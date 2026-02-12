@@ -24,10 +24,10 @@ public class PrintProjectFile
     public GcodeFile? GcodeFile { get; set; }
 
     /// <summary>
-    /// Color requirement for this file (e.g., Base, Accent).
-    /// Helps operators identify which filament to use.
+    /// Optional Spoolman filament ID for filament type assignment.
+    /// Links this file to a specific filament product in the Spoolman inventory.
     /// </summary>
-    public PrintColorRequirement ColorRequirement { get; set; } = PrintColorRequirement.Base;
+    public int? SpoolmanFilamentId { get; set; }
 
     /// <summary>
     /// Optional material requirement override (e.g., "PLA", "ABS").

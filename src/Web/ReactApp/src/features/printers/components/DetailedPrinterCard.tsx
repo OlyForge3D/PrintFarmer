@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { PanelRightOpen } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
-import { Button, TemperatureInput, MovementInput, Select, ControlPadButton } from '@/common/components/ui';
+import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
+import { Button, TemperatureInput, MovementInput, MoveDistanceSlider, Select, ControlPadButton } from '@/common/components/ui';
 import { 
   NozzleIcon, 
   BedIcon, 
@@ -21,6 +23,10 @@ import {
   SnowflakeIcon,
   XCircleIcon,
   FileIcon,
+  FilamentLoadIcon,
+  FilamentUnloadIcon,
+  FilamentChangeIcon,
+  EjectIcon,
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
@@ -29,6 +35,8 @@ import {
   canCooldown,
   canDisableMotors,
   canEmergencyStop,
+  canFilamentChange,
+  canFilamentControl,
   canMove,
   canOpenFiles,
   canOpenHistory,
@@ -59,11 +67,6 @@ function formatTempWithTarget(current: number | undefined, target: number | unde
   return formatTemperature(current);
 }
 
-function formatPos(val: number | undefined): string {
-  if (val === undefined || val === null) return '---';
-  return val.toFixed(2);
-}
-
 function toCamelCase(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
@@ -71,6 +74,7 @@ function toCamelCase(str: string): string {
 export function DetailedPrinterCard({ printer: initialPrinter, backendCapabilities, onEdit, onDismiss }: DetailedPrinterCardProps) {
   // Fetch from shared usePrinters() cache (same as table view/sidebar) to ensure consistency
   const { data: allPrinters = [] } = usePrinters();
+  const queryClient = useQueryClient();
   const apiPrinter = useMemo(
     () => allPrinters.find(p => p.id === initialPrinter.id) ?? initialPrinter,
     [allPrinters, initialPrinter]
@@ -81,6 +85,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
+  const [showSpoolPicker, setShowSpoolPicker] = useState(false);
+  const [spoolActionPending, setSpoolActionPending] = useState(false);
   const [hotendTemp, setHotendTemp] = useState<number | string>('');
   const [bedTemp, setBedTemp] = useState<number | string>('');
   const [moveX, setMoveX] = useState<number | string>('');
@@ -94,9 +100,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const state = printer.state ?? 'Unknown';
   const isOnline = printer.isOnline ?? false;
   const isEnabled = printer.isEnabled ?? true;
-  const isPrinting = isOnline && (state === 'Printing' || state === 'Busy');
+  const isPrinting = isOnline && state === 'Printing';
   const isPaused = state === 'Paused';
-  const isShutdown = state === 'Shutdown' || state === 'Halted';
+  const isShutdown = state === 'Offline' || state === 'Shutdown' || state === 'Halted';
   const support = getPrinterSupport(backendCapabilities);
 
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
@@ -171,6 +177,22 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       }
     } catch (error) {
       console.error(`Error during ${action}:`, error);
+    }
+  };
+
+  const handleFilamentAction = async (action: 'load' | 'unload' | 'change') => {
+    try {
+      const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
+        load: () => apiClient.loadFilament(printer.id),
+        unload: () => apiClient.unloadFilament(printer.id),
+        change: () => apiClient.changeFilament(printer.id),
+      };
+      const result = await methodMap[action]();
+      if (!result.success) {
+        console.error(`Failed to ${action} filament:`, result.error);
+      }
+    } catch (error) {
+      console.error(`Error during filament ${action}:`, error);
     }
   };
 
@@ -285,7 +307,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   };
 
   return (
-    <div className="relative rounded-xl p-3 shadow-lg bg-white/5 border border-white/10 w-full min-w-92">
+    <div className="relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full min-w-92">
       {/* Header */}
       <div className="mb-4">
         {/* Top row: Name + Status Pill (match collapsed card) */}
@@ -440,47 +462,30 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       <div className="mb-2">
         <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">Temps</div>
         <div className="grid grid-cols-3 gap-2 w-full">
-          {/* Row 1: Labels */}
-          <div className="flex items-center h-5 min-w-0">
+          {/* Inputs with bracket-style current temp labels */}
+          <div className="flex items-center gap-1">
             <NozzleIcon className="w-4 h-4 text-red-500 shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
-            <span className="text-[0.65rem] text-slate-400 ml-auto truncate">
-              {formatTempWithTarget(
-                printer.hotendTemp,
-                printer.hotendTarget
-              )}
-            </span>
+            <TemperatureInput
+              value={hotendTemp}
+              onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
+              onKeyDown={handleHotendTempKeyDown}
+              disabled={!canSetTemperaturesNow}
+              currentTemp={formatTempWithTarget(printer.hotendTemp, printer.hotendTarget)}
+              className="!w-full"
+            />
           </div>
           
-          <div className="flex items-center h-5 min-w-0">
+          <div className="flex items-center gap-1">
             <BedIcon className="w-4 h-4 text-blue-500 shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
-            <span className="text-[0.65rem] text-slate-400 ml-auto truncate">
-              {formatTempWithTarget(
-                printer.bedTemp,
-                printer.bedTarget
-              )}
-            </span>
+            <TemperatureInput
+              value={bedTemp}
+              onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
+              onKeyDown={handleBedTempKeyDown}
+              disabled={!canSetTemperaturesNow}
+              currentTemp={formatTempWithTarget(printer.bedTemp, printer.bedTarget)}
+              className="!w-full"
+            />
           </div>
-
-          <div className="flex items-center h-5">
-            <span className="text-xs font-bold text-pf-text-secondary">PRESETS</span>
-          </div>
-
-          {/* Row 2: Inputs */}
-          <TemperatureInput
-            value={hotendTemp}
-            onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
-            onKeyDown={handleHotendTempKeyDown}
-            disabled={!canSetTemperaturesNow}
-            className="!w-full"
-          />
-          
-          <TemperatureInput
-            value={bedTemp}
-            onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
-            onKeyDown={handleBedTempKeyDown}
-            disabled={!canSetTemperaturesNow}
-            className="!w-full"
-          />
           
           <div className="flex gap-1 items-stretch h-9 min-w-0">
             <Button
@@ -623,6 +628,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                 </ControlPadButton>
               </div>
             </div>
+            {/* Move distance slider */}
+            <MoveDistanceSlider value={step} onChange={handleStepChange} disabled={!canSetStepNow} />
           </div>
 
           {/* Right Column: Control */}
@@ -659,49 +666,48 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               </ControlPadButton>
             </div>
             
-            {/* Steps section - separate from Control buttons */}
-            <div className="flex flex-col gap-1 mt-2">
-              <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-                Steps
-              </div>
-              
-              {/* Step buttons row - 3 equal-sized buttons */}
-              <div className="grid grid-cols-3 gap-1 w-fit">
-                {[1, 10, 50].map((stepValue) => (
+            {/* Filament Macros - capability-based */}
+            {support.supportsFilamentControl && (
+              <div className="flex flex-col gap-1 mt-2">
+                <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+                  Filament
+                </div>
+                <div className="grid grid-cols-3 gap-1 w-fit">
                   <ControlPadButton
-                    key={stepValue}
-                    variant={step === stepValue ? 'primary' : 'secondary'}
-                    disabled={!canSetStepNow}
-                    onClick={() => handleStepChange(stepValue)}
+                    disabled={!canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                    onClick={() => handleFilamentAction('load')}
+                    title="Load Filament"
                     padSize="small"
                   >
-                    {stepValue}
+                    <FilamentLoadIcon className="w-4 h-4" />
                   </ControlPadButton>
-                ))}
+                  <ControlPadButton
+                    disabled={!canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                    onClick={() => handleFilamentAction('unload')}
+                    title="Unload Filament"
+                    padSize="small"
+                  >
+                    <FilamentUnloadIcon className="w-4 h-4" />
+                  </ControlPadButton>
+                  <ControlPadButton
+                    disabled={!canFilamentChange({ isOnline, isEnabled, support })}
+                    onClick={() => handleFilamentAction('change')}
+                    title="Change Filament (M600)"
+                    padSize="small"
+                  >
+                    <FilamentChangeIcon className="w-4 h-4" />
+                  </ControlPadButton>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Row 2: Axis Fields - 4 column grid, 2 rows, h-12 total, right-aligned labels */}
-        <div className="grid grid-cols-4 gap-2 mt-3 w-72 h-12">
-          {/* Row 1: Labels (right-aligned) */}
-          <div className="flex items-center justify-end pr-1">
-            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(printer.x)} ]</span>
-          </div>
-          <div className="flex items-center justify-end pr-1">
-            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(printer.y)} ]</span>
-          </div>
-          <div className="flex items-center justify-end pr-1">
-            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(printer.z)} ]</span>
-          </div>
-          <div className="flex items-center">
-            <span className="text-xs font-bold text-pf-text-secondary">GO</span>
-          </div>
-          
-          {/* Row 2: Inputs */}
+        {/* Row 2: Axis Fields - 4 column grid with bracket-style position labels */}
+        <div className="grid grid-cols-4 gap-2 mt-3 w-72 pt-2">
           <MovementInput
             axis="X"
+            currentPosition={printer.x}
             disabled={!canManualMoveNow}
             value={moveX}
             onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
@@ -709,6 +715,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           />
           <MovementInput
             axis="Y"
+            currentPosition={printer.y}
             disabled={!canManualMoveNow}
             value={moveY}
             onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
@@ -716,6 +723,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           />
           <MovementInput
             axis="Z"
+            currentPosition={printer.z}
             disabled={!canManualMoveNow}
             value={moveZ}
             onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
@@ -739,6 +747,97 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         </div>
       </div>
 
+      {/* Spool Info Section - Only show when Spoolman is configured */}
+      {printer.spoolInfo && (
+      <div className="mb-2">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>
+          <div className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={spoolActionPending}
+              onClick={() => setShowSpoolPicker(true)}
+              className="!p-0.5 !h-auto"
+              title="Change spool"
+              aria-label="Change spool"
+              iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
+            ></Button>
+            {printer.spoolInfo?.hasActiveSpool && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={spoolActionPending}
+                onClick={async () => {
+                  setSpoolActionPending(true);
+                  try {
+                    await apiClient.clearActiveSpool(printer.id);
+                    queryClient.invalidateQueries({ queryKey: ['printers'] });
+                    setTimeout(() => queryClient.invalidateQueries({ queryKey: ['printers'] }), 2000);
+                  } catch (err) {
+                    console.error('Failed to eject spool:', err);
+                  } finally {
+                    setSpoolActionPending(false);
+                  }
+                }}
+                className="!p-0.5 !h-auto"
+                title="Eject spool"
+                aria-label="Eject spool"
+                iconCenter={<EjectIcon className="h-3.5 w-3.5" />}
+              ></Button>
+            )}
+          </div>
+        </div>
+        {printer.spoolInfo?.hasActiveSpool ? (
+          <div className="space-y-1 text-xs">
+            {printer.spoolInfo.vendor && (
+              <div className="flex justify-between">
+                <span className="text-pf-text-secondary">Vendor:</span>
+                <span className="text-pf-text-primary font-medium">{printer.spoolInfo.vendor}</span>
+              </div>
+            )}
+            {printer.spoolInfo.material && (
+              <div className="flex justify-between">
+                <span className="text-pf-text-secondary">Material:</span>
+                <span className="text-pf-text-primary font-medium">{printer.spoolInfo.material}</span>
+              </div>
+            )}
+            {printer.spoolInfo.colorHex && (
+              <div className="flex justify-between items-center">
+                <span className="text-pf-text-secondary">Color:</span>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-3 h-3 rounded-sm border border-pf-border"
+                    style={{ backgroundColor: printer.spoolInfo.colorHex }}
+                    title={printer.spoolInfo.colorHex}
+                  />
+                  <span className="text-pf-text-primary font-medium">{printer.spoolInfo.colorHex}</span>
+                </div>
+              </div>
+            )}
+            {printer.spoolInfo.spoolName && (
+              <div className="flex justify-between">
+                <span className="text-pf-text-secondary">Spool:</span>
+                <span className="text-pf-text-primary font-medium">{printer.spoolInfo.spoolName}</span>
+              </div>
+            )}
+            {printer.spoolInfo.remainingWeightG != null && (
+              <div className="flex justify-between">
+                <span className="text-pf-text-secondary">Remaining:</span>
+                <span className="text-pf-text-primary font-medium">{Math.round(printer.spoolInfo.remainingWeightG)}g</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-xs text-pf-text-tertiary">
+            <p>No spool loaded</p>
+          </div>
+        )}
+      </div>
+      )}
+
       {/* History Modal */}
       <PrinterHistoryModal
         isOpen={showHistory}
@@ -750,6 +849,28 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         isOpen={showFiles}
         onClose={() => setShowFiles(false)}
         printer={printer}
+      />
+
+      <SpoolPickerModal
+        isOpen={showSpoolPicker}
+        onClose={() => setShowSpoolPicker(false)}
+        printerId={printer.id}
+        activeSpoolId={printer.spoolInfo?.activeSpoolId}
+        onSelect={async (spoolId) => {
+          setSpoolActionPending(true);
+          try {
+            await apiClient.setActiveSpool(printer.id, spoolId);
+            setShowSpoolPicker(false);
+            // Immediate invalidation + delayed re-fetch to pick up spool info
+            // after the Moonraker subscription service updates the status cache
+            queryClient.invalidateQueries({ queryKey: ['printers'] });
+            setTimeout(() => queryClient.invalidateQueries({ queryKey: ['printers'] }), 2000);
+          } catch (err) {
+            console.error('Failed to set active spool:', err);
+          } finally {
+            setSpoolActionPending(false);
+          }
+        }}
       />
     </div>
   );

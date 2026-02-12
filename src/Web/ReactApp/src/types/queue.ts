@@ -93,9 +93,14 @@ export interface JobDetails {
   queuedAtUtc?: string;
   startedAt?: string;
   completedAt?: string;
+  // Spoolman filament assignment
+  spoolmanFilamentId?: number;
+  filamentName?: string;
+  filamentVendor?: string;
+  filamentColor?: string;
 }
 
 /**
  * Type for tab selection in job details modal
  */
-export type JobDetailsTabType = 'overview' | 'details' | 'history';
+export type JobDetailsTabType = 'overview' | 'details';

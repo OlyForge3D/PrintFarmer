@@ -1,12 +1,14 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
@@ -233,6 +235,398 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         return [];
     }
 
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanFilamentDto>> ListFilamentsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug($"Spoolman not configured – returning empty filament list", null, null);
+            return [];
+        }
+
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
+
+        string[] candidates =
+        [
+            "/api/v1/filament",
+            "/api/v1/filament/",
+            "/api/v1/filaments",
+            "/api/v1/filaments/"
+        ];
+
+        foreach (string ep in candidates)
+        {
+            string full = baseUrl + ep;
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(20));
+
+                HttpResponseMessage response = await http.GetAsync(full, cts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    logger.LogDebug($"Spoolman filament endpoint {ep} returned status {(int)response.StatusCode}; trying next candidate", null, null);
+                    continue;
+                }
+
+                string json = await response.Content.ReadAsStringAsync(cts.Token);
+                using JsonDocument doc = JsonDocument.Parse(json);
+
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    logger.LogDebug($"Spoolman filament endpoint {ep} did not return an array; trying next candidate", null, null);
+                    continue;
+                }
+
+                var filaments = new List<SpoolmanFilamentDto>();
+                foreach (JsonElement el in doc.RootElement.EnumerateArray())
+                {
+                    filaments.Add(SpoolmanJsonParser.ParseFilament(el));
+                }
+
+                logger.LogDebug($"Retrieved {filaments.Count} filament types via endpoint {ep}", null, null);
+                return filaments;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, $"Exception when querying Spoolman filament endpoint {ep}; trying next candidate", null, null);
+            }
+        }
+
+        logger.LogWarning($"All candidate Spoolman filament endpoints failed – returning empty list", null, null);
+        return [];
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto?> GetFilamentByIdAsync(int filamentId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            return null;
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning($"Spoolman filament {filamentId} returned status {(int)response.StatusCode}", null, null);
+                return null;
+            }
+
+            string json = await response.Content.ReadAsStringAsync(cts.Token);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            return SpoolmanJsonParser.ParseFilament(doc.RootElement);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, $"Exception fetching Spoolman filament {filamentId}", null, null);
+            return null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanVendorDto>> ListVendorsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            return [];
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/vendor";
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning($"Spoolman vendor list returned status {(int)response.StatusCode}", null, null);
+                return [];
+            }
+
+            string json = await response.Content.ReadAsStringAsync(cts.Token);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            var vendors = new List<SpoolmanVendorDto>();
+            foreach (JsonElement el in doc.RootElement.EnumerateArray())
+            {
+                int id = SpoolmanJsonParser.TryGetInt(el, "id");
+                string name = SpoolmanJsonParser.TryGetString(el, "name") ?? string.Empty;
+                string? externalId = SpoolmanJsonParser.TryGetString(el, "external_id");
+                vendors.Add(new SpoolmanVendorDto(id, name, externalId));
+            }
+
+            return vendors;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Exception fetching Spoolman vendors", null, null);
+            return [];
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanVendorDto> CreateVendorAsync(string name, string? externalId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/vendor";
+        var body = new Dictionary<string, object?> { ["name"] = name };
+        if (!string.IsNullOrWhiteSpace(externalId))
+        {
+            body["external_id"] = externalId;
+        }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        string jsonBody = JsonSerializer.Serialize(body);
+        using var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+        HttpResponseMessage response = await http.PostAsync(url, content, cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        string json = await response.Content.ReadAsStringAsync(cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        int id = SpoolmanJsonParser.TryGetInt(doc.RootElement, "id");
+        string vendorName = SpoolmanJsonParser.TryGetString(doc.RootElement, "name") ?? name;
+        string? extId = SpoolmanJsonParser.TryGetString(doc.RootElement, "external_id");
+        return new SpoolmanVendorDto(id, vendorName, extId);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto> CreateFilamentInSpoolmanAsync(SpoolmanCreateFilamentRequest request, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament";
+        string jsonBody = BuildFilamentJson(request);
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+        HttpResponseMessage response = await http.PostAsync(url, content, cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        string json = await response.Content.ReadAsStringAsync(cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return SpoolmanJsonParser.ParseFilament(doc.RootElement);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto> UpdateFilamentInSpoolmanAsync(int filamentId, SpoolmanCreateFilamentRequest request, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
+        string jsonBody = BuildFilamentJson(request);
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Patch, url)
+        {
+            Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json")
+        };
+        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        string json = await response.Content.ReadAsStringAsync(cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return SpoolmanJsonParser.ParseFilament(doc.RootElement);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanBulkUpdateResult> BulkUpdateFilamentsAsync(SpoolmanBulkUpdateFilamentsRequest request, CancellationToken ct)
+    {
+        if (request.FilamentIds is not { Length: > 0 })
+        {
+            return new SpoolmanBulkUpdateResult(0, 0, []);
+        }
+
+        // Build a partial update request with only the fields the caller wants to change
+        var patch = new SpoolmanCreateFilamentRequest
+        {
+            VendorId = request.VendorId,
+            Material = request.Material,
+            Price = request.Price,
+            SettingsExtruderTemp = request.SettingsExtruderTemp,
+            SettingsBedTemp = request.SettingsBedTemp,
+            Comment = request.Comment,
+        };
+
+        int updated = 0;
+        int errorCount = 0;
+        List<string> errors = [];
+
+        foreach (int id in request.FilamentIds)
+        {
+            try
+            {
+                await UpdateFilamentInSpoolmanAsync(id, patch, ct);
+                updated++;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Filament {id}: {ex.Message}");
+                errorCount++;
+            }
+        }
+
+        return new SpoolmanBulkUpdateResult(updated, errorCount, [.. errors]);
+    }
+
+    /// <inheritdoc/>
+    public async Task DeleteFilamentFromSpoolmanAsync(int filamentId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Delete, url);
+        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanBulkUpdateResult> BulkDeleteFilamentsAsync(int[] filamentIds, CancellationToken ct)
+    {
+        if (filamentIds is not { Length: > 0 })
+        {
+            return new SpoolmanBulkUpdateResult(0, 0, []);
+        }
+
+        int deleted = 0;
+        int errorCount = 0;
+        List<string> errors = [];
+
+        foreach (int id in filamentIds)
+        {
+            try
+            {
+                await DeleteFilamentFromSpoolmanAsync(id, ct);
+                deleted++;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Filament {id}: {ex.Message}");
+                errorCount++;
+            }
+        }
+
+        return new SpoolmanBulkUpdateResult(deleted, errorCount, [.. errors]);
+    }
+
+    private static string BuildFilamentJson(SpoolmanCreateFilamentRequest request)
+    {
+        var body = new Dictionary<string, object?>();
+
+        if (request.Density.HasValue)
+        {
+            body["density"] = request.Density.Value;
+        }
+
+        if (request.Diameter.HasValue)
+        {
+            body["diameter"] = request.Diameter.Value;
+        }
+
+        if (request.Name != null)
+        {
+            body["name"] = request.Name;
+        }
+
+        if (request.VendorId.HasValue)
+        {
+            body["vendor_id"] = request.VendorId.Value;
+        }
+
+        if (request.Material != null)
+        {
+            body["material"] = request.Material;
+        }
+
+        if (request.Weight.HasValue)
+        {
+            body["weight"] = request.Weight.Value;
+        }
+
+        if (request.SpoolWeight.HasValue)
+        {
+            body["spool_weight"] = request.SpoolWeight.Value;
+        }
+
+        if (request.SettingsExtruderTemp.HasValue)
+        {
+            body["settings_extruder_temp"] = request.SettingsExtruderTemp.Value;
+        }
+
+        if (request.SettingsBedTemp.HasValue)
+        {
+            body["settings_bed_temp"] = request.SettingsBedTemp.Value;
+        }
+
+        if (request.ColorHex != null)
+        {
+            body["color_hex"] = request.ColorHex;
+        }
+
+        if (request.ExternalId != null)
+        {
+            body["external_id"] = request.ExternalId;
+        }
+
+        if (request.Comment != null)
+        {
+            body["comment"] = request.Comment;
+        }
+
+        if (request.Price.HasValue)
+        {
+            body["price"] = request.Price.Value;
+        }
+
+        if (request.ArticleNumber != null)
+        {
+            body["article_number"] = request.ArticleNumber;
+        }
+
+        if (request.MultiColorHexes != null)
+        {
+            body["multi_color_hexes"] = request.MultiColorHexes;
+        }
+
+        return JsonSerializer.Serialize(body);
+    }
+
     /// <summary>
     /// Gets all material types directly from Spoolman's /api/v1/material endpoint.
     /// This is the correct endpoint for getting material definitions like PLA, ABS, PETG, etc.
@@ -337,9 +731,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
             JsonElement root = doc.RootElement;
             int before = collected.Count;
-            foreach (JsonElement item in EnumerateItems(root, ct))
+            foreach (JsonElement item in SpoolmanJsonParser.EnumerateItems(root))
             {
-                collected.Add(ParseSpool(item));
+                ct.ThrowIfCancellationRequested();
+                collected.Add(SpoolmanJsonParser.ParseSpool(item));
             }
 
             int added = collected.Count - before;
@@ -453,7 +848,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                                 ColorHex: null);
                         }
                     }
-                    else if (el.ValueKind == JsonValueKind.Object && TryParseMaterialFromJson(el, out SpoolmanMaterialDto objectMaterial))
+                    else if (el.ValueKind == JsonValueKind.Object && SpoolmanJsonParser.TryParseMaterial(el, out SpoolmanMaterialDto objectMaterial))
                     {
                         // Object format: {"id": 1, "name": "PLA", ...}
                         parsedMaterial = objectMaterial;
@@ -509,7 +904,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             }
 
             using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
-            return doc is null ? null : ParseSpool(doc.RootElement);
+            return doc is null ? null : SpoolmanJsonParser.ParseSpool(doc.RootElement);
         }
         catch
         {
@@ -540,516 +935,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             }
 
             return null;
-        }
-    }
-
-    private static IEnumerable<JsonElement> EnumerateItems(JsonElement root, CancellationToken ct)
-    {
-        // If the root is an array, return items directly
-        if (root.ValueKind == JsonValueKind.Array)
-        {
-            foreach (JsonElement el in root.EnumerateArray())
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return el;
-            }
-        }
-
-        // If it's an object, try common list containers
-        if (root.ValueKind == JsonValueKind.Object &&
-            TryGetArray(root, out JsonElement arr, "results", "spools", "items", "data"))
-        {
-            foreach (JsonElement el in arr.EnumerateArray())
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return el;
-            }
-        }
-    }
-
-    private static bool TryGetArray(JsonElement obj, out JsonElement arrayEl, params string[] names)
-    {
-        arrayEl = default;
-        if (obj.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        foreach (string name in names)
-        {
-            if (obj.TryGetProperty(name, out JsonElement el) && el.ValueKind == JsonValueKind.Array)
-            {
-                arrayEl = el;
-                return true;
-            }
-        }
-
-        // case-insensitive scan
-        foreach (JsonProperty prop in obj.EnumerateObject())
-        {
-            foreach (string name in names)
-            {
-                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.Array)
-                {
-                    arrayEl = prop.Value;
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private static SpoolmanSpoolDto ParseSpool(JsonElement el)
-    {
-        int id = TryGetInt(el, "id", "spool_id");
-        string name = TryGetString(el, "name", "display_name") ?? (id != 0 ? $"Spool {id}" : "Spool");
-
-        // Material can be a string or nested inside an object
-        string material = TryGetString(el, "material")
-                      ?? TryGetStringFromObject(el, ["material"], ["name", "material", "material_name", "material__name"])
-                      ?? TryGetStringFromObject(el, ["filament", "profile"], ["material", "material_name", "material__name"])
-                      ?? string.Empty;
-
-        // Remaining weight could be in grams or another field name
-        double? remaining = TryGetDoubleNullable(el, "remaining_weight_g", "remaining_weight", "remaining_weight_grams", "mass_remaining_g", "weight_remaining_g");
-
-        // Color may be direct or nested under filament/profile
-        string? color = TryGetString(el, "color_hex", "color")
-            ?? TryGetStringFromObject(el, ["filament", "profile"], ["color_hex", "hex_color", "color"]);
-        color = NormalizeHexColor(color);
-
-        // Filament name and vendor/manufacturer
-        string? filamentName = TryGetString(el, "filament_name")
-                   ?? TryGetStringFromObject(el, ["filament", "profile"], ["name", "filament_name", "display_name"]);
-        string? vendor =
-
-            // Preferred path per Spoolman: filament.vendor.name
-            TryGetStringAtPath(el, "filament", "vendor", "name")
-
-            // Common alternative: profile.vendor.name
-            ?? TryGetStringAtPath(el, "profile", "vendor", "name")
-
-            // Fallbacks
-            ?? TryGetStringFromObject(el, ["filament", "profile"], ["vendor", "manufacturer", "brand", "name"])
-            ?? TryGetString(el, "vendor", "manufacturer");
-
-        // In-use/active detection
-        bool? inUse = TryGetBool(el, "in_use", "is_active", "active", "selected");
-        if (!inUse.HasValue)
-        {
-            // Some schemas use archived=false to indicate active
-            bool? archived = TryGetBool(el, "archived");
-            if (archived.HasValue)
-            {
-                inUse = !archived.Value;
-            }
-        }
-
-        // Extended numeric fields (weight/length)
-        double? initialWeight = TryGetDoubleNullable(el, "initial_weight", "initial_weight_g", "initial_weight_grams");
-        double? usedWeight = TryGetDoubleNullable(el, "used_weight", "used_weight_g", "used_weight_grams");
-        double? spoolWeight = TryGetDoubleNullable(el, "spool_weight", "empty_spool_weight");
-        double? remainingLength = TryGetDoubleNullable(el, "remaining_length", "remaining_length_mm");
-        double? usedLength = TryGetDoubleNullable(el, "used_length", "used_length_mm");
-
-        // Location, lot/batch and archived
-        string? location = TryGetString(el, "location", "storage_location");
-        string? lotNumber = TryGetString(el, "lot_nr", "lot", "batch", "batch_nr");
-        bool? archivedFlag = TryGetBool(el, "archived");
-
-        // Dates: registered, first used, last used (tolerant to various names and formats)
-        DateTime? registeredAt = TryGetDateTime(el, "registered");
-        DateTime? firstUsedAt = TryGetDateTime(el, "first_used");
-        DateTime? lastUsedAt = TryGetDateTime(el, "last_used");
-
-        return new SpoolmanSpoolDto(
-            Id: id,
-            Name: name,
-            Material: material,
-            RemainingWeightG: remaining,
-            ColorHex: color,
-            InUse: inUse ?? false,
-            FilamentName: filamentName,
-            Vendor: vendor,
-            RegisteredAt: registeredAt,
-            FirstUsedAt: firstUsedAt,
-            LastUsedAt: lastUsedAt,
-            InitialWeightG: initialWeight,
-            UsedWeightG: usedWeight,
-            SpoolWeightG: spoolWeight,
-            RemainingLengthMm: remainingLength,
-            UsedLengthMm: usedLength,
-            Location: location,
-            LotNumber: lotNumber,
-            Archived: archivedFlag);
-    }
-
-    private static int TryGetInt(JsonElement el, params string[] names)
-    {
-        foreach (string n in names)
-        {
-            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out int i))
-            {
-                return i;
-            }
-        }
-
-        // case-insensitive
-        if (el.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty p in el.EnumerateObject())
-            {
-                foreach (string n in names)
-                {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out int i))
-                    {
-                        return i;
-                    }
-                }
-            }
-        }
-
-        return 0;
-    }
-
-    private static double? TryGetDoubleNullable(JsonElement el, params string[] names)
-    {
-        foreach (string n in names)
-        {
-            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out double d))
-            {
-                return d;
-            }
-        }
-
-        if (el.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty p in el.EnumerateObject())
-            {
-                foreach (string n in names)
-                {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out double d))
-                    {
-                        return d;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static string? NormalizeHexColor(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return null;
-        }
-
-        string s = raw.Trim();
-        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
-            s = s[2..];
-        }
-
-        if (s.StartsWith('#'))
-        {
-            s = s[1..];
-        }
-
-        s = s.ToUpperInvariant();
-
-        // Expand shorthand RGB like F0A -> FF00AA
-        if (s.Length == 3 && s.All(IsHex))
-        {
-            s = string.Concat(s[0], s[0], s[1], s[1], s[2], s[2]);
-        }
-
-        // Drop alpha if present (ARGB/RGBA -> take first 6 of last 8)
-        if (s.Length == 8 && s.All(IsHex))
-        {
-            // Heuristic: keep first 6 (assume RRGGBB and ignore alpha at the end)
-            s = s[..6];
-        }
-
-        return s.Length == 6 && s.All(IsHex) ? "#" + s : null;
-    }
-
-    private static bool IsHex(char c) =>
-        (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
-
-    private static string? TryGetString(JsonElement el, params string[] names)
-    {
-        foreach (string n in names)
-        {
-            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.String)
-            {
-                return v.GetString();
-            }
-        }
-
-        if (el.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty p in el.EnumerateObject())
-            {
-                foreach (string n in names)
-                {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.String)
-                    {
-                        return p.Value.GetString();
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static string? TryGetStringFromObject(JsonElement el, string[] objPathCandidates, string[] fieldCandidates)
-    {
-        // Look for nested objects using any of the candidate names, then extract a string from candidate fields
-        foreach (string objName in objPathCandidates)
-        {
-            if (TryGetObject(el, out JsonElement nested, objName))
-            {
-                string? s = TryGetString(nested, fieldCandidates);
-                if (!string.IsNullOrEmpty(s))
-                {
-                    return s;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static string? TryGetStringAtPath(JsonElement el, params string[] path)
-    {
-        if (path.Length == 0)
-        {
-            return null;
-        }
-
-        JsonElement current = el;
-        for (int i = 0; i < path.Length; i++)
-        {
-            if (current.ValueKind != JsonValueKind.Object)
-            {
-                return null;
-            }
-
-            if (!TryGetPropertyCaseInsensitive(current, path[i], out JsonElement next))
-            {
-                return null;
-            }
-
-            if (i == path.Length - 1)
-            {
-                return next.ValueKind == JsonValueKind.String ? next.GetString() : null;
-            }
-
-            current = next;
-        }
-
-        return null;
-    }
-
-    private static bool TryGetPropertyCaseInsensitive(JsonElement obj, string name, out JsonElement value)
-    {
-        value = default;
-        if (obj.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        foreach (JsonProperty p in obj.EnumerateObject())
-        {
-            if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
-            {
-                value = p.Value;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool TryGetObject(JsonElement el, out JsonElement found, params string[] names)
-    {
-        found = default;
-        foreach (string n in names)
-        {
-            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.Object)
-            {
-                found = v;
-                return true;
-            }
-        }
-
-        if (el.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty p in el.EnumerateObject())
-            {
-                foreach (string n in names)
-                {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Object)
-                    {
-                        found = p.Value;
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private static bool? TryGetBool(JsonElement el, params string[] names)
-    {
-        foreach (string n in names)
-        {
-            if (el.TryGetProperty(n, out JsonElement v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False))
-            {
-                return v.GetBoolean();
-            }
-        }
-
-        if (el.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty p in el.EnumerateObject())
-            {
-                foreach (string n in names)
-                {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && (p.Value.ValueKind == JsonValueKind.True || p.Value.ValueKind == JsonValueKind.False))
-                    {
-                        return p.Value.GetBoolean();
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static DateTime? TryGetDateTime(JsonElement el, params string[] names)
-    {
-        // Try string ISO formats
-        foreach (string n in names)
-        {
-            if (el.TryGetProperty(n, out JsonElement v))
-            {
-                DateTime? dt = FromJsonElementToDateTime(v);
-                if (dt.HasValue)
-                {
-                    return dt;
-                }
-            }
-        }
-
-        if (el.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty p in el.EnumerateObject())
-            {
-                foreach (string n in names)
-                {
-                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase))
-                    {
-                        DateTime? dt = FromJsonElementToDateTime(p.Value);
-                        if (dt.HasValue)
-                        {
-                            return dt;
-                        }
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static DateTime? FromJsonElementToDateTime(JsonElement v)
-    {
-        try
-        {
-            if (v.ValueKind == JsonValueKind.String)
-            {
-                string? s = v.GetString();
-                if (!string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsed))
-                {
-                    return DateTime.SpecifyKind(parsed, parsed.Kind == DateTimeKind.Unspecified ? DateTimeKind.Utc : parsed.Kind);
-                }
-            }
-            else if (v.ValueKind == JsonValueKind.Number)
-            {
-                if (v.TryGetInt64(out long num))
-                {
-                    // Heuristic: epoch seconds vs milliseconds
-                    // >= 1e12 -> milliseconds, >= 1e9 -> seconds
-                    if (num >= 1_000_000_000_000)
-                    {
-                        return DateTimeOffset.FromUnixTimeMilliseconds(num).UtcDateTime;
-                    }
-
-                    if (num >= 1_000_000_000)
-                    {
-                        return DateTimeOffset.FromUnixTimeSeconds(num).UtcDateTime;
-                    }
-                }
-                else if (v.TryGetDouble(out double dnum))
-                {
-                    long ln = (long)dnum;
-                    if (ln >= 1_000_000_000_000)
-                    {
-                        return DateTimeOffset.FromUnixTimeMilliseconds(ln).UtcDateTime;
-                    }
-
-                    if (ln >= 1_000_000_000)
-                    {
-                        return DateTimeOffset.FromUnixTimeSeconds(ln).UtcDateTime;
-                    }
-                }
-            }
-        }
-        catch
-        {
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Tries to parse a Spoolman material from JSON element
-    /// </summary>
-    private static bool TryParseMaterialFromJson(JsonElement el, out SpoolmanMaterialDto material)
-    {
-        try
-        {
-            int id = TryGetInt(el, "id");
-            string name = TryGetString(el, "name") ?? string.Empty;
-
-            // Skip materials without required fields
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                material = default!;
-                return false;
-            }
-
-            double? density = TryGetDoubleNullable(el, "density");
-            string? colorHex = TryGetString(el, "color_hex");
-            colorHex = NormalizeHexColor(colorHex);
-
-            material = new SpoolmanMaterialDto(
-                Id: id,
-                Name: name,
-                Density: density,
-                ColorHex: colorHex);
-            return true;
-        }
-        catch
-        {
-            material = default!;
-            return false;
         }
     }
 
@@ -1127,4 +1012,75 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             return new SpoolmanDiscoveryResult(url, false, ex.Message);
         }
     }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanDbFilamentEntry>> GetExternalFilamentsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug("Spoolman not configured – cannot fetch external filaments", null, null);
+            return [];
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/external/filament";
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            response.EnsureSuccessStatusCode();
+
+            List<SpoolmanDbFilamentEntry>? filaments = await response.Content.ReadFromJsonAsync<List<SpoolmanDbFilamentEntry>>(ExternalJsonOptions, cts.Token);
+            IReadOnlyList<SpoolmanDbFilamentEntry> result = filaments?.AsReadOnly() ?? (IReadOnlyList<SpoolmanDbFilamentEntry>)Array.Empty<SpoolmanDbFilamentEntry>();
+
+            logger.LogDebug($"Retrieved {result.Count} external filaments from Spoolman", null, null);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to fetch external filaments from Spoolman at {Url}", url);
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanDbMaterialEntry>> GetExternalMaterialsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug("Spoolman not configured – cannot fetch external materials", null, null);
+            return [];
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/external/material";
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            response.EnsureSuccessStatusCode();
+
+            List<SpoolmanDbMaterialEntry>? materials = await response.Content.ReadFromJsonAsync<List<SpoolmanDbMaterialEntry>>(ExternalJsonOptions, cts.Token);
+            IReadOnlyList<SpoolmanDbMaterialEntry> result = materials?.AsReadOnly() ?? (IReadOnlyList<SpoolmanDbMaterialEntry>)Array.Empty<SpoolmanDbMaterialEntry>();
+
+            logger.LogDebug($"Retrieved {result.Count} external materials from Spoolman", null, null);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to fetch external materials from Spoolman at {Url}", url);
+            throw;
+        }
+    }
+
+    private static readonly JsonSerializerOptions ExternalJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
 }

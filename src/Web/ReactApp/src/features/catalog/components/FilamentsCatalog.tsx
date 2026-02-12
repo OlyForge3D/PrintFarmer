@@ -19,9 +19,10 @@ import {
   useCreateFilamentType, 
   useUpdateFilamentType, 
   useDeleteFilamentType,
-  useImportFilamentTypesFromSpoolman
+  useImportFilamentTypesFromSpoolman,
 } from '@/common/hooks/useApi';
 import type { FilamentTypeDto, CreateFilamentTypeRequest, UpdateFilamentTypeRequest, TempTargets } from '@/types/api';
+
 
 /**
  * Card display for filament type - uses consistent Card styling with other catalog tabs
@@ -386,7 +387,6 @@ export function FilamentsCatalog() {
   const handleImportFromSpoolman = useCallback(async () => {
     try {
       await importMutation.mutateAsync();
-      // Mutation success automatically invalidates the query and refreshes the list
     } catch {
       // Error handled by mutation
     }
@@ -420,7 +420,7 @@ export function FilamentsCatalog() {
 
   return (
     <div className="space-y-4">
-      {/* Header with Add and Import buttons */}
+      {/* Header with action buttons */}
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Filament Types ({filaments.length})
@@ -568,6 +568,7 @@ export function FilamentsCatalog() {
           </div>
         </div>
       </Modal>
+
     </div>
   );
 }

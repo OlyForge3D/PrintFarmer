@@ -99,6 +99,7 @@ export function usePrinterDisplays(printers: Printer[]): PrinterDisplay[] {
         bedTemp: signalRStatus?.bedTemp !== undefined ? signalRStatus.bedTemp : printer.bedTemp,
         hotendTarget: signalRStatus?.hotendTarget !== undefined ? signalRStatus.hotendTarget : printer.hotendTarget,
         bedTarget: signalRStatus?.bedTarget !== undefined ? signalRStatus.bedTarget : printer.bedTarget,
+        spoolInfo: signalRStatus?.spoolInfo !== undefined ? signalRStatus.spoolInfo : printer.spoolInfo,
         isRealtimeStatus,
         signalRStatus,
       } as PrinterDisplay;

@@ -9,7 +9,7 @@ import { HubConnection, HubConnectionBuilder, LogLevel } from '@microsoft/signal
 export interface PrinterStatusUpdate {
   printerId: string;
   name: string;
-  state: 'Idle' | 'Printing' | 'Paused' | 'Error' | 'Offline';
+  state: 'Idle' | 'Printing' | 'Paused' | 'Error' | 'Offline' | 'Shutdown' | 'Halted' | 'Disconnected' | 'Complete' | 'Cancelled' | 'Connecting';
   nozzlePosition?: {
     x: number;
     y: number;

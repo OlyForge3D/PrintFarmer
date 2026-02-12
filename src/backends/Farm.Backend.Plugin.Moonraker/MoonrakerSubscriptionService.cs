@@ -1631,6 +1631,13 @@ public sealed class MoonrakerSubscriptionService(
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
 
+            // Check if Spoolman is configured and connected on this printer
+            SpoolmanStatus? spoolmanStatus = await moonrakerClient.GetSpoolmanStatusAsync(serverUrl, ct);
+            if (spoolmanStatus == null || !spoolmanStatus.SpoolmanConnected)
+            {
+                return null; // Spoolman not configured or not connected
+            }
+
             // Get the active spool ID from Moonraker
             int? activeSpoolId = await moonrakerClient.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
             if (activeSpoolId == null)
@@ -1638,18 +1645,57 @@ public sealed class MoonrakerSubscriptionService(
                 return new PrinterSpoolInfoDto(HasActiveSpool: false);
             }
 
-            // Return basic info - Spoolman detailed fetch removed to avoid API layer dependency
-            // In a backend plugin, we only report that there's an active spool
-            return new PrinterSpoolInfoDto(
-                HasActiveSpool: true,
-                ActiveSpoolId: activeSpoolId);
+            // Fetch spool details from Spoolman via Moonraker proxy
+            string? spoolDetailsJson = await moonrakerClient.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
+            if (string.IsNullOrWhiteSpace(spoolDetailsJson))
+            {
+                return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
+            }
+
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(spoolDetailsJson);
+                JsonElement root = doc.RootElement;
+
+                double? remainingWeight = root.TryGetProperty("remaining_weight", out JsonElement weightEl) && weightEl.ValueKind == JsonValueKind.Number ? weightEl.GetDouble() : (double?)null;
+
+                string? material = null;
+                string? colorHex = null;
+                string? vendor = null;
+                string? filamentName = null;
+                if (root.TryGetProperty("filament", out JsonElement filamentEl) && filamentEl.ValueKind == JsonValueKind.Object)
+                {
+                    material = filamentEl.TryGetProperty("material", out JsonElement matEl) ? matEl.GetString() : null;
+                    colorHex = filamentEl.TryGetProperty("color_hex", out JsonElement colorEl) ? colorEl.GetString() : null;
+                    filamentName = filamentEl.TryGetProperty("name", out JsonElement fnEl) ? fnEl.GetString() : null;
+                    if (filamentEl.TryGetProperty("vendor", out JsonElement vendorEl) && vendorEl.ValueKind == JsonValueKind.Object)
+                    {
+                        vendor = vendorEl.TryGetProperty("name", out JsonElement vnEl) ? vnEl.GetString() : null;
+                    }
+                }
+
+                return new PrinterSpoolInfoDto(
+                    HasActiveSpool: true,
+                    ActiveSpoolId: activeSpoolId,
+                    SpoolName: filamentName,
+                    Material: material,
+                    ColorHex: colorHex != null ? $"#{colorHex}" : null,
+                    FilamentName: filamentName,
+                    Vendor: vendor,
+                    RemainingWeightG: remainingWeight);
+            }
+            catch (Exception parseEx)
+            {
+                _logger.LogWarning(parseEx, "GetSpoolInfoAsync: Failed to parse spool details for {ServerUrl}", serverUrl);
+                return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "GetSpoolInfoAsync: Exception occurred during spool detection for {ServerUrl}", serverUrl);
 
-            // If any operations fail, just return no spool info
-            return new PrinterSpoolInfoDto(HasActiveSpool: false);
+            // If any operations fail, Spoolman status is unknown
+            return null;
         }
     }
 

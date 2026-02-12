@@ -71,4 +71,10 @@ public interface IPrintProjectService
     /// Get progress summary for a project.
     /// </summary>
     Task<PrintProjectProgressDto?> GetProjectProgressAsync(Guid projectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Queue all pending files from a project to the job queue.
+    /// Files are ordered by material type and color to minimize filament changes.
+    /// </summary>
+    Task<QueueProjectResultDto?> QueueProjectAsync(Guid projectId, QueueProjectRequest request, CancellationToken ct = default);
 }

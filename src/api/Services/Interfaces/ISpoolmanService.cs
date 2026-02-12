@@ -40,6 +40,23 @@ public interface ISpoolmanService
     Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct);
 
     /// <summary>
+    /// Gets a list of all filament types (product definitions) from the configured Spoolman server.
+    /// Filaments represent the product/class (e.g., "PolyTerra PLA Charcoal Black"),
+    /// while spools represent physical instances of a filament.
+    /// </summary>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing a read-only list of all filament types</returns>
+    Task<IReadOnlyList<SpoolmanFilamentDto>> ListFilamentsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Gets a specific filament type by its ID from the configured Spoolman server.
+    /// </summary>
+    /// <param name="filamentId">The unique identifier of the filament type to retrieve</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the filament information, or null if not found</returns>
+    Task<SpoolmanFilamentDto?> GetFilamentByIdAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>
     /// Gets detailed information about a specific filament spool by its ID.
     /// </summary>
     /// <param name="spoolId">The unique identifier of the spool to retrieve</param>
@@ -68,4 +85,51 @@ public interface ISpoolmanService
     /// </summary>
     /// <param name="ct">The cancellation token.</param>
     Task<SpoolmanProbeResult> HealthProbeAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Lists all vendors from the configured Spoolman server.
+    /// </summary>
+    Task<IReadOnlyList<SpoolmanVendorDto>> ListVendorsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Creates a new vendor in Spoolman. Returns the created vendor with its ID.
+    /// </summary>
+    Task<SpoolmanVendorDto> CreateVendorAsync(string name, string? externalId, CancellationToken ct);
+
+    /// <summary>
+    /// Creates a new filament in Spoolman. Returns the created filament with its ID.
+    /// </summary>
+    Task<SpoolmanFilamentDto> CreateFilamentInSpoolmanAsync(SpoolmanCreateFilamentRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Updates an existing filament in Spoolman by its ID.
+    /// </summary>
+    Task<SpoolmanFilamentDto> UpdateFilamentInSpoolmanAsync(int filamentId, SpoolmanCreateFilamentRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Bulk-updates multiple filaments in Spoolman. Only non-null fields in the request are applied.
+    /// </summary>
+    Task<SpoolmanBulkUpdateResult> BulkUpdateFilamentsAsync(SpoolmanBulkUpdateFilamentsRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes a filament from Spoolman by its ID.
+    /// </summary>
+    Task DeleteFilamentFromSpoolmanAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>
+    /// Bulk-deletes multiple filaments from Spoolman. Returns success/error counts.
+    /// </summary>
+    Task<SpoolmanBulkUpdateResult> BulkDeleteFilamentsAsync(int[] filamentIds, CancellationToken ct);
+
+    /// <summary>
+    /// Gets all filaments from Spoolman's external (SpoolmanDB) endpoint: /api/v1/external/filament.
+    /// Spoolman periodically syncs this data from the SpoolmanDB community database.
+    /// </summary>
+    Task<IReadOnlyList<SpoolmanDbFilamentEntry>> GetExternalFilamentsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Gets all materials from Spoolman's external (SpoolmanDB) endpoint: /api/v1/external/material.
+    /// Returns material definitions with density, extruder temp, and bed temp.
+    /// </summary>
+    Task<IReadOnlyList<SpoolmanDbMaterialEntry>> GetExternalMaterialsAsync(CancellationToken ct);
 }

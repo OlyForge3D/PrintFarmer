@@ -7,12 +7,15 @@ export { Badge, type BadgeProps, type BadgeVariant, type BadgeSize } from './Bad
 export { Button, type ButtonVariant, type ButtonSize } from './Button';
 export { Card, type CardProps, type CardHeaderProps, type CardBodyProps, type CardFooterProps } from './Card';
 export { Checkbox, type CheckboxProps } from './Checkbox';
+export { CollapsibleSection } from './CollapsibleSection';
+export { ColorPicker, type ColorPickerProps } from './ColorPicker';
 export { ControlPadButton, type ControlPadButtonProps } from './ControlPadButton';
 export { DataTable, type DataTableProps, type DataTableColumn } from './DataTable';
 export { FileUpload, type FileUploadProps } from './FileUpload';
 export { FormField, type FormFieldProps } from './FormField';
 export { Input, type InputProps } from './Input';
 export { Label, type LabelProps } from './Label';
+export { MoveDistanceSlider } from './MoveDistanceSlider';
 export { MovementInput, type MovementInputProps } from './MovementInput';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Radio, type RadioProps } from './Radio';
@@ -36,6 +39,7 @@ export {
 } from './Table';
 export { Tabs, type TabsProps, type TabListProps, type TabProps, type TabPanelsProps, type TabPanelProps } from './Tabs';
 export { TemperatureInput, type TemperatureInputProps } from './TemperatureInput';
+export { TemperatureControlRow, type TemperatureControlRowProps } from './TemperatureControlRow';
 export { Textarea, type TextareaProps } from './Textarea';
 export { Toggle, type ToggleProps } from './Toggle';
 export { Tooltip, type TooltipProps, type TooltipPosition } from './Tooltip';

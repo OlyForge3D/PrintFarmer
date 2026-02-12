@@ -266,6 +266,7 @@ export interface PrinterBackendCapabilitiesDto {
   supportsTemperatureControl: boolean;
   supportsPrinterInformation: boolean;
   supportsHistory: boolean;
+  supportsFilamentControl: boolean;
 }
 
 /**
@@ -1095,6 +1096,55 @@ export interface SpoolmanDiscoveryResult {
   responseTime?: number; // in milliseconds
 }
 
+// CSV Import/Export
+export interface FilamentCsvImportResult {
+  createdCount: number;
+  updatedCount: number;
+  errorCount: number;
+  totalRows: number;
+  errors: string[];
+}
+
+// SpoolmanDB community database types
+export interface SpoolmanDbFilamentEntry {
+  id: string;
+  manufacturer: string;
+  name: string;
+  material: string;
+  density?: number | null;
+  weight?: number | null;
+  spoolWeight?: number | null;
+  spoolType?: string | null;
+  diameter?: number | null;
+  colorHex?: string | null;
+  colorHexes?: string[] | null;
+  extruderTemp?: number | null;
+  extruderTempRange?: number[] | null;
+  bedTemp?: number | null;
+  bedTempRange?: number[] | null;
+  finish?: string | null;
+  translucent?: boolean;
+  glow?: boolean;
+}
+
+export interface SpoolmanDbMaterialEntry {
+  material: string;
+  density?: number | null;
+  extruderTemp?: number | null;
+  bedTemp?: number | null;
+}
+
+export interface SpoolmanDbImportRequest {
+  filamentIds: string[];
+}
+
+export interface SpoolmanDbImportResult {
+  createdCount: number;
+  updatedCount: number;
+  errorCount: number;
+  errors: string[];
+}
+
 export interface UpdateModelRequest {
   name: string;
   motionType?: MotionTypeString;
@@ -1770,6 +1820,14 @@ export interface QueuedPrintJobDto {
   tags?: string[];
   projectId?: string;
   projectName?: string;
+  /** Spoolman filament ID */
+  spoolmanFilamentId?: number;
+  /** Filament name from Spoolman */
+  filamentName?: string;
+  /** Filament vendor from Spoolman */
+  filamentVendor?: string;
+  /** Filament color hex from Spoolman */
+  filamentColor?: string;
 }
 
 export interface QueueGcodeFileMetaDto {
@@ -2098,7 +2156,7 @@ export interface PrintProjectFileDto {
   gcodeFileId: string;
   fileName: string;
   thumbnailUrl?: string;
-  colorRequirement: PrintColorRequirement;
+  spoolmanFilamentId?: number | null;
   materialRequirement?: string;
   printCount: number;
   printedCount: number;
@@ -2109,6 +2167,14 @@ export interface PrintProjectFileDto {
   lastPrintJobId?: string;
   isComplete: boolean;
   remainingPrints: number;
+  // Gcode metadata for time/material estimation
+  estimatedPrintTimeMinutes?: number | null;
+  estimatedFilamentLengthMm?: number | null;
+  estimatedFilamentWeightG?: number | null;
+  requiredMaterial?: string | null;
+  requiredNozzleDiameter?: number | null;
+  extractedPrinterModelName?: string | null;
+  remainingPrintTimeMinutes?: number | null;
 }
 
 /**
@@ -2140,7 +2206,7 @@ export interface UpdatePrintProjectRequest {
  */
 export interface AddFileToProjectRequest {
   gcodeFileId: string;
-  colorRequirement?: PrintColorRequirement;
+  spoolmanFilamentId?: number | null;
   materialRequirement?: string;
   printCount?: number;
   notes?: string;
@@ -2150,7 +2216,7 @@ export interface AddFileToProjectRequest {
  * Request to update a file within a project
  */
 export interface UpdateProjectFileRequest {
-  colorRequirement?: PrintColorRequirement;
+  spoolmanFilamentId?: number | null;
   materialRequirement?: string;
   printCount?: number;
   printedCount?: number;
@@ -2180,11 +2246,46 @@ export interface PrintProjectProgressDto {
 export interface FileProgressDto {
   fileId: string;
   fileName: string;
-  colorRequirement: PrintColorRequirement;
   status: PrintProjectFileStatus;
   printCount: number;
   printedCount: number;
   isComplete: boolean;
+}
+
+/**
+ * Request to queue all pending files from a project to the job queue
+ */
+export interface QueueProjectRequest {
+  assignedPrinterId?: string | null;
+  groupByMaterial?: boolean;
+  groupByColor?: boolean;
+  priority?: number;
+}
+
+/**
+ * Result of queueing a project's files
+ */
+export interface QueueProjectResultDto {
+  projectId: string;
+  projectName: string;
+  totalJobsQueued: number;
+  totalPrintsQueued: number;
+  estimatedTotalTimeMinutes?: number | null;
+  queuedFiles: QueuedProjectFileDto[];
+}
+
+/**
+ * A single file that was queued from a project
+ */
+export interface QueuedProjectFileDto {
+  projectFileId: string;
+  printJobId: string;
+  fileName: string;
+  materialType?: string | null;
+  colorHex?: string | null;
+  printCount: number;
+  estimatedPrintTimeMinutes?: number | null;
+  queueOrder: number;
 }
 
 // Print Project Templates
@@ -2240,4 +2341,127 @@ export interface CreateTemplateFileRequest {
   materialRequirement?: string;
   printCount?: number;
   notes?: string;
+}
+
+/**
+ * Spoolman spool (matches backend SpoolmanSpoolDto serialized with camelCase)
+ */
+export interface SpoolmanSpool {
+  id: number;
+  name: string;
+  material: string;
+  remainingWeightG?: number | null;
+  colorHex?: string | null;
+  inUse: boolean;
+  filamentName?: string | null;
+  vendor?: string | null;
+  registeredAt?: string | null;
+  firstUsedAt?: string | null;
+  lastUsedAt?: string | null;
+  initialWeightG?: number | null;
+  usedWeightG?: number | null;
+  spoolWeightG?: number | null;
+  remainingLengthMm?: number | null;
+  usedLengthMm?: number | null;
+  location?: string | null;
+  lotNumber?: string | null;
+  archived?: boolean | null;
+  usedPercent?: number | null;
+  remainingPercent?: number | null;
+  price?: number | null;
+}
+
+/**
+ * Spoolman filament type/product definition (matches backend SpoolmanFilamentDto).
+ * Represents the filament product class (e.g., "PolyTerra PLA Charcoal Black"),
+ * not a physical spool instance.
+ */
+export interface SpoolmanFilament {
+  id: number;
+  name?: string | null;
+  material?: string | null;
+  colorHex?: string | null;
+  vendor?: string | null;
+  density?: number | null;
+  diameter?: number | null;
+  weight?: number | null;
+  spoolWeight?: number | null;
+  price?: number | null;
+  settingsExtruderTemp?: number | null;
+  settingsBedTemp?: number | null;
+  articleNumber?: string | null;
+  comment?: string | null;
+  multiColorHexes?: string | null;
+  externalId?: string | null;
+}
+
+/**
+ * Spoolman vendor record.
+ */
+export interface SpoolmanVendor {
+  id: number;
+  name: string;
+  externalId?: string | null;
+}
+
+/**
+ * Spoolman material definition (e.g. PLA, PETG, ASA).
+ */
+export interface SpoolmanMaterial {
+  id: number;
+  name: string;
+  density?: number | null;
+  colorHex?: string | null;
+}
+
+/**
+ * Request to bulk-update a set of filaments in Spoolman.
+ * Only non-null/undefined fields are applied to each filament.
+ */
+export interface SpoolmanBulkUpdateFilamentsRequest {
+  filamentIds: number[];
+  vendorId?: number | null;
+  material?: string | null;
+  price?: number | null;
+  settingsExtruderTemp?: number | null;
+  settingsBedTemp?: number | null;
+  comment?: string | null;
+}
+
+/**
+ * Result of a bulk filament update.
+ */
+export interface SpoolmanBulkUpdateResult {
+  updatedCount: number;
+  errorCount: number;
+  errors: string[];
+}
+
+/**
+ * Request to bulk-delete filaments from Spoolman.
+ */
+export interface SpoolmanBulkDeleteRequest {
+  filamentIds: number[];
+}
+
+/**
+ * Request to update (PATCH) a single filament in Spoolman.
+ * Only non-null/undefined fields are applied.
+ */
+export interface SpoolmanUpdateFilamentRequest {
+  name?: string | null;
+  vendorId?: number | null;
+  material?: string | null;
+  density?: number | null;
+  diameter?: number | null;
+  weight?: number | null;
+  spoolWeight?: number | null;
+  settingsExtruderTemp?: number | null;
+  settingsBedTemp?: number | null;
+  colorHex?: string | null;
+  externalId?: string | null;
+  comment?: string | null;
+  price?: number | null;
+  articleNumber?: string | null;
+  multiColorHexes?: string | null;
 }

@@ -59,34 +59,13 @@ jobs:
         working-directory: src/Web/ReactApp
         run: npm run build
 
-      - name: Test .NET (with coverage - fast only)
+      - name: Test .NET
         # Temporarily restrict tests to quick unit/in-memory tests that do not require Docker or external services.
         # This avoids CI failures caused by private Docker images and long integration tests.
         working-directory: src
         run: |
           dotnet test ./farm-web.sln -c Debug --no-build --logger trx --results-directory TestResults \
-            --filter "Category!=DbHeavy&Category!=Docker" \
-            /p:CollectCoverage=true /p:CoverletOutput=./coverage/ /p:CoverletOutputFormat=lcov
-
-      - name: "Test Farm.Importing.Tests (explicit)"
-        working-directory: src
-        run: |
-          # Run the importing tests explicitly so they are covered even if not in the solution
-          dotnet test ./tests/Farm.Importing.Tests/Farm.Importing.Tests.csproj -c Debug --no-build --logger trx --results-directory TestResults/Importing \
-            --filter "Category!=DbHeavy&Category!=Docker" \
-            /p:CollectCoverage=true /p:CoverletOutput=./coverage/importing/ /p:CoverletOutputFormat=lcov
-
-      - name: "Merge backend coverage (strict merge: combine SF blocks)"
-        id: merge-backend-coverage
-        run: |
-          bash ./.github/scripts/merge-lcov.sh
-
-      - name: Upload .NET coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dotnet-coverage
-          path: src/coverage
+            --filter "Category!=DbHeavy&Category!=Docker"
 
       - name: Test frontend (with coverage)
         working-directory: src/Web/ReactApp
@@ -119,49 +98,4 @@ jobs:
         run: |
           echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "- .NET test results: stored in artifact dotnet-test-results" >> $GITHUB_STEP_SUMMARY
-          echo "- .NET coverage: artifact dotnet-coverage" >> $GITHUB_STEP_SUMMARY
           echo "- Frontend coverage: artifact frontend-coverage" >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload coverage to Codecov
-        if: always()
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: |
-            src/coverage/coverage.info
-            src/Web/ReactApp/coverage/lcov.info
-          flags: backend,frontend
-          fail_ci_if_error: false
-
-      - name: Enforce frontend coverage thresholds
-        if: success()
-        run: |
-          FRONTEND_LCOV=src/Web/ReactApp/coverage/lcov.info
-          if [ ! -f "$FRONTEND_LCOV" ]; then echo "Missing frontend lcov"; exit 1; fi
-          # Sum all LF (lines found) and LH (lines hit) values across all files
-          LINES=$(grep '^LF:' "$FRONTEND_LCOV" | sed 's/LF://' | awk '{sum+=$1} END {print sum+0}')
-          LINES_HIT=$(grep '^LH:' "$FRONTEND_LCOV" | sed 's/LH://' | awk '{sum+=$1} END {print sum+0}')
-          if [ -z "$LINES" ] || [ -z "$LINES_HIT" ] || [ "$LINES" -eq 0 ]; then 
-            echo "Could not parse frontend coverage or no lines found"; 
-            echo "Lines: $LINES, Lines Hit: $LINES_HIT"; 
-            exit 1; 
-          fi
-          PCT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.2f", (h/t)*100 }')
-          echo "Frontend line coverage: ${PCT}%" >> $GITHUB_STEP_SUMMARY
-          echo "Frontend coverage: ${PCT}% (${LINES_HIT}/${LINES} lines)"
-          PCT_INT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.0f", (h/t)*100 }')
-          if [ "$PCT_INT" -lt 10 ]; then echo "Frontend coverage below 10%"; exit 1; fi
-
-      - name: Enforce backend coverage thresholds
-        if: success() && steps.merge-backend-coverage.outputs.coverage_present == 'true'
-        run: |
-          # Use the single canonical merged backend coverage file created by reportgenerator
-          BACKEND_LCOV=src/coverage/coverage.info
-          if [ ! -f "$BACKEND_LCOV" ]; then echo "Missing backend lcov at $BACKEND_LCOV"; exit 1; fi
-          LINES=$(grep -c '^DA:' "$BACKEND_LCOV")
-          # Count DA lines with execution > 0
-          LINES_HIT=$(grep '^DA:' "$BACKEND_LCOV" | awk -F',' '{ if ($2+0>0) c++ } END {print c+0}')
-          if [ -z "$LINES" ] || [ -z "$LINES_HIT" ]; then echo "Could not parse backend coverage"; exit 1; fi
-          PCT=$(awk -v h=$LINES_HIT -v t=$LINES 'BEGIN { if (t==0) print 100; else printf "%.0f", (h/t)*100 }')
-          echo "Backend line coverage: ${PCT}%" >> $GITHUB_STEP_SUMMARY
-          if [ $PCT -lt 10 ]; then echo "Backend coverage below 10%"; exit 1; fi

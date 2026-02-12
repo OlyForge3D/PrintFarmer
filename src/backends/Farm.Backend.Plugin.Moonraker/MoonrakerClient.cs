@@ -26,7 +26,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     ISupportsMovement,
     ISupportsTemperatureControl,
     ISupportsPrinterInformation,
-    ISupportsHistory
+    ISupportsHistory,
+    ISupportsFilamentControl,
+    ISupportsSpoolman
 {
     private readonly HttpClient _http = http;
     private readonly IUnifiedLoggingService _logger = logger;
@@ -771,6 +773,16 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         ArgumentNullException.ThrowIfNull(baseUrl);
         return SendGcodeAsync(baseUrl.ToString(), gcode, ct);
     }
+
+    // ISupportsFilamentControl implementation
+    public async Task<bool> LoadFilamentAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "LOAD_FILAMENT", ct);
+
+    public async Task<bool> UnloadFilamentAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "UNLOAD_FILAMENT", ct);
+
+    public async Task<bool> ChangeFilamentAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "M600", ct);
 
     private async Task<bool> SendGcodePrivateAsync(string baseUrl, string gcode, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, new[] { gcode }, ct);
@@ -2115,13 +2127,26 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             cts.CancelAfter(TimeSpan.FromSeconds(10));
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/spoolman/spool_id");
-            SpoolmanSpoolIdRequest request = new()
-            { SpoolId = spoolId };
-            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
+
+            // Moonraker expects spool_id as an int when setting, but the key must be
+            // OMITTED (not null) to clear. Sending spool_id:null causes a 400 because
+            // Moonraker's Python code tries int(None) and fails.
+            object payload = spoolId.HasValue
+                ? new SpoolmanSpoolIdRequest { SpoolId = spoolId }
+                : new { };
+
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, payload, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                string body = await resp.Content.ReadAsStringAsync(cts.Token);
+                _logger.LogWarning($"SetSpoolmanActiveSpoolAsync: Moonraker returned {(int)resp.StatusCode} for spool_id={spoolId} on {uri}. Body: {body}");
+            }
+
             return resp.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, $"SetSpoolmanActiveSpoolAsync: Exception for spool_id={spoolId} on {baseUrl}");
             return false;
         }
     }
@@ -2145,17 +2170,44 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for proxy requests
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/spoolman/proxy");
+
+            // Moonraker proxy expects paths starting with /v1, not /api/v1
+            string proxyPath = path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
+                ? path[4..] // Strip "/api" prefix
+                : path;
+
             SpoolmanProxyRequest request = new()
             {
                 RequestMethod = method,
-                Path = path,
+                Path = proxyPath,
                 Query = query,
                 Body = body,
                 UseV2Response = useV2Response
             };
 
             using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
-            return !resp.IsSuccessStatusCode ? null : await resp.Content.ReadAsStringAsync(cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            string json = await resp.Content.ReadAsStringAsync(cts.Token);
+
+            // Moonraker wraps Spoolman responses in {"result": ...} — unwrap it
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("result", out JsonElement resultEl))
+                {
+                    return resultEl.GetRawText();
+                }
+            }
+            catch
+            {
+                /* If unwrap fails, return raw */
+            }
+
+            return json;
         }
         catch
         {

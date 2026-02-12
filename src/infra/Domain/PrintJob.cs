@@ -91,6 +91,42 @@ public class PrintJob
     /// </summary>
     public bool WasSeededFromHistory { get; set; }
 
+    // Project tracking: link job to its source project and filament assignment
+
+    /// <summary>
+    /// ID of the project this job was queued from (if any).
+    /// </summary>
+    public Guid? ProjectId { get; set; }
+
+    /// <summary>
+    /// Denormalized project name for display without a join.
+    /// </summary>
+    [MaxLength(255)]
+    public string? ProjectName { get; set; }
+
+    /// <summary>
+    /// Spoolman filament ID assigned via the project file (if any).
+    /// </summary>
+    public int? SpoolmanFilamentId { get; set; }
+
+    /// <summary>
+    /// Denormalized filament display name (e.g., "PolyTerra PLA Charcoal Black").
+    /// </summary>
+    [MaxLength(255)]
+    public string? FilamentName { get; set; }
+
+    /// <summary>
+    /// Denormalized filament vendor (e.g., "Polymaker").
+    /// </summary>
+    [MaxLength(128)]
+    public string? FilamentVendor { get; set; }
+
+    /// <summary>
+    /// Denormalized filament color hex (e.g., "#1A1A1A").
+    /// </summary>
+    [MaxLength(32)]
+    public string? FilamentColor { get; set; }
+
     // Phase 3C: Timeline tracking
     public ICollection<JobStateHistory> StateHistory { get; } = new List<JobStateHistory>();
 

@@ -65,6 +65,16 @@ public sealed class OctoPrintPollingService(
         public string? LastApiState { get; set; } // "responding", "authFail", "noResponse"
 
         public OctoPrintWebSocketAdapter? WebSocketAdapter { get; set; }
+
+        /// <summary>
+        /// ServerUrl the adapter was created with, used to detect credential changes.
+        /// </summary>
+        public string? CreatedWithServerUrl { get; set; }
+
+        /// <summary>
+        /// API key the adapter was created with, used to detect credential changes.
+        /// </summary>
+        public string? CreatedWithApiKey { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -157,10 +167,40 @@ public sealed class OctoPrintPollingService(
                     List<Guid> printerIds = await GetOctoPrintPrinterIdsAsync(ct);
                     _logger.LogDebug($"OctoPrintPollingService: Found {printerIds.Count} OctoPrint printers");
 
-                    // Ensure WebSocket adapters and polling loops exist for all OctoPrint printers
+                    // Ensure WebSocket adapters and polling loops exist for all OctoPrint printers.
+                    // Also detect credential changes (ServerUrl, API key) and recreate adapters when needed.
                     foreach (Guid id in printerIds)
                     {
-                        if (!_webSocketAdapters.ContainsKey(id))
+                        bool needsNewAdapter = !_webSocketAdapters.ContainsKey(id);
+
+                        // Check for credential changes on existing adapters
+                        if (!needsNewAdapter && _printerStates.TryGetValue(id, out PrinterPollingState? existing))
+                        {
+                            Printer? current = await GetPrinterAsync(id, ct);
+                            if (current != null)
+                            {
+                                string? currentApiKey = current.Credential?.ApiKey;
+                                bool credentialsChanged = current.ServerUrl != existing.CreatedWithServerUrl
+                                    || currentApiKey != existing.CreatedWithApiKey;
+
+                                if (credentialsChanged)
+                                {
+                                    _logger.LogInformation($"OctoPrint {id}: Credentials changed, recreating adapter");
+
+                                    // Tear down old adapter
+                                    if (_webSocketAdapters.TryRemove(id, out OctoPrintWebSocketAdapter? oldAdapter))
+                                    {
+                                        oldAdapter.Dispose();
+                                    }
+
+                                    _pollingLoops.TryRemove(id, out _);
+                                    _printerStates.TryRemove(id, out _);
+                                    needsNewAdapter = true;
+                                }
+                            }
+                        }
+
+                        if (needsNewAdapter)
                         {
                             Printer? printer = await GetPrinterAsync(id, ct);
                             if (printer != null)
@@ -187,6 +227,8 @@ public sealed class OctoPrintPollingService(
                                     WebSocketAdapter = adapter
                                 });
                                 state.WebSocketAdapter = adapter;
+                                state.CreatedWithServerUrl = printer.ServerUrl;
+                                state.CreatedWithApiKey = printer.Credential?.ApiKey;
 
                                 _logger.LogDebug($"Created WebSocket adapter for OctoPrint printer {id}");
 

@@ -86,7 +86,7 @@ export const GcodeLibraryPage: React.FC = () => {
       <div className="space-y-4 h-full flex flex-col">
         {/* Filter Panel */}
         {showFiltersPanel && (
-          <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 space-y-4">
+          <div className="bg-pf-card rounded-lg border border-pf-border p-4 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-medium text-pf-text-primary">Filters</h3>
               <div className="flex items-center gap-2">

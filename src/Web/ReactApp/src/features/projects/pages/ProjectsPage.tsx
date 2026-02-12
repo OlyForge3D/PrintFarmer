@@ -11,9 +11,12 @@ import {
   FilterIcon, 
   DeleteIcon,
   CheckIcon,
+  GridIcon,
+  TableIcon,
 } from '@/common/components/icons/MdiIcons';
 import { CreateProjectModal } from '@/features/projects/components/CreateProjectModal';
 import { ProjectDetailModal } from '@/features/projects/components/ProjectDetailModal';
+import { ProjectsTableView } from '@/features/projects/components/ProjectsTableView';
 import type { 
   PrintProjectListDto, 
   PrintProjectStatus,
@@ -44,6 +47,15 @@ export const ProjectsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<PrintProjectStatus | ''>('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<PrintProjectDetailDto | null>(null);
+  const [editingProject, setEditingProject] = useState<PrintProjectDetailDto | null>(null);
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
+    try { return (localStorage.getItem('projects-view-mode') as 'cards' | 'table') || 'cards'; } catch { return 'cards'; }
+  });
+
+  const handleViewModeChange = (mode: 'cards' | 'table') => {
+    setViewMode(mode);
+    try { localStorage.setItem('projects-view-mode', mode); } catch { /* ignore */ }
+  };
 
   // Fetch projects with auto-refresh for real-time-like updates
   const { data: projects = [], isLoading, error } = useQuery({
@@ -132,6 +144,30 @@ export const ProjectsPage: React.FC = () => {
             </Select>
           </div>
 
+          {/* View mode toggle */}
+          <div className="flex rounded-sm overflow-hidden border border-pf-border">
+            <Button
+              variant={viewMode === 'cards' ? 'primary' : 'secondary'}
+              size="sm"
+              aria-label="Card view"
+              title="Card view"
+              onClick={() => handleViewModeChange('cards')}
+              className="flex items-center gap-1"
+            >
+              <GridIcon className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === 'table' ? 'primary' : 'secondary'}
+              size="sm"
+              aria-label="Table view"
+              title="Table view"
+              onClick={() => handleViewModeChange('table')}
+              className="flex items-center gap-1"
+            >
+              <TableIcon className="h-4 w-4" />
+            </Button>
+          </div>
+
           {/* Create button */}
           <Button
             variant="primary"
@@ -184,7 +220,7 @@ export const ProjectsPage: React.FC = () => {
                 Create First Project
               </Button>
             </div>
-          ) : (
+          ) : viewMode === 'cards' ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {projects.map((project) => (
                 <ProjectCard
@@ -195,18 +231,29 @@ export const ProjectsPage: React.FC = () => {
                 />
               ))}
             </div>
+          ) : (
+            <ProjectsTableView
+              projects={projects}
+              onProjectClick={handleProjectClick}
+              onDelete={handleDeleteProject}
+            />
           )}
         </div>
       </div>
 
-      {/* Create Project Modal */}
+      {/* Create / Edit Project Modal */}
       <CreateProjectModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+        isOpen={showCreateModal || !!editingProject}
+        onClose={() => {
+          setShowCreateModal(false);
+          setEditingProject(null);
+        }}
         onSuccess={() => {
           setShowCreateModal(false);
+          setEditingProject(null);
           queryClient.invalidateQueries({ queryKey: ['projects'] });
         }}
+        editProject={editingProject ?? undefined}
       />
 
       {/* Project Detail Modal */}
@@ -219,6 +266,11 @@ export const ProjectsPage: React.FC = () => {
             queryClient.invalidateQueries({ queryKey: ['projects'] });
             // Refresh the selected project
             projectService.getProject(selectedProject.id).then(setSelectedProject);
+          }}
+          onEdit={() => {
+            const proj = selectedProject;
+            setSelectedProject(null);
+            setEditingProject(proj);
           }}
         />
       )}

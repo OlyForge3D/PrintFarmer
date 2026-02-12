@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
-import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels, TestConnectionResponse } from '@/types/api';
+import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -48,7 +48,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   
   // Test connection state
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   
   // Fetch default capabilities for the selected model
@@ -147,14 +146,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     onClose();
     setValidationErrors({});
     setError('');
-    setTestResult(null);
     setShowPassword(false);
   }, [onClose]);
 
-  // Reset test result and password visibility when modal opens or printer changes
+  // Reset password visibility when modal opens or printer changes
   useEffect(() => {
     if (isOpen) {
-      setTestResult(null);
       setShowPassword(false);
     }
   }, [isOpen, printerId]);
@@ -466,37 +463,33 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     if (!formData) return;
     
     // Validate required fields for test
-    if (!formData.serverUrl?.trim()) {
-      setTestResult({ success: false, message: 'Server URL is required' });
-      return;
-    }
+    const errors: Record<string, string[]> = {};
 
-    try {
-      new URL(formData.serverUrl);
-    } catch {
-      setTestResult({ success: false, message: 'Please enter a valid HTTP/HTTPS URL' });
-      return;
+    if (!formData.serverUrl?.trim()) {
+      errors.serverUrl = ['Server URL is required'];
+    } else {
+      try {
+        new URL(formData.serverUrl);
+      } catch {
+        errors.serverUrl = ['Please enter a valid HTTP/HTTPS URL'];
+      }
     }
 
     // Check authentication requirements per backend
     if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
-      setTestResult({ 
-        success: false, 
-        message: 'Password is required for PrusaLink printers (get it from printer Settings → Network → Credentials)' 
-      });
-      return;
+      errors.password = ['Password is required for PrusaLink (Settings → Network → Credentials)'];
     }
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
-      setTestResult({ 
-        success: false, 
-        message: 'API Key is required for OctoPrint printers' 
-      });
+      errors.apiKey = ['API Key is required for OctoPrint'];
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(prev => ({ ...prev, ...errors }));
       return;
     }
 
     setIsTesting(true);
-    setTestResult(null);
 
     try {
       const result = await apiClient.testConnection({
@@ -507,12 +500,14 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         password: formData.password,
         backendPort: formData.backendPort,
       });
-      setTestResult(result);
+      if (result.success) {
+        toast.success(result.message || 'Connection successful', { duration: 5000 });
+      } else {
+        toast.error(result.message || 'Connection failed', { duration: 8000 });
+      }
     } catch (err) {
-      setTestResult({ 
-        success: false, 
-        message: err instanceof Error ? err.message : 'Connection test failed' 
-      });
+      const message = err instanceof Error ? err.message : 'Connection test failed';
+      toast.error(message, { duration: 8000 });
     } finally {
       setIsTesting(false);
     }
@@ -550,30 +545,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
           {isTesting ? 'Testing...' : 'Test'}
         </Button>
       </div>
-
-      {/* Test Connection Result - wraps on small widths to avoid obstructing actions */}
-      {testResult && (
-        <div className="sm:flex-1 sm:min-w-0">
-          <span
-            className={`text-sm flex w-full items-center gap-1.5 rounded px-2 py-1 sm:w-auto ${
-              testResult.success
-                ? 'text-pf-success bg-pf-success-bg'
-                : 'text-pf-error-text bg-pf-error-bg'
-            }`}
-            role={testResult.success ? 'status' : 'alert'}
-            aria-live={testResult.success ? 'polite' : 'assertive'}
-          >
-            {testResult.success ? (
-              <CheckIcon className="w-4 h-4" />
-            ) : (
-              <span className="w-4 h-4 flex items-center justify-center">✕</span>
-            )}
-            <span className="min-w-0 truncate sm:max-w-[360px]" title={testResult.message}>
-              {testResult.success ? 'Connected' : testResult.message}
-            </span>
-          </span>
-        </div>
-      )}
 
       <div className="sm:ml-auto">
         <Button
@@ -676,7 +647,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                     title="PrusaLink username (usually 'maker')"
                   />
                 </FormField>
-                <FormField label="Password">
+                <FormField label="Password" error={validationErrors.password?.[0]}>
                   <div className="relative">
                     <Input
                       type={showPassword ? 'text' : 'password'}
@@ -701,7 +672,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             {/* OctoPrint uses API Key authentication */}
             {formData.backend === PrinterBackend.OctoPrint && (
               <div className="col-span-2">
-                <FormField label="API Key (OctoPrint)">
+                <FormField label="API Key (OctoPrint)" error={validationErrors.apiKey?.[0]}>
                   <Input
                     type="text"
                     value={formData.apiKey || ''}

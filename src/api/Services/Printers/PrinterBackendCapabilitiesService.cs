@@ -69,6 +69,7 @@ public class PrinterBackendCapabilitiesService(
             SupportsMovement: (capabilities & BackendCapabilities.Movement) == BackendCapabilities.Movement,
             SupportsTemperatureControl: (capabilities & BackendCapabilities.TemperatureControl) == BackendCapabilities.TemperatureControl,
             SupportsPrinterInformation: (capabilities & BackendCapabilities.PrinterInformation) == BackendCapabilities.PrinterInformation,
-            SupportsHistory: supportsHistory);
+            SupportsHistory: supportsHistory,
+            SupportsFilamentControl: (capabilities & BackendCapabilities.FilamentControl) == BackendCapabilities.FilamentControl);
     }
 }

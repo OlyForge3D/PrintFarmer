@@ -22,6 +22,7 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Printers;
@@ -2268,6 +2269,210 @@ public class PrintersService(
         {
             _logger.LogWarning(ex, $"Failed to disable motors on printer {id}");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Sends an arbitrary G-code command to the printer firmware.
+    /// </summary>
+    /// <param name="id">Unique printer identifier (GUID)</param>
+    /// <param name="gcode">The G-code command string to execute (e.g., "LOAD_FILAMENT", "M600")</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>True if command sent successfully, false if printer not found or backend unavailable</returns>
+    /// <remarks>
+    /// Sends raw G-code to the printer via the backend's gcode execution capability.
+    /// Used for Klipper macros (LOAD_FILAMENT, UNLOAD_FILAMENT) and standard G-code commands (M600).
+    /// Requires backend to support ISupportsGcodeExecution capability.
+    /// </remarks>
+    public async Task<bool> SendGcodeAsync(Guid id, string gcode, CancellationToken ct)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+            IBackendClient client = GetBackendClient(backend);
+
+            if (client is ISupportsGcodeExecution gcodeClient)
+            {
+                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                return await gcodeClient.SendGcodeAsync(moonrakerUrl, gcode, ct).ConfigureAwait(false);
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, $"Failed to send G-code '{gcode}' to printer {id}");
+            return false;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> LoadFilamentAsync(Guid id, CancellationToken ct)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p == null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+            IBackendClient client = GetBackendClient(backend);
+
+            if (client is not ISupportsFilamentControl filamentClient)
+            {
+                return new CommandResult(false, $"Backend '{backend}' does not support filament control");
+            }
+
+            string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+            bool result = await filamentClient.LoadFilamentAsync(url, ct).ConfigureAwait(false);
+            return result
+                ? new CommandResult(true, "Filament load initiated")
+                : new CommandResult(false, "Printer rejected the filament load command");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to load filament on printer {p.Name} ({id})");
+            return new CommandResult(false, $"Failed to load filament: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p == null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+            IBackendClient client = GetBackendClient(backend);
+
+            if (client is not ISupportsFilamentControl filamentClient)
+            {
+                return new CommandResult(false, $"Backend '{backend}' does not support filament control");
+            }
+
+            string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+            bool result = await filamentClient.UnloadFilamentAsync(url, ct).ConfigureAwait(false);
+            return result
+                ? new CommandResult(true, "Filament unload initiated")
+                : new CommandResult(false, "Printer rejected the filament unload command");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to unload filament on printer {p.Name} ({id})");
+            return new CommandResult(false, $"Failed to unload filament: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> ChangeFilamentAsync(Guid id, CancellationToken ct)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p == null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+            IBackendClient client = GetBackendClient(backend);
+
+            if (client is not ISupportsFilamentControl filamentClient)
+            {
+                return new CommandResult(false, $"Backend '{backend}' does not support filament control");
+            }
+
+            string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+            bool result = await filamentClient.ChangeFilamentAsync(url, ct).ConfigureAwait(false);
+            return result
+                ? new CommandResult(true, "Filament change initiated")
+                : new CommandResult(false, "Printer rejected the filament change command");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to change filament on printer {p.Name} ({id})");
+            return new CommandResult(false, $"Failed to change filament: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> SetActiveSpoolAsync(Guid id, int? spoolId, CancellationToken ct)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p == null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+            IBackendClient client = GetBackendClient(backend);
+
+            if (client is not ISupportsSpoolman spoolmanClient)
+            {
+                _logger.LogWarning($"SetActiveSpoolAsync: Backend {backend} ({client.GetType().Name}) does not support Spoolman");
+                return new CommandResult(false, $"Backend '{backend}' does not support Spoolman integration");
+            }
+
+            bool result = await spoolmanClient.SetSpoolmanActiveSpoolAsync(p.ServerUrl, spoolId, ct).ConfigureAwait(false);
+
+            if (!result)
+            {
+                string action = spoolId.HasValue ? $"set active spool to {spoolId}" : "clear active spool";
+                _logger.LogWarning($"SetActiveSpoolAsync: Spoolman rejected request to {action} on printer {p.Name} ({id})");
+                return new CommandResult(false, $"Spoolman failed to {action}. The printer may not have Spoolman configured or the spool ID may be invalid.");
+            }
+
+            return new CommandResult(true, spoolId.HasValue ? $"Active spool set to {spoolId}" : "Active spool cleared");
+        }
+        catch (Exception ex)
+        {
+            string action = spoolId.HasValue ? $"set active spool to {spoolId}" : "clear active spool";
+            _logger.LogError(ex, $"SetActiveSpoolAsync: Exception while attempting to {action} on printer {p.Name} ({id})");
+            return new CommandResult(false, $"Failed to {action}: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanSpoolDto>?> ListPrinterSpoolsAsync(Guid id, CancellationToken ct)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+            IBackendClient client = GetBackendClient(backend);
+
+            if (client is not ISupportsSpoolman spoolmanClient)
+            {
+                return null;
+            }
+
+            string? json = await spoolmanClient.GetSpoolmanSpoolsAsync(p.ServerUrl, ct).ConfigureAwait(false);
+            return SpoolmanJsonParser.ParseSpools(json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"ListPrinterSpoolsAsync: Exception fetching spools for printer {p.Name} ({id})");
+            return null;
         }
     }
 

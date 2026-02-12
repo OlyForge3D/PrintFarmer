@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,5 +30,17 @@ namespace Farm.Web.Api.Services.Filament
 
         /// <summary>Imports filament types from connected Spoolman instance.</summary>
         Task<SpoolmanFilamentImportResult> ImportFromSpoolmanAsync(CancellationToken ct);
+
+        /// <summary>Exports all filament types to CSV format.</summary>
+        Task<byte[]> ExportToCsvAsync(CancellationToken ct);
+
+        /// <summary>Imports filament types from a CSV stream with upsert logic.</summary>
+        Task<FilamentCsvImportResult> ImportFromCsvAsync(Stream csvStream, CancellationToken ct);
+
+        /// <summary>Imports selected filaments from SpoolmanDB community database.</summary>
+        Task<SpoolmanDbImportResult> ImportFromSpoolmanDbAsync(SpoolmanDbImportRequest request, IReadOnlyList<SpoolmanDbFilamentEntry> allFilaments, CancellationToken ct);
+
+        /// <summary>Syncs all external materials from Spoolman's SpoolmanDB endpoint as filament types (upsert).</summary>
+        Task<SpoolmanDbImportResult> SyncExternalMaterialsAsync(IReadOnlyList<SpoolmanDbMaterialEntry> materials, CancellationToken ct);
     }
 }

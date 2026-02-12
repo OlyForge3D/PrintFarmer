@@ -1,7 +1,10 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs.Projects;
+using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Services.Queue;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Projects;
@@ -9,7 +12,11 @@ namespace Farm.Web.Api.Services.Projects;
 /// <summary>
 /// Service implementation for managing print projects.
 /// </summary>
-public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger) : IPrintProjectService
+public class PrintProjectService(
+    AppDbContext db,
+    IUnifiedLoggingService logger,
+    IJobQueueService queueService,
+    ISpoolmanService spoolmanService) : IPrintProjectService
 {
     public async Task<IReadOnlyList<PrintProjectListDto>> GetProjectsAsync(
         PrintProjectStatus? status = null,
@@ -74,7 +81,7 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
             Name = request.Name,
             Description = request.Description,
             Priority = request.Priority,
-            DueDate = request.DueDate,
+            DueDate = request.DueDate.HasValue ? DateTime.SpecifyKind(request.DueDate.Value, DateTimeKind.Utc) : null,
             Notes = request.Notes,
             Status = PrintProjectStatus.Open,
             CreatedAt = now,
@@ -106,7 +113,7 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
                     Id = Guid.NewGuid(),
                     PrintProjectId = project.Id,
                     GcodeFileId = fileRequest.GcodeFileId,
-                    ColorRequirement = fileRequest.ColorRequirement,
+                    SpoolmanFilamentId = fileRequest.SpoolmanFilamentId,
                     MaterialRequirement = fileRequest.MaterialRequirement,
                     PrintCount = Math.Max(1, fileRequest.PrintCount),
                     PrintedCount = 0,
@@ -162,7 +169,7 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
 
         if (request.DueDate.HasValue)
         {
-            project.DueDate = request.DueDate.Value;
+            project.DueDate = DateTime.SpecifyKind(request.DueDate.Value, DateTimeKind.Utc);
         }
 
         if (request.Notes is not null)
@@ -234,7 +241,7 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
                 Id = Guid.NewGuid(),
                 PrintProjectId = projectId,
                 GcodeFileId = fileRequest.GcodeFileId,
-                ColorRequirement = fileRequest.ColorRequirement,
+                SpoolmanFilamentId = fileRequest.SpoolmanFilamentId,
                 MaterialRequirement = fileRequest.MaterialRequirement,
                 PrintCount = Math.Max(1, fileRequest.PrintCount),
                 PrintedCount = 0,
@@ -305,9 +312,10 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
 
         var now = DateTime.UtcNow;
 
-        if (request.ColorRequirement.HasValue)
+        if (request.SpoolmanFilamentId.HasValue)
         {
-            projectFile.ColorRequirement = request.ColorRequirement.Value;
+            // Allow clearing by sending 0 or by having a value
+            projectFile.SpoolmanFilamentId = request.SpoolmanFilamentId.Value == 0 ? null : request.SpoolmanFilamentId.Value;
         }
 
         if (request.MaterialRequirement is not null)
@@ -407,6 +415,178 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
         return MapToFileDto(projectFile);
     }
 
+    public async Task<QueueProjectResultDto?> QueueProjectAsync(Guid projectId, QueueProjectRequest request, CancellationToken ct = default)
+    {
+        var project = await db.PrintProjects
+            .Include(p => p.Files)
+                .ThenInclude(f => f.GcodeFile)
+            .FirstOrDefaultAsync(p => p.Id == projectId, ct);
+
+        if (project is null)
+        {
+            return null;
+        }
+
+        // Get only pending/incomplete files
+        var pendingFiles = project.Files
+            .Where(f => f.Status != PrintProjectFileStatus.Completed && f.Status != PrintProjectFileStatus.Skipped)
+            .Where(f => f.PrintedCount < f.PrintCount)
+            .ToList();
+
+        if (pendingFiles.Count == 0)
+        {
+            return new QueueProjectResultDto(projectId, project.Name, 0, 0, 0, []);
+        }
+
+        // Fetch Spoolman filament data for color grouping (best-effort)
+        Dictionary<int, SpoolmanFilamentDto> filamentLookup = [];
+        if (request.GroupByColor)
+        {
+            try
+            {
+                var filaments = await spoolmanService.ListFilamentsAsync(ct);
+                filamentLookup = filaments.ToDictionary(f => f.Id);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning($"Could not fetch Spoolman filaments for project queue ordering: {ex.Message}");
+            }
+        }
+
+        // Smart ordering: group by material type, then by color
+        var orderedFiles = OrderFilesForPrinting(pendingFiles, filamentLookup, request.GroupByMaterial, request.GroupByColor);
+
+        var queuedFiles = new List<QueuedProjectFileDto>();
+        var queueOrder = 0;
+
+        foreach (var file in orderedFiles)
+        {
+            var remainingPrints = file.PrintCount - file.PrintedCount;
+
+            // Queue one job per remaining print for this file
+            for (var i = 0; i < remainingPrints; i++)
+            {
+                var materialType = file.MaterialRequirement ?? file.GcodeFile?.RequiredMaterial;
+                string? colorHex = null;
+                if (file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var filament))
+                {
+                    colorHex = filament.ColorHex;
+                }
+
+                var queueRequest = new QueuePrintJobDto
+                {
+                    GcodeFileId = file.GcodeFileId,
+                    AssignedPrinterId = request.AssignedPrinterId,
+                    Priority = (PrintJobPriority)request.Priority,
+                    RequiredMaterialType = materialType,
+                    RequiredNozzleDiameter = file.GcodeFile?.RequiredNozzleDiameter.HasValue == true
+                        ? (decimal)file.GcodeFile.RequiredNozzleDiameter.Value
+                        : null,
+                    RequiredPrinterModel = file.GcodeFile?.ExtractedPrinterModelName,
+                    ProjectId = projectId,
+                    ProjectName = project.Name,
+                    SpoolmanFilamentId = file.SpoolmanFilamentId,
+                    FilamentName = file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var fil) ? fil.Name : null,
+                    FilamentVendor = file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var filV) ? filV.Vendor : null,
+                    FilamentColor = colorHex,
+                };
+
+                var job = await queueService.AddJobToQueueAsync(queueRequest, ct);
+                if (job is not null)
+                {
+                    queuedFiles.Add(new QueuedProjectFileDto(
+                        file.Id,
+                        job.Id,
+                        file.GcodeFile?.FileName ?? "Unknown",
+                        materialType,
+                        colorHex,
+                        1,
+                        file.GcodeFile?.EstimatedPrintTimeMinutes,
+                        queueOrder++));
+                }
+                else
+                {
+                    logger.LogWarning($"Could not queue file {file.GcodeFileId} (no compatible printer available)");
+                }
+            }
+        }
+
+        // Update project status to InProgress
+        if (queuedFiles.Count > 0 && project.Status == PrintProjectStatus.Open)
+        {
+            project.Status = PrintProjectStatus.InProgress;
+            project.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+
+        var totalEstimatedMinutes = queuedFiles
+            .Where(f => f.EstimatedPrintTimeMinutes.HasValue)
+            .Sum(f => f.EstimatedPrintTimeMinutes!.Value);
+
+        logger.LogInformation($"Queued {queuedFiles.Count} jobs from project {projectId} ({project.Name})");
+
+        return new QueueProjectResultDto(
+            projectId,
+            project.Name,
+            queuedFiles.Count,
+            queuedFiles.Sum(f => f.PrintCount),
+            totalEstimatedMinutes > 0 ? totalEstimatedMinutes : null,
+            queuedFiles);
+    }
+
+    /// <summary>
+    /// Orders project files for optimal printing by grouping by material type and color
+    /// to minimize filament swaps.
+    /// </summary>
+    private static List<PrintProjectFile> OrderFilesForPrinting(
+        List<PrintProjectFile> files,
+        Dictionary<int, SpoolmanFilamentDto> filamentLookup,
+        bool groupByMaterial,
+        bool groupByColor)
+    {
+        IEnumerable<PrintProjectFile> ordered;
+
+        if (groupByMaterial && groupByColor)
+        {
+            // Primary: material type, Secondary: color (filament color hex), Tertiary: sort order
+            ordered = files.OrderBy(f => f.MaterialRequirement ?? f.GcodeFile?.RequiredMaterial ?? "zzz")
+                .ThenBy(f =>
+                {
+                    if (f.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(f.SpoolmanFilamentId.Value, out var filament))
+                    {
+                        return filament.ColorHex ?? "zzz";
+                    }
+
+                    return "zzz";
+                })
+                .ThenBy(f => f.SortOrder);
+        }
+        else if (groupByMaterial)
+        {
+            ordered = files.OrderBy(f => f.MaterialRequirement ?? f.GcodeFile?.RequiredMaterial ?? "zzz")
+                .ThenBy(f => f.SortOrder);
+        }
+        else if (groupByColor)
+        {
+            ordered = files.OrderBy(f =>
+            {
+                if (f.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(f.SpoolmanFilamentId.Value, out var filament))
+                {
+                    return filament.ColorHex ?? "zzz";
+                }
+
+                return "zzz";
+            })
+                .ThenBy(f => f.SortOrder);
+        }
+        else
+        {
+            ordered = files.OrderBy(f => f.SortOrder);
+        }
+
+        return ordered.ToList();
+    }
+
     public async Task<PrintProjectProgressDto?> GetProjectProgressAsync(Guid projectId, CancellationToken ct = default)
     {
         var project = await db.PrintProjects
@@ -435,7 +615,6 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
             project.Files.OrderBy(f => f.SortOrder).Select(f => new FileProgressDto(
                 f.Id,
                 f.GcodeFile?.FileName ?? "Unknown",
-                f.ColorRequirement,
                 f.Status,
                 f.PrintCount,
                 f.PrintedCount,
@@ -494,9 +673,9 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
         return new PrintProjectFileDto(
             file.Id,
             file.GcodeFileId,
-            file.GcodeFile?.FileName ?? "Unknown",
-            file.GcodeFile?.ThumbnailFileName is not null ? $"/api/gcode-library/{file.GcodeFileId}/thumbnail" : null,
-            file.ColorRequirement,
+            file.GcodeFile?.Name ?? "Unknown",
+            file.GcodeFile?.ThumbnailFileName is not null ? $"/api/gcode-files/thumbnail/{file.GcodeFileId}" : null,
+            file.SpoolmanFilamentId,
             file.MaterialRequirement,
             file.PrintCount,
             file.PrintedCount,
@@ -504,6 +683,12 @@ public class PrintProjectService(AppDbContext db, IUnifiedLoggingService logger)
             file.SortOrder,
             file.Notes,
             file.LastPrintedAt,
-            file.LastPrintJobId);
+            file.LastPrintJobId,
+            file.GcodeFile?.EstimatedPrintTimeMinutes,
+            file.GcodeFile?.EstimatedFilamentLengthMm,
+            file.GcodeFile?.EstimatedFilamentWeightG,
+            file.MaterialRequirement ?? file.GcodeFile?.RequiredMaterial,
+            file.GcodeFile?.RequiredNozzleDiameter,
+            file.GcodeFile?.ExtractedPrinterModelName);
     }
 }

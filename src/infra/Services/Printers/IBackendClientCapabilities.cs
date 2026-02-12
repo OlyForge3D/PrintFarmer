@@ -396,6 +396,24 @@ public interface ISupportsSpoolman
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>JSON string containing spool information, or null if spool not found</returns>
     Task<string?> GetSpoolmanSpoolByIdAsync(string baseUrl, int spoolId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sets or clears the active spool in Spoolman.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="spoolId">The spool ID to activate, or null to clear the active spool</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if the operation succeeded</returns>
+    Task<bool> SetSpoolmanActiveSpoolAsync(string baseUrl, int? spoolId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists all spools from the Spoolman server connected to this printer's backend.
+    /// Uses the backend's proxy endpoint so results reflect the printer-specific Spoolman instance.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>JSON string containing the spool array, or null if unavailable</returns>
+    Task<string?> GetSpoolmanSpoolsAsync(string baseUrl, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -413,6 +431,38 @@ public interface ISupportsGcodeExecution
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if G-code command was sent and executed successfully, false if send/execution failed</returns>
     Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Capability marker interface for backends that support filament management operations.
+/// Backends implementing this interface can load, unload, and change filament
+/// using firmware macros or standard G-code commands (e.g., Klipper macros, M600).
+/// </summary>
+public interface ISupportsFilamentControl
+{
+    /// <summary>
+    /// Loads filament into the extruder (e.g., Klipper LOAD_FILAMENT macro).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if the load command was sent successfully, false if it failed</returns>
+    Task<bool> LoadFilamentAsync(string baseUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Unloads filament from the extruder (e.g., Klipper UNLOAD_FILAMENT macro).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if the unload command was sent successfully, false if it failed</returns>
+    Task<bool> UnloadFilamentAsync(string baseUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Initiates a filament change procedure (e.g., M600 G-code command).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if the change command was sent successfully, false if it failed</returns>
+    Task<bool> ChangeFilamentAsync(string baseUrl, CancellationToken ct = default);
 }
 
 /// <summary>

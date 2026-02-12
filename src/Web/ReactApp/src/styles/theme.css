@@ -21,6 +21,11 @@
   --pf-bg-1: #161b22;           /* Secondary background (cards/forms - GitHub canvas subtle) */
   --pf-bg-2: #21262d;           /* Tertiary background (GitHub canvas inset) */
   --pf-panel: #161b22;          /* Panel background */
+  --pf-card-bg: #161b22;        /* Card background */
+  --pf-sidebar-bg: #161b22;     /* Sidebar background */
+  
+  /* Button glow effect */
+  --pf-btn-glow: 0 0 8px rgba(132, 255, 116, 0.15), 0 1px 2px rgba(0, 0, 0, 0.2);
   
   /* Border and divider colors - GitHub Dark */
   --pf-border: #30363d;         /* Main border color (GitHub border default) */

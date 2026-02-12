@@ -254,6 +254,12 @@ namespace Farm.Web.Api.Services.Queue
                 RequiredMaterialType = request.RequiredMaterialType,
                 EstimatedPrintTime = gcode.EstimatedPrintTimeMinutes.HasValue ? TimeSpan.FromMinutes(gcode.EstimatedPrintTimeMinutes.Value) : null,
                 EstimatedFilamentUsage = gcode.EstimatedFilamentWeightG,
+                ProjectId = request.ProjectId,
+                ProjectName = request.ProjectName,
+                SpoolmanFilamentId = request.SpoolmanFilamentId,
+                FilamentName = request.FilamentName,
+                FilamentVendor = request.FilamentVendor,
+                FilamentColor = request.FilamentColor,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 QueuedAt = DateTime.UtcNow
@@ -276,6 +282,10 @@ namespace Farm.Web.Api.Services.Queue
                 RequiredMaterialType = job.RequiredMaterialType,
                 EstimatedPrintTime = job.EstimatedPrintTime,
                 EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                SpoolmanFilamentId = job.SpoolmanFilamentId,
+                FilamentName = job.FilamentName,
+                FilamentVendor = job.FilamentVendor,
+                FilamentColor = job.FilamentColor,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };
@@ -316,6 +326,10 @@ namespace Farm.Web.Api.Services.Queue
                     ActualPrintTime = job.ActualPrintTime,
                     ActualFilamentUsage = job.ActualFilamentUsage,
                     FailureReason = job.FailureReason,
+                    SpoolmanFilamentId = job.SpoolmanFilamentId,
+                    FilamentName = job.FilamentName,
+                    FilamentVendor = job.FilamentVendor,
+                    FilamentColor = job.FilamentColor,
                     CreatedAt = job.CreatedAt,
                     UpdatedAt = job.UpdatedAt
                 };
@@ -455,6 +469,30 @@ namespace Farm.Web.Api.Services.Queue
                 job.FailureReason = request.FailureReason;
             }
 
+            if (!string.IsNullOrEmpty(request.Name))
+            {
+                job.Name = request.Name;
+            }
+
+            // Filament assignment (0 = clear)
+            if (request.SpoolmanFilamentId.HasValue)
+            {
+                if (request.SpoolmanFilamentId.Value == 0)
+                {
+                    job.SpoolmanFilamentId = null;
+                    job.FilamentName = null;
+                    job.FilamentVendor = null;
+                    job.FilamentColor = null;
+                }
+                else
+                {
+                    job.SpoolmanFilamentId = request.SpoolmanFilamentId.Value;
+                    job.FilamentName = request.FilamentName;
+                    job.FilamentVendor = request.FilamentVendor;
+                    job.FilamentColor = request.FilamentColor;
+                }
+            }
+
             job.UpdatedAt = DateTime.UtcNow;
 
             await _repo.SaveChangesAsync(ct);
@@ -484,6 +522,10 @@ namespace Farm.Web.Api.Services.Queue
                 ActualPrintTime = job.ActualPrintTime,
                 ActualFilamentUsage = job.ActualFilamentUsage,
                 FailureReason = job.FailureReason,
+                SpoolmanFilamentId = job.SpoolmanFilamentId,
+                FilamentName = job.FilamentName,
+                FilamentVendor = job.FilamentVendor,
+                FilamentColor = job.FilamentColor,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };

@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -296,6 +299,310 @@ namespace Farm.Web.Api.Services.Filament
                 ImportedNames: importedNames.ToArray());
         }
 
+        /// <inheritdoc/>
+        public async Task<byte[]> ExportToCsvAsync(CancellationToken ct)
+        {
+            IReadOnlyList<FilamentTypeDto> filaments = await _repo.GetFilamentTypesAsync(ct);
+
+            StringBuilder sb = new();
+            sb.AppendLine("Id,Name,HotendTemp,BedTemp,IsAbrasive,NeedsEnclosure");
+
+            foreach (FilamentTypeDto f in filaments.OrderBy(f => f.Name))
+            {
+                sb.Append(CsvEscape(f.Id.ToString()));
+                sb.Append(',');
+                sb.Append(CsvEscape(f.Name));
+                sb.Append(',');
+                sb.Append(f.DefaultTemperatures?.Hotend?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+                sb.Append(',');
+                sb.Append(f.DefaultTemperatures?.Bed?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+                sb.Append(',');
+                sb.Append(f.IsAbrasive ? "true" : "false");
+                sb.Append(',');
+                sb.AppendLine(f.NeedsEnclosure ? "true" : "false");
+            }
+
+            return Encoding.UTF8.GetBytes(sb.ToString());
+        }
+
+        /// <inheritdoc/>
+        public async Task<FilamentCsvImportResult> ImportFromCsvAsync(Stream csvStream, CancellationToken ct)
+        {
+            using StreamReader reader = new(csvStream, Encoding.UTF8);
+            string? headerLine = await reader.ReadLineAsync(ct);
+            if (string.IsNullOrWhiteSpace(headerLine))
+            {
+                return new FilamentCsvImportResult(0, 0, 0, 0, ["CSV file is empty or missing header row"]);
+            }
+
+            // Parse header to get column indices
+            string[] headers = ParseCsvLine(headerLine);
+            Dictionary<string, int> headerMap = new(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < headers.Length; i++)
+            {
+                headerMap[headers[i].Trim()] = i;
+            }
+
+            // Require at least Name column
+            if (!headerMap.ContainsKey("Name"))
+            {
+                return new FilamentCsvImportResult(0, 0, 0, 0, ["CSV must contain a 'Name' column"]);
+            }
+
+            // Load existing filament types for upsert matching
+            IReadOnlyList<FilamentTypeDto> existing = await _repo.GetFilamentTypesAsync(ct);
+            Dictionary<Guid, FilamentTypeDto> byId = existing.ToDictionary(f => f.Id);
+            Dictionary<string, FilamentTypeDto> byName = existing.ToDictionary(f => f.Name, f => f, StringComparer.OrdinalIgnoreCase);
+
+            int created = 0;
+            int updated = 0;
+            int errorCount = 0;
+            int totalRows = 0;
+            List<string> errors = new();
+            string? line;
+
+            while ((line = await reader.ReadLineAsync(ct)) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                totalRows++;
+
+                try
+                {
+                    string[] values = ParseCsvLine(line);
+                    string name = GetCsvValue(values, headerMap, "Name").Trim();
+
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        errors.Add($"Row {totalRows}: Name is required");
+                        errorCount++;
+                        continue;
+                    }
+
+                    string idStr = GetCsvValue(values, headerMap, "Id");
+                    double? hotend = ParseDoubleOrNull(GetCsvValue(values, headerMap, "HotendTemp"));
+                    double? bed = ParseDoubleOrNull(GetCsvValue(values, headerMap, "BedTemp"));
+                    bool isAbrasive = ParseBool(GetCsvValue(values, headerMap, "IsAbrasive"));
+                    bool needsEnclosure = ParseBool(GetCsvValue(values, headerMap, "NeedsEnclosure"));
+
+                    // Upsert: match by Id first, then by Name
+                    FilamentTypeDto? match = null;
+                    if (Guid.TryParse(idStr, out Guid parsedId) && byId.TryGetValue(parsedId, out FilamentTypeDto? idMatch))
+                    {
+                        match = idMatch;
+                    }
+                    else if (byName.TryGetValue(name, out FilamentTypeDto? nameMatch))
+                    {
+                        match = nameMatch;
+                    }
+
+                    if (match != null)
+                    {
+                        // Update existing
+                        FilamentType? entity = await _repo.GetEntityByIdAsync(match.Id, ct);
+                        if (entity != null)
+                        {
+                            entity.Name = name;
+                            entity.DefaultHotendTemp = hotend ?? entity.DefaultHotendTemp;
+                            entity.DefaultBedTemp = bed ?? entity.DefaultBedTemp;
+                            entity.IsAbrasive = isAbrasive;
+                            entity.NeedsEnclosure = needsEnclosure;
+                            await _repo.UpdateFilamentTypeAsync(entity, ct);
+                            updated++;
+                        }
+                    }
+                    else
+                    {
+                        // Create new
+                        FilamentType newFt = new()
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = name,
+                            DefaultHotendTemp = hotend ?? GetDefaultHotendTemp(name),
+                            DefaultBedTemp = bed ?? GetDefaultBedTemp(name),
+                            IsAbrasive = isAbrasive,
+                            NeedsEnclosure = needsEnclosure,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        await _repo.AddFilamentTypeAsync(newFt, ct);
+
+                        // Add to lookup for subsequent duplicate detection within same import
+                        FilamentTypeDto newDto = new(newFt.Id, newFt.Name, new TempTargets(newFt.DefaultHotendTemp, newFt.DefaultBedTemp), newFt.IsAbrasive, newFt.NeedsEnclosure);
+                        byName[newFt.Name] = newDto;
+                        created++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"Row {totalRows}: {ex.Message}");
+                    errorCount++;
+                }
+            }
+
+            await _repo.SaveChangesAsync(ct);
+
+            return new FilamentCsvImportResult(created, updated, errorCount, totalRows, errors.ToArray());
+        }
+
+        /// <inheritdoc/>
+        public async Task<SpoolmanDbImportResult> ImportFromSpoolmanDbAsync(
+            SpoolmanDbImportRequest request,
+            IReadOnlyList<SpoolmanDbFilamentEntry> allFilaments,
+            CancellationToken ct)
+        {
+            if (request?.FilamentIds == null || request.FilamentIds.Length == 0)
+            {
+                return new SpoolmanDbImportResult(0, 0, 0, []);
+            }
+
+            // Index requested IDs
+            HashSet<string> requestedIds = new(request.FilamentIds, StringComparer.OrdinalIgnoreCase);
+            List<SpoolmanDbFilamentEntry> selected = allFilaments.Where(f => requestedIds.Contains(f.Id)).ToList();
+
+            // Load existing Spoolman filaments to detect duplicates by external_id
+            IReadOnlyList<SpoolmanFilamentDto> existingFilaments = await _spoolmanService.ListFilamentsAsync(ct);
+            Dictionary<string, SpoolmanFilamentDto> byExternalId = existingFilaments
+                .Where(f => !string.IsNullOrWhiteSpace(f.ExternalId))
+                .ToDictionary(f => f.ExternalId!, f => f, StringComparer.OrdinalIgnoreCase);
+
+            // Secondary lookup: match by (name, material, vendor) as fallback.
+            // This prevents duplicates when external_id isn't returned by Spoolman
+            // or when a filament was manually created before importing from SpoolmanDB.
+            static string MakeCompositeKey(string? name, string? material, string? vendor) =>
+                $"{name?.Trim()}|{material?.Trim()}|{vendor?.Trim()}".ToUpperInvariant();
+
+            Dictionary<string, SpoolmanFilamentDto> byComposite = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SpoolmanFilamentDto f in existingFilaments)
+            {
+                string key = MakeCompositeKey(f.Name, f.Material, f.Vendor);
+                byComposite.TryAdd(key, f);
+            }
+
+            // Load existing Spoolman vendors and build lookup by name (first-wins for duplicates)
+            IReadOnlyList<SpoolmanVendorDto> existingVendors = await _spoolmanService.ListVendorsAsync(ct);
+            Dictionary<string, SpoolmanVendorDto> vendorByName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SpoolmanVendorDto v in existingVendors)
+            {
+                vendorByName.TryAdd(v.Name, v);
+            }
+
+            int created = 0;
+            int updated = 0;
+            int errorCount = 0;
+            List<string> errors = new();
+
+            foreach (SpoolmanDbFilamentEntry entry in selected)
+            {
+                try
+                {
+                    // Resolve or create vendor in Spoolman
+                    int? vendorId = null;
+                    if (!string.IsNullOrWhiteSpace(entry.Manufacturer))
+                    {
+                        if (vendorByName.TryGetValue(entry.Manufacturer, out SpoolmanVendorDto? existingVendor))
+                        {
+                            vendorId = existingVendor.Id;
+                        }
+                        else
+                        {
+                            SpoolmanVendorDto newVendor = await _spoolmanService.CreateVendorAsync(entry.Manufacturer, null, ct);
+                            vendorByName[entry.Manufacturer] = newVendor;
+                            vendorId = newVendor.Id;
+                        }
+                    }
+
+                    // Normalize color hex (remove # prefix if present)
+                    // Fall back to first color in color_hexes array for multi-color filaments
+                    string? colorHex = entry.ColorHex?.TrimStart('#');
+                    if (colorHex == null && entry.ColorHexes is { Length: > 0 })
+                    {
+                        colorHex = entry.ColorHexes[0].TrimStart('#');
+                    }
+
+                    // Resolve temperatures: prefer single temp, fall back to average of range
+                    int? extruderTemp = entry.ExtruderTemp;
+                    int? bedTemp = entry.BedTemp;
+                    List<string> rangeNotes = new();
+
+                    if (!extruderTemp.HasValue && entry.ExtruderTempRange is { Length: 2 })
+                    {
+                        extruderTemp = (int)(Math.Ceiling((entry.ExtruderTempRange[0] + entry.ExtruderTempRange[1]) / 2.0 / 5.0) * 5);
+                        rangeNotes.Add($"Extruder range: {entry.ExtruderTempRange[0]}-{entry.ExtruderTempRange[1]}°C");
+                    }
+
+                    if (!bedTemp.HasValue && entry.BedTempRange is { Length: 2 })
+                    {
+                        bedTemp = (int)(Math.Ceiling((entry.BedTempRange[0] + entry.BedTempRange[1]) / 2.0 / 5.0) * 5);
+                        rangeNotes.Add($"Bed range: {entry.BedTempRange[0]}-{entry.BedTempRange[1]}°C");
+                    }
+
+                    // If we still have range data alongside single temps, note them too
+                    if (extruderTemp.HasValue && entry.ExtruderTemp.HasValue && entry.ExtruderTempRange is { Length: 2 })
+                    {
+                        rangeNotes.Add($"Extruder range: {entry.ExtruderTempRange[0]}-{entry.ExtruderTempRange[1]}°C");
+                    }
+
+                    if (bedTemp.HasValue && entry.BedTemp.HasValue && entry.BedTempRange is { Length: 2 })
+                    {
+                        rangeNotes.Add($"Bed range: {entry.BedTempRange[0]}-{entry.BedTempRange[1]}°C");
+                    }
+
+                    string? comment = rangeNotes.Count > 0
+                        ? $"SpoolmanDB temp ranges: {string.Join("; ", rangeNotes)}"
+                        : null;
+
+                    SpoolmanCreateFilamentRequest filamentRequest = new()
+                    {
+                        Name = entry.Name,
+                        VendorId = vendorId,
+                        Material = entry.Material,
+                        Density = entry.Density ?? 1.24d,
+                        Diameter = entry.Diameter ?? 1.75d,
+                        Weight = entry.Weight,
+                        SpoolWeight = entry.SpoolWeight,
+                        SettingsExtruderTemp = extruderTemp,
+                        SettingsBedTemp = bedTemp,
+                        ColorHex = colorHex,
+                        ExternalId = entry.Id,
+                        Comment = comment
+                    };
+
+                    // Check if filament with this external_id already exists → update
+                    if (byExternalId.TryGetValue(entry.Id, out SpoolmanFilamentDto? existingMatch))
+                    {
+                        await _spoolmanService.UpdateFilamentInSpoolmanAsync(existingMatch.Id, filamentRequest, ct);
+                        updated++;
+                    }
+                    else if (byComposite.TryGetValue(MakeCompositeKey(entry.Name, entry.Material, entry.Manufacturer), out SpoolmanFilamentDto? compositeMatch))
+                    {
+                        // Secondary: match by (name, material, vendor) for filaments created before SpoolmanDB import
+                        await _spoolmanService.UpdateFilamentInSpoolmanAsync(compositeMatch.Id, filamentRequest, ct);
+
+                        // Move to external_id lookup for future imports
+                        byExternalId[entry.Id] = compositeMatch;
+                        byComposite.Remove(MakeCompositeKey(entry.Name, entry.Material, entry.Manufacturer));
+                        updated++;
+                    }
+                    else
+                    {
+                        SpoolmanFilamentDto newFilament = await _spoolmanService.CreateFilamentInSpoolmanAsync(filamentRequest, ct);
+                        byExternalId[entry.Id] = newFilament;
+                        created++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"Filament '{entry.Id}': {ex.Message}");
+                    errorCount++;
+                }
+            }
+
+            return new SpoolmanDbImportResult(created, updated, errorCount, errors.ToArray());
+        }
+
         #region Helper Methods
 
         /// <summary>
@@ -426,6 +733,162 @@ namespace Farm.Web.Api.Services.Filament
             }
 
             return material.Contains("CARBON", StringComparison.OrdinalIgnoreCase) ? 100 : 70;
+        }
+
+        /// <summary>Escapes a CSV field value, wrapping in quotes if necessary.</summary>
+        private static string CsvEscape(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+            {
+                return $"\"{value.Replace("\"", "\"\"")}\"";
+            }
+
+            return value;
+        }
+
+        /// <summary>Parses a CSV line respecting quoted fields.</summary>
+        private static string[] ParseCsvLine(string line)
+        {
+            List<string> fields = new();
+            bool inQuotes = false;
+            StringBuilder current = new();
+
+            int i = 0;
+            while (i < line.Length)
+            {
+                char c = line[i];
+
+                if (inQuotes)
+                {
+                    if (c == '"')
+                    {
+                        if (i + 1 < line.Length && line[i + 1] == '"')
+                        {
+                            current.Append('"');
+                            i++; // skip escaped quote
+                        }
+                        else
+                        {
+                            inQuotes = false;
+                        }
+                    }
+                    else
+                    {
+                        current.Append(c);
+                    }
+                }
+                else if (c == '"')
+                {
+                    inQuotes = true;
+                }
+                else if (c == ',')
+                {
+                    fields.Add(current.ToString());
+                    current.Clear();
+                }
+                else
+                {
+                    current.Append(c);
+                }
+
+                i++;
+            }
+
+            fields.Add(current.ToString());
+            return fields.ToArray();
+        }
+
+        /// <summary>Gets a CSV value by column name, returns empty string if not found.</summary>
+        private static string GetCsvValue(string[] values, Dictionary<string, int> headerMap, string column)
+        {
+            return headerMap.TryGetValue(column, out int idx) && idx < values.Length
+                ? values[idx].Trim()
+                : string.Empty;
+        }
+
+        /// <summary>Parses a double from string, returns null if empty or invalid.</summary>
+        private static double? ParseDoubleOrNull(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? null
+                : double.TryParse(value, CultureInfo.InvariantCulture, out double result) ? result : null;
+        }
+
+        /// <summary>Parses a boolean from string (handles true/false, yes/no, 1/0).</summary>
+        private static bool ParseBool(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value)
+                && (value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                    || value == "1");
+        }
+
+        #endregion
+
+        #region External Material Sync
+
+        /// <summary>
+        /// Syncs external materials from Spoolman's SpoolmanDB endpoint as local filament types.
+        /// Uses upsert logic: creates new filament types for unknown materials, updates temperatures for existing ones.
+        /// </summary>
+        public async Task<SpoolmanDbImportResult> SyncExternalMaterialsAsync(IReadOnlyList<SpoolmanDbMaterialEntry> materials, CancellationToken ct)
+        {
+            int created = 0;
+            int updated = 0;
+            int errorCount = 0;
+            List<string> errors = [];
+
+            foreach (SpoolmanDbMaterialEntry mat in materials)
+            {
+                if (string.IsNullOrWhiteSpace(mat.Material))
+                {
+                    errorCount++;
+                    errors.Add("Skipped entry with empty material name");
+                    continue;
+                }
+
+                string name = mat.Material.Trim();
+
+                try
+                {
+                    int hotend = mat.ExtruderTemp ?? 200;
+                    int bed = mat.BedTemp ?? 60;
+
+                    FilamentType? existing = await _repo.GetByNameAsync(name, ct);
+                    if (existing == null)
+                    {
+                        FilamentType filamentType = new()
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = name,
+                            DefaultHotendTemp = hotend,
+                            DefaultBedTemp = bed,
+                            CreatedAt = DateTime.UtcNow,
+                        };
+                        await _repo.AddFilamentTypeAsync(filamentType, ct);
+                        created++;
+                    }
+                    else
+                    {
+                        existing.DefaultHotendTemp = hotend;
+                        existing.DefaultBedTemp = bed;
+                        await _repo.UpdateFilamentTypeAsync(existing, ct);
+                        updated++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errorCount++;
+                    errors.Add($"{name}: {ex.Message}");
+                }
+            }
+
+            await _repo.SaveChangesAsync(ct);
+            return new SpoolmanDbImportResult(created, updated, errorCount, [.. errors]);
         }
 
         #endregion

@@ -37,7 +37,8 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         { typeof(ISupportsTemperatureControl), BackendCapabilities.TemperatureControl },
         { typeof(ISupportsPrinterInformation), BackendCapabilities.PrinterInformation },
         { typeof(ISupportsHistory), BackendCapabilities.History },
-        { typeof(ISupportsFileDelete), BackendCapabilities.FileDelete }
+        { typeof(ISupportsFileDelete), BackendCapabilities.FileDelete },
+        { typeof(ISupportsFilamentControl), BackendCapabilities.FilamentControl }
     };
 
     // Cache of capabilities for each backend (computed once at initialization)
@@ -276,6 +277,18 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         if (TryGetFileDeleteClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsFileDelete deleteClient)
         {
             client = deleteClient;
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryGetFilamentControlClientTyped(PrinterBackend backend, out ISupportsFilamentControl? client)
+    {
+        client = null;
+        if (TryGetClientWithCapability(backend, BackendCapabilities.FilamentControl, out IBackendClient? baseClient) && baseClient is ISupportsFilamentControl filamentClient)
+        {
+            client = filamentClient;
             return true;
         }
 

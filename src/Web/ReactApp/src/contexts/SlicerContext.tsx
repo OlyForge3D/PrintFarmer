@@ -24,7 +24,7 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       try {
         // Fetch settings and workers in parallel
         const [settings, workers] = await Promise.all([
-          apiClient.getSettings<SlicerSettings>('slicer').catch(() => ({ enabled: true })),
+          apiClient.getSettings<SlicerSettings>('Slicer').catch(() => ({ enabled: true })),
           slicerRegistry.getSlicers().catch(() => []),
         ]);
 

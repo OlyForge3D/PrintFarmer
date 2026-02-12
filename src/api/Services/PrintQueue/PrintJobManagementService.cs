@@ -1536,6 +1536,12 @@ public class PrintJobManagementService(
             ActualFilamentUsageGrams = job.ActualFilamentUsage,
             FailureReason = job.FailureReason,
             Notes = job.Notes,
+            SpoolmanFilamentId = job.SpoolmanFilamentId,
+            FilamentName = job.FilamentName,
+            FilamentVendor = job.FilamentVendor,
+            FilamentColor = job.FilamentColor,
+            ProjectId = job.ProjectId,
+            ProjectName = job.ProjectName,
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt,
@@ -1669,6 +1675,26 @@ public class PrintJobManagementService(
             if (updates.RequiredNozzleDiameter.HasValue)
             {
                 job.RequiredNozzleDiameter = updates.RequiredNozzleDiameter;
+            }
+
+            // Handle Spoolman filament fields
+            if (updates.SpoolmanFilamentId.HasValue)
+            {
+                if (updates.SpoolmanFilamentId.Value == 0)
+                {
+                    // Clear filament assignment
+                    job.SpoolmanFilamentId = null;
+                    job.FilamentName = null;
+                    job.FilamentVendor = null;
+                    job.FilamentColor = null;
+                }
+                else
+                {
+                    job.SpoolmanFilamentId = updates.SpoolmanFilamentId.Value;
+                    job.FilamentName = updates.FilamentName;
+                    job.FilamentVendor = updates.FilamentVendor;
+                    job.FilamentColor = updates.FilamentColor;
+                }
             }
 
             // Handle tags (future phase enhancement)

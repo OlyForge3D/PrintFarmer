@@ -1915,6 +1915,141 @@ public class PrintersController(
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Sends a raw G-code command to the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="request">The G-code command request containing the script to execute.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the G-code command.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="400">If the request body is missing or the gcode string is empty.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error sending the G-code command.</response>
+    /// <remarks>
+    /// Sends arbitrary G-code commands to the printer firmware.
+    /// Commonly used for Klipper macros (LOAD_FILAMENT, UNLOAD_FILAMENT) and standard commands (M600).
+    /// Requires the backend to support G-code execution capability.
+    /// </remarks>
+    [HttpPost("{id:guid}/gcode")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<CommandResult>> SendGcodeAsync(Guid id, [FromBody] GcodeCommandRequest request, CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Command))
+        {
+            return BadRequest(new CommandResult(false, "G-code command is required."));
+        }
+
+        bool ok = await _printersService.SendGcodeAsync(id, request.Command.Trim(), ct);
+        return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
+    // Filament control endpoints
+
+    /// <summary>
+    /// Loads filament into the extruder.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure with descriptive message.</returns>
+    /// <response code="200">Filament load command sent successfully.</response>
+    /// <response code="400">If the command failed (backend error, unsupported capability).</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    [HttpPost("{id:guid}/filament-load")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> LoadFilamentAsync(Guid id, CancellationToken ct)
+    {
+        CommandResult result = await _printersService.LoadFilamentAsync(id, ct);
+        return MapCommandResult(result);
+    }
+
+    /// <summary>
+    /// Unloads filament from the extruder.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure with descriptive message.</returns>
+    /// <response code="200">Filament unload command sent successfully.</response>
+    /// <response code="400">If the command failed (backend error, unsupported capability).</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    [HttpPost("{id:guid}/filament-unload")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    {
+        CommandResult result = await _printersService.UnloadFilamentAsync(id, ct);
+        return MapCommandResult(result);
+    }
+
+    /// <summary>
+    /// Initiates a filament change procedure (M600).
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure with descriptive message.</returns>
+    /// <response code="200">Filament change command sent successfully.</response>
+    /// <response code="400">If the command failed (backend error, unsupported capability).</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    [HttpPost("{id:guid}/filament-change")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> ChangeFilamentAsync(Guid id, CancellationToken ct)
+    {
+        CommandResult result = await _printersService.ChangeFilamentAsync(id, ct);
+        return MapCommandResult(result);
+    }
+
+    /// <summary>
+    /// Sets or clears the active Spoolman spool for a printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="request">The spool ID to set, or null/omitted to clear.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure with descriptive message.</returns>
+    /// <response code="200">Spool was set or cleared successfully.</response>
+    /// <response code="400">If the request failed (backend error, Spoolman not configured, invalid spool ID).</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    [HttpPost("{id:guid}/active-spool")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> SetActiveSpoolAsync(Guid id, [FromBody] SetActiveSpoolRequest? request, CancellationToken ct)
+    {
+        CommandResult result = await _printersService.SetActiveSpoolAsync(id, request?.SpoolId, ct);
+        return MapCommandResult(result);
+    }
+
+    /// <summary>
+    /// Lists available spools from the Spoolman instance connected to a specific printer's backend.
+    /// Routes through the printer's Moonraker proxy so results reflect that printer's Spoolman server,
+    /// which may differ from the central Spoolman server configured in PrintFarmer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>List of available spools from the printer's Spoolman instance.</returns>
+    /// <response code="200">Returns the list of spools.</response>
+    /// <response code="404">If the printer was not found or does not support Spoolman.</response>
+    [HttpGet("{id:guid}/spoolman/spools")]
+    [ProducesResponseType(typeof(IEnumerable<SpoolmanSpoolDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetPrinterSpoolsAsync(Guid id, CancellationToken ct)
+    {
+        IReadOnlyList<SpoolmanSpoolDto>? spools = await _printersService.ListPrinterSpoolsAsync(id, ct);
+        if (spools is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(spools);
+    }
+
     // Camera control endpoints
 
     /// <summary>
@@ -2702,4 +2837,22 @@ public class PrintersController(
 
     #endregion
 
+    /// <summary>
+    /// Maps a CommandResult to the appropriate HTTP status code.
+    /// Success → 200, "not found" → 404, other failures → 400.
+    /// </summary>
+    private ActionResult<CommandResult> MapCommandResult(CommandResult result)
+    {
+        if (result.Success)
+        {
+            return Ok(result);
+        }
+
+        if (result.Message?.Contains("not found", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return NotFound(result);
+        }
+
+        return BadRequest(result);
+    }
 }

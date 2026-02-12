@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
@@ -20,13 +21,14 @@ namespace Farm.Web.Api.Tests.Controllers
             Mock<IFilamentTypeService> mockService = new Mock<IFilamentTypeService>(MockBehavior.Strict);
             Mock<IStartupStatus> mockStartup = new Mock<IStartupStatus>();
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ISpoolmanDbService> mockSpoolmanDb = new Mock<ISpoolmanDbService>();
 
             _ = mockStartup.Setup(s => s.IsReady).Returns(true);
 
             List<FilamentTypeDto> expected = new List<FilamentTypeDto> { new FilamentTypeDto(System.Guid.NewGuid(), "PLA", new TempTargets(200, 60), false, false) };
             _ = mockService.Setup(s => s.GetFilamentTypesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
-            FilamentTypeController controller = new FilamentTypeController(mockService.Object, mockStartup.Object, mockLogger.Object);
+            FilamentTypeController controller = new FilamentTypeController(mockService.Object, mockStartup.Object, mockLogger.Object, mockSpoolmanDb.Object);
 
             ActionResult<IEnumerable<FilamentTypeDto>> result = await controller.GetFilamentTypesAsync(CancellationToken.None);
 

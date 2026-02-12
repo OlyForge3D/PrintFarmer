@@ -1,4 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { apiClient } from '@/services/api';
+import { Select, Spinner } from '@/common/components/ui';
+import type { SpoolmanFilament } from '@/types/api';
 
 export interface JobDetailsSectionProps {
   jobDetails: {
@@ -14,6 +17,11 @@ export interface JobDetailsSectionProps {
     requiredMaterialType?: string;
     nozzleDiameter?: number;
     requiredNozzleDiameter?: number;
+    // Spoolman filament assignment
+    spoolmanFilamentId?: number;
+    filamentName?: string;
+    filamentVendor?: string;
+    filamentColor?: string;
   };
   isEditing: boolean;
   onFieldChange: (field: keyof JobDetailsSectionProps['jobDetails'], value: string | number | undefined) => void;
@@ -77,12 +85,47 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
     [onFieldChange]
   );
 
-  const handleMaterialChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value.trim();
-      onFieldChange('materialType', value || undefined);
+  // Filament picker state (edit mode)
+  const [filaments, setFilaments] = useState<SpoolmanFilament[]>([]);
+  const [filamentsLoaded, setFilamentsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing || filamentsLoaded) return;
+    let cancelled = false;
+    apiClient.getFilaments()
+      .then(data => { if (!cancelled) { setFilaments(data); setFilamentsLoaded(true); } })
+      .catch(() => { if (!cancelled) setFilamentsLoaded(true); });
+    return () => { cancelled = true; };
+  }, [isEditing, filamentsLoaded]);
+
+  // Filter filaments by the job's required material type (same as QueueGcodeModal/CreateProjectModal)
+  const materialForFilter = jobDetails.requiredMaterialType || jobDetails.materialType;
+  const filteredFilaments = useMemo(() => {
+    if (!materialForFilter) return filaments;
+    const needle = materialForFilter.toLowerCase();
+    return filaments.filter(f => f.material?.toLowerCase() === needle);
+  }, [filaments, materialForFilter]);
+
+  const handleFilamentChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const val = e.target.value;
+      if (!val) {
+        // Clear filament — use 0 to signal clearing to backend
+        onFieldChange('spoolmanFilamentId', 0);
+        onFieldChange('filamentName', undefined);
+        onFieldChange('filamentVendor', undefined);
+        onFieldChange('filamentColor', undefined);
+      } else {
+        const filament = filaments.find(f => f.id === parseInt(val, 10));
+        if (filament) {
+          onFieldChange('spoolmanFilamentId', filament.id);
+          onFieldChange('filamentName', filament.name || undefined);
+          onFieldChange('filamentVendor', filament.vendor || undefined);
+          onFieldChange('filamentColor', filament.colorHex || undefined);
+        }
+      }
     },
-    [onFieldChange]
+    [onFieldChange, filaments]
   );
 
   if (isEditing) {
@@ -138,63 +181,41 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="job-material" className="block text-sm font-medium text-pf-text-secondary">Material Type</label>
-            <input
-              id="job-material"
-              type="text"
-              value={jobDetails.materialType || ''}
-              onChange={handleMaterialChange}
-              placeholder="e.g., PLA, PETG, ABS"
-              list="material-suggestions"
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
-            />
-            <datalist id="material-suggestions">
-              <option value="PLA" />
-              <option value="PETG" />
-              <option value="ABS" />
-              <option value="TPU" />
-              <option value="Nylon" />
-            </datalist>
+            <label htmlFor="job-filament" className="block text-sm font-medium text-pf-text-secondary">
+              Spoolman Filament
+              {jobDetails.filamentColor && (
+                <span
+                  className="inline-block w-3 h-3 rounded-full ml-1 align-middle border border-pf-border"
+                  style={{ backgroundColor: jobDetails.filamentColor }}
+                  aria-hidden="true"
+                />
+              )}
+            </label>
+            {!filamentsLoaded ? (
+              <div className="flex items-center gap-2 text-sm text-pf-text-tertiary py-2">
+                <Spinner className="h-4 w-4" />
+                Loading filaments...
+              </div>
+            ) : filaments.length > 0 ? (
+              <Select
+                id="job-filament"
+                aria-label="Select Spoolman filament"
+                value={jobDetails.spoolmanFilamentId?.toString() ?? ''}
+                onChange={handleFilamentChange}
+              >
+                <option value="">-- Not assigned --</option>
+                {filteredFilaments.map(f => (
+                  <option key={f.id} value={f.id.toString()}>
+                    {f.vendor ? `${f.vendor} — ` : ''}{f.name || 'Unnamed'}{f.material ? ` (${f.material})` : ''}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <p className="text-xs text-pf-text-muted italic">No Spoolman filaments available</p>
+            )}
           </div>
 
-          <div className="space-y-1.5 opacity-60">
-            <label htmlFor="job-printer" className="block text-sm font-medium text-pf-text-secondary">Printer</label>
-            <input
-              id="job-printer"
-              type="text"
-              value={jobDetails.printerName}
-              disabled
-              readOnly
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
-            />
-            <span className="text-xs text-pf-text-muted italic">Cannot change printer after queuing</span>
-          </div>
 
-          <div className="space-y-1.5 opacity-60">
-            <label htmlFor="job-status" className="block text-sm font-medium text-pf-text-secondary">Status</label>
-            <input
-              id="job-status"
-              type="text"
-              value={jobDetails.status}
-              disabled
-              readOnly
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
-            />
-            <span className="text-xs text-pf-text-muted italic">Status managed by system</span>
-          </div>
-
-          <div className="space-y-1.5 opacity-60">
-            <label htmlFor="job-position" className="block text-sm font-medium text-pf-text-secondary">Queue Position</label>
-            <input
-              id="job-position"
-              type="text"
-              value={jobDetails.queuePosition}
-              disabled
-              readOnly
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
-            />
-            <span className="text-xs text-pf-text-muted italic">Use drag-and-drop to reorder</span>
-          </div>
         </fieldset>
       </div>
     );
@@ -238,6 +259,25 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
           <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Material Type</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{materialType || <span className="text-pf-text-muted italic">Not specified</span>}</dd>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Filament</dt>
+          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">
+            {jobDetails.filamentName ? (
+              <span className="inline-flex items-center gap-1.5">
+                {jobDetails.filamentColor && (
+                  <span
+                    className="inline-block w-3 h-3 rounded-full border border-pf-border shrink-0"
+                    style={{ backgroundColor: jobDetails.filamentColor }}
+                    aria-hidden="true"
+                  />
+                )}
+                <span>{jobDetails.filamentVendor ? `${jobDetails.filamentVendor} — ` : ''}{jobDetails.filamentName}</span>
+              </span>
+            ) : (
+              <span className="text-pf-text-muted italic">Not assigned</span>
+            )}
+          </dd>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2">
           <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Nozzle Diameter</dt>

@@ -184,6 +184,13 @@ public interface IBackendCapabilityFactory
     /// <param name="backend">The printer backend type to get a client for.</param>
     /// <param name="client">When this method returns, contains the typed file delete client if the capability is supported; otherwise, null.</param>
     bool TryGetFileDeleteClientTyped(PrinterBackend backend, out ISupportsFileDelete? client);
+
+    /// <summary>
+    /// Tries to get a backend client typed as ISupportsFilamentControl for filament management operations.
+    /// </summary>
+    /// <param name="backend">The printer backend type to get a client for.</param>
+    /// <param name="client">When this method returns, contains the typed filament control client if the capability is supported; otherwise, null.</param>
+    bool TryGetFilamentControlClientTyped(PrinterBackend backend, out ISupportsFilamentControl? client);
 }
 
 /// <summary>
@@ -206,6 +213,7 @@ public enum BackendCapabilities
     PrinterInformation = 1 << 9,
     History = 1 << 10,
     FileDelete = 1 << 11,
+    FilamentControl = 1 << 12,
 
     /// <summary>All file operations (download, list, upload, delete)</summary>
     FileOperations = FileDownload | FileList | FileUpload | FileDelete,
@@ -217,5 +225,5 @@ public enum BackendCapabilities
     AllControlOps = ControlOperations | Movement | TemperatureControl,
 
     /// <summary>All capabilities combined</summary>
-    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History | FileDelete
+    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History | FileDelete | FilamentControl
 }

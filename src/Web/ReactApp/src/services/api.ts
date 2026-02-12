@@ -66,6 +66,18 @@ import {
   DiscoveredGcodeFileDto,
   GcodeHarvestResultDto,
   BulkImportResponse,
+  SpoolmanSpool,
+  SpoolmanFilament,
+  SpoolmanVendor,
+  SpoolmanMaterial,
+  SpoolmanBulkUpdateFilamentsRequest,
+  SpoolmanBulkUpdateResult,
+  SpoolmanUpdateFilamentRequest,
+  FilamentCsvImportResult,
+  SpoolmanDbFilamentEntry,
+  SpoolmanDbMaterialEntry,
+  SpoolmanDbImportRequest,
+  SpoolmanDbImportResult,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -674,6 +686,63 @@ export class ApiClient {
     return response.data;
   }
 
+  async loadFilament(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/filament-load`
+    );
+    return response.data;
+  }
+
+  async unloadFilament(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/filament-unload`
+    );
+    return response.data;
+  }
+
+  async changeFilament(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/filament-change`
+    );
+    return response.data;
+  }
+
+  /**
+   * Set the active spool on a printer via Spoolman.
+   * @param printerId The printer's GUID
+   * @param spoolId The Spoolman spool ID to activate
+   */
+  async setActiveSpool(printerId: string, spoolId: number): Promise<boolean> {
+    const response = await this.client.post<boolean>(
+      `/printers/${printerId}/active-spool`,
+      { spoolId }
+    );
+    return response.data;
+  }
+
+  /**
+   * Clear the active spool on a printer via Spoolman.
+   * @param printerId The printer's GUID
+   */
+  async clearActiveSpool(printerId: string): Promise<boolean> {
+    const response = await this.client.post<boolean>(
+      `/printers/${printerId}/active-spool`,
+      { spoolId: null }
+    );
+    return response.data;
+  }
+
+  /**
+   * Get spools available on a printer's Spoolman instance (via Moonraker proxy).
+   * Each printer may use a different Spoolman server.
+   * @param printerId The printer's GUID
+   */
+  async getPrinterSpools(printerId: string): Promise<SpoolmanSpool[]> {
+    const response = await this.client.get(`/printers/${printerId}/spoolman/spools`);
+    const data = response.data;
+    return Array.isArray(data) ? data : [];
+  }
+
   // ============ Printer History API methods ============
 
   async getPrinterHistory(
@@ -1052,6 +1121,53 @@ export class ApiClient {
   async importFilamentTypesFromSpoolman(): Promise<SpoolmanFilamentImportResult> {
     const response = await this.client.post<SpoolmanFilamentImportResult>(
       "/filament-types/import-from-spoolman"
+    );
+    return response.data;
+  }
+
+  async exportFilamentTypesCsv(): Promise<Blob> {
+    const response = await this.client.get("/filament-types/export", {
+      responseType: "blob",
+    });
+    return response.data;
+  }
+
+  async importFilamentTypesCsv(file: File): Promise<FilamentCsvImportResult> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await this.client.post<FilamentCsvImportResult>(
+      "/filament-types/import",
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return response.data;
+  }
+
+  async getSpoolmanDbFilaments(): Promise<SpoolmanDbFilamentEntry[]> {
+    const response = await this.client.get<SpoolmanDbFilamentEntry[]>(
+      "/filament-types/spoolmandb/filaments"
+    );
+    return response.data;
+  }
+
+  async getSpoolmanDbMaterials(): Promise<SpoolmanDbMaterialEntry[]> {
+    const response = await this.client.get<SpoolmanDbMaterialEntry[]>(
+      "/filament-types/spoolmandb/materials"
+    );
+    return response.data;
+  }
+
+  async importFromSpoolmanDb(request: SpoolmanDbImportRequest): Promise<SpoolmanDbImportResult> {
+    const response = await this.client.post<SpoolmanDbImportResult>(
+      "/filament-types/spoolmandb/import",
+      request
+    );
+    return response.data;
+  }
+
+  async syncExternalMaterials(): Promise<SpoolmanDbImportResult> {
+    const response = await this.client.post<SpoolmanDbImportResult>(
+      "/filament-types/spoolmandb/sync-materials"
     );
     return response.data;
   }
@@ -2335,8 +2451,103 @@ export class ApiClient {
   /**
    * Get spools from Spoolman
    */
-  async getSpools(): Promise<Record<string, unknown>> {
+  async getSpools(): Promise<SpoolmanSpool[]> {
     const response = await this.client.get('/spoolman/spools');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanSpool[] || [];
+  }
+
+  /**
+   * Get filament types/products from Spoolman (product definitions, not physical spools)
+   */
+  async getFilaments(): Promise<SpoolmanFilament[]> {
+    const response = await this.client.get('/spoolman/filaments');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanFilament[] || [];
+  }
+
+  /**
+   * Create a new filament in Spoolman.
+   */
+  async createFilament(request: SpoolmanUpdateFilamentRequest): Promise<SpoolmanFilament> {
+    const response = await this.client.post<SpoolmanFilament>('/spoolman/filaments', request);
+    return response.data;
+  }
+
+  /**
+   * Get all vendors from Spoolman
+   */
+  async getVendors(): Promise<SpoolmanVendor[]> {
+    const response = await this.client.get('/spoolman/vendors');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanVendor[] || [];
+  }
+
+  /**
+   * Get all material types from Spoolman (e.g. PLA, PETG, ASA)
+   */
+  async getMaterials(): Promise<SpoolmanMaterial[]> {
+    const response = await this.client.get('/spoolman/materials');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanMaterial[] || [];
+  }
+
+  /**
+   * Bulk-update multiple filaments in Spoolman.
+   * Only non-null fields are applied.
+   */
+  async bulkUpdateFilaments(request: SpoolmanBulkUpdateFilamentsRequest): Promise<SpoolmanBulkUpdateResult> {
+    const response = await this.client.patch<SpoolmanBulkUpdateResult>('/spoolman/filaments/bulk', request);
+    return response.data;
+  }
+
+  /**
+   * Update a single filament in Spoolman by ID.
+   * Only non-null fields are applied (PATCH semantics).
+   */
+  async updateFilament(id: number, request: SpoolmanUpdateFilamentRequest): Promise<SpoolmanFilament> {
+    const response = await this.client.patch<SpoolmanFilament>(`/spoolman/filaments/${id}`, request);
+    return response.data;
+  }
+
+  /**
+   * Delete a single filament from Spoolman by ID.
+   */
+  async deleteFilament(id: number): Promise<void> {
+    await this.client.delete(`/spoolman/filaments/${id}`);
+  }
+
+  /**
+   * Bulk-delete multiple filaments from Spoolman.
+   */
+  async bulkDeleteFilaments(filamentIds: number[]): Promise<SpoolmanBulkUpdateResult> {
+    const response = await this.client.delete<SpoolmanBulkUpdateResult>('/spoolman/filaments/bulk', {
+      data: { filamentIds },
+    });
+    return response.data;
+  }
+
+  /**
+   * Export all Spoolman filaments as a CSV file download.
+   */
+  async exportSpoolmanFilamentsCsv(): Promise<Blob> {
+    const response = await this.client.get('/spoolman/filaments/export', {
+      responseType: 'blob',
+    });
+    return response.data;
+  }
+
+  /**
+   * Import filaments from a CSV file into Spoolman.
+   */
+  async importSpoolmanFilamentsCsv(file: File): Promise<SpoolmanBulkUpdateResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await this.client.post<SpoolmanBulkUpdateResult>(
+      '/spoolman/filaments/import',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
     return response.data;
   }
 
@@ -2771,6 +2982,14 @@ export class ApiClient {
    */
   async bulkCancelJobs(request: unknown): Promise<unknown> {
     const response = await this.client.post(`/job-queue/bulk/cancel`, request);
+    return response.data;
+  }
+
+  /**
+   * Bulk reorder print jobs in queue
+   */
+  async reorderQueueJobs(moves: { jobId: string; newPosition: number }[]): Promise<unknown> {
+    const response = await this.client.post(`/job-queue-analytics/bulk/reorder`, { moves });
     return response.data;
   }
 

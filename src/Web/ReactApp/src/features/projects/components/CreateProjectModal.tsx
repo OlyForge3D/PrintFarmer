@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Select, Textarea } from '@/common/components/ui';
@@ -7,15 +7,18 @@ import {
   DeleteIcon,
   SearchIcon,
 } from '@/common/components/icons/MdiIcons';
+import { ColorSwatch } from '@/features/catalog/components/ColorSwatch';
 import { projectService } from '@/services/projectService';
 import { templateService } from '@/services/templateService';
 import { apiClient } from '@/services/api';
 import type { 
   CreatePrintProjectRequest, 
   AddFileToProjectRequest,
-  PrintColorRequirement,
   GcodeFile,
+  PrintProjectDetailDto,
+  PrintProjectStatus,
   PrintProjectTemplateListDto,
+  SpoolmanFilament,
 } from '@/types/api';
 
 interface CreateProjectModalProps {
@@ -24,6 +27,8 @@ interface CreateProjectModalProps {
   onSuccess: () => void;
   /** Pre-selected file IDs to add to the project */
   initialFileIds?: string[];
+  /** When provided, the modal operates in edit mode for this project */
+  editProject?: PrintProjectDetailDto;
 }
 
 export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
@@ -31,22 +36,75 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   onClose,
   onSuccess,
   initialFileIds = [],
+  editProject,
 }) => {
+  const isEditMode = !!editProject;
+
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [status, setStatus] = useState<PrintProjectStatus>('Open');
   const [priority, setPriority] = useState(0);
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
-  const [selectedFiles, setSelectedFiles] = useState<AddFileToProjectRequest[]>(
-    initialFileIds.map(id => ({
-      gcodeFileId: id,
-      colorRequirement: 'Base' as PrintColorRequirement,
-      printCount: 1,
-    }))
-  );
+  const [selectedFiles, setSelectedFiles] = useState<AddFileToProjectRequest[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [fileSearch, setFileSearch] = useState('');
+  // Cache gcode file metadata so it persists after picker closes
+  const [gcodeFileCache, setGcodeFileCache] = useState<Record<string, GcodeFile>>({});
+  // Track which filament is assigned to each file (keyed by gcodeFileId)
+  const [filamentAssignments, setFilamentAssignments] = useState<Record<string, number>>({});
+
+  // Initialize form when modal opens
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (editProject) {
+      // Edit mode: populate from existing project
+      setName(editProject.name);
+      setDescription(editProject.description || '');
+      setStatus(editProject.status);
+      setPriority(editProject.priority);
+      setDueDate(editProject.dueDate ? editProject.dueDate.split('T')[0] : '');
+      setNotes(editProject.notes || '');
+      setSelectedTemplate('');
+
+      const cache: Record<string, GcodeFile> = {};
+      const assignments: Record<string, number> = {};
+      const files: AddFileToProjectRequest[] = [];
+
+      for (const f of editProject.files) {
+        cache[f.gcodeFileId] = {
+          id: f.gcodeFileId,
+          name: f.fileName,
+          thumbnailUrl: f.thumbnailUrl,
+          extractedMaterial: f.materialRequirement,
+        } as GcodeFile;
+
+        files.push({
+          gcodeFileId: f.gcodeFileId,
+          printCount: f.printCount,
+          materialRequirement: f.materialRequirement || undefined,
+          notes: f.notes || undefined,
+        });
+
+        if (f.spoolmanFilamentId) {
+          assignments[f.gcodeFileId] = f.spoolmanFilamentId;
+        }
+      }
+
+      setGcodeFileCache(cache);
+      setFilamentAssignments(assignments);
+      setSelectedFiles(files);
+    } else if (initialFileIds.length > 0) {
+      // Create mode with pre-selected files
+      setSelectedFiles(initialFileIds.map(id => ({
+        gcodeFileId: id,
+        printCount: 1,
+      })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, editProject?.id]);
 
   // Fetch available templates
   const { data: templates = [] } = useQuery({
@@ -70,6 +128,22 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     staleTime: 30 * 1000,
   });
 
+  // Fetch available filaments from Spoolman
+  const { data: filaments = [] } = useQuery({
+    queryKey: ['spoolman-filaments-for-project'],
+    queryFn: () => apiClient.getFilaments(),
+    staleTime: 60 * 1000,
+  });
+
+  // Index filaments by ID for quick lookup
+  const filamentsById = useMemo(() => {
+    const map = new Map<number, SpoolmanFilament>();
+    for (const filament of filaments) {
+      map.set(filament.id, filament);
+    }
+    return map;
+  }, [filaments]);
+
   // Create project mutation
   const createMutation = useMutation({
     mutationFn: (request: CreatePrintProjectRequest) => projectService.createProject(request),
@@ -79,9 +153,74 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     },
   });
 
+  // Edit project mutation (handles metadata update + file reconciliation)
+  const editMutation = useMutation({
+    mutationFn: async () => {
+      if (!editProject) return;
+
+      // 1. Update project metadata
+      await projectService.updateProject(editProject.id, {
+        name: name.trim(),
+        description: description.trim() || undefined,
+        status,
+        priority,
+        dueDate: dueDate || undefined,
+        notes: notes.trim() || undefined,
+      });
+
+      // 2. Reconcile files
+      const originalMap = new Map(editProject.files.map(f => [f.gcodeFileId, f]));
+      const currentIds = new Set(selectedFiles.map(f => f.gcodeFileId));
+
+      // Remove files that were deleted
+      for (const origFile of editProject.files) {
+        if (!currentIds.has(origFile.gcodeFileId)) {
+          await projectService.removeFileFromProject(editProject.id, origFile.id);
+        }
+      }
+
+      // Add files that are new
+      for (const file of selectedFiles) {
+        if (!originalMap.has(file.gcodeFileId)) {
+          await projectService.addFileToProject(editProject.id, {
+            ...file,
+            spoolmanFilamentId: filamentAssignments[file.gcodeFileId] ?? undefined,
+          });
+        }
+      }
+
+      // Update existing files that changed
+      for (const file of selectedFiles) {
+        const orig = originalMap.get(file.gcodeFileId);
+        if (!orig) continue; // new file, already handled above
+
+        const newFilamentId = filamentAssignments[file.gcodeFileId] ?? null;
+        const changed =
+          file.printCount !== orig.printCount ||
+          newFilamentId !== orig.spoolmanFilamentId ||
+          (file.materialRequirement || null) !== (orig.materialRequirement || null);
+
+        if (changed) {
+          await projectService.updateProjectFile(editProject.id, orig.id, {
+            spoolmanFilamentId: newFilamentId,
+            printCount: file.printCount,
+            materialRequirement: file.materialRequirement,
+          });
+        }
+      }
+    },
+    onSuccess: () => {
+      resetForm();
+      onSuccess();
+    },
+  });
+
+  const activeMutation = isEditMode ? editMutation : createMutation;
+
   const resetForm = () => {
     setName('');
     setDescription('');
+    setStatus('Open');
     setPriority(0);
     setDueDate('');
     setNotes('');
@@ -89,6 +228,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setSelectedFiles([]);
     setShowFilePicker(false);
     setFileSearch('');
+    setGcodeFileCache({});
+    setFilamentAssignments({});
   };
 
   const handleTemplateChange = async (templateId: string) => {
@@ -124,13 +265,24 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     e.preventDefault();
     if (!name.trim()) return;
 
+    if (isEditMode) {
+      editMutation.mutate();
+      return;
+    }
+
+    // Merge filament assignments into the file requests
+    const filesWithFilaments = selectedFiles.map(f => ({
+      ...f,
+      spoolmanFilamentId: filamentAssignments[f.gcodeFileId] ?? undefined,
+    }));
+
     const request: CreatePrintProjectRequest = {
       name: name.trim(),
       description: description.trim() || undefined,
       priority,
       dueDate: dueDate || undefined,
       notes: notes.trim() || undefined,
-      files: selectedFiles.length > 0 ? selectedFiles : undefined,
+      files: filesWithFilaments.length > 0 ? filesWithFilaments : undefined,
     };
 
     createMutation.mutate(request);
@@ -139,11 +291,13 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const addFile = (file: GcodeFile) => {
     if (selectedFiles.some(f => f.gcodeFileId === file.id)) return;
     
+    // Cache the full gcode file object so metadata persists after picker closes
+    setGcodeFileCache(prev => ({ ...prev, [file.id]: file }));
     setSelectedFiles([
       ...selectedFiles,
       {
         gcodeFileId: file.id,
-        colorRequirement: 'Base' as PrintColorRequirement,
+        materialRequirement: file.extractedMaterial || undefined,
         printCount: 1,
       },
     ]);
@@ -170,26 +324,28 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Create New Project"
-      size="lg"
+      title={isEditMode ? 'Edit Project' : 'Create New Project'}
+      size="full"
       footer={
         <div className="flex gap-3 w-full justify-end">
-          <Button variant="secondary" onClick={handleClose} disabled={createMutation.isPending}>
+          <Button variant="secondary" onClick={handleClose} disabled={activeMutation.isPending}>
             Cancel
           </Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
-            disabled={!name.trim() || createMutation.isPending}
+            disabled={!name.trim() || activeMutation.isPending}
           >
-            {createMutation.isPending ? 'Creating...' : 'Create Project'}
+            {activeMutation.isPending
+              ? (isEditMode ? 'Saving...' : 'Creating...')
+              : (isEditMode ? 'Save Changes' : 'Create Project')}
           </Button>
         </div>
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Template selector */}
-        {templates.length > 0 && (
+        {/* Template selector (create mode only) */}
+        {!isEditMode && templates.length > 0 && (
           <div>
             <label className="block text-sm font-medium text-pf-text-primary mb-1">
               Start from Template
@@ -239,12 +395,12 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Brief description of the project..."
             rows={2}
-            className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 resize-none min-h-0"
+            className="w-full bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 !resize-none !min-h-0"
           />
         </div>
 
-        {/* Priority and Due Date row */}
-        <div className="grid grid-cols-2 gap-4">
+        {/* Priority, Status, and Due Date row */}
+        <div className={`grid gap-4 ${isEditMode ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <div>
             <label className="block text-sm font-medium text-pf-text-primary mb-1">
               Priority
@@ -261,6 +417,26 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </Select>
           </div>
 
+          {/* Status (edit mode only) */}
+          {isEditMode && (
+            <div>
+              <label className="block text-sm font-medium text-pf-text-primary mb-1">
+                Status
+              </label>
+              <Select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as PrintProjectStatus)}
+                className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
+              >
+                <option value="Open">Open</option>
+                <option value="InProgress">In Progress</option>
+                <option value="OnHold">On Hold</option>
+                <option value="Completed">Completed</option>
+                <option value="Cancelled">Cancelled</option>
+              </Select>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-pf-text-primary mb-1">
               Due Date
@@ -272,20 +448,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
             />
           </div>
-        </div>
-
-        {/* Notes */}
-        <div>
-          <label className="block text-sm font-medium text-pf-text-primary mb-1">
-            Notes
-          </label>
-          <Textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Additional notes about the project..."
-            rows={2}
-            className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 resize-none min-h-0"
-          />
         </div>
 
         {/* Files Section */}
@@ -330,9 +492,16 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                         type="button"
                         onClick={() => addFile(file)}
                         variant="unstyled"
-                        className="w-full text-left px-3 py-2 rounded hover:bg-pf-bg-1 text-sm text-pf-text-primary truncate enabled:cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+                        className="w-full text-left px-3 py-2 rounded hover:bg-pf-bg-1 text-sm text-pf-text-primary enabled:cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
                       >
-                        {file.fileName}
+                        <span className="flex items-center gap-2">
+                          <span className="truncate">{file.name || file.fileName}</span>
+                          {file.extractedMaterial && (
+                            <span className="shrink-0 text-xs text-pf-text-tertiary">
+                              {file.extractedMaterial}
+                            </span>
+                          )}
+                        </span>
                       </Button>
                     ))
                 )}
@@ -340,18 +509,126 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </div>
           )}
 
-          {/* Selected Files List */}
+          {/* Selected Files Table */}
           {selectedFiles.length > 0 ? (
-            <div className="space-y-2">
-              {selectedFiles.map((file) => (
-                <SelectedFileRow
-                  key={file.gcodeFileId}
-                  file={file}
-                  gcodeFiles={gcodeFiles}
-                  onUpdate={(updates) => updateFileSettings(file.gcodeFileId, updates)}
-                  onRemove={() => removeFile(file.gcodeFileId)}
-                />
-              ))}
+            <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-pf-border bg-pf-bg-2">
+                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">File</th>
+                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Material</th>
+                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Filament</th>
+                    <th className="px-3 py-2 text-center font-medium text-pf-text-primary w-16">Qty</th>
+                    <th className="px-3 py-2 text-right font-medium text-pf-text-primary w-24">Est. Cost</th>
+                    <th className="px-3 py-2 w-10"><span className="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-pf-border">
+                  {selectedFiles.map((file) => {
+                    const gcodeFile = gcodeFiles.find(f => f.id === file.gcodeFileId) 
+                      || gcodeFileCache[file.gcodeFileId];
+                    const fileName = gcodeFile?.name || gcodeFile?.fileName || file.gcodeFileId;
+                    const material = gcodeFile?.extractedMaterial || file.materialRequirement || '—';
+                    const assignedFilamentId = filamentAssignments[file.gcodeFileId];
+                    const assignedFilament = assignedFilamentId ? filamentsById.get(assignedFilamentId) : undefined;
+                    const filamentLengthMm = gcodeFile?.extractedFilamentLength;
+                    const estimatedCost = computeEstimatedCost(assignedFilament, filamentLengthMm, file.printCount);
+
+                    return (
+                      <tr key={file.gcodeFileId}>
+                        {/* Thumbnail + File name */}
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            {gcodeFile?.thumbnailUrl ? (
+                              <img
+                                src={gcodeFile.thumbnailUrl}
+                                alt=""
+                                className="w-8 h-8 rounded object-cover bg-pf-bg-2 shrink-0"
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary shrink-0">
+                                <span className="text-[10px]">GC</span>
+                              </div>
+                            )}
+                            <p className="text-pf-text-primary truncate max-w-[260px]" title={fileName}>
+                              {fileName}
+                            </p>
+                          </div>
+                        </td>
+
+                        {/* Material from gcode metadata */}
+                        <td className="px-3 py-2 text-pf-text-secondary">
+                          {material}
+                        </td>
+
+                        {/* Filament selector */}
+                        <td className="px-3 py-2">
+                          <FilamentSelector
+                            filaments={filaments}
+                            materialFilter={gcodeFile?.extractedMaterial || undefined}
+                            selectedFilamentId={assignedFilamentId}
+                            onChange={(filamentId) => {
+                              setFilamentAssignments(prev => {
+                                const next = { ...prev };
+                                if (filamentId) {
+                                  next[file.gcodeFileId] = filamentId;
+                                } else {
+                                  delete next[file.gcodeFileId];
+                                }
+                                return next;
+                              });
+                              // Auto-fill material requirement from filament
+                              if (filamentId) {
+                                const filament = filamentsById.get(filamentId);
+                                if (filament?.material) {
+                                  updateFileSettings(file.gcodeFileId, { materialRequirement: filament.material });
+                                }
+                              }
+                            }}
+                          />
+                        </td>
+
+                        {/* Print count */}
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="number"
+                            min={1}
+                            value={file.printCount}
+                            onChange={(e) => updateFileSettings(file.gcodeFileId, { printCount: Math.max(1, parseInt(e.target.value) || 1) })}
+                            className="w-14 px-2 py-1 text-xs text-center bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary"
+                            aria-label={`Print count for ${fileName}`}
+                          />
+                        </td>
+
+                        {/* Estimated cost */}
+                        <td className="px-3 py-2 text-right text-pf-text-secondary whitespace-nowrap">
+                          {estimatedCost !== null ? (
+                            <span title="Estimated material cost based on spool price and filament usage">
+                              ${estimatedCost.toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-pf-text-tertiary">—</span>
+                          )}
+                        </td>
+
+                        {/* Remove */}
+                        <td className="px-3 py-2 text-center">
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            size="sm"
+                            onClick={() => removeFile(file.gcodeFileId)}
+                            className="!p-1 text-pf-text-tertiary hover:text-pf-error"
+                            title={`Remove ${fileName}`}
+                          >
+                            <DeleteIcon className="w-4 h-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           ) : (
             <p className="text-sm text-pf-text-tertiary py-2">
@@ -360,9 +637,9 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           )}
         </div>
 
-        {createMutation.isError && (
+        {activeMutation.isError && (
           <p className="text-sm text-pf-error">
-            Failed to create project: {String(createMutation.error)}
+            Failed to {isEditMode ? 'update' : 'create'} project: {String(activeMutation.error)}
           </p>
         )}
       </form>
@@ -370,64 +647,80 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   );
 };
 
-// Selected file row component
-interface SelectedFileRowProps {
-  file: AddFileToProjectRequest;
-  gcodeFiles: GcodeFile[];
-  onUpdate: (updates: Partial<AddFileToProjectRequest>) => void;
-  onRemove: () => void;
+/**
+ * Estimate material cost from filament price and gcode filament usage.
+ * Uses filament length (mm) and filament weight to derive per-unit cost.
+ */
+function computeEstimatedCost(
+  filament: SpoolmanFilament | undefined,
+  filamentLengthMm: number | undefined,
+  printCount: number | undefined,
+): number | null {
+  if (!filament?.price || !filamentLengthMm || filamentLengthMm <= 0) return null;
+  const count = Math.max(1, printCount ?? 1);
+
+  // Use filament weight (g per spool) to estimate total length
+  // Standard 1.75mm diameter filament density ~2.98 g/m for PLA
+  const weight = filament.weight; // grams per spool
+  if (weight && weight > 0) {
+    const gramsPerMeter = 2.98; // approximate for 1.75mm filament
+    const totalLengthM = weight / gramsPerMeter;
+    const totalLengthMm = totalLengthM * 1000;
+    const costPerMm = filament.price / totalLengthMm;
+    return costPerMm * filamentLengthMm * count;
+  }
+
+  return null;
 }
 
-const SelectedFileRow: React.FC<SelectedFileRowProps> = ({
-  file,
-  gcodeFiles,
-  onUpdate,
-  onRemove,
-}) => {
-  const gcodeFile = gcodeFiles.find(f => f.id === file.gcodeFileId);
-  const fileName = gcodeFile?.fileName || file.gcodeFileId;
+/** Compact filament selector with color swatch, filtered by material type */
+interface FilamentSelectorProps {
+  filaments: SpoolmanFilament[];
+  /** When set, filaments are filtered to match this material (case-insensitive). */
+  materialFilter?: string;
+  selectedFilamentId?: number;
+  onChange: (filamentId: number | null) => void;
+}
+
+const FilamentSelector: React.FC<FilamentSelectorProps> = ({ filaments, materialFilter, selectedFilamentId, onChange }) => {
+  const selectedFilament = selectedFilamentId ? filaments.find(f => f.id === selectedFilamentId) : undefined;
+
+  // Filter filaments by material type
+  const availableFilaments = useMemo(() => {
+    if (!materialFilter) return filaments;
+    const needle = materialFilter.toLowerCase();
+    return filaments.filter(f => f.material?.toLowerCase() === needle);
+  }, [filaments, materialFilter]);
+
+  if (availableFilaments.length === 0) {
+    return <span className="text-xs text-pf-text-tertiary italic">No filaments</span>;
+  }
 
   return (
-    <div className="flex items-center gap-2 p-2 bg-pf-bg-2 border border-pf-border rounded-lg">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-pf-text-primary truncate">{fileName}</p>
-      </div>
-
-      {/* Color requirement */}
-      <Select
-        value={file.colorRequirement}
-        onChange={(e) => onUpdate({ colorRequirement: e.target.value as PrintColorRequirement })}
-        className="bg-pf-bg-1 border-pf-border rounded !px-2 !py-1 !text-xs"
-        title="Color requirement"
-      >
-        <option value="Base">Base</option>
-        <option value="Accent">Accent</option>
-        <option value="Custom">Custom</option>
-      </Select>
-
-      {/* Print count */}
-      <div className="flex items-center gap-1">
-        <span className="text-xs text-pf-text-secondary">×</span>
-        <input
-          type="number"
-          min={1}
-          value={file.printCount}
-          onChange={(e) => onUpdate({ printCount: Math.max(1, parseInt(e.target.value) || 1) })}
-          className="w-12 px-2 py-1 text-xs text-center bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
+    <div className="flex items-center gap-1.5">
+      {selectedFilament?.colorHex && (
+        <ColorSwatch
+          color={`#${selectedFilament.colorHex.replace('#', '')}`}
+          label={selectedFilament.material ?? undefined}
+          className="shrink-0"
         />
-      </div>
-
-      {/* Remove button */}
-      <Button
-        type="button"
-        variant="subtle"
-        size="sm"
-        onClick={onRemove}
-        className="!p-1 text-pf-text-tertiary hover:text-pf-error"
-        title="Remove file"
+      )}
+      <Select
+        value={selectedFilamentId ?? ''}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+        className="bg-pf-bg-2 border-pf-border rounded !px-2 !py-1 !text-xs !w-auto"
+        containerClassName="!w-auto"
+        title="Assign filament type"
       >
-        <DeleteIcon className="w-4 h-4" />
-      </Button>
+        <option value="">— None —</option>
+        {availableFilaments.map(filament => (
+          <option key={filament.id} value={filament.id}>
+            {filament.name ?? 'Unnamed'}
+            {filament.material ? ` (${filament.material})` : ''}
+            {filament.vendor ? ` — ${filament.vendor}` : ''}
+          </option>
+        ))}
+      </Select>
     </div>
   );
 };

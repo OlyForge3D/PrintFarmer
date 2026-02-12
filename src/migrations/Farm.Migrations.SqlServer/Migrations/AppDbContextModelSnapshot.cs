@@ -2081,6 +2081,18 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("FailureReason")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("FilamentColor")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("FilamentName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("FilamentVendor")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("uniqueidentifier");
 
@@ -2099,6 +2111,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(0);
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProjectName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<int>("QueuePosition")
                         .HasColumnType("int");
@@ -2122,6 +2141,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<Guid?>("SourcePrinterId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("SpoolmanFilamentId")
+                        .HasColumnType("int");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -2285,11 +2307,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("ColorRequirement")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0);
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -2333,6 +2350,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
+                    b.Property<int?>("SpoolmanFilamentId")
+                        .HasColumnType("int");
+
                     b.Property<int>("Status")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -2343,13 +2363,13 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ColorRequirement");
-
                     b.HasIndex("GcodeFileId");
 
                     b.HasIndex("LastPrintJobId");
 
                     b.HasIndex("PrintProjectId");
+
+                    b.HasIndex("SpoolmanFilamentId");
 
                     b.HasIndex("Status");
 

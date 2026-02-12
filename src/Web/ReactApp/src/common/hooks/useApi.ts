@@ -41,6 +41,15 @@ import {
   FileHealthAuditDto,
   FileIssuesSummaryDto,
   FileHealthDetailDto,
+  SpoolmanDbFilamentEntry,
+  SpoolmanDbMaterialEntry,
+  SpoolmanDbImportRequest,
+  SpoolmanBulkUpdateFilamentsRequest,
+  SpoolmanBulkUpdateResult,
+  SpoolmanVendor,
+  SpoolmanMaterial,
+  SpoolmanUpdateFilamentRequest,
+  SpoolmanFilament,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -67,6 +76,10 @@ export const queryKeys = {
   nozzleModels: ['nozzle-models'] as const,
   filamentTypes: ['filament-types'] as const,
   filamentPresets: ['presets', 'filament'] as const,
+  spoolmanDbFilaments: ['spoolmandb', 'filaments'] as const,
+  spoolmanDbMaterials: ['spoolmandb', 'materials'] as const,
+  spoolmanVendors: ['spoolman', 'vendors'] as const,
+  spoolmanMaterials: ['spoolman', 'materials'] as const,
   gcodeFiles: (page?: number, pageSize?: number) => ['gcode-files', page, pageSize] as const,
   gcodeFile: (id: string) => ['gcode-files', id] as const,
   harvestOperations: (printerId?: string) => ['harvest-operations', printerId] as const,
@@ -734,6 +747,153 @@ export function useImportFilamentTypesFromSpoolman() {
     mutationFn: () => apiClient.importFilamentTypesFromSpoolman(),
     onSuccess: () => {
       // Invalidate both filament types and presets since new types were added
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
+    },
+  });
+}
+
+export function useExportFilamentTypesCsv() {
+  return useMutation({
+    mutationFn: () => apiClient.exportFilamentTypesCsv(),
+  });
+}
+
+export function useImportFilamentTypesCsv() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (file: File) => apiClient.importFilamentTypesCsv(file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
+    },
+  });
+}
+
+export function useSpoolmanDbFilaments(options?: QueryOptions<SpoolmanDbFilamentEntry[]>) {
+  return useQuery({
+    queryKey: queryKeys.spoolmanDbFilaments,
+    queryFn: () => apiClient.getSpoolmanDbFilaments(),
+    staleTime: 3600000, // 1 hour – data rarely changes
+    enabled: false, // Only fetch when explicitly triggered
+    ...options,
+  });
+}
+
+export function useSpoolmanDbMaterials(options?: QueryOptions<SpoolmanDbMaterialEntry[]>) {
+  return useQuery({
+    queryKey: queryKeys.spoolmanDbMaterials,
+    queryFn: () => apiClient.getSpoolmanDbMaterials(),
+    staleTime: 3600000,
+    enabled: false,
+    ...options,
+  });
+}
+
+export function useImportFromSpoolmanDb() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (request: SpoolmanDbImportRequest) => apiClient.importFromSpoolmanDb(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
+    },
+  });
+}
+
+export function useSpoolmanVendors(options?: QueryOptions<SpoolmanVendor[]>) {
+  return useQuery({
+    queryKey: queryKeys.spoolmanVendors,
+    queryFn: () => apiClient.getVendors(),
+    staleTime: 300_000, // 5 minutes
+    ...options,
+  });
+}
+
+export function useSpoolmanMaterials(options?: QueryOptions<SpoolmanMaterial[]>) {
+  return useQuery({
+    queryKey: queryKeys.spoolmanMaterials,
+    queryFn: () => apiClient.getMaterials(),
+    staleTime: 300_000, // 5 minutes
+    ...options,
+  });
+}
+
+export function useBulkUpdateFilaments() {
+  const queryClient = useQueryClient();
+  return useMutation<SpoolmanBulkUpdateResult, ApiError, SpoolmanBulkUpdateFilamentsRequest>({
+    mutationFn: (request: SpoolmanBulkUpdateFilamentsRequest) => apiClient.bulkUpdateFilaments(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
+    },
+  });
+}
+
+export function useUpdateFilament() {
+  const queryClient = useQueryClient();
+  return useMutation<SpoolmanFilament, ApiError, { id: number; request: SpoolmanUpdateFilamentRequest }>({
+    mutationFn: ({ id, request }) => apiClient.updateFilament(id, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
+    },
+  });
+}
+
+export function useCreateFilament() {
+  const queryClient = useQueryClient();
+  return useMutation<SpoolmanFilament, ApiError, SpoolmanUpdateFilamentRequest>({
+    mutationFn: (request) => apiClient.createFilament(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
+    },
+  });
+}
+
+export function useDeleteFilament() {
+  const queryClient = useQueryClient();
+  return useMutation<void, ApiError, number>({
+    mutationFn: (id: number) => apiClient.deleteFilament(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
+    },
+  });
+}
+
+export function useBulkDeleteFilaments() {
+  const queryClient = useQueryClient();
+  return useMutation<SpoolmanBulkUpdateResult, ApiError, number[]>({
+    mutationFn: (filamentIds: number[]) => apiClient.bulkDeleteFilaments(filamentIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
+    },
+  });
+}
+
+export function useExportSpoolmanFilamentsCsv() {
+  return useMutation({
+    mutationFn: () => apiClient.exportSpoolmanFilamentsCsv(),
+  });
+}
+
+export function useImportSpoolmanFilamentsCsv() {
+  return useMutation<SpoolmanBulkUpdateResult, ApiError, File>({
+    mutationFn: (file: File) => apiClient.importSpoolmanFilamentsCsv(file),
+  });
+}
+
+export function useSyncExternalMaterials() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiClient.syncExternalMaterials(),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
     },

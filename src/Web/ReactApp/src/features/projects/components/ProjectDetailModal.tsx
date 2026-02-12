@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button, Select, Textarea } from '@/common/components/ui';
+import { Button } from '@/common/components/ui';
 import { Badge } from '@/common/components/ui/Badge';
 import { 
   CheckIcon, 
@@ -10,13 +10,15 @@ import {
   EditIcon,
 } from '@/common/components/icons/MdiIcons';
 import { projectService } from '@/services/projectService';
+import { apiClient } from '@/services/api';
 import type { 
   PrintProjectDetailDto,
   PrintProjectFileDto,
   PrintProjectStatus,
-  PrintColorRequirement,
   PrintProjectFileStatus,
-  UpdatePrintProjectRequest,
+  SpoolmanFilament,
+  QueueProjectRequest,
+  QueueProjectResultDto,
 } from '@/types/api';
 
 interface ProjectDetailModalProps {
@@ -24,6 +26,8 @@ interface ProjectDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUpdate: () => void;
+  /** Called when the user wants to edit the project (opens the unified form modal) */
+  onEdit: () => void;
 }
 
 // Status badge color mapping
@@ -43,12 +47,6 @@ const statusLabelMap: Record<PrintProjectStatus, string> = {
   OnHold: 'On Hold',
 };
 
-const colorVariantMap: Record<PrintColorRequirement, 'default' | 'primary' | 'warning'> = {
-  Base: 'default',
-  Accent: 'primary',
-  Custom: 'warning',
-};
-
 const fileStatusVariantMap: Record<PrintProjectFileStatus, 'default' | 'primary' | 'success' | 'warning'> = {
   Pending: 'default',
   Printing: 'primary',
@@ -61,27 +59,29 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   isOpen,
   onClose,
   onUpdate,
+  onEdit,
 }) => {
   const queryClient = useQueryClient();
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedProject, setEditedProject] = useState({
-    name: project.name,
-    description: project.description || '',
-    status: project.status,
-    priority: project.priority,
-    notes: project.notes || '',
+  const [showQueueConfirm, setShowQueueConfirm] = useState(false);
+  const [queueResult, setQueueResult] = useState<QueueProjectResultDto | null>(null);
+
+  // Fetch Spoolman filaments for display
+  const { data: filaments } = useQuery({
+    queryKey: ['spoolman-filaments-project-detail'],
+    queryFn: () => apiClient.getFilaments(),
+    staleTime: 60_000,
   });
 
-  // Update project mutation
-  const updateMutation = useMutation({
-    mutationFn: (request: UpdatePrintProjectRequest) =>
-      projectService.updateProject(project.id, request),
-    onSuccess: () => {
-      setIsEditing(false);
-      onUpdate();
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-    },
-  });
+  // Build filament lookup map
+  const filamentMap = React.useMemo(() => {
+    const map = new Map<number, SpoolmanFilament>();
+    if (filaments) {
+      for (const filament of filaments) {
+        map.set(filament.id, filament);
+      }
+    }
+    return map;
+  }, [filaments]);
 
   // Mark file as printed mutation
   const markPrintedMutation = useMutation({
@@ -101,15 +101,17 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     },
   });
 
-  const handleSave = () => {
-    updateMutation.mutate({
-      name: editedProject.name,
-      description: editedProject.description || undefined,
-      status: editedProject.status,
-      priority: editedProject.priority,
-      notes: editedProject.notes || undefined,
-    });
-  };
+  // Queue project mutation
+  const queueProjectMutation = useMutation({
+    mutationFn: (request: QueueProjectRequest) => projectService.queueProject(project.id, request),
+    onSuccess: (result) => {
+      setQueueResult(result);
+      setShowQueueConfirm(false);
+      onUpdate();
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['job-queue'] });
+    },
+  });
 
   const handleMarkPrinted = (fileId: string) => {
     markPrintedMutation.mutate(fileId);
@@ -121,6 +123,21 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     }
   };
 
+  const handleQueueProject = () => {
+    queueProjectMutation.mutate({
+      groupByMaterial: true,
+      groupByColor: true,
+      priority: 1,
+    });
+  };
+
+  // Calculate project-level estimates
+  const pendingFiles = project.files.filter(f => !f.isComplete);
+  const hasPendingFiles = pendingFiles.length > 0;
+  const totalEstimatedMinutes = project.files.reduce((sum, f) => {
+    return sum + (f.remainingPrintTimeMinutes ?? 0);
+  }, 0);
+
   // Sort files: incomplete first, then by sort order
   const sortedFiles = [...project.files].sort((a, b) => {
     if (a.isComplete !== b.isComplete) return a.isComplete ? 1 : -1;
@@ -131,54 +148,90 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={isEditing ? 'Edit Project' : project.name}
+      title={project.name}
       size="xl"
       footer={
         <div className="flex gap-3 w-full justify-between">
-          <div>
-            {!isEditing && (
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={onEdit}
+              iconLeft={<EditIcon className="w-4 h-4" />}
+            >
+              Edit
+            </Button>
+            {hasPendingFiles && (
               <Button
-                variant="secondary"
-                onClick={() => setIsEditing(true)}
-                iconLeft={<EditIcon className="w-4 h-4" />}
+                variant="primary"
+                onClick={() => setShowQueueConfirm(true)}
+                disabled={queueProjectMutation.isPending}
               >
-                Edit
+                {queueProjectMutation.isPending ? 'Queuing...' : `Queue ${pendingFiles.length} File${pendingFiles.length !== 1 ? 's' : ''}`}
               </Button>
             )}
           </div>
           <div className="flex gap-3">
-            {isEditing ? (
-              <>
-                <Button variant="secondary" onClick={() => setIsEditing(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={handleSave}
-                  disabled={updateMutation.isPending}
-                >
-                  {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-                </Button>
-              </>
-            ) : (
-              <Button variant="secondary" onClick={onClose}>
-                Close
-              </Button>
-            )}
+            <Button variant="secondary" onClick={onClose}>
+              Close
+            </Button>
           </div>
         </div>
       }
     >
       <div className="space-y-6">
-        {/* Project Info */}
-        {isEditing ? (
-          <EditProjectForm
-            project={editedProject}
-            onChange={setEditedProject}
-          />
-        ) : (
-          <ProjectInfo project={project} />
+        {/* Queue Result Banner */}
+        {queueResult && (
+          <div className="bg-pf-success/10 border border-pf-success/30 rounded-lg p-4">
+            <p className="font-medium text-pf-success">
+              Queued {queueResult.totalJobsQueued} job{queueResult.totalJobsQueued !== 1 ? 's' : ''} successfully
+            </p>
+            {queueResult.estimatedTotalTimeMinutes && (
+              <p className="text-sm text-pf-text-secondary mt-1">
+                Estimated total time: {formatDuration(queueResult.estimatedTotalTimeMinutes)}
+              </p>
+            )}
+          </div>
         )}
+
+        {/* Queue Confirmation Dialog */}
+        {showQueueConfirm && (
+          <div className="bg-pf-bg-2 border border-pf-border rounded-lg p-4 space-y-3">
+            <h4 className="font-semibold text-pf-text-primary">Queue Project for Printing</h4>
+            <p className="text-sm text-pf-text-secondary">
+              {pendingFiles.length} file{pendingFiles.length !== 1 ? 's' : ''} with{' '}
+              {pendingFiles.reduce((sum, f) => sum + f.remainingPrints, 0)} total print{pendingFiles.reduce((sum, f) => sum + f.remainingPrints, 0) !== 1 ? 's' : ''} will be added to the job queue.
+            </p>
+            {totalEstimatedMinutes > 0 && (
+              <p className="text-sm text-pf-text-secondary">
+                Estimated total print time: <span className="font-medium text-pf-text-primary">{formatDuration(totalEstimatedMinutes)}</span>
+              </p>
+            )}
+            <p className="text-xs text-pf-text-tertiary">
+              Jobs will be grouped by filament type and color to minimize filament changes.
+            </p>
+            {queueProjectMutation.isError && (
+              <p className="text-sm text-pf-error">
+                Failed to queue project. Check that compatible printers are available.
+              </p>
+            )}
+            <div className="flex gap-2 justify-end">
+              <Button variant="secondary" size="sm" onClick={() => setShowQueueConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleQueueProject}
+                disabled={queueProjectMutation.isPending}
+              >
+                {queueProjectMutation.isPending ? 'Queuing...' : 'Confirm & Queue'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Project Info */}
+        <ProjectInfo project={project} totalEstimatedMinutes={totalEstimatedMinutes} />
 
         {/* Progress */}
         <div className="bg-pf-bg-2 rounded-lg p-4">
@@ -202,7 +255,6 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             <h3 className="font-semibold text-pf-text-primary">
               Files ({project.files.length})
             </h3>
-            {/* Could add "Add File" button here in future */}
           </div>
 
           {sortedFiles.length === 0 ? (
@@ -222,6 +274,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                 <FileRow
                   key={file.id}
                   file={file}
+                  filament={file.spoolmanFilamentId ? filamentMap.get(file.spoolmanFilamentId) : undefined}
                   onMarkPrinted={() => handleMarkPrinted(file.id)}
                   onRemove={() => handleRemoveFile(file.id)}
                   isMarkingPrinted={markPrintedMutation.isPending}
@@ -235,8 +288,19 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   );
 };
 
+// Helper to format minutes into human-readable duration
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  if (hours < 24) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
+}
+
 // Project info display
-const ProjectInfo: React.FC<{ project: PrintProjectDetailDto }> = ({ project }) => (
+const ProjectInfo: React.FC<{ project: PrintProjectDetailDto; totalEstimatedMinutes: number }> = ({ project, totalEstimatedMinutes }) => (
   <div className="space-y-3">
     <div className="flex items-center gap-2">
       <Badge variant={statusVariantMap[project.status]}>
@@ -245,6 +309,11 @@ const ProjectInfo: React.FC<{ project: PrintProjectDetailDto }> = ({ project }) 
       {project.priority > 0 && (
         <Badge variant="warning">
           {project.priority === 2 ? 'Urgent' : 'High Priority'}
+        </Badge>
+      )}
+      {totalEstimatedMinutes > 0 && (
+        <Badge variant="default">
+          ~{formatDuration(totalEstimatedMinutes)} remaining
         </Badge>
       )}
     </div>
@@ -278,86 +347,10 @@ const ProjectInfo: React.FC<{ project: PrintProjectDetailDto }> = ({ project }) 
   </div>
 );
 
-// Edit project form
-interface EditProjectFormProps {
-  project: {
-    name: string;
-    description: string;
-    status: PrintProjectStatus;
-    priority: number;
-    notes: string;
-  };
-  onChange: (project: EditProjectFormProps['project']) => void;
-}
-
-const EditProjectForm: React.FC<EditProjectFormProps> = ({ project, onChange }) => (
-  <div className="space-y-4">
-    <div>
-      <label className="block text-sm font-medium text-pf-text-primary mb-1">Name</label>
-      <input
-        type="text"
-        value={project.name}
-        onChange={(e) => onChange({ ...project, name: e.target.value })}
-        className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary"
-      />
-    </div>
-
-    <div>
-      <label className="block text-sm font-medium text-pf-text-primary mb-1">Description</label>
-      <Textarea
-        value={project.description}
-        onChange={(e) => onChange({ ...project, description: e.target.value })}
-        rows={2}
-        className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 resize-none min-h-0"
-      />
-    </div>
-
-    <div className="grid grid-cols-2 gap-4">
-      <div>
-        <label className="block text-sm font-medium text-pf-text-primary mb-1">Status</label>
-        <Select
-          value={project.status}
-          onChange={(e) => onChange({ ...project, status: e.target.value as PrintProjectStatus })}
-          className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
-        >
-          <option value="Open">Open</option>
-          <option value="InProgress">In Progress</option>
-          <option value="OnHold">On Hold</option>
-          <option value="Completed">Completed</option>
-          <option value="Cancelled">Cancelled</option>
-        </Select>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-pf-text-primary mb-1">Priority</label>
-        <Select
-          value={project.priority}
-          onChange={(e) => onChange({ ...project, priority: Number(e.target.value) })}
-          className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
-        >
-          <option value={-1}>Low</option>
-          <option value={0}>Normal</option>
-          <option value={1}>High</option>
-          <option value={2}>Urgent</option>
-        </Select>
-      </div>
-    </div>
-
-    <div>
-      <label className="block text-sm font-medium text-pf-text-primary mb-1">Notes</label>
-      <Textarea
-        value={project.notes}
-        onChange={(e) => onChange({ ...project, notes: e.target.value })}
-        rows={3}
-        className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 resize-none min-h-0"
-      />
-    </div>
-  </div>
-);
-
 // File row component
 interface FileRowProps {
   file: PrintProjectFileDto;
+  filament?: SpoolmanFilament;
   onMarkPrinted: () => void;
   onRemove: () => void;
   isMarkingPrinted: boolean;
@@ -365,6 +358,7 @@ interface FileRowProps {
 
 const FileRow: React.FC<FileRowProps> = ({
   file,
+  filament,
   onMarkPrinted,
   onRemove,
   isMarkingPrinted,
@@ -394,15 +388,44 @@ const FileRow: React.FC<FileRowProps> = ({
       <p className={`font-medium truncate ${file.isComplete ? 'text-pf-success' : 'text-pf-text-primary'}`}>
         {file.fileName}
       </p>
-      <div className="flex items-center gap-2 mt-1">
-        <Badge variant={colorVariantMap[file.colorRequirement]} size="sm">
-          {file.colorRequirement}
-        </Badge>
+      <div className="flex items-center gap-2 mt-1 flex-wrap">
         <Badge variant={fileStatusVariantMap[file.status]} size="sm">
           {file.status}
         </Badge>
-        {file.materialRequirement && (
-          <span className="text-xs text-pf-text-tertiary">{file.materialRequirement}</span>
+        {/* Material info */}
+        {(file.requiredMaterial ?? file.materialRequirement) && (
+          <Badge variant="default" size="sm">
+            {file.requiredMaterial ?? file.materialRequirement}
+          </Badge>
+        )}
+        {/* Spoolman filament info with color swatch */}
+        {filament ? (
+          <span className="inline-flex items-center gap-1 text-xs text-pf-text-secondary">
+            {filament.colorHex && (
+              <span
+                className="inline-block w-3 h-3 rounded-full border border-pf-border"
+                style={{ backgroundColor: `#${filament.colorHex.replace('#', '')}` }}
+                title={filament.colorHex}
+                role="img"
+                aria-label={`Filament color ${filament.colorHex}`}
+              />
+            )}
+            <span className="truncate max-w-[140px]" title={`${filament.name ?? 'Unnamed'}${filament.vendor ? ` (${filament.vendor})` : ''}`}>
+              {filament.name ?? 'Unnamed'}
+              {filament.vendor ? ` · ${filament.vendor}` : ''}
+            </span>
+            {filament.material && (
+              <span className="text-pf-text-tertiary">({filament.material})</span>
+            )}
+          </span>
+        ) : file.spoolmanFilamentId ? (
+          <span className="text-xs text-pf-text-tertiary">Filament #{file.spoolmanFilamentId}</span>
+        ) : null}
+        {/* Estimated print time */}
+        {file.estimatedPrintTimeMinutes && file.estimatedPrintTimeMinutes > 0 && (
+          <span className="text-xs text-pf-text-tertiary">
+            ~{formatDuration(file.estimatedPrintTimeMinutes)}/print
+          </span>
         )}
       </div>
     </div>
@@ -415,6 +438,11 @@ const FileRow: React.FC<FileRowProps> = ({
       <div className="text-xs text-pf-text-tertiary">
         {file.remainingPrints > 0 ? `${file.remainingPrints} left` : 'Complete'}
       </div>
+      {file.remainingPrintTimeMinutes != null && file.remainingPrintTimeMinutes > 0 && (
+        <div className="text-xs text-pf-text-tertiary">
+          ~{formatDuration(file.remainingPrintTimeMinutes)}
+        </div>
+      )}
     </div>
 
     {/* Actions */}

@@ -87,6 +87,36 @@ public class QueuePrintJobDto
     /// Used for auto-assign to filter printers by model compatibility.
     /// </summary>
     public string? RequiredPrinterModel { get; set; }
+
+    /// <summary>
+    /// ID of the project this job was queued from.
+    /// </summary>
+    public Guid? ProjectId { get; set; }
+
+    /// <summary>
+    /// Denormalized project name for display.
+    /// </summary>
+    public string? ProjectName { get; set; }
+
+    /// <summary>
+    /// Spoolman filament ID from the project file assignment.
+    /// </summary>
+    public int? SpoolmanFilamentId { get; set; }
+
+    /// <summary>
+    /// Denormalized filament display name.
+    /// </summary>
+    public string? FilamentName { get; set; }
+
+    /// <summary>
+    /// Denormalized filament vendor name.
+    /// </summary>
+    public string? FilamentVendor { get; set; }
+
+    /// <summary>
+    /// Denormalized filament color hex.
+    /// </summary>
+    public string? FilamentColor { get; set; }
 }
 
 /// <summary>
@@ -96,6 +126,8 @@ public class QueuePrintJobDto
 public class UpdatePrintJobStatusDto
 #pragma warning restore SA1402 // File may only contain a single type
 {
+    public string? Name { get; set; }
+
     public PrintJobStatus? Status { get; set; }
 
     public PrintJobPriority? Priority { get; set; }
@@ -105,6 +137,17 @@ public class UpdatePrintJobStatusDto
     public double? ActualFilamentUsage { get; set; }
 
     public string? FailureReason { get; set; }
+
+    /// <summary>
+    /// Spoolman filament ID. Use 0 to clear the assignment.
+    /// </summary>
+    public int? SpoolmanFilamentId { get; set; }
+
+    public string? FilamentName { get; set; }
+
+    public string? FilamentVendor { get; set; }
+
+    public string? FilamentColor { get; set; }
 }
 
 /// <summary>
@@ -173,6 +216,14 @@ public class JobQueuePrintJobDto
     public double? ActualFilamentUsage { get; set; }
 
     public string? FailureReason { get; set; }
+
+    public int? SpoolmanFilamentId { get; set; }
+
+    public string? FilamentName { get; set; }
+
+    public string? FilamentVendor { get; set; }
+
+    public string? FilamentColor { get; set; }
 
     public DateTime CreatedAt { get; set; }
 
