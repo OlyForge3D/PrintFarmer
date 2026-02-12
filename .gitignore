@@ -114,3 +114,6 @@ src/api/uploads/
 /publish/
 # Data Protection Keys (auto-generated, contain encryption keys)
 src/api/data-protection-keys/
+
+# TLS certificates (self-signed, generated locally)
+deploy/nginx/certs/
