@@ -18,7 +18,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-public sealed record UpdateSettingsRequest(
-    [property: JsonPropertyName("allowedExtensions")] IReadOnlyCollection<string> AllowedExtensions);
+/// <summary>Failure detail for an individual file during multi-upload.</summary>
+public record MultiUploadFailure(
+    [property: JsonPropertyName("fileName")] string FileName,
+    [property: JsonPropertyName("error")] string Error);

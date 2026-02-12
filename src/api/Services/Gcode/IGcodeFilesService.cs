@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Controllers;
+using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services.FileManagement;
 using Microsoft.AspNetCore.Http;
 

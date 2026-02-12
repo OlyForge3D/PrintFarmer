@@ -18,7 +18,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
 /// <summary>DTO describing a single file or directory entry in the virtual G-code library listing.</summary>
 public record GcodeFileEntryDto(

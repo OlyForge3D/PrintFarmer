@@ -6,22 +6,21 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Email;
 
-public sealed class MailjetEmailService : IEmailService, IDisposable
+public sealed class MailjetEmailService : IEmailService
 {
     private const string MailjetApiBaseUrl = "https://api.mailjet.com/v3.1/send";
 
     private readonly IUnifiedLoggingService _logger;
     private readonly EmailOptions _options;
     private readonly IEmailTemplateRenderer _renderer;
-    private readonly HttpClient _http;
-    private bool _disposed;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public MailjetEmailService(IUnifiedLoggingService logger, EmailOptions options, IEmailTemplateRenderer renderer)
+    public MailjetEmailService(IUnifiedLoggingService logger, EmailOptions options, IEmailTemplateRenderer renderer, IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
         _options = options;
         _renderer = renderer;
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<EmailDispatchResult> SendAsync(EmailMessage message, CancellationToken ct = default)
@@ -33,8 +32,9 @@ public sealed class MailjetEmailService : IEmailService, IDisposable
             return new EmailDispatchResult(Success: true, ProviderMessage: "Missing API keys - logged only");
         }
 
+        using HttpClient http = _httpClientFactory.CreateClient("Mailjet");
+
         string auth = Convert.ToBase64String(Encoding.UTF8.GetBytes(_options.Mailjet.ApiKey + ":" + _options.Mailjet.ApiSecret));
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", auth);
 
         // Build payload per Mailjet v3.1 API
         var payload = new
@@ -57,7 +57,13 @@ public sealed class MailjetEmailService : IEmailService, IDisposable
 
         try
         {
-            HttpResponseMessage response = await _http.PostAsync(MailjetApiBaseUrl, content, ct);
+            using var request = new HttpRequestMessage(HttpMethod.Post, MailjetApiBaseUrl)
+            {
+                Content = content
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", auth);
+
+            HttpResponseMessage response = await http.SendAsync(request, ct);
 
             if (response.IsSuccessStatusCode)
             {
@@ -102,14 +108,5 @@ public sealed class MailjetEmailService : IEmailService, IDisposable
         var message = new EmailMessage(email, subject, plain, html);
         EmailDispatchResult result = await SendAsync(message, ct);
         return result.Success;
-    }
-
-    public void Dispose()
-    {
-        if (!_disposed)
-        {
-            _http?.Dispose();
-            _disposed = true;
-        }
     }
 }

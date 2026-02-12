@@ -18,12 +18,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-// ---------------- Chunk Upload DTOs ----------------
-public sealed record ChunkInitRequest(
-    [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("size"), JsonRequired] long Size,
-    [property: JsonPropertyName("path")] string? Path,
-    [property: JsonPropertyName("hashAlgorithm")] string? HashAlgorithm = null,
-    [property: JsonPropertyName("expectedHash")] string? ExpectedHash = null);
+/// <summary>Summary of printer model info for filtering.</summary>
+public record PrinterModelSummary(
+    [property: JsonPropertyName("id")] Guid? Id,
+    [property: JsonPropertyName("name")] string Name);

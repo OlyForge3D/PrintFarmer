@@ -18,9 +18,10 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-public record MoveRequestDto(
-    [property: JsonPropertyName("sourcePath")] string SourcePath,
-    [property: JsonPropertyName("destinationPath")] string DestinationPath,
-    [property: JsonPropertyName("overwrite")] bool Overwrite = false);
+public sealed record GcodeFileHashResponse(
+    [property: JsonPropertyName("fileName")] string FileName,
+    [property: JsonPropertyName("size")] long Size,
+    [property: JsonPropertyName("algorithm")] string Algorithm,
+    [property: JsonPropertyName("hash")] string Hash);

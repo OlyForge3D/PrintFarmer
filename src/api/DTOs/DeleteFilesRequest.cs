@@ -18,9 +18,10 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-/// <summary>Failure detail for an individual file during multi-upload.</summary>
-public record MultiUploadFailure(
-    [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("error")] string Error);
+/// <summary>Request body for bulk deletion of virtual G-code files.</summary>
+public sealed class DeleteFilesRequest
+{
+    [JsonPropertyName("fileIds")] public IList<Guid> FileIds { get; init; } = [];
+}

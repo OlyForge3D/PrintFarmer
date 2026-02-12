@@ -18,13 +18,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-public sealed record ChunkInitResponse(
-    [property: JsonPropertyName("uploadId")] string UploadId,
-    [property: JsonPropertyName("finalFileName")] string FinalFileName,
-    [property: JsonPropertyName("virtualPath")] string VirtualPath,
-    [property: JsonPropertyName("uploadedBytes")] long UploadedBytes,
-    [property: JsonPropertyName("totalSize")] long TotalSize,
-    [property: JsonPropertyName("recommendedChunkSize")] int RecommendedChunkSize,
-    [property: JsonPropertyName("hashAlgorithm")] string? HashAlgorithm);
+public record GcodeUploadSettingsResponse(
+    [property: JsonPropertyName("allowedExtensions")] IReadOnlyCollection<string> AllowedExtensions,
+    [property: JsonPropertyName("dailyUploadLimitBytes")] long DailyUploadLimitBytes,
+    [property: JsonPropertyName("userUsedBytes")] long UserUsedBytes);

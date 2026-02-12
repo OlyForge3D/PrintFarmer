@@ -18,9 +18,13 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-/// <summary>Summary of printer model info for filtering.</summary>
-public record PrinterModelSummary(
-    [property: JsonPropertyName("id")] Guid? Id,
-    [property: JsonPropertyName("name")] string Name);
+public sealed record ChunkInitResponse(
+    [property: JsonPropertyName("uploadId")] string UploadId,
+    [property: JsonPropertyName("finalFileName")] string FinalFileName,
+    [property: JsonPropertyName("virtualPath")] string VirtualPath,
+    [property: JsonPropertyName("uploadedBytes")] long UploadedBytes,
+    [property: JsonPropertyName("totalSize")] long TotalSize,
+    [property: JsonPropertyName("recommendedChunkSize")] int RecommendedChunkSize,
+    [property: JsonPropertyName("hashAlgorithm")] string? HashAlgorithm);

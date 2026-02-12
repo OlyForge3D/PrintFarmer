@@ -381,13 +381,21 @@ public static class ServiceCollectionExtensions
             cfg.GetSection("Email").Bind(opts);
             return opts;
         });
+        
+        // Register HttpClient for Mailjet
+        _ = services.AddHttpClient("Mailjet", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        
         _ = services.AddScoped<IEmailService>(sp =>
         {
             IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
             EmailOptions opts = sp.GetRequiredService<EmailOptions>();
             IEmailTemplateRenderer renderer = sp.GetRequiredService<IEmailTemplateRenderer>();
+            IHttpClientFactory httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
             return opts.Mailjet?.ApiKey != null
-                ? new MailjetEmailService(logger, opts, renderer)
+                ? new MailjetEmailService(logger, opts, renderer, httpClientFactory)
                 : new ConsoleEmailService(logger);
         });
     }

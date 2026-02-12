@@ -168,4 +168,8 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
     // Contextual manufacturer query
     public Task<ManufacturersByContextDto> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct)
         => _coreCatalogService.GetManufacturersByContextAsync(context, ct);
+
+    // Default catalog IDs
+    public Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync(CancellationToken ct)
+        => _coreCatalogService.GetDefaultCatalogIdsAsync(ct);
 }

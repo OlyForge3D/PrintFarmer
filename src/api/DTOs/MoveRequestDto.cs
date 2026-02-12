@@ -18,9 +18,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-public record GcodeUploadSettingsResponse(
-    [property: JsonPropertyName("allowedExtensions")] IReadOnlyCollection<string> AllowedExtensions,
-    [property: JsonPropertyName("dailyUploadLimitBytes")] long DailyUploadLimitBytes,
-    [property: JsonPropertyName("userUsedBytes")] long UserUsedBytes);
+public record MoveRequestDto(
+    [property: JsonPropertyName("sourcePath")] string SourcePath,
+    [property: JsonPropertyName("destinationPath")] string DestinationPath,
+    [property: JsonPropertyName("overwrite")] bool Overwrite = false);

@@ -18,10 +18,12 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-public sealed record GcodeFileHashResponse(
+// ---------------- Chunk Upload DTOs ----------------
+public sealed record ChunkInitRequest(
     [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("size")] long Size,
-    [property: JsonPropertyName("algorithm")] string Algorithm,
-    [property: JsonPropertyName("hash")] string Hash);
+    [property: JsonPropertyName("size"), JsonRequired] long Size,
+    [property: JsonPropertyName("path")] string? Path,
+    [property: JsonPropertyName("hashAlgorithm")] string? HashAlgorithm = null,
+    [property: JsonPropertyName("expectedHash")] string? ExpectedHash = null);

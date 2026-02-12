@@ -1,53 +1,33 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using System.Net;
-using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using AutoMapper;
-using Farm.Infrastructure;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Json;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
-using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api;
-using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Infrastructure.Authorization;
-using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Database;
-using Farm.Web.Api.Infrastructure.Filters;
-using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Artifacts;
-using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Startup;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -110,28 +90,7 @@ catch
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
 
 // Configure Data Protection for encrypting sensitive data (API keys, passwords)
-// IMPORTANT: In Docker deployments we mount a persistent host volume at
-// /root/.aspnet/DataProtection-Keys. Persisting keys here ensures secrets can
-// be decrypted across container restarts and upgrades.
-var keysDirectoryPath = Environment.GetEnvironmentVariable("DATAPROTECTION_KEYS_PATH");
-
-if (string.IsNullOrWhiteSpace(keysDirectoryPath))
-{
-    var userProfileDirectoryPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-    keysDirectoryPath = string.IsNullOrWhiteSpace(userProfileDirectoryPath)
-        ? Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys")
-        : Path.Combine(userProfileDirectoryPath, ".aspnet", "DataProtection-Keys");
-}
-
-Directory.CreateDirectory(keysDirectoryPath);
-builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo(keysDirectoryPath))
-    .SetApplicationName("PrintFarmer");
-
-// Register sensitive data encryption service
-builder.Services.AddSingleton<Farm.Infrastructure.Services.Security.ISensitiveDataProtector,
-    Farm.Infrastructure.Services.Security.SensitiveDataProtector>();
+builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Environment.ContentRootPath);
 
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
@@ -159,22 +118,7 @@ catch
 }
 
 // Add API services
-builder.Services.AddControllers(options =>
-    {
-        _ = options.Filters.Add<DuplicateConflictExceptionFilter>();
-    })
-    .AddJsonOptions(options =>
-    {
-        // Configure JSON options for .NET 9 compatibility
-        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-        options.JsonSerializerOptions.WriteIndented = false;
-        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-        options.JsonSerializerOptions.Converters.Add(new PrinterBackendJsonConverter());
-        options.JsonSerializerOptions.Converters.Add(new PrintJobStatusJsonConverter());
-
-        // Default string enum converter for all other enums
-        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-    });
+builder.Services.AddPrintFarmerControllers();
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -182,420 +126,32 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
 // CORS configuration for API access
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("Default", policy =>
-    {
-        // Get allowed origins from environment variable or use defaults.
-        string allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
-            ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
-            ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001";
-        bool allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
-        _ = policy.SetIsOriginAllowed(origin =>
-        {
-            if (allowLocalNetwork)
-            {
-                return true;
-            }
-
-            string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(o => o.Trim()).ToArray();
-            return configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
-        });
-        _ = policy.AllowCredentials();
-        _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with");
-        _ = policy.WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
-    });
-});
+builder.Services.AddPrintFarmerCors();
 
 // TODO: Simple rate limiting scaffold for OctoPrint endpoints - implementation pending
 // NOTE: This is a lightweight scaffold; replace with production-ready rate limiter if needed
 // builder.Services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
 
 // Configure OpenTelemetry (skippable for tests)
-bool disableTelemetry = false;
-try
-{
-    string? disableEnv = Environment.GetEnvironmentVariable("DISABLE_TELEMETRY");
-    if (!string.IsNullOrEmpty(disableEnv) && string.Equals(disableEnv, "true", StringComparison.OrdinalIgnoreCase))
-    {
-        disableTelemetry = true;
-    }
-}
-catch
-{ /* best-effort */
-}
-
-// Also skip telemetry when running under the 'Testing' environment to avoid external exporters
-if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
-{
-    // Determine console exporter setting once, outside lambdas, so both tracing and metrics can access it
-    bool enableConsoleExporter = builder.Configuration.GetValue<bool>("OpenTelemetry:ConsoleExporter:Enabled", false);
-    if (!enableConsoleExporter)
-    {
-        string? consoleEnv = Environment.GetEnvironmentVariable("OTEL_CONSOLE_EXPORTER");
-        enableConsoleExporter = string.Equals(consoleEnv, "true", StringComparison.OrdinalIgnoreCase);
-    }
-
-    _ = builder.Services.AddOpenTelemetry()
-    .ConfigureResource(resource =>
-    {
-        _ = resource.AddService("PrintFarmer.API", serviceVersion: "1.0.0")
-                .AddAttributes(new[]
-                {
-                    new KeyValuePair<string, object>("farm.environment", builder.Environment.EnvironmentName),
-                    new KeyValuePair<string, object>("farm.database.provider", builder.Configuration.GetValue<string>("DB_PROVIDER") ?? "sqlite")
-                });
-    })
-    .WithTracing(tracing =>
-    {
-        _ = tracing.AddAspNetCoreInstrumentation(options =>
-        {
-            options.RecordException = true;
-            options.EnrichWithHttpRequest = (activity, httpRequest) =>
-            {
-                _ = activity.SetTag("http.request.method", httpRequest.Method);
-                _ = activity.SetTag("http.request.path", httpRequest.Path);
-                if (httpRequest.QueryString.HasValue)
-                {
-                    _ = activity.SetTag("http.request.query", httpRequest.QueryString.Value);
-                }
-            };
-            options.EnrichWithHttpResponse = (activity, httpResponse) =>
-            {
-                _ = activity.SetTag("http.response.status_code", httpResponse.StatusCode);
-            };
-        })
-        .AddHttpClientInstrumentation()
-        .AddEntityFrameworkCoreInstrumentation(options =>
-        {
-            // Note: SetDbStatementForStoredProcedure and SetDbStatementForText removed in .NET 10
-            options.EnrichWithIDbCommand = (activity, command) =>
-            {
-                _ = activity.SetTag("db.operation", command.CommandText);
-            };
-        })
-        .AddSource("PrintFarmer.*");
-
-        // Add console exporter only if explicitly enabled (disabled by default to avoid log flooding)
-        if (enableConsoleExporter)
-        {
-            _ = tracing.AddConsoleExporter();
-        }
-
-        // Add OTLP exporter for production observability backends
-        string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
-        if (!string.IsNullOrEmpty(otlpEndpoint))
-        {
-            _ = tracing.AddOtlpExporter(options =>
-            {
-                options.Endpoint = new Uri(otlpEndpoint);
-                string? headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
-                if (!string.IsNullOrEmpty(headers))
-                {
-                    options.Headers = headers;
-                }
-            });
-        }
-    })
-    .WithMetrics(metrics =>
-    {
-        _ = metrics.AddAspNetCoreInstrumentation()
-               .AddHttpClientInstrumentation()
-               .AddRuntimeInstrumentation()
-               .AddMeter("PrintFarmer.Artifacts")
-               .AddMeter("PrintFarmer.Slicing")
-               .AddMeter("PrintFarmer.API");
-
-        // Add console exporter only if explicitly enabled (same as tracing)
-        if (enableConsoleExporter)
-        {
-            _ = metrics.AddConsoleExporter();
-        }
-
-        // Add Prometheus exporter for /metrics endpoint
-        _ = metrics.AddPrometheusExporter();
-
-        // Add OTLP exporter for metrics
-        string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
-        if (!string.IsNullOrEmpty(otlpEndpoint))
-        {
-            _ = metrics.AddOtlpExporter(options =>
-            {
-                options.Endpoint = new Uri(otlpEndpoint);
-                string? headers = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Headers");
-                if (!string.IsNullOrEmpty(headers))
-                {
-                    options.Headers = headers;
-                }
-            });
-        }
-    });
-} // end skip-telemetry guard
+builder.Services.AddPrintFarmerTelemetry(builder.Configuration, builder.Environment);
 
 // SignalR for real-time updates
-builder.Services.AddSignalR(options =>
-{
-    // Ensure single parallel invocation to prevent race conditions
-    options.MaximumParallelInvocationsPerClient = 1;
-})
-.AddJsonProtocol(options =>
-{
-    // CRITICAL: Use SAME JSON configuration as Controllers for consistency
-    // This ensures SignalR broadcasts use camelCase property names matching client expectations
-    options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    options.PayloadSerializerOptions.WriteIndented = false;
-    options.PayloadSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-
-    // Register custom converters for complex types
-    options.PayloadSerializerOptions.Converters.Add(new PrinterBackendJsonConverter());
-    options.PayloadSerializerOptions.Converters.Add(new PrintJobStatusJsonConverter());
-
-    // Default string enum converter
-    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-});
+builder.Services.AddPrintFarmerSignalR();
 
 // Health checks
-builder.Services.AddHealthChecks()
-    .AddCheck<ComprehensiveHealthCheck>("comprehensive")
-    .AddCheck<SignalRHealthCheck>("signalr")
-    .AddCheck<SpoolmanHealthCheck>("spoolman");
+builder.Services.AddPrintFarmerHealthChecks();
 
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
-// OctoPrint compatibility settings and services
-builder.Services.Configure<Farm.Web.Api.Services.OctoPrint.OctoPrintSettings>(builder.Configuration.GetSection("OctoPrint"));
-builder.Services.AddScoped<Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService, Farm.Web.Api.Services.OctoPrint.OctoPrintAuthService>();
-builder.Services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
-
-// ApiKey repository
-builder.Services.AddScoped<Farm.Web.Api.Data.Repositories.IApiKeyRepository>(sp =>
-{
-    AppDbContext db = sp.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-    return new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(db);
-});
-
-// Print job approval service
-builder.Services.AddScoped<Farm.Web.Api.Services.PrintJobs.IPrintApprovalService, Farm.Web.Api.Services.PrintJobs.PrintApprovalService>();
-
-// Print Projects Service (multi-file job tracking)
-builder.Services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectService, Farm.Web.Api.Services.Projects.PrintProjectService>();
-builder.Services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectTemplateService, Farm.Web.Api.Services.Projects.PrintProjectTemplateService>();
-
-// File Management Services
-builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
-builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService, Farm.Web.Api.Services.FileManagement.StoredFileOperationsService>();
-
-// 3MF to STL Conversion Service
-builder.Services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
-
-// Print Job Management Service (renamed from PrintQueueService)
-builder.Services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobManagementRepository>();
-builder.Services.AddScoped<Farm.Api.Services.Interfaces.IPrintJobManagementService, Farm.Api.Services.PrintQueue.PrintJobManagementService>();
-
-// Print Job Completion Sync Service (auto-marks jobs as completed when printer finishes)
-builder.Services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintJobCompletionService, Farm.Infrastructure.Services.Printers.PrintJobCompletionService>();
-
-// Job Scheduling Service (Phase 4.1)
-builder.Services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();
-
-// Prediction Service (Phase 4.2)
-builder.Services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobStatisticsRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobStatisticsRepository>();
-builder.Services.AddScoped<Farm.Infrastructure.Services.PredictionService>();
-
-// Retry Service (Phase 4.4)
-builder.Services.AddScoped<Farm.Infrastructure.Services.IRetryService, Farm.Infrastructure.Services.RetryService>();
-
-// Maintenance Module - Repositories
-builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterStatisticsRepository>();
-builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceScheduleRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceScheduleRepository>();
-builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceAlertRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceAlertRepository>();
-builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceLogRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceLogRepository>();
-
-// Maintenance Module - Services
-builder.Services.AddScoped<Farm.Web.Api.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
-
-// SPA services (only for monolithic deployments)
-bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
-if (isMonolithicDeployment)
-{
-    builder.Services.AddSpaStaticFiles(configuration =>
-    {
-        // Use relative path from content root to unified shared web root so SPA static files (prod) resolve.
-        string shared = builder.Environment.WebRootPath;
-        try
-        {
-            if (string.IsNullOrWhiteSpace(shared) || !Directory.Exists(shared))
-            {
-                // Fallback: look for a local wwwroot under content root (publish scenario)
-                string fallback = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
-                if (Directory.Exists(fallback))
-                {
-                    shared = fallback;
-                }
-                else
-                {
-                    // No static root available; skip configuring SPA static files.
-                    return; // leaves configuration.RootPath unset -> no static file serving attempt
-                }
-            }
-
-            string relative = Path.GetRelativePath(builder.Environment.ContentRootPath, shared);
-            configuration.RootPath = relative; // e.g. ../../wwwroot or wwwroot
-        }
-        catch
-        {
-            // Safety: if relative path resolution fails (null args, etc.), skip static file mapping to avoid container crash.
-        }
-    });
-}
-
-// Dynamic SPA dev proxy support (development only)
-if (isMonolithicDeployment && builder.Environment.IsDevelopment())
-{
-    // Default dev server URL (configurable via SPA_DEV_URL); using widely adopted Vite default.
-    string? devUrl = builder.Configuration.GetValue<string>("SPA_DEV_URL");
-    if (string.IsNullOrWhiteSpace(devUrl))
-    {
-        devUrl = string.Concat("http://localhost:", "3000"); // constructed to avoid hardcoded analyzer warning
-    }
-
-    _ = builder.Services.AddSingleton(_ => new SpaProxyActivationState(devUrl));
-    _ = builder.Services.AddHttpClient("SpaProxy");
-
-    // SpaDevServerWatcher is implemented as a BackgroundService; register it as a hosted service
-    _ = builder.Services.AddHostedService<SpaDevServerWatcher>();
-}
+// Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
+builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
 
 // Register background services for distributed slicing
-builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.WorkerHealthMonitorService>();
-builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobDispatchingService>();
+builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);
 
-// Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
-builder.Services.Configure<Farm.Web.Api.Services.Workers.JobDispatchRetrySettings>(builder.Configuration.GetSection("JobDispatchRetry"));
-
-// Circuit breaker for worker failure tracking
-builder.Services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>(builder.Configuration.GetSection("CircuitBreaker"));
-builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
-builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
-
-// Stale worker cleanup service
-builder.Services.Configure<Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings.SectionName));
-builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.StaleWorkerCleanupHostedService>();
-
-// Maintenance Module - Print Statistics Sync Service
-builder.Services.Configure<Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings.SectionName));
-builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSyncHostedService>();
-
-// Maintenance Module - Maintenance Alert Engine
-builder.Services.Configure<Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings.SectionName));
-builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.MaintenanceAlertHostedService>();
-
-// Orphaned Job Sync - Runs once on startup to sync jobs stuck in "Printing" status
-// This handles cases where the API restarts while a print completes
-builder.Services.AddHostedService<Farm.Web.Api.Services.Startup.OrphanedJobSyncStartupService>();
-
-// History Seeding - Periodically seeds job history from connected printers
-// This captures jobs dispatched outside of PrintFarmer (e.g., via Mainsail/Fluidd)
-builder.Services.Configure<Farm.Web.Api.Services.Workers.HistorySeedingSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.HistorySeedingSettings.SectionName));
-builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.HistorySeedingBackgroundService>();
-
-// Register asset service for OrcaSlicer printer images and bed textures
-builder.Services.AddSingleton<IAssetService, AssetService>();
-
-// Register file consistency audit background service
-// Runs hourly to detect orphaned/missing/corrupted files
-builder.Services.AddHostedService(sp =>
-{
-    IServiceScopeFactory scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-    IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
-    IConfiguration config = sp.GetRequiredService<IConfiguration>();
-    string modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
-    string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
-    return new Farm.Web.Api.Services.FileManagement.FileConsistencyAuditService(
-        scopeFactory,
-        logger,
-        modelStoragePath,
-        gcodeStoragePath);
-});
-
-// Add JWT Authentication
-builder.Services.AddAuthentication("Bearer")
-    .AddJwtBearer("Bearer", options =>
-    {
-        // Enable extra diagnostics in Development and Testing
-        if (builder.Environment.IsDevelopment() || builder.Environment.EnvironmentName == "Testing")
-        {
-            // Avoid building a temporary service provider here (BuildServiceProvider creates a second provider and may duplicate singletons).
-            // We intentionally pass nulls here; the ProgramHelpers events will fall back to resolving per-request if needed.
-            // The concrete startup logging references will be populated after the application is built.
-            options.Events = ProgramHelpers.CreateJwtEvents(null, null);
-        }
-
-        // Allow HTTP in test runs and relax validation for test environment
-        if (builder.Environment.EnvironmentName == "Testing")
-        {
-            options.RequireHttpsMetadata = false;
-        }
-
-        string? key = builder.Configuration["Jwt:Key"];
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            throw new InvalidOperationException("JWT Key not configured. Provide a 32+ character secret via environment variable Jwt__Key or user-secrets in development.");
-        }
-
-        string issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
-        string audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
-
-        TokenValidationParameters tvp = new()
-        {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
-            ValidateIssuer = true,
-            ValidIssuer = issuer,
-            ValidateAudience = true,
-            ValidAudience = audience,
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero
-        };
-
-        // NOTE: Previously issuer/audience validation was relaxed in the "Testing" environment.
-        // All integration tests now obtain tokens exclusively via the authentication endpoints,
-        // which generate tokens including both issuer and audience (see AuthenticationService).
-        // Enforcing validation in tests prevents accidental acceptance of malformed tokens.
-        // (If a future test truly needs to bypass these checks, generate a properly formed token
-        // instead of weakening validation here.)
-        options.TokenValidationParameters = tvp;
-    });
-
-// Add Authorization with custom policies
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
-    options.AddPolicy("RequireAdmin", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.RequireRole("farm_admin");
-    });
-
-    // Historical policy name used across controllers. Keep an alias so existing
-    // controllers using [Authorize(Policy = "farm_admin")] continue to work.
-    options.AddPolicy("farm_admin", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.RequireRole("farm_admin");
-    });
-    options.AddPolicy("CanViewSliceQueue", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.RequireRole("farm_admin");
-    });
-});
-
-// Register authorization handlers
-builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
-builder.Services.AddSingleton<IAuthorizationHandler, DevModeAuthorizationHandler>();
+// Add JWT Authentication and Authorization
+builder.Services.AddPrintFarmerAuthentication(builder.Configuration, builder.Environment);
 
 // Bind (HTTP) to configured dev port; using launchSettings.json for default. Override via ASPNETCORE_URLS if needed.
 #pragma warning disable S1075 // URIs should not be hardcoded
@@ -960,6 +516,7 @@ app.MapGet("/api/debug/db-info", async (
 });
 
 // Configure SPA only for monolithic deployments (not microservices)
+bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 if (isMonolithicDeployment)
 {
     // Only enable static file / SPA pipeline if a web root actually exists (prebuilt assets). In container builds

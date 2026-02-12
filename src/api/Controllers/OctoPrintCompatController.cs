@@ -2,6 +2,7 @@
 using System.IO;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Filters;
 using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.OctoPrint;

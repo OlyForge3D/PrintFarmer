@@ -18,7 +18,7 @@ using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
 /// <summary>
 /// Request DTO for deleting multiple models

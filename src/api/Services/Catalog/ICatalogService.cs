@@ -97,4 +97,7 @@ public interface ICatalogService
 
     /// <summary>Gets manufacturers filtered by context (printers vs. components).</summary>
     Task<ManufacturersByContextDto> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct);
+
+    /// <summary>Gets the default (Unknown) manufacturer and model IDs.</summary>
+    Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync(CancellationToken ct);
 }

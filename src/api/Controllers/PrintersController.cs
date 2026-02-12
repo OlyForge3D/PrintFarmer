@@ -41,7 +41,6 @@ public class PrintersController(
     IUnifiedLoggingService logger,
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
-    Farm.Infrastructure.Repositories.Catalog.ICatalogRepository catalogRepository,
     IValidator<CreatePrinterFromDiscoveryDto> validator,
     Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
@@ -54,7 +53,6 @@ public class PrintersController(
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
-    private readonly Farm.Infrastructure.Repositories.Catalog.ICatalogRepository _catalogRepository = catalogRepository;
     private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
@@ -1286,7 +1284,6 @@ public class PrintersController(
         {
             string name = dto.NewManufacturerName!.Trim();
 
-            // ICatalogRepository does not expose GetManufacturerByName; create via CatalogService
             ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, null, null, ct);
             manufacturerId = created.Id;
         }
@@ -1311,26 +1308,16 @@ public class PrintersController(
         // Use default catalog entries if manufacturer or model are still empty
         if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
         {
+            (Guid defaultManufacturerId, Guid defaultModelId) = await _catalogService.GetDefaultCatalogIdsAsync(ct);
+
             if (manufacturerId == Guid.Empty)
             {
-                Guid? unknownMfgId = await _catalogRepository.GetUnknownManufacturerIdAsync(ct);
-                if (!unknownMfgId.HasValue)
-                {
-                    throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
-                }
-
-                manufacturerId = unknownMfgId.Value;
+                manufacturerId = defaultManufacturerId;
             }
 
             if (modelId == Guid.Empty)
             {
-                Guid? unknownModelId = await _catalogRepository.GetUnknownModelIdAsync(ct);
-                if (!unknownModelId.HasValue)
-                {
-                    throw new InvalidOperationException("Unknown model not found. Ensure database seeding has been completed.");
-                }
-
-                modelId = unknownModelId.Value;
+                modelId = defaultModelId;
             }
         }
 

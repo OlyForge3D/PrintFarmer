@@ -18,11 +18,15 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Web.Api.DTOs;
 
-/// <summary>Response for multi-file upload endpoint.</summary>
-public record MultiUploadResponse(
-    [property: JsonPropertyName("created")] IReadOnlyList<GcodeFileEntryDto> Created,
-    [property: JsonPropertyName("failed")] IReadOnlyList<MultiUploadFailure> Failed,
-    [property: JsonPropertyName("succeededCount")] int SucceededCount,
-    [property: JsonPropertyName("failedCount")] int FailedCount);
+public sealed record ChunkStatusResponse(
+    [property: JsonPropertyName("uploadId")] string UploadId,
+    [property: JsonPropertyName("finalFileName")] string FinalFileName,
+    [property: JsonPropertyName("uploadedBytes")] long UploadedBytes,
+    [property: JsonPropertyName("totalSize")] long TotalSize,
+    [property: JsonPropertyName("completed")] bool Completed,
+    [property: JsonPropertyName("finalHash")] string? FinalHash = null,
+    [property: JsonPropertyName("paused")] bool Paused = false,
+    [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null,
+    [property: JsonPropertyName("gcodeFileId")] Guid? GcodeFileId = null);
