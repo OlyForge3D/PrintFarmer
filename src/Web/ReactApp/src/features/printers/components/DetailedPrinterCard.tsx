@@ -729,10 +729,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
             className="!w-full"
           />
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
+          <ControlPadButton
             disabled={!canManualMoveNow}
             onClick={() => {
               const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
@@ -740,10 +737,11 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                 console.log('[PrintFarmer] DetailedPrinterCard: Moving to', moveX, moveY, moveZ);
               }
             }}
-            className="w-full h-full !p-0"
+            title="Go to position"
+            padSize="small"
           >
             GO
-          </Button>
+          </ControlPadButton>
         </div>
       </div>
 

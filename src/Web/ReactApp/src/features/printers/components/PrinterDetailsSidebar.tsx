@@ -27,6 +27,7 @@ import {
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection } from '@/common/components/ui';
+import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import {
   NozzleIcon,
   BedIcon,
@@ -609,42 +610,33 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           onToggle={setIsControlExpanded}
         >
           <div className="flex flex-col gap-0">
-            {/* Control buttons row - 3 buttons matching XY pad width and height */}
-            <div className="grid grid-cols-3 gap-1 w-40 h-12">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
+            {/* Control buttons row - matching DetailedPrinterCard sizing */}
+            <div className="grid grid-cols-3 gap-1 w-fit">
+              <ControlPadButton
                 disabled={!canPauseOrResumeNow}
                 onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
                 title={isPaused ? 'Resume print' : 'Pause print'}
-                className="w-full h-full !p-0"
-                iconCenter={isPaused ? <PlayIcon className="h-6 w-6" /> : <PauseIcon className="h-6 w-6" />}
-              ></Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
+                padSize="small"
+              >
+                {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
+              </ControlPadButton>
+              <ControlPadButton
                 disabled={!canCancelNow}
                 onClick={() => handleControlAction('cancel')}
                 title="Cancel print"
-                className="w-full h-full !p-0"
-                iconCenter={<XCircleIcon className="h-6 w-6" ariaLabel="Cancel" />}
-              ></Button>
-              <Button
-                type="button"
+                padSize="small"
+              >
+                <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
+              </ControlPadButton>
+              <ControlPadButton
                 variant={isShutdown ? 'secondary' : 'danger'}
-                size="sm"
                 disabled={!canEmergencyStopNow}
                 onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                 title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-                className="w-full h-full !p-0"
-                iconLeft={isShutdown ? (
-                  <RefreshIcon className="h-6 w-6" />
-                ) : (
-                  <EmergencyStopIcon className="h-6 w-6" />
-                )}
-              ></Button>
+                padSize="small"
+              >
+                {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
+              </ControlPadButton>
             </div>
           </div>
         </CollapsibleSection>

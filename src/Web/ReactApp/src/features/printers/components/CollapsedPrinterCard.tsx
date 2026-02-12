@@ -237,31 +237,31 @@ export function CollapsedPrinterCard({
       </div>
 
       {/* Control buttons */}
-      <div className="flex items-center justify-between gap-2 mb-2 w-full">
+      <div className="flex items-center gap-1 mb-2">
         <ControlPadButton
           disabled={!canPauseOrResumeNow}
           onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
           title={isPaused ? 'Resume' : 'Pause'}
-          padSize="medium"
+          padSize="small"
         >
-          {isPaused ? <PlayIcon className="h-6 w-6" /> : <PauseIcon className="h-6 w-6" />}
+          {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
         </ControlPadButton>
         <ControlPadButton
           disabled={!canCancelNow}
           onClick={() => handleControlAction('cancel')}
           title="Cancel"
-          padSize="medium"
+          padSize="small"
         >
-          <XCircleIcon className="h-6 w-6" ariaLabel="Cancel" />
+          <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
         </ControlPadButton>
         <ControlPadButton
           variant={isShutdown ? 'secondary' : 'danger'}
           disabled={!canEmergencyStopNow}
           onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
           title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-          padSize="medium"
+          padSize="small"
         >
-          {isShutdown ? <RefreshIcon className="h-6 w-6" /> : <EmergencyStopIcon className="h-6 w-6" />}
+          {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
         </ControlPadButton>
       </div>
 
