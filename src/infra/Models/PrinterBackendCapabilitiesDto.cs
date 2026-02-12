@@ -22,7 +22,8 @@ public record PrinterBackendCapabilitiesDto(
     bool SupportsMovement = false,
     bool SupportsTemperatureControl = false,
     bool SupportsPrinterInformation = false,
-    bool SupportsHistory = false)
+    bool SupportsHistory = false,
+    bool SupportsFilamentControl = false)
 {
     /// <summary>
     /// Gets a summary of all supported capabilities as a formatted string.
@@ -86,6 +87,11 @@ public record PrinterBackendCapabilitiesDto(
             if (SupportsHistory)
             {
                 caps.Add("History");
+            }
+
+            if (SupportsFilamentControl)
+            {
+                caps.Add("FilamentControl");
             }
 
             return caps.ToArray();

@@ -73,6 +73,11 @@ import {
   SpoolmanBulkUpdateFilamentsRequest,
   SpoolmanBulkUpdateResult,
   SpoolmanUpdateFilamentRequest,
+  FilamentCsvImportResult,
+  SpoolmanDbFilamentEntry,
+  SpoolmanDbMaterialEntry,
+  SpoolmanDbImportRequest,
+  SpoolmanDbImportResult,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -679,6 +684,63 @@ export class ApiClient {
       `/printers/${printerId}/disable-motors`
     );
     return response.data;
+  }
+
+  async loadFilament(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/filament-load`
+    );
+    return response.data;
+  }
+
+  async unloadFilament(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/filament-unload`
+    );
+    return response.data;
+  }
+
+  async changeFilament(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/filament-change`
+    );
+    return response.data;
+  }
+
+  /**
+   * Set the active spool on a printer via Spoolman.
+   * @param printerId The printer's GUID
+   * @param spoolId The Spoolman spool ID to activate
+   */
+  async setActiveSpool(printerId: string, spoolId: number): Promise<boolean> {
+    const response = await this.client.post<boolean>(
+      `/printers/${printerId}/active-spool`,
+      { spoolId }
+    );
+    return response.data;
+  }
+
+  /**
+   * Clear the active spool on a printer via Spoolman.
+   * @param printerId The printer's GUID
+   */
+  async clearActiveSpool(printerId: string): Promise<boolean> {
+    const response = await this.client.post<boolean>(
+      `/printers/${printerId}/active-spool`,
+      { spoolId: null }
+    );
+    return response.data;
+  }
+
+  /**
+   * Get spools available on a printer's Spoolman instance (via Moonraker proxy).
+   * Each printer may use a different Spoolman server.
+   * @param printerId The printer's GUID
+   */
+  async getPrinterSpools(printerId: string): Promise<SpoolmanSpool[]> {
+    const response = await this.client.get(`/printers/${printerId}/spoolman/spools`);
+    const data = response.data;
+    return Array.isArray(data) ? data : [];
   }
 
   // ============ Printer History API methods ============

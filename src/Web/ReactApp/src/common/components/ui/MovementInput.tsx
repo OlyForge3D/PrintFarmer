@@ -10,12 +10,16 @@ export interface MovementInputProps extends Omit<InputProps, 'type'> {
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   /** Step value for increment/decrement */
   step?: number;
+  /** Current position to display as a groupbox-style label overlapping the top border */
+  currentPosition?: number | null;
 }
 
 /**
  * Movement/distance input component for XYZ axis controls
  * Used for printer head movement controls (nozzle positioning)
  * Features: Number input with axis label, compact sizing, spinner button removal
+ * When `currentPosition` is provided, renders a groupbox-style label showing
+ * the current axis position overlapping the top-right border of the input.
  */
 export function MovementInput({
   axis,
@@ -24,12 +28,18 @@ export function MovementInput({
   step = 1,
   disabled = false,
   className,
+  currentPosition,
   ...props
 }: MovementInputProps) {
 
   return (
-    <div className="relative inline-block">
-      <span className="absolute left-2 text-slate-500 text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
+    <div className={`relative ${currentPosition != null ? 'pt-2' : ''} inline-block`}>
+      {currentPosition != null && (
+        <span className="absolute -top-0.5 right-2 px-1 bg-pf-bg-1 text-[10px] font-bold text-pf-text-secondary z-10">
+          [ {(currentPosition ?? 0).toFixed(1)} ]
+        </span>
+      )}
+      <span className="absolute left-2 bottom-1.5 text-slate-500 text-xs pointer-events-none z-10">
         {axis}
       </span>
       <Input

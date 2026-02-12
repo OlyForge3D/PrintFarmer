@@ -56,7 +56,7 @@ export const GcodeListView: React.FC<GcodeListViewProps> = ({
   }
 
   return (
-    <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto flex-1">
+    <div className="bg-pf-card rounded-lg border border-pf-border overflow-x-auto flex-1">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-pf-border bg-pf-bg-2 sticky top-0">

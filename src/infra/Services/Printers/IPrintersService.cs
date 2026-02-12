@@ -394,6 +394,57 @@ public interface IPrintersService
     Task<bool> DisableMotorsAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Sends an arbitrary G-code command to the printer.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="gcode">The G-code command string to execute (e.g., "LOAD_FILAMENT", "M600")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if command sent successfully, false if backend unavailable or unsupported</returns>
+    Task<bool> SendGcodeAsync(Guid id, string gcode, CancellationToken ct);
+
+    /// <summary>
+    /// Loads filament into the extruder via the backend's filament control capability.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> LoadFilamentAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Unloads filament from the extruder via the backend's filament control capability.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> UnloadFilamentAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Initiates a filament change procedure via the backend's filament control capability.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> ChangeFilamentAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Sets or clears the active Spoolman spool for a printer.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="spoolId">The spool ID to activate, or null to clear</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> SetActiveSpoolAsync(Guid id, int? spoolId, CancellationToken ct);
+
+    /// <summary>
+    /// Lists available spools from the Spoolman instance connected to a printer's backend.
+    /// Routes through the printer's backend proxy so each printer can use its own Spoolman server.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Parsed spool DTOs, or null if the printer is not found or does not support Spoolman</returns>
+    Task<IReadOnlyList<SpoolmanSpoolDto>?> ListPrinterSpoolsAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
     /// Starts printing a gcode file that exists on the printer's storage.
     /// </summary>
     /// <param name="id">The printer ID</param>

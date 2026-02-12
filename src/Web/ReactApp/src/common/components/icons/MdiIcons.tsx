@@ -97,6 +97,10 @@ import {
   mdiArrowAll,
   mdiTimerSand,
   mdiMapMarker,
+  mdiTrayArrowDown,
+  mdiTrayArrowUp,
+  mdiSwapVertical,
+  mdiEject,
 } from '@mdi/js';
 
 interface IconProps {
@@ -2834,6 +2838,72 @@ export function OrthographicIcon({ className = 'w-4 h-4', ariaLabel = 'Orthograp
 }
 
 /**
+ * Filament load icon - Arrow down into tray
+ *
+ * @component
+ * @preview ![tray-arrow-down](https://unpkg.com/@mdi/svg@7.4.47/svg/tray-arrow-down.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/tray-arrow-down.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FilamentLoadIcon({ className = 'w-4 h-4', ariaLabel = 'Load filament' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiTrayArrowDown} />
+    </svg>
+  );
+}
+
+/**
+ * Filament unload icon - Arrow up from tray
+ *
+ * @component
+ * @preview ![tray-arrow-up](https://unpkg.com/@mdi/svg@7.4.47/svg/tray-arrow-up.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/tray-arrow-up.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FilamentUnloadIcon({ className = 'w-4 h-4', ariaLabel = 'Unload filament' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiTrayArrowUp} />
+    </svg>
+  );
+}
+
+/**
+ * Filament change icon - Swap vertical arrows
+ *
+ * @component
+ * @preview ![swap-vertical](https://unpkg.com/@mdi/svg@7.4.47/svg/swap-vertical.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/swap-vertical.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FilamentChangeIcon({ className = 'w-4 h-4', ariaLabel = 'Change filament' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiSwapVertical} />
+    </svg>
+  );
+}
+
+/**
  * Recenter camera icon - Reset camera position
  */
 export function RecenterIcon({ className = 'w-4 h-4', ariaLabel = 'Recenter View' }: Omit<IconProps, 'isOn'>) {
@@ -2845,6 +2915,22 @@ export function RecenterIcon({ className = 'w-4 h-4', ariaLabel = 'Recenter View
       role="img"
     >
       <path fill="currentColor" d={mdiHome} />
+    </svg>
+  );
+}
+
+/**
+ * Eject icon - used for ejecting/removing active spool
+ */
+export function EjectIcon({ className = 'w-4 h-4', ariaLabel = 'Eject' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiEject} />
     </svg>
   );
 }

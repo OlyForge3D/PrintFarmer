@@ -266,6 +266,7 @@ export interface PrinterBackendCapabilitiesDto {
   supportsTemperatureControl: boolean;
   supportsPrinterInformation: boolean;
   supportsHistory: boolean;
+  supportsFilamentControl: boolean;
 }
 
 /**

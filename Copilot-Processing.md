@@ -1,4 +1,30 @@
-# Copilot Processing — PFarm1-j4g: Split SpoolsPage into Filaments and Spools tabs
+# Copilot Processing
+
+## Request
+Add Filament Load, Unload, and Change GCode macros and buttons for Moonraker backends, accessible from the sidebar and detailed printer cards.
+
+## Action Plan
+
+### Phase 1: Research ✅
+- Identified `ISupportsGcodeExecution` interface with `SendGcodeAsync(baseUrl, gcode, ct)`
+- MoonrakerClient implements this interface
+- PrintersController has control endpoints (`home`, `pause`, `cancel`, `emergency-stop`, `disable-motors`)
+- PrintersService uses `ISupportsGcodeExecution` for DisableMotors (M84) and EmergencyStop (M112)
+- Frontend `api.ts` has methods per control action
+- Sidebar and DetailedPrinterCard both have `handleControlAction` switch statements
+
+### Phase 2: Backend - Add SendGcodeAsync + endpoint
+- [ ] Add `SendGcodeAsync(Guid id, string gcode)` to `IPrintersService`
+- [ ] Implement in `PrintersService`
+- [ ] Add `POST {id}/gcode` endpoint to `PrintersController`
+
+### Phase 3: Frontend changes
+- [ ] Add `sendGcode(printerId, gcode)` to `api.ts`
+- [ ] Add filament buttons to sidebar (Moonraker only)
+- [ ] Add filament buttons to printer card (Moonraker only)
+
+### Phase 4: Build & Verify
+- [ ] Build + test + lint — PFarm1-j4g: Split SpoolsPage into Filaments and Spools tabs
 
 **Session**: Split SpoolsPage into tabbed Filaments + Spools view
 **Date**: 2026-02-10

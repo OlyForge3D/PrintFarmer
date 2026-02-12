@@ -88,10 +88,14 @@ export function PrinterTableView({
       case 'paused':
         return 'text-pf-warning';
       case 'error':
+      case 'shutdown':
+      case 'halted':
         return 'text-pf-error-text';
-      case 'ready':
+      case 'disconnected':
+        return 'text-pf-text-tertiary';
       case 'idle':
-      case 'operational':
+      case 'complete':
+      case 'cancelled':
         return 'text-pf-accent';
       default:
         return 'text-pf-text-secondary';

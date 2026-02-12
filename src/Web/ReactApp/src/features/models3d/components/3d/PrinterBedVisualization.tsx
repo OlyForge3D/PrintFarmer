@@ -24,7 +24,7 @@ import {
 export interface PrinterStatus {
   printerId: string;
   name: string;
-  state: 'Idle' | 'Printing' | 'Paused' | 'Error' | 'Offline';
+  state: 'Idle' | 'Printing' | 'Paused' | 'Error' | 'Offline' | 'Shutdown' | 'Halted' | 'Disconnected' | 'Complete' | 'Cancelled' | 'Connecting';
   nozzlePosition?: {
     x: number;
     y: number;

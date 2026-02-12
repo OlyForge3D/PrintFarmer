@@ -5,8 +5,7 @@ import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
 import { formatPrinterState } from '@/common/utils/printerStateDisplay';
-import type { MoveRequest, Printer, PrinterBackendCapabilitiesDto, TempTargets } from '@/types/api';
-import { PrinterBackend } from '@/types/api';
+import { PrinterBackend, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import {
@@ -14,6 +13,8 @@ import {
   canCooldown,
   canDisableMotors,
   canEmergencyStop,
+  canFilamentChange,
+  canFilamentControl,
   canMove,
   canOpenFiles,
   canOpenHistory,
@@ -25,7 +26,7 @@ import {
 } from '@/features/printers/utils/printerSupport';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { renderUnknown } from '@/common/utils/renderUnknown';
-import { Button, TemperatureInput, MovementInput, Select } from '@/common/components/ui';
+import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection } from '@/common/components/ui';
 import {
   NozzleIcon,
   BedIcon,
@@ -41,12 +42,15 @@ import {
   FileIcon,
   RefreshIcon,
   HistoryIcon,
-  ChevronDownIcon,
   CloseIcon,
-  MinusIcon,
   SnowflakeIcon,
   XCircleIcon,
+  FilamentLoadIcon,
+  FilamentUnloadIcon,
+  FilamentChangeIcon,
+  EjectIcon,
 } from '@/common/components/icons/MdiIcons';
+import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 
 // Animation styles
 // Use unique keyframe/class names to avoid collisions with other injected styles.
@@ -130,6 +134,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   }, []);
 
   const [isStatisticsExpanded, setIsStatisticsExpanded] = useState(false);
+  const [isVersionExpanded, setIsVersionExpanded] = useState(true);
+  const [isControlExpanded, setIsControlExpanded] = useState(true);
+  const [isMoveExpanded, setIsMoveExpanded] = useState(true);
+  const [isQuickAccessExpanded, setIsQuickAccessExpanded] = useState(true);
+  const [isManualMoveExpanded, setIsManualMoveExpanded] = useState(true);
+  const [isFilamentExpanded, setIsFilamentExpanded] = useState(true);
+  const [isSpoolExpanded, setIsSpoolExpanded] = useState(true);
+  const [showSpoolPicker, setShowSpoolPicker] = useState(false);
+  const [spoolActionPending, setSpoolActionPending] = useState(false);
 
   const printerStatisticsQuery = useQuery({
     queryKey: ['printerStatistics', printerId],
@@ -143,7 +156,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const printerVersionQuery = useQuery({
     queryKey: ['printerVersion', printerId],
     queryFn: () => apiClient.getPrinterVersionInfo(printerId!),
-    enabled: !!printerId,
+    enabled: !!printerId && isVersionExpanded,
     staleTime: 10 * 60_000,
     gcTime: 60 * 60_000,
     refetchOnWindowFocus: false,
@@ -214,7 +227,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
     return (
-      <div className="w-96 h-full bg-linear-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 flex items-center justify-center shrink-0">
+      <div className="w-96 h-full bg-pf-sidebar border-l border-pf-border shadow-lg z-30 flex items-center justify-center shrink-0">
         <div className="text-pf-text-secondary">Loading...</div>
       </div>
     );
@@ -361,6 +374,22 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
+  const handleFilamentAction = async (action: 'load' | 'unload' | 'change') => {
+    try {
+      const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
+        load: () => apiClient.loadFilament(printer.id),
+        unload: () => apiClient.unloadFilament(printer.id),
+        change: () => apiClient.changeFilament(printer.id),
+      };
+      const result = await methodMap[action]();
+      if (!result.success) {
+        console.error(`Failed to ${action} filament:`, result.error);
+      }
+    } catch (error) {
+      console.error(`Error during filament ${action}:`, error);
+    }
+  };
+
   const handleHotendTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || hotendTemp === '') return;
 
@@ -445,8 +474,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     <div
       className={
         layout === 'content'
-          ? `w-full bg-linear-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
-          : `w-96 h-full bg-linear-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`
+          ? `w-full max-w-sm bg-pf-sidebar border border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
+          : `w-96 h-full bg-pf-sidebar border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`
       }
     >
       {/* Header */}
@@ -473,85 +502,62 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       {/* Scrollable Content */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Statistics */}
-        <section aria-labelledby="printer-statistics-heading" className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h3 id="printer-statistics-heading" className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsStatisticsExpanded(v => !v)}
-                aria-expanded={isStatisticsExpanded}
-                aria-controls="printer-statistics-panel"
-                className="!px-0 !py-0 !h-auto text-pf-text-secondary hover:text-pf-text-primary"
-                iconLeft={
-                  <ChevronDownIcon
-                    className={`h-4 w-4 transition-transform ${isStatisticsExpanded ? 'rotate-180' : ''}`}
-                    ariaLabel={isStatisticsExpanded ? 'Collapse statistics' : 'Expand statistics'}
-                  />
-                }
-              >
-                Statistics
-              </Button>
-            </h3>
-
-            {isStatisticsExpanded && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => void printerStatisticsQuery.refetch()}
-                className="!p-1 !h-auto"
-                title="Refresh statistics"
-                aria-label="Refresh statistics"
-                iconCenter={<RefreshIcon className="h-4 w-4" />}
-              ></Button>
-            )}
-          </div>
-
-          {isStatisticsExpanded && (
-            <div id="printer-statistics-panel">
-              {printerStatisticsQuery.isLoading ? (
-                <div className="text-sm text-pf-text-secondary">Loading statistics…</div>
-              ) : printerStatisticsQuery.data ? (
-                <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-                  <div>
-                    <dt className="text-xs text-pf-text-secondary">Print time</dt>
-                    <dd className="font-medium text-pf-text-primary">{formatHours(printerStatisticsQuery.data.totalPrintHours)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-pf-text-secondary">Filament</dt>
-                    <dd className="font-medium text-pf-text-primary">{formatFilament(printerStatisticsQuery.data.totalFilamentUsedGrams)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-pf-text-secondary">Completed</dt>
-                    <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsCompleted}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-pf-text-secondary">Failed</dt>
-                    <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsFailed}</dd>
-                  </div>
-                  <div className="col-span-2">
-                    <dt className="text-xs text-pf-text-secondary">Last sync</dt>
-                    <dd className="text-pf-text-primary">
-                      {printerStatisticsQuery.data.lastSyncTime ? new Date(printerStatisticsQuery.data.lastSyncTime).toLocaleString() : '—'}
-                    </dd>
-                  </div>
-                </dl>
-              ) : (
-                <div className="text-sm text-pf-text-secondary">Statistics unavailable.</div>
-              )}
-            </div>
+        <CollapsibleSection
+          title="Statistics"
+          expanded={isStatisticsExpanded}
+          onToggle={setIsStatisticsExpanded}
+          defaultExpanded={false}
+          headerActions={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void printerStatisticsQuery.refetch()}
+              className="!p-1 !h-auto"
+              title="Refresh statistics"
+              aria-label="Refresh statistics"
+              iconCenter={<RefreshIcon className="h-4 w-4" />}
+            ></Button>
+          }
+        >
+          {printerStatisticsQuery.isLoading ? (
+            <div className="text-sm text-pf-text-secondary">Loading statistics…</div>
+          ) : printerStatisticsQuery.data ? (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Print time</dt>
+                <dd className="font-medium text-pf-text-primary">{formatHours(printerStatisticsQuery.data.totalPrintHours)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Filament</dt>
+                <dd className="font-medium text-pf-text-primary">{formatFilament(printerStatisticsQuery.data.totalFilamentUsedGrams)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Completed</dt>
+                <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsCompleted}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Failed</dt>
+                <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsFailed}</dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-xs text-pf-text-secondary">Last sync</dt>
+                <dd className="text-pf-text-primary">
+                  {printerStatisticsQuery.data.lastSyncTime ? new Date(printerStatisticsQuery.data.lastSyncTime).toLocaleString() : '—'}
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <div className="text-sm text-pf-text-secondary">Statistics unavailable.</div>
           )}
-        </section>
+        </CollapsibleSection>
 
         {/* Version */}
-        <section aria-labelledby="printer-version-heading" className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h3 id="printer-version-heading" className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-              Version
-            </h3>
-
+        <CollapsibleSection
+          title="Version"
+          expanded={isVersionExpanded}
+          onToggle={setIsVersionExpanded}
+          headerActions={
             <Button
               type="button"
               variant="ghost"
@@ -562,8 +568,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               aria-label="Refresh version info"
               iconCenter={<RefreshIcon className="h-4 w-4" />}
             ></Button>
-          </div>
-
+          }
+        >
           {printerVersionQuery.isLoading ? (
             <div className="text-sm text-pf-text-secondary">Loading version…</div>
           ) : printerVersionQuery.data ? (
@@ -594,13 +600,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           ) : (
             <div className="text-sm text-pf-text-secondary">Version unavailable.</div>
           )}
-        </section>
+        </CollapsibleSection>
 
-        {/* Control Section - MOVED TO TOP */}
-        <div className="flex flex-col gap-2">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-            Control
-          </div>
+        {/* Control Section */}
+        <CollapsibleSection
+          title="Control"
+          expanded={isControlExpanded}
+          onToggle={setIsControlExpanded}
+        >
           <div className="flex flex-col gap-0">
             {/* Control buttons row - 3 buttons matching XY pad width and height */}
             <div className="grid grid-cols-3 gap-1 w-40 h-12">
@@ -639,37 +646,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 )}
               ></Button>
             </div>
-            {/* Step control */}
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canSetStepNow}
-                onClick={() => setStep(Math.max(1, step - 5))}
-                className="flex-1 p-0 text-xs"
-                iconCenter={<MinusIcon className="h-3 w-3" />}
-              ></Button>
-              <span className="text-xs text-pf-text-secondary flex-1 text-center">{step}mm</span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canSetStepNow}
-                onClick={() => setStep(step + 5)}
-                className="flex-1 p-0 text-xs"
-              >
-                +
-              </Button>
-            </div>
           </div>
-        </div>
+        </CollapsibleSection>
 
         {/* Move Section */}
-        <div className="flex flex-col gap-2">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-            Move
-          </div>
+        <CollapsibleSection
+          title="Move"
+          expanded={isMoveExpanded}
+          onToggle={setIsMoveExpanded}
+        >
           <div className="flex gap-4 items-start">
             {/* XY Pad */}
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-40 h-36">
@@ -785,13 +770,16 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               </Button>
             </div>
           </div>
-        </div>
+          {/* Move distance slider */}
+          <MoveDistanceSlider value={step} onChange={setStep} disabled={!canSetStepNow} />
+        </CollapsibleSection>
 
         {/* Files and History Section */}
-        <div className="flex flex-col gap-2">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-            Quick Access
-          </div>
+        <CollapsibleSection
+          title="Quick Access"
+          expanded={isQuickAccessExpanded}
+          onToggle={setIsQuickAccessExpanded}
+        >
           <div className="grid grid-cols-2 gap-2">
             <Button
               type="button"
@@ -818,26 +806,18 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <span>History</span>
             </Button>
           </div>
-        </div>
+        </CollapsibleSection>
 
         {/* Manual Movement Input Section */}
-        <div className="space-y-2">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">Manual Move</div>
-          <div className="grid grid-cols-3 gap-2 h-20">
-            {/* Row 1: Current Position Labels */}
-            <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownX ?? 0).toFixed(1)} ]</span>
-            </div>
-            <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownY ?? 0).toFixed(1)} ]</span>
-            </div>
-            <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownZ ?? 0).toFixed(1)} ]</span>
-            </div>
-
-            {/* Row 2: Input Fields */}
+        <CollapsibleSection
+          title="Manual Move"
+          expanded={isManualMoveExpanded}
+          onToggle={setIsManualMoveExpanded}
+        >
+          <div className="grid grid-cols-3 gap-2">
             <MovementInput
               axis="X"
+              currentPosition={lastKnownX}
               disabled={!canManualMoveNow}
               value={moveX}
               onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
@@ -846,6 +826,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             />
             <MovementInput
               axis="Y"
+              currentPosition={lastKnownY}
               disabled={!canManualMoveNow}
               value={moveY}
               onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
@@ -854,6 +835,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             />
             <MovementInput
               axis="Z"
+              currentPosition={lastKnownZ}
               disabled={!canManualMoveNow}
               value={moveZ}
               onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
@@ -861,7 +843,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               className="!w-full"
             />
           </div>
-        </div>
+        </CollapsibleSection>
 
         {/* Temperatures Section - REDESIGNED */}
         <div className="space-y-2">
@@ -901,50 +883,131 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           </div>
 
           {/* Hotend Temperature Row */}
-          <div className="flex items-center gap-2 py-1">
-            <NozzleIcon className="w-4 h-4 text-red-500 shrink-0" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />
-            <span className="text-xs text-pf-text-secondary min-w-16">Hotend</span>
-            <span className="text-xs text-slate-400 flex-1">
-              {formatTempWithTarget(
-                displayPrinter?.hotendTemp,
-                displayPrinter?.hotendTarget,
-                lastKnownHotendTemp
-              )}
-            </span>
-            <TemperatureInput
-              value={hotendTemp}
-              onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
-              onKeyDown={handleHotendTempKeyDown}
-              disabled={!canSetTemperaturesNow}
-              className="w-16"
-            />
-          </div>
+          <TemperatureControlRow
+            icon={<NozzleIcon className="w-4 h-4 text-red-500" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />}
+            label="Hotend"
+            liveReading={formatTempWithTarget(
+              displayPrinter?.hotendTemp,
+              displayPrinter?.hotendTarget,
+              lastKnownHotendTemp
+            )}
+            value={hotendTemp}
+            onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
+            onKeyDown={handleHotendTempKeyDown}
+            disabled={!canSetTemperaturesNow}
+          />
 
           {/* Bed Temperature Row */}
-          <div className="flex items-center gap-2 py-1">
-            <BedIcon className="w-4 h-4 text-blue-500 shrink-0" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />
-            <span className="text-xs text-pf-text-secondary min-w-16">Bed</span>
-            <span className="text-xs text-slate-400 flex-1">
-              {formatTempWithTarget(
-                displayPrinter?.bedTemp,
-                displayPrinter?.bedTarget,
-                lastKnownBedTemp
-              )}
-            </span>
-            <TemperatureInput
-              value={bedTemp}
-              onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
-              onKeyDown={handleBedTempKeyDown}
-              disabled={!canSetTemperaturesNow}
-              className="w-16"
-            />
-          </div>
+          <TemperatureControlRow
+            icon={<BedIcon className="w-4 h-4 text-blue-500" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />}
+            label="Bed"
+            liveReading={formatTempWithTarget(
+              displayPrinter?.bedTemp,
+              displayPrinter?.bedTarget,
+              lastKnownBedTemp
+            )}
+            value={bedTemp}
+            onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
+            onKeyDown={handleBedTempKeyDown}
+            disabled={!canSetTemperaturesNow}
+          />
         </div>
 
-        {/* Spool Info Section - Display if available */}
-        {displayPrinter?.spoolInfo && displayPrinter.spoolInfo.hasActiveSpool && (
-          <div className="mt-4 pt-4 border-t border-pf-border">
-            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-2">Spool</div>
+        {/* Filament Macros Section - capability-based */}
+        {support.supportsFilamentControl && (
+          <CollapsibleSection
+            title="Filament"
+            expanded={isFilamentExpanded}
+            onToggle={setIsFilamentExpanded}
+          >
+            <div className="grid grid-cols-3 gap-1">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={!canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                onClick={() => handleFilamentAction('load')}
+                title="Load Filament"
+                className="w-full text-xs inline-flex items-center justify-center gap-1"
+                iconLeft={<FilamentLoadIcon className="w-3.5 h-3.5" />}
+              >
+                Load
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={!canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                onClick={() => handleFilamentAction('unload')}
+                title="Unload Filament"
+                className="w-full text-xs inline-flex items-center justify-center gap-1"
+                iconLeft={<FilamentUnloadIcon className="w-3.5 h-3.5" />}
+              >
+                Unload
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={!canFilamentChange({ isOnline, isEnabled, support })}
+                onClick={() => handleFilamentAction('change')}
+                title="Change Filament (M600)"
+                className="w-full text-xs inline-flex items-center justify-center gap-1"
+                iconLeft={<FilamentChangeIcon className="w-3.5 h-3.5" />}
+              >
+                Change
+              </Button>
+            </div>
+          </CollapsibleSection>
+        )}
+
+        {/* Spool Section - Only show when Spoolman is configured */}
+        {displayPrinter?.spoolInfo && (
+        <CollapsibleSection
+          title="Spool"
+          expanded={isSpoolExpanded}
+          onToggle={setIsSpoolExpanded}
+          headerActions={
+            <div className="flex items-center gap-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={spoolActionPending}
+                onClick={() => setShowSpoolPicker(true)}
+                className="!p-1 !h-auto"
+                title="Change spool"
+                aria-label="Change spool"
+                iconCenter={<FilamentChangeIcon className="h-4 w-4" />}
+              ></Button>
+              {displayPrinter?.spoolInfo?.hasActiveSpool && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={spoolActionPending}
+                  onClick={async () => {
+                    setSpoolActionPending(true);
+                    try {
+                      await apiClient.clearActiveSpool(printer.id);
+                      refetch();
+                      setTimeout(() => refetch(), 2000);
+                    } catch (err) {
+                      console.error('Failed to eject spool:', err);
+                    } finally {
+                      setSpoolActionPending(false);
+                    }
+                  }}
+                  className="!p-1 !h-auto"
+                  title="Eject spool"
+                  aria-label="Eject spool"
+                  iconCenter={<EjectIcon className="h-4 w-4" />}
+                ></Button>
+              )}
+            </div>
+          }
+        >
+          {displayPrinter?.spoolInfo?.hasActiveSpool ? (
             <div className="space-y-2 text-xs">
               {displayPrinter.spoolInfo.vendor && (
                 <div className="flex justify-between">
@@ -984,7 +1047,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 </div>
               )}
             </div>
-          </div>
+          ) : (
+            <div className="text-xs text-pf-text-tertiary">
+              <p>No spool loaded</p>
+            </div>
+          )}
+        </CollapsibleSection>
         )}
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
           <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
@@ -1005,6 +1073,29 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         isOpen={showFiles}
         onClose={() => setShowFiles(false)}
         printer={printer}
+      />
+
+      {/* Spool Picker Modal */}
+      <SpoolPickerModal
+        isOpen={showSpoolPicker}
+        onClose={() => setShowSpoolPicker(false)}
+        printerId={printer.id}
+        activeSpoolId={displayPrinter?.spoolInfo?.activeSpoolId}
+        onSelect={async (spoolId) => {
+          setSpoolActionPending(true);
+          try {
+            await apiClient.setActiveSpool(printer.id, spoolId);
+            setShowSpoolPicker(false);
+            // Immediate refetch + delayed re-fetch to pick up spool info
+            // after the Moonraker subscription service updates the status cache
+            refetch();
+            setTimeout(() => refetch(), 2000);
+          } catch (err) {
+            console.error('Failed to set active spool:', err);
+          } finally {
+            setSpoolActionPending(false);
+          }
+        }}
       />
     </div>
   );

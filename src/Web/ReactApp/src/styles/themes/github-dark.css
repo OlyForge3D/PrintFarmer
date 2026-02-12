@@ -11,6 +11,8 @@
   --pf-bg-1: #161b22;           /* Secondary background (cards/forms - GitHub canvas subtle) */
   --pf-bg-2: #21262d;           /* Tertiary background (GitHub canvas inset) */
   --pf-panel: #161b22;          /* Panel background */
+  --pf-card-bg: #202428;        /* Card background */
+  --pf-sidebar-bg: #202428;     /* Sidebar background */
   
   /* Border and divider colors - GitHub Dark */
   --pf-border: #30363d;         /* Main border color (GitHub border default) */
@@ -119,6 +121,9 @@
   /* Home buttons (axis homed state) */
   --pf-home-homed-bg: #2096f3;
   --pf-home-not-homed-bg: #fb8c00;
+  
+  /* Button glow effect */
+  --pf-btn-glow: 0 0 8px rgba(132, 255, 116, 0.15), 0 1px 2px rgba(0, 0, 0, 0.2);
   
   /* Button States (Danger variant) */
   --pf-button-danger-bg: #f85149;

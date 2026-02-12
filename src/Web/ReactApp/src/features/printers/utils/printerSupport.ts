@@ -6,6 +6,7 @@ export interface PrinterSupport {
   supportsTemperatureControl: boolean;
   supportsHistory: boolean;
   supportsFileList: boolean;
+  supportsFilamentControl: boolean;
 }
 
 /**
@@ -24,6 +25,7 @@ export function getPrinterSupport(
     supportsTemperatureControl: backendCapabilities?.supportsTemperatureControl ?? defaults?.supportsTemperatureControl ?? true,
     supportsHistory: backendCapabilities?.supportsHistory ?? defaults?.supportsHistory ?? true,
     supportsFileList: backendCapabilities?.supportsFileList ?? defaults?.supportsFileList ?? true,
+    supportsFilamentControl: backendCapabilities?.supportsFilamentControl ?? defaults?.supportsFilamentControl ?? false,
   };
 }
 
@@ -91,4 +93,14 @@ export function canOpenFiles(args: { isOnline: boolean; isEnabled?: boolean; sup
 export function canOpenHistory(args: { isOnline: boolean; isEnabled?: boolean; support: PrinterSupport }): boolean {
   const isEnabled = args.isEnabled ?? true;
   return isEnabled && args.isOnline && args.support.supportsHistory;
+}
+
+export function canFilamentControl(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; support: PrinterSupport }): boolean {
+  const isEnabled = args.isEnabled ?? true;
+  return isEnabled && args.isOnline && args.support.supportsFilamentControl && !args.isPrinting;
+}
+
+export function canFilamentChange(args: { isOnline: boolean; isEnabled?: boolean; support: PrinterSupport }): boolean {
+  const isEnabled = args.isEnabled ?? true;
+  return isEnabled && args.isOnline && args.support.supportsFilamentControl;
 }

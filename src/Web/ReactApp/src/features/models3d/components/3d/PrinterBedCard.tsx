@@ -64,6 +64,12 @@ const StatusBadge: React.FC<{
     Paused: 'bg-pf-warning-bg',
     Error: 'bg-pf-error-bg',
     Offline: 'bg-pf-border-dark',
+    Shutdown: 'bg-pf-error-bg',
+    Halted: 'bg-pf-error-bg',
+    Disconnected: 'bg-pf-border-dark',
+    Complete: 'bg-pf-border-medium',
+    Cancelled: 'bg-pf-border-medium',
+    Connecting: 'bg-pf-border-medium',
   };
 
   const statusTextClasses: Record<PrinterStatus['state'], string> = {
@@ -72,6 +78,12 @@ const StatusBadge: React.FC<{
     Paused: 'text-white',
     Error: 'text-white',
     Offline: 'text-pf-text-secondary',
+    Shutdown: 'text-white',
+    Halted: 'text-white',
+    Disconnected: 'text-pf-text-secondary',
+    Complete: 'text-pf-text-secondary',
+    Cancelled: 'text-pf-text-secondary',
+    Connecting: 'text-pf-text-secondary',
   };
 
   const statusDotClasses: Record<PrinterStatus['state'], string> = {
@@ -80,6 +92,12 @@ const StatusBadge: React.FC<{
     Paused: 'bg-pf-warning',
     Error: 'bg-pf-error',
     Offline: 'bg-pf-border-medium opacity-50',
+    Shutdown: 'bg-pf-error opacity-80',
+    Halted: 'bg-pf-error opacity-80',
+    Disconnected: 'bg-pf-border-medium opacity-50',
+    Complete: 'bg-pf-accent opacity-60',
+    Cancelled: 'bg-pf-border opacity-60',
+    Connecting: 'bg-pf-accent animate-pulse',
   };
 
   return (

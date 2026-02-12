@@ -85,12 +85,13 @@ services:
       - Security__DevModeBypassAuth=${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
+      - DATAPROTECTION_KEYS_PATH=/app/data-protection-keys
     volumes:
       - ${EXTERNAL_APP_DATA_PATH:-.volumes/printfarmer-app-data}:/data
       - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
       - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles
-      - ${EXTERNAL_DATAPROTECTION_PATH:-.volumes/printfarmer-dataprotection-keys}:/root/.aspnet/DataProtection-Keys
+      - ${EXTERNAL_DATAPROTECTION_PATH:-.volumes/printfarmer-dataprotection-keys}:/app/data-protection-keys
 
     networks:
       - printfarmer-network

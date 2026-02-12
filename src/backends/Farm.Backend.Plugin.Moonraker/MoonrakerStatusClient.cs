@@ -115,6 +115,13 @@ namespace Farm.Backend.Plugin.Moonraker
         {
             try
             {
+                // Check if Spoolman is configured and connected on this printer
+                SpoolmanStatus? spoolmanStatus = await _client.GetSpoolmanStatusAsync(serverUrl, ct);
+                if (spoolmanStatus == null || !spoolmanStatus.SpoolmanConnected)
+                {
+                    return null; // Spoolman not configured or not connected
+                }
+
                 int? activeSpoolId = await _client.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
                 if (activeSpoolId == null)
                 {
@@ -131,17 +138,34 @@ namespace Farm.Backend.Plugin.Moonraker
                 {
                     using JsonDocument doc = JsonDocument.Parse(spoolDetailsJson);
                     JsonElement root = doc.RootElement;
-                    string? spoolName = root.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() : null;
-                    string? material = root.TryGetProperty("material", out JsonElement matEl) ? matEl.GetString() : null;
-                    string? colorHex = root.TryGetProperty("color_hex", out JsonElement colorEl) ? colorEl.GetString() : null;
+
+                    // remaining_weight is at root level
                     double? remainingWeight = root.TryGetProperty("remaining_weight", out JsonElement weightEl) && weightEl.ValueKind == JsonValueKind.Number ? weightEl.GetDouble() : (double?)null;
+
+                    // material, color, vendor, and filament name are nested under .filament
+                    string? material = null;
+                    string? colorHex = null;
+                    string? vendor = null;
+                    string? filamentName = null;
+                    if (root.TryGetProperty("filament", out JsonElement filamentEl) && filamentEl.ValueKind == JsonValueKind.Object)
+                    {
+                        material = filamentEl.TryGetProperty("material", out JsonElement matEl) ? matEl.GetString() : null;
+                        colorHex = filamentEl.TryGetProperty("color_hex", out JsonElement colorEl) ? colorEl.GetString() : null;
+                        filamentName = filamentEl.TryGetProperty("name", out JsonElement fnEl) ? fnEl.GetString() : null;
+                        if (filamentEl.TryGetProperty("vendor", out JsonElement vendorEl) && vendorEl.ValueKind == JsonValueKind.Object)
+                        {
+                            vendor = vendorEl.TryGetProperty("name", out JsonElement vnEl) ? vnEl.GetString() : null;
+                        }
+                    }
 
                     return new PrinterSpoolInfoDto(
                         HasActiveSpool: true,
                         ActiveSpoolId: activeSpoolId,
-                        SpoolName: spoolName,
+                        SpoolName: filamentName,
                         Material: material,
-                        ColorHex: colorHex,
+                        ColorHex: colorHex != null ? $"#{colorHex}" : null,
+                        FilamentName: filamentName,
+                        Vendor: vendor,
                         RemainingWeightG: remainingWeight);
                 }
                 catch (Exception ex)

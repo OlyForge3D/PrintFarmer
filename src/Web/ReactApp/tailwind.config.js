@@ -14,6 +14,8 @@ module.exports = {
           'bg-1': 'var(--pf-bg-1)',           // Secondary background  
           'bg-2': 'var(--pf-bg-2)',           // Tertiary background
           'panel': 'var(--pf-panel)',         // Panel background
+          'card': 'var(--pf-card-bg)',        // Card background
+          'sidebar': 'var(--pf-sidebar-bg)',  // Sidebar background
           
           // Borders and dividers
           'border': 'var(--pf-border)',       // Main border color

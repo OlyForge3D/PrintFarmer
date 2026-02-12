@@ -121,7 +121,7 @@ export function CollapsedPrinterCard({
   };
 
   return (
-    <div className="relative rounded-xl p-3 shadow-lg bg-white/5 border border-white/10 w-full">
+    <div className="relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full">
       {/* Top row: Name + Status Pill */}
       <div className="flex justify-between items-center mb-2 gap-2">
         <div className="flex-1 min-w-0">

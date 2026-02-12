@@ -39,12 +39,12 @@ public class PrinterStateManagementTests
     }
 
     [Fact]
-    public void NormalizeState_KeepsLeadingWhitespaceUntouched()
+    public void NormalizeState_TrimsWhitespaceBeforeMapping()
     {
         string input = " printing";
 
         string? result = PrinterStateNormalizer.NormalizeState(input);
 
-        result.Should().Be(" printing");
+        result.Should().Be("Printing");
     }
 }

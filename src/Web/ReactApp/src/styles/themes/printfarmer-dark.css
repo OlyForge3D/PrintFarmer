@@ -11,6 +11,11 @@
   --pf-bg-1: #0f172a;           /* Secondary background (cards) */
   --pf-bg-2: #111827;           /* Tertiary background */
   --pf-panel: #0e1528;          /* Panel background */
+  --pf-card-bg: #0f172a;        /* Card background */
+  --pf-sidebar-bg: #0f172a;     /* Sidebar background */
+  
+  /* Button glow effect (none for this theme) */
+  --pf-btn-glow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   
   /* Border and divider colors */
   --pf-border: #243145;         /* Main border color */

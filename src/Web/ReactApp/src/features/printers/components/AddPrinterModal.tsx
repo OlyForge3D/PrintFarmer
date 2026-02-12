@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
 import { LoadingIcon, CheckIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
-import type { PrinterModelDto, CreatePrinterDto, ManufacturerDto, TestConnectionResponse } from '@/types/api';
+import type { PrinterModelDto, CreatePrinterDto, ManufacturerDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
+import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { Button, Input, Select, Textarea, FormField, Alert } from '@/common/components/ui';
@@ -55,7 +56,6 @@ function AddPrinterModalContent({
   
   // Test connection state
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
@@ -78,7 +78,7 @@ function AddPrinterModalContent({
     }
     // Clear test result when server URL or backend type changes
     if (field === 'serverUrl' || field === 'backend' || field === 'apiKey' || field === 'backendPort') {
-      setTestResult(null);
+      toast.dismiss();
     }
   };
 
@@ -88,37 +88,33 @@ function AddPrinterModalContent({
    */
   const handleTestConnection = async () => {
     // Validate required fields for test
-    if (!formData.serverUrl.trim()) {
-      setTestResult({ success: false, message: 'Server URL is required' });
-      return;
-    }
+    const errors: Record<string, string[]> = {};
 
-    try {
-      new URL(formData.serverUrl);
-    } catch {
-      setTestResult({ success: false, message: 'Please enter a valid HTTP/HTTPS URL' });
-      return;
+    if (!formData.serverUrl.trim()) {
+      errors.serverUrl = ['Server URL is required'];
+    } else {
+      try {
+        new URL(formData.serverUrl);
+      } catch {
+        errors.serverUrl = ['Please enter a valid HTTP/HTTPS URL'];
+      }
     }
 
     // Check authentication requirements per backend
     if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
-      setTestResult({ 
-        success: false, 
-        message: 'Password is required for PrusaLink printers (get it from printer Settings → Network → Credentials)' 
-      });
-      return;
+      errors.password = ['Password is required for PrusaLink (Settings → Network → Credentials)'];
     }
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
-      setTestResult({ 
-        success: false, 
-        message: 'API Key is required for OctoPrint printers' 
-      });
+      errors.apiKey = ['API Key is required for OctoPrint'];
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(prev => ({ ...prev, ...errors }));
       return;
     }
 
     setIsTesting(true);
-    setTestResult(null);
 
     try {
       const result = await apiClient.testConnection({
@@ -129,12 +125,14 @@ function AddPrinterModalContent({
         password: formData.password,
         backendPort: formData.backendPort,
       });
-      setTestResult(result);
+      if (result.success) {
+        toast.success(result.message || 'Connection successful', { duration: 5000 });
+      } else {
+        toast.error(result.message || 'Connection failed', { duration: 8000 });
+      }
     } catch (err) {
-      setTestResult({ 
-        success: false, 
-        message: err instanceof Error ? err.message : 'Connection test failed' 
-      });
+      const message = err instanceof Error ? err.message : 'Connection test failed';
+      toast.error(message, { duration: 8000 });
     } finally {
       setIsTesting(false);
     }
@@ -215,7 +213,6 @@ function AddPrinterModalContent({
     });
     setValidationErrors({});
     setError('');
-    setTestResult(null);
     setIsTesting(false);
     onClose();
   }, [onClose]);
@@ -238,16 +235,6 @@ function AddPrinterModalContent({
 
   const modalFooter = (
     <div className="space-y-3">
-      {/* Test Connection Result */}
-      {testResult && (
-        <Alert 
-          type={testResult.success ? 'success' : 'error'} 
-          className="mb-0"
-        >
-          {testResult.message}
-        </Alert>
-      )}
-      
       {/* Buttons */}
       <div className="flex gap-3">
         <Button
@@ -260,7 +247,7 @@ function AddPrinterModalContent({
         </Button>
         <Button
           type="button"
-          variant="default"
+          variant="secondary"
           onClick={handleTestConnection}
           disabled={isTesting || !formData.serverUrl.trim()}
           iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
@@ -584,8 +571,6 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
       isOpen={isOpen}
       onClose={onClose}
       onSuccess={onSuccess}
-      isLoadingData={isLoadingData}
-      error={dataError}
     />
   );
 }
