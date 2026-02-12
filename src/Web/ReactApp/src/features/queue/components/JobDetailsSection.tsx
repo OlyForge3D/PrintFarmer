@@ -191,7 +191,7 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
                 />
               )}
             </label>
-            {!filamentsLoaded && isEditing ? (
+            {!filamentsLoaded ? (
               <div className="flex items-center gap-2 text-sm text-pf-text-tertiary py-2">
                 <Spinner className="h-4 w-4" />
                 Loading filaments...

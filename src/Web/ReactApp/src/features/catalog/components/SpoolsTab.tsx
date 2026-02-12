@@ -548,7 +548,7 @@ export function SpoolsTab() {
             variant="primary"
             size="sm"
             onClick={loadSpools}
-            disabled={loading || !spoolmanBaseUrl}
+            disabled={!spoolmanBaseUrl}
             aria-label="Refresh spools"
             title="Refresh spools"
             className="flex items-center gap-2"

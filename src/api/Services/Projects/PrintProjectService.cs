@@ -544,7 +544,7 @@ public class PrintProjectService(
         bool groupByMaterial,
         bool groupByColor)
     {
-        IEnumerable<PrintProjectFile> ordered = files;
+        IEnumerable<PrintProjectFile> ordered;
 
         if (groupByMaterial && groupByColor)
         {
