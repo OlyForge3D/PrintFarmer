@@ -93,7 +93,9 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
         // Register the MoonrakerSubscriptionService hosted service
         // This service manages real-time WebSocket subscriptions for printer status updates
         // and updates the shared cache before broadcasting via SignalR
-        services.AddSingleton<IHostedService, MoonrakerSubscriptionService>();
+        services.AddSingleton<MoonrakerSubscriptionService>();
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<MoonrakerSubscriptionService>());
+        services.AddSingleton<IPrinterConnectionHealthProvider>(sp => sp.GetRequiredService<MoonrakerSubscriptionService>());
     }
 
     /// <summary>

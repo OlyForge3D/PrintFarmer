@@ -22,7 +22,7 @@ public sealed class SdcpPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
     IUnifiedLoggingService logger,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
+    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
@@ -31,6 +31,7 @@ public sealed class SdcpPollingService(
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
+    private readonly ConcurrentDictionary<Guid, PrinterConnectionHealth> _connectionHealth = new();
 
     // Polling interval for SDCP printers (same as PrusaLink)
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(5);
@@ -247,6 +248,12 @@ public sealed class SdcpPollingService(
                     state.LastKnownJobName = status.JobName;
                     state.ConsecutiveFailures = 0;
 
+                    // Track connection health
+                    if (status.IsOnline && (!wasOnline || previousFailures > 0))
+                    {
+                        RecordHealthTransition(printerId, printer.Name ?? printerId.ToString(), PrinterConnectionState.Connected, "Poll successful");
+                    }
+
                     // Check for print completion/failure transitions
                     if (stateChanged && previousState != null && status.State != null)
                     {
@@ -292,6 +299,12 @@ public sealed class SdcpPollingService(
                         metadata: new { printerId, backendUrl = printer?.BackendUrl, attempt = state.ConsecutiveFailures },
                         exception: ex);
 
+                    // Track reconnecting state on first failure
+                    if (state.ConsecutiveFailures == 1)
+                    {
+                        RecordHealthTransition(printerId, printer?.Name ?? printerId.ToString(), PrinterConnectionState.Reconnecting, $"Poll failed: {ex.GetType().Name}");
+                    }
+
                     // After 3 consecutive failures, mark as offline
                     if (state.ConsecutiveFailures >= 3 && state.LastKnownIsOnline)
                     {
@@ -304,6 +317,8 @@ public sealed class SdcpPollingService(
                             "SDCP printer marked Offline after consecutive failures",
                             correlationId: printerId.ToString("N"),
                             metadata: new { printerId, backendUrl = printer?.BackendUrl, failures = state.ConsecutiveFailures });
+
+                        RecordHealthTransition(printerId, printer?.Name ?? printerId.ToString(), PrinterConnectionState.Offline, $"Failed {state.ConsecutiveFailures} consecutive times");
 
                         var offlineUpdate = new PrinterStatusDto(
                             Id: printerId,
@@ -410,4 +425,37 @@ public sealed class SdcpPollingService(
             _logger.LogError(ex, $"[SdcpPollingService] Failed to sync job completion for printer {printerId}");
         }
     }
+
+    #region Connection Health
+
+    /// <inheritdoc/>
+    public IReadOnlyDictionary<Guid, PrinterConnectionHealth> GetConnectionHealth()
+    {
+        foreach (var health in _connectionHealth.Values)
+        {
+            health.UpdateUptimePercent(TimeSpan.FromHours(1));
+            health.ConnectionMode = "Polling";
+
+            if (_printerStates.TryGetValue(health.PrinterId, out var state))
+            {
+                health.ConsecutiveFailures = state.ConsecutiveFailures;
+            }
+        }
+
+        return _connectionHealth;
+    }
+
+    private void RecordHealthTransition(Guid printerId, string printerName, PrinterConnectionState newState, string? reason)
+    {
+        var health = _connectionHealth.GetOrAdd(printerId, _ => new PrinterConnectionHealth
+        {
+            PrinterId = printerId,
+            PrinterName = printerName,
+            Backend = PrinterBackend.SDCP
+        });
+
+        health.RecordTransition(newState, reason);
+    }
+
+    #endregion
 }

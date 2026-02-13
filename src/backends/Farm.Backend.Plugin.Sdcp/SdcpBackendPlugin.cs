@@ -85,7 +85,9 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
 
         // Register the SdcpPollingService hosted service
         // This service polls SDCP printers for status updates every 5 seconds
-        services.AddSingleton<IHostedService, SdcpPollingService>();
+        services.AddSingleton<SdcpPollingService>();
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<SdcpPollingService>());
+        services.AddSingleton<IPrinterConnectionHealthProvider>(sp => sp.GetRequiredService<SdcpPollingService>());
     }
 
     /// <summary>

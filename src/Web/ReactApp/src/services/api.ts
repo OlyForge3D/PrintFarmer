@@ -78,6 +78,7 @@ import {
   SpoolmanDbMaterialEntry,
   SpoolmanDbImportRequest,
   SpoolmanDbImportResult,
+  ConnectionDiagnosticsResponse,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -2567,6 +2568,14 @@ export class ApiClient {
    */
   async getDiagnosticsSummary(): Promise<Record<string, unknown>> {
     const response = await this.client.get('/diagnostics/summary');
+    return response.data;
+  }
+
+  /**
+   * Get connection health diagnostics for all printers
+   */
+  async getConnectionDiagnostics(): Promise<ConnectionDiagnosticsResponse> {
+    const response = await this.client.get('/diagnostics/connections');
     return response.data;
   }
 

@@ -20,7 +20,13 @@ internal sealed class ConnectionMetrics
 {
     public int ReconnectAttempts { get; set; }
 
+    public int ConsecutiveFailures { get; set; }
+
+    public int TotalReconnects { get; set; }
+
     public DateTime LastConnected { get; set; }
+
+    public DateTime LastDisconnected { get; set; }
 
     public DateTime LastReconnectAttempt { get; set; }
 
@@ -29,12 +35,19 @@ internal sealed class ConnectionMetrics
     public void Reset()
     {
         ReconnectAttempts = 0;
+        ConsecutiveFailures = 0;
         LastConnected = DateTime.UtcNow;
     }
 
     public void IncrementAttempts()
     {
         ReconnectAttempts++;
+        ConsecutiveFailures++;
         LastReconnectAttempt = DateTime.UtcNow;
+    }
+
+    public void RecordDisconnect()
+    {
+        LastDisconnected = DateTime.UtcNow;
     }
 }

@@ -1017,7 +1017,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         catch (Exception ex)
         {
             LogSdcp(LogLevel.Debug, "SDCP composite status failed", correlationId: null, new { operation = "GetCompositeStatus" }, ex);
-            return new PrinterCompositeStatus(false, null, null, null, null, null, null);
+            throw;  // Let callers (polling service) handle failure counting
         }
     }
 

@@ -69,6 +69,26 @@ public enum PrinterBackend
     OctoPrint = 4
 }
 
+/// <summary>
+/// Connection state for a printer backend, used by connection health monitoring.
+/// Tracks the lifecycle of a connection from initial connect through disconnection.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum PrinterConnectionState
+{
+    /// <summary>Printer is connected and communicating normally.</summary>
+    Connected = 0,
+
+    /// <summary>Connection was lost but reconnection is in progress. Controls remain enabled.</summary>
+    Reconnecting = 1,
+
+    /// <summary>Printer is confirmed offline after grace period or max retries.</summary>
+    Offline = 2,
+
+    /// <summary>Connection is unstable — frequent disconnects/reconnects detected.</summary>
+    Degraded = 3
+}
+
 #endregion
 
 #region Printer Hardware Types

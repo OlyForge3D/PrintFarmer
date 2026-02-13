@@ -27,6 +27,10 @@ type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => v
 export class PrinterSignalRService {
   // Keep a local cache of last statuses for debugging
   private lastStatuses: Map<string, PrinterStatusUpdate> = new Map();
+  /** Pending offline timers keyed by printer ID — suppresses transient offline flicker */
+  private offlineGraceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  /** Grace period (ms) before broadcasting an online→offline transition */
+  private static readonly OFFLINE_GRACE_MS = 1_000;
 
   public getLastStatus(printerId: string): PrinterStatusUpdate | undefined {
     return this.lastStatuses.get(printerId);
@@ -128,44 +132,37 @@ export class PrinterSignalRService {
       } catch {
         // ignore debug guard failures
       }
-      // Cache the last status (best-effort)
-      try {
-        this.lastStatuses.set(status.id, status);
-      } catch {
-        // ignore cache failures
-      }
-      // Expose on window for quick inspection (best-effort)
-      try {
-        const win = window as unknown as {
-          PrintFarmerDebug?: Record<string, unknown>;
-        };
-        if (!win.PrintFarmerDebug) win.PrintFarmerDebug = {};
-        win.PrintFarmerDebug.lastPrinterUpdate = status as unknown as Record<
-          string,
-          unknown
-        >;
-        win.PrintFarmerDebug.printerSignalR = {
-          connectionId: this.connectionId,
-          isConnected: this.isConnected,
-          lastStatuses: Array.from(this.lastStatuses.entries()).reduce(
-            (acc, [k, v]) => {
-              acc[k] = v;
-              return acc;
-            },
-            {} as Record<string, unknown>
-          ),
-        };
-      } catch {
-        // ignore debug exposure failures
+      // --- Offline debounce logic ---
+      // Suppress brief online→offline flickers caused by transient WebSocket/network hiccups.
+      // If a printer goes offline, we wait OFFLINE_GRACE_MS before telling the UI.
+      // If it comes back online within that window, the offline event is silently discarded.
+      const previousStatus = this.lastStatuses.get(status.id);
+      const wasOnline = previousStatus?.isOnline !== false; // true or undefined → was online
+
+      if (status.isOnline === false && wasOnline) {
+        // Online→Offline transition: start grace period instead of broadcasting immediately
+        if (!this.offlineGraceTimers.has(status.id)) {
+          const timer = setTimeout(() => {
+            this.offlineGraceTimers.delete(status.id);
+            // Grace period expired — printer is genuinely offline
+            this.applyStatusUpdate(status);
+          }, PrinterSignalRService.OFFLINE_GRACE_MS);
+          this.offlineGraceTimers.set(status.id, timer);
+        }
+        return; // Don't broadcast yet
       }
 
-      this.printerStatusCallbacks.forEach((cb) => {
-        try {
-          cb(status);
-        } catch (e) {
-          console.error("Printer status cb error:", e);
+      if (status.isOnline) {
+        // Cancel any pending offline grace timer — printer recovered
+        const pendingTimer = this.offlineGraceTimers.get(status.id);
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+          this.offlineGraceTimers.delete(status.id);
         }
-      });
+      }
+
+      // Normal flow: cache + broadcast
+      this.applyStatusUpdate(status);
     };
 
     // Register single lowercase event name
@@ -333,6 +330,48 @@ export class PrinterSignalRService {
       default:
         return LogLevel.Information;
     }
+  }
+
+  /** Apply a status update: cache it, expose for debug, and notify all subscribers. */
+  private applyStatusUpdate(status: PrinterStatusUpdate): void {
+    // Cache the last status (best-effort)
+    try {
+      this.lastStatuses.set(status.id, status);
+    } catch {
+      // ignore cache failures
+    }
+    // Expose on window for quick inspection (best-effort)
+    try {
+      const win = window as unknown as {
+        PrintFarmerDebug?: Record<string, unknown>;
+      };
+      if (!win.PrintFarmerDebug) win.PrintFarmerDebug = {};
+      win.PrintFarmerDebug.lastPrinterUpdate = status as unknown as Record<
+        string,
+        unknown
+      >;
+      win.PrintFarmerDebug.printerSignalR = {
+        connectionId: this.connectionId,
+        isConnected: this.isConnected,
+        lastStatuses: Array.from(this.lastStatuses.entries()).reduce(
+          (acc, [k, v]) => {
+            acc[k] = v;
+            return acc;
+          },
+          {} as Record<string, unknown>
+        ),
+      };
+    } catch {
+      // ignore debug exposure failures
+    }
+
+    this.printerStatusCallbacks.forEach((cb) => {
+      try {
+        cb(status);
+      } catch (e) {
+        console.error("Printer status cb error:", e);
+      }
+    });
   }
 
   private notifyConnectionState(connected: boolean): void {

@@ -21,7 +21,7 @@ public sealed class MoonrakerSubscriptionService(
     IServiceScopeFactory scopeFactory,
     IUnifiedLoggingService logger,
     IHttpClientFactory httpClientFactory,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
+    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
@@ -42,6 +42,12 @@ public sealed class MoonrakerSubscriptionService(
     // Track Klippy ready state per printer (for IsOnline determination)
     private readonly ConcurrentDictionary<Guid, bool> _klippyReadyState = new();
 
+    // Connection health tracking for diagnostics API
+    private readonly ConcurrentDictionary<Guid, PrinterConnectionHealth> _connectionHealth = new();
+
+    // Grace timers for delaying offline broadcasts (cancel if printer recovers quickly)
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _offlineGraceTimers = new();
+
     private enum PollingMode
     {
         WebSocketRealTime,  // Use WebSocket for real-time updates (normal operation)
@@ -57,6 +63,8 @@ public sealed class MoonrakerSubscriptionService(
     private const int MaxParseErrorsBeforeFallback = 5;
     private static readonly TimeSpan HttpPollInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan StaleConnectionThreshold = TimeSpan.FromSeconds(60); // Trigger fallback if no status updates for 60 seconds
+    private static readonly TimeSpan OfflineGracePeriod = TimeSpan.FromSeconds(5); // Wait before declaring offline on klippy disconnect
+    private const int ConsecutiveFailuresBeforeOffline = 2; // Require N failures before broadcasting offline
 
     // Client identification for Moonraker
     private const string ClientName = "PrintFarmer";
@@ -352,6 +360,8 @@ public sealed class MoonrakerSubscriptionService(
 
                 // Connection successful - reset metrics
                 metrics.Reset();
+                CancelOfflineGraceTimer(id);
+                RecordHealthTransition(id, printer.Name, PrinterConnectionState.Connected, "WebSocket connected");
 
                 // Initialize status update tracking
                 _lastStatusUpdateTimes[id] = DateTime.UtcNow;
@@ -384,8 +394,14 @@ public sealed class MoonrakerSubscriptionService(
                     _logger.LogError(ex, $"Unexpected error for printer {printer.Name} (attempt {metrics.ReconnectAttempts}/{MaxReconnectAttempts})");
                 }
 
-                // Send offline status on connection failure
-                await SendOfflineStatusAsync(id, ct);
+                // Only broadcast offline after consecutive failures threshold
+                metrics.RecordDisconnect();
+                RecordHealthTransition(id, printer.Name, PrinterConnectionState.Reconnecting, $"WS error: {ex.GetType().Name}");
+                if (metrics.ConsecutiveFailures >= ConsecutiveFailuresBeforeOffline)
+                {
+                    await SendOfflineStatusAsync(id, ct);
+                    RecordHealthTransition(id, printer.Name, PrinterConnectionState.Offline, $"Failed {metrics.ConsecutiveFailures} consecutive times");
+                }
             }
             finally
             {
@@ -419,6 +435,7 @@ public sealed class MoonrakerSubscriptionService(
         {
             _logger.LogError($"Exhausted all reconnection attempts ({MaxReconnectAttempts}) for printer {printer.Name}, giving up");
             await SendOfflineStatusAsync(id, ct);
+            RecordHealthTransition(id, printer.Name, PrinterConnectionState.Offline, $"Exhausted {MaxReconnectAttempts} reconnection attempts");
         }
 
         _logger.LogInformation("Subscription loop ended for printer {PrinterName} ({PrinterId})", printer.Name, id);
@@ -877,16 +894,19 @@ public sealed class MoonrakerSubscriptionService(
                 break;
 
             case "notify_klippy_disconnected":
-                _logger.LogWarning("Klippy disconnected for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
+                _logger.LogWarning("Klippy disconnected for printer {PrinterName}, starting offline grace period", printer.Name);
                 _klippyReadyState[printer.Id] = false;
                 SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy disconnected");
-                await SendOfflineStatusAsync(printer.Id, ct);
+                RecordHealthTransition(printer.Id, printer.Name, PrinterConnectionState.Reconnecting, "Klippy disconnected");
+                StartOfflineGraceTimer(printer.Id, printer.Name, ct);
                 break;
 
             case "notify_klippy_ready":
                 _logger.LogInformation("Klippy ready for printer {PrinterName}, switching to WebSocket real-time mode", printer.Name);
                 _klippyReadyState[printer.Id] = true;
                 SetPollingMode(printer.Id, PollingMode.WebSocketRealTime, "Klippy ready");
+                CancelOfflineGraceTimer(printer.Id);
+                RecordHealthTransition(printer.Id, printer.Name, PrinterConnectionState.Connected, "Klippy ready");
                 break;
 
             case "notify_klippy_shutdown":
@@ -1788,4 +1808,101 @@ public sealed class MoonrakerSubscriptionService(
             _logger.LogError(ex, "Error during HTTP polling fallback for printer {PrinterName}", printer.Name);
         }
     }
+
+    #region Connection Health
+
+    /// <inheritdoc/>
+    public IReadOnlyDictionary<Guid, PrinterConnectionHealth> GetConnectionHealth()
+    {
+        // Update uptime percentages before returning
+        foreach (var health in _connectionHealth.Values)
+        {
+            health.UpdateUptimePercent(TimeSpan.FromHours(1));
+
+            // Sync connection mode from polling mode
+            if (_pollingModes.TryGetValue(health.PrinterId, out var mode))
+            {
+                health.ConnectionMode = mode switch
+                {
+                    PollingMode.WebSocketRealTime => "WebSocket",
+                    PollingMode.HttpPollingOnly => "HTTP Polling",
+                    PollingMode.WebSocketWithFallback => "WebSocket + Fallback",
+                    _ => "Unknown"
+                };
+            }
+
+            // Sync metrics
+            if (_connectionMetrics.TryGetValue(health.PrinterId, out var metrics))
+            {
+                health.ReconnectAttempts = metrics.ReconnectAttempts;
+                health.TotalReconnects = metrics.TotalReconnects;
+                health.ConsecutiveFailures = metrics.ConsecutiveFailures;
+            }
+        }
+
+        return _connectionHealth;
+    }
+
+    private PrinterConnectionHealth GetOrCreateHealth(Guid printerId, string printerName)
+    {
+        return _connectionHealth.GetOrAdd(printerId, _ => new PrinterConnectionHealth
+        {
+            PrinterId = printerId,
+            PrinterName = printerName,
+            Backend = PrinterBackend.Moonraker
+        });
+    }
+
+    private void RecordHealthTransition(Guid printerId, string printerName, PrinterConnectionState newState, string? reason)
+    {
+        var health = GetOrCreateHealth(printerId, printerName);
+        health.RecordTransition(newState, reason);
+    }
+
+    private void StartOfflineGraceTimer(Guid printerId, string printerName, CancellationToken ct)
+    {
+        CancelOfflineGraceTimer(printerId);
+
+        var graceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _offlineGraceTimers[printerId] = graceCts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(OfflineGracePeriod, graceCts.Token);
+
+                // Grace period expired — printer didn't recover, broadcast offline
+                _logger.LogWarning("Offline grace period expired for printer {PrinterName}, confirming offline", printerName);
+                RecordHealthTransition(printerId, printerName, PrinterConnectionState.Offline, "Grace period expired");
+                await SendOfflineStatusAsync(printerId, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Grace timer was cancelled — printer recovered, no action needed
+                _logger.LogDebug("Offline grace timer cancelled for printer {PrinterName} (recovered)", printerName);
+            }
+            finally
+            {
+                _offlineGraceTimers.TryRemove(printerId, out _);
+            }
+        }, CancellationToken.None);
+    }
+
+    private void CancelOfflineGraceTimer(Guid printerId)
+    {
+        if (_offlineGraceTimers.TryRemove(printerId, out var existingCts))
+        {
+            try
+            {
+                existingCts.Cancel();
+                existingCts.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
+    #endregion
 }

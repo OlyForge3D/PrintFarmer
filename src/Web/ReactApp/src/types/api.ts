@@ -2465,3 +2465,39 @@ export interface SpoolmanUpdateFilamentRequest {
   articleNumber?: string | null;
   multiColorHexes?: string | null;
 }
+
+// ============ Connection Diagnostics Types ============
+
+export type PrinterConnectionState = 'Connected' | 'Reconnecting' | 'Offline' | 'Degraded';
+
+export interface ConnectionStateTransition {
+  timestampUtc: string;
+  fromState: PrinterConnectionState;
+  toState: PrinterConnectionState;
+  reason: string | null;
+}
+
+export interface PrinterConnectionHealthDto {
+  printerId: string;
+  printerName: string;
+  backend: string;
+  connectionState: PrinterConnectionState;
+  lastConnectedUtc: string | null;
+  lastDisconnectedUtc: string | null;
+  reconnectAttempts: number;
+  totalReconnects: number;
+  consecutiveFailures: number;
+  uptimePercent: number;
+  connectionMode: string | null;
+  recentTransitions: ConnectionStateTransition[];
+}
+
+export interface ConnectionDiagnosticsResponse {
+  printers: PrinterConnectionHealthDto[];
+  totalPrinters: number;
+  connectedCount: number;
+  reconnectingCount: number;
+  offlineCount: number;
+  degradedCount: number;
+  timestampUtc: string;
+}
