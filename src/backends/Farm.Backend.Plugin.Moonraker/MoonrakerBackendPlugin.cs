@@ -4,6 +4,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
@@ -76,11 +77,12 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
             HttpClient httpClient = httpClientFactory.CreateClient();
 
             // IMPORTANT: do not rely on HttpClient.Timeout for Moonraker.
-            // Many operations (especially file uploads) legitimately exceed 10s.
-            // MoonrakerClient applies per-request cancellation timeouts via linked CTS.
-            httpClient.Timeout = Timeout.InfiniteTimeSpan;
+            // MoonrakerClient applies per-request cancellation timeouts via linked CTS
+            // using values from BackendTimeoutSettings.
+            var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
+            httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
             IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
-            return new MoonrakerClient(httpClient, logger);
+            return new MoonrakerClient(httpClient, logger, timeouts);
         });
 
         // NOTE: Status clients are NOT registered in DI container. They are instantiated

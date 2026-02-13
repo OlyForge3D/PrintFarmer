@@ -31,7 +31,7 @@ public class OctoPrintClientTests
 #pragma warning disable CA2000 // Dispose objects before losing scope - HttpClient is owned by the test client for test lifetime
         HttpClient http = new HttpClient(handler.Object);
 #pragma warning restore CA2000
-        OctoPrintClient client = new OctoPrintClient(http);
+        OctoPrintClient client = new OctoPrintClient(http, null, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
         return (client, handler, recorded);
     }
 

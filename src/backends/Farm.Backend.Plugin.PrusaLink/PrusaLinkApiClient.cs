@@ -372,7 +372,8 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         ArgumentNullException.ThrowIfNull(fileStream);
 
         HttpClient client = GetClientForCredentials(credentials);
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
+        string uploadUrl = new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString();
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, uploadUrl, credentials);
 
         request.Content = new StreamContent(fileStream);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -381,7 +382,16 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         request.Headers.Add("Print-After-Upload", printAfterUpload ? "?1" : "?0");
         request.Headers.Add("Overwrite", overwrite ? "?1" : "?0");
 
+        _logger.LogInformation($"Uploading {fileStream.Length} bytes to PrusaLink: PUT {uploadUrl} (timeout={client.Timeout.TotalSeconds}s)");
+
         using HttpResponseMessage response = await client.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            string body = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogWarning($"PrusaLink upload failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase} - {body}");
+        }
+
         return response.IsSuccessStatusCode;
     }
 

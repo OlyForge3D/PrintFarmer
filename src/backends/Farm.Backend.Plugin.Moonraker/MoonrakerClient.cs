@@ -9,11 +9,12 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : PrinterClientBase, IMoonrakerClient,
+public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, BackendTimeoutSettings timeouts) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -32,13 +33,14 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
 {
     private readonly HttpClient _http = http;
     private readonly IUnifiedLoggingService _logger = logger;
+    private readonly BackendTimeoutSettings _timeouts = timeouts;
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
     {
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "printer/info");
             _logger.LogDebug($"[Moonraker] Querying status at: {uri}");
@@ -98,7 +100,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "printer/info");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
@@ -152,7 +154,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "printer/objects/query?print_stats&display_status&job_queue");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
@@ -343,7 +345,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             }
 
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
             using HttpResponseMessage resp = await _http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
             return !resp.IsSuccessStatusCode ? null : await resp.Content.ReadAsByteArrayAsync(cts.Token);
         }
@@ -390,7 +392,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
             Uri posUri = new(baseUri, "printer/objects/query?toolhead=position");
             using HttpResponseMessage resp = await _http.GetAsync(posUri, cts.Token);
@@ -455,7 +457,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts2.CancelAfter(TimeSpan.FromSeconds(5));
+            cts2.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri2 = new(baseUrl);
             Uri tempsUri = new(baseUri2, "printer/objects/query?extruder&heater_bed");
             using HttpResponseMessage resp2 = await _http.GetAsync(tempsUri, cts2.Token);
@@ -698,7 +700,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.PrintControlTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri endpoint = new(baseUri, relativePath);
@@ -731,7 +733,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                 }
 
                 using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(TimeSpan.FromSeconds(5));
+                cts.CancelAfter(_timeouts.StatusPollTimeout);
 
                 Uri retryEndpoint = new(WithPort(baseUri, 7125), relativePath);
                 using HttpResponseMessage retryResp = await _http.PostAsync(retryEndpoint, content: null, cts.Token);
@@ -792,7 +794,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri4 = new(baseUrl);
             Uri scriptUri = new(baseUri4, "printer/gcode/script");
             using HttpResponseMessage resp = await _http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
@@ -812,7 +814,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
             Uri listUri = new(baseUri, "server/webcams/list");
             using HttpResponseMessage resp = await _http.GetAsync(listUri, cts.Token);
@@ -1010,7 +1012,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.PrintControlTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "printer/print/start");
@@ -1042,7 +1044,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/list?root=gcodes");
@@ -1154,7 +1156,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/roots");
@@ -1185,7 +1187,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             // First try using REST API
             string encodedPath = Uri.EscapeDataString(path);
@@ -1329,7 +1331,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/directory");
             DirectoryCreateRequest request = new()
@@ -1361,7 +1363,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             string encodedPath = Uri.EscapeDataString(path);
             Uri baseUri = new(baseUrl);
@@ -1387,7 +1389,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/move");
             FileMoveRequest request = new()
@@ -1413,7 +1415,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/copy");
             FileCopyRequest request = new()
@@ -1438,7 +1440,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(baseUrl);
@@ -1470,7 +1472,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(baseUrl);
@@ -1505,7 +1507,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/metascan");
             MetadataScanRequest request = new()
@@ -1546,7 +1548,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(baseUrl);
@@ -1573,7 +1575,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(baseUrl);
@@ -1621,7 +1623,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(900)); // 15 minutes for large file downloads
+            cts.CancelAfter(_timeouts.FileDownloadTimeout);
 
             // Encode each path segment separately to preserve forward slashes
             // e.g., "folder/subfolder/file.gcode" -> "folder/subfolder/file.gcode" (only special chars encoded)
@@ -1684,7 +1686,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(60)); // Allow more time for uploads
+            cts.CancelAfter(_timeouts.FileUploadTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/upload");
 
@@ -1728,7 +1730,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            cts.CancelAfter(_timeouts.FileUploadTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/upload");
 
@@ -1772,7 +1774,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            cts.CancelAfter(_timeouts.PrintControlTimeout);
             Uri baseUri = new(baseUrl);
             string relative = $"server/files/list?root={Uri.EscapeDataString(root)}&extended=true";
             if (!string.IsNullOrEmpty(path))
@@ -1807,7 +1809,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             string encodedPath = Uri.EscapeDataString(path);
             Uri baseUri = new(baseUrl);
@@ -1832,7 +1834,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(30));
+            cts.CancelAfter(_timeouts.PrintControlTimeout);
 
             string encodedFilename = Uri.EscapeDataString(filename);
             Uri baseUri = new(baseUrl);
@@ -1870,7 +1872,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             Uri baseUri = new(baseUrl);
             string relative = "server/history/list";
             List<string> queryParams = new();
@@ -1954,7 +1956,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
@@ -1985,7 +1987,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
@@ -2009,7 +2011,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/history/totals");
@@ -2039,7 +2041,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/history/reset_totals");
@@ -2065,7 +2067,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/spoolman/status");
@@ -2094,7 +2096,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/spoolman/spool_id");
@@ -2124,7 +2126,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/spoolman/spool_id");
 
@@ -2167,7 +2169,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for proxy requests
+            cts.CancelAfter(_timeouts.PrintControlTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/spoolman/proxy");
 
@@ -2741,7 +2743,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/info");

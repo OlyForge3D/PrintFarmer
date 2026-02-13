@@ -3,6 +3,7 @@ using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Backend.Plugin.OctoPrint;
 
@@ -67,15 +68,18 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
     /// <param name="services">The service collection to register with.</param>
     public void RegisterAdditionalServices(IServiceCollection services)
     {
-        // Register the HTTP client for OctoPrint with proper timeout
-        // Using AddScoped to allow proper dependency resolution
+        // Register the HTTP client for OctoPrint with proper timeout.
+        // Using AddScoped to allow proper dependency resolution.
         services.AddScoped<IOctoPrintClient>(provider =>
         {
             IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
             HttpClient httpClient = httpClientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            // Per-request CTS timeouts (from BackendTimeoutSettings) control actual cancellation;
+            // HttpClient.Timeout is just a ceiling to avoid orphaned connections.
+            var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
+            httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
             ILogger<OctoPrintClient>? logger = provider.GetService<Microsoft.Extensions.Logging.ILogger<OctoPrintClient>>();
-            return new OctoPrintClient(httpClient, logger);
+            return new OctoPrintClient(httpClient, logger, timeouts);
         });
 
         // NOTE: Status clients are NOT registered in DI container. They are instantiated

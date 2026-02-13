@@ -10,11 +10,12 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.OctoPrint;
 
-public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null) : IOctoPrintClient,
+public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null, BackendTimeoutSettings? timeouts = null) : IOctoPrintClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -27,9 +28,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 {
     private readonly HttpClient _httpClient = httpClient;
     private readonly ILogger<OctoPrintClient>? _logger = logger;
+    private readonly BackendTimeoutSettings _timeouts = timeouts ?? new BackendTimeoutSettings();
 
     // Configuration
-    private const int DefaultTimeoutSeconds = 30;
+    private int DefaultTimeoutSeconds => _timeouts.CommandTimeoutSeconds;
+
     private const int MaxRetryAttempts = 3;
     private const int RetryDelayMs = 1000;
 
@@ -104,9 +107,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <returns>The HTTP response</returns>
     private async Task<HttpResponseMessage> SendWithRetryAsync(
         HttpRequestMessage request,
-        int timeoutSeconds = DefaultTimeoutSeconds,
+        int timeoutSeconds = 0,
         CancellationToken cancellationToken = default)
     {
+        if (timeoutSeconds <= 0)
+        {
+            timeoutSeconds = DefaultTimeoutSeconds;
+        }
+
         LogRequest(request);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -188,7 +196,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request, timeoutSeconds: 10);
+            HttpResponseMessage response = await SendWithRetryAsync(request, timeoutSeconds: _timeouts.StatusPollTimeoutSeconds);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)

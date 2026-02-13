@@ -3,6 +3,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Backend.Plugin.Sdcp;
 
@@ -74,9 +75,13 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
         {
             IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
             HttpClient httpClient = httpClientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+            // Per-request CTS timeouts (from BackendTimeoutSettings) control actual cancellation;
+            // HttpClient.Timeout is just a ceiling to avoid orphaned connections.
+            var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
+            httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
             IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
-            return new SdcpClient(httpClient, logger);
+            return new SdcpClient(httpClient, logger, timeouts);
         });
 
         // NOTE: Status clients are NOT registered in DI container. They are instantiated
