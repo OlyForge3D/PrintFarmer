@@ -14,6 +14,9 @@ vi.mock('../../../features/admin/components/ObservabilityContent', () => ({
 vi.mock('../../../features/admin/components/FileHealthContent', () => ({
   FileHealthContent: () => <div data-testid="file-health-content">File Health Content</div>
 }));
+vi.mock('../../../features/admin/components/ConnectionHealthContent', () => ({
+  ConnectionHealthContent: () => <div data-testid="connection-health-content">Connection Health Content</div>
+}));
 
 // Mock PageTemplate to simplify testing
 vi.mock('../../../common/components/PageTemplate', () => ({
@@ -45,10 +48,11 @@ describe('SystemDashboardPage', () => {
       expect(screen.getByTestId('page-template')).toHaveAttribute('data-title', 'System Dashboard');
     });
 
-    it('renders all three tabs', () => {
+    it('renders all four tabs', () => {
       renderWithRouter();
       expect(screen.getByRole('tab', { name: /system logs/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /observability/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /connections/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /file health/i })).toBeInTheDocument();
     });
   });
@@ -89,7 +93,7 @@ describe('SystemDashboardPage', () => {
     it('tabs have proper roles', () => {
       renderWithRouter();
       const tabs = screen.getAllByRole('tab');
-      expect(tabs).toHaveLength(3);
+      expect(tabs).toHaveLength(4);
     });
 
     it('tab panels have proper roles', () => {
