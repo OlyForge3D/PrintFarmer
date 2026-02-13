@@ -48,6 +48,7 @@ export function CollapsedPrinterCard({
   const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
+  const [controlActionPending, setControlActionPending] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
   // Use printer data directly (already contains merged realtime status from API)
@@ -85,6 +86,11 @@ export function CollapsedPrinterCard({
   };
 
   const handleControlAction = async (action: 'pause' | 'resume' | 'cancel' | 'stop' | 'firmware-restart') => {
+    if (controlActionPending) {
+      return;
+    }
+
+    setControlActionPending(true);
     try {
       if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { printerActions?: boolean } }).PrintFarmerDebug?.printerActions) {
         console.log(`Performing ${action} on printer ${printer.id}`);
@@ -113,6 +119,8 @@ export function CollapsedPrinterCard({
       }
     } catch (error) {
       console.error(`Error performing ${action}:`, error);
+    } finally {
+      setControlActionPending(false);
     }
   };
 
@@ -239,7 +247,7 @@ export function CollapsedPrinterCard({
       {/* Control buttons */}
       <div className="flex items-center gap-1 mb-2">
         <ControlPadButton
-          disabled={!canPauseOrResumeNow}
+          disabled={controlActionPending || !canPauseOrResumeNow}
           onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
           title={isPaused ? 'Resume' : 'Pause'}
           padSize="small"
@@ -247,7 +255,7 @@ export function CollapsedPrinterCard({
           {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
         </ControlPadButton>
         <ControlPadButton
-          disabled={!canCancelNow}
+          disabled={controlActionPending || !canCancelNow}
           onClick={() => handleControlAction('cancel')}
           title="Cancel"
           padSize="small"
@@ -256,7 +264,7 @@ export function CollapsedPrinterCard({
         </ControlPadButton>
         <ControlPadButton
           variant={isShutdown ? 'secondary' : 'danger'}
-          disabled={!canEmergencyStopNow}
+          disabled={controlActionPending || !canEmergencyStopNow}
           onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
           title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           padSize="small"

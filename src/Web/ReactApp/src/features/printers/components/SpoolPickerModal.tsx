@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, startTransition } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, startTransition } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
 import { RefreshIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
@@ -8,7 +8,7 @@ import type { SpoolmanSpool } from '@/types/api';
 interface SpoolPickerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (spoolId: number) => void;
+  onSelect: (spoolId: number, spool: SpoolmanSpool) => void;
   /** Printer ID — spools are fetched through this printer's backend proxy */
   printerId: string;
   /** Currently active spool ID (to highlight it) */
@@ -48,29 +48,42 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('lastUsed');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const requestIdRef = useRef(0);
 
-  const loadSpools = async () => {
+  const loadSpools = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
       const data = await apiClient.getPrinterSpools(printerId);
+
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       startTransition(() => {
         setSpools(Array.isArray(data) ? data : []);
       });
     } catch (err) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       setError(err instanceof Error ? err.message : 'Failed to load spools');
       setSpools([]);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [printerId]);
 
   useEffect(() => {
     if (isOpen) {
-      loadSpools();
+      void loadSpools();
       setSearch('');
     }
-  }, [isOpen]);
+  }, [isOpen, loadSpools]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -196,7 +209,7 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
             <Button
               key={spool.id}
               variant="unstyled"
-              onClick={() => onSelect(spool.id)}
+              onClick={() => onSelect(spool.id, spool)}
               className={`w-full grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center px-2 py-2.5 text-left transition-colors cursor-pointer ${
                 isActive
                   ? 'bg-pf-accent/20 border-l-2 border-pf-accent'

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
@@ -24,9 +24,15 @@ import {
   canUseManualMove,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
+import {
+  bedPresetOptions,
+  getPresetTargets,
+  hotendPresetOptions,
+  materialPresets,
+} from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { renderUnknown } from '@/common/utils/renderUnknown';
-import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection } from '@/common/components/ui';
+import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import {
   NozzleIcon,
@@ -113,6 +119,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
   const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
+  const queryClient = useQueryClient();
 
   const [isClosing, setIsClosing] = useState(false);
   const closeTimeoutRef = useRef<number | null>(null);
@@ -138,11 +145,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [isVersionExpanded, setIsVersionExpanded] = useState(true);
   const [isControlExpanded, setIsControlExpanded] = useState(true);
   const [isMoveExpanded, setIsMoveExpanded] = useState(true);
-  const [isQuickAccessExpanded, setIsQuickAccessExpanded] = useState(true);
-  const [isManualMoveExpanded, setIsManualMoveExpanded] = useState(true);
-  const [isFilamentExpanded, setIsFilamentExpanded] = useState(true);
+
+  const [isTempsExpanded, setIsTempsExpanded] = useState(true);
   const [isSpoolExpanded, setIsSpoolExpanded] = useState(true);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
+  const [controlActionPending, setControlActionPending] = useState(false);
+  const [temperatureActionPending, setTemperatureActionPending] = useState(false);
+  const [movementActionPending, setMovementActionPending] = useState(false);
+  const [filamentActionPending, setFilamentActionPending] = useState(false);
   const [spoolActionPending, setSpoolActionPending] = useState(false);
 
   const printerStatisticsQuery = useQuery({
@@ -186,35 +196,49 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   });
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Poll printer data for PrusaLink (fallback - server now broadcasts via SignalR)
-  // Server-side PrusaLinkPollingService polls every 5 seconds and broadcasts via SignalR
-  // This client-side polling serves as a fallback in case SignalR connection drops
+  // Poll printer data for PrusaLink only when this component is doing its own fetches.
+  // When printer data is provided by parent (`printerProp`), polling here is redundant/no-op.
   useEffect(() => {
-    if (!printer || printer.backend !== PrinterBackend.PrusaLink || !printerId) {
+    if (!shouldFetch || !printer || printer.backend !== PrinterBackend.PrusaLink || !printerId) {
       return;
     }
 
     const pollInterval = setInterval(() => {
-      refetch();
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      void refetch();
     }, 5000); // Poll every 5 seconds for PrusaLink as fallback
 
     return () => clearInterval(pollInterval);
-  }, [printer, refetch, printerId]);
+  }, [shouldFetch, printer, refetch, printerId]);
 
-  // Update last known values when printer data changes
+  // Update last known values when printer data changes.
+  // Avoid microtask churn and skip state updates when values are unchanged.
   useEffect(() => {
-    if (printer) {
-      // Defer state update to satisfy React Compiler rules
-      queueMicrotask(() => {
-        setLastKnownValues(prev => ({
-          hotendTemp: printer.hotendTemp !== undefined ? printer.hotendTemp : prev.hotendTemp,
-          bedTemp: printer.bedTemp !== undefined ? printer.bedTemp : prev.bedTemp,
-          x: printer.x !== undefined ? printer.x : prev.x,
-          y: printer.y !== undefined ? printer.y : prev.y,
-          z: printer.z !== undefined ? printer.z : prev.z,
-        }));
-      });
+    if (!printer) {
+      return;
     }
+
+    setLastKnownValues(prev => {
+      const next = {
+        hotendTemp: printer.hotendTemp !== undefined ? printer.hotendTemp : prev.hotendTemp,
+        bedTemp: printer.bedTemp !== undefined ? printer.bedTemp : prev.bedTemp,
+        x: printer.x !== undefined ? printer.x : prev.x,
+        y: printer.y !== undefined ? printer.y : prev.y,
+        z: printer.z !== undefined ? printer.z : prev.z,
+      };
+
+      return (
+        next.hotendTemp === prev.hotendTemp &&
+        next.bedTemp === prev.bedTemp &&
+        next.x === prev.x &&
+        next.y === prev.y &&
+        next.z === prev.z
+      )
+        ? prev
+        : next;
+    });
   }, [printer]);
 
   // Guard early after all hooks are called
@@ -275,12 +299,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     return `${Math.round(grams)}g`;
   };
 
-  // Format temperature with target
-  const formatTempWithTarget = (current?: number, target?: number, lastKnown?: number | null): string => {
+  const formatCurrentTemp = (current?: number, lastKnown?: number | null): string => {
     const displayCurrent = current ?? lastKnown ?? 0;
-    if (target && target > 0) {
-      return `${displayCurrent.toFixed(1)}°C / ${target.toFixed(0)}°C`;
-    }
     return `${displayCurrent.toFixed(1)}°C`;
   };
 
@@ -317,6 +337,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   }
 
   const handleHome = async (axes?: 'all' | 'xy' | 'z') => {
+    if (movementActionPending) {
+      return;
+    }
+
+    setMovementActionPending(true);
     try {
       const result = await (axes === 'xy'
         ? apiClient.homeXY(printer.id)
@@ -328,10 +353,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       }
     } catch (error) {
       console.error('Error homing:', error);
+    } finally {
+      setMovementActionPending(false);
     }
   };
 
   const handleMove = async (axis: 'X' | 'Y' | 'Z', distance: number) => {
+    if (movementActionPending) {
+      return;
+    }
+
+    setMovementActionPending(true);
     try {
       const move: MoveRequest = {};
       move[axis.toLowerCase() as keyof MoveRequest] = distance;
@@ -341,10 +373,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       }
     } catch (error) {
       console.error(`Error moving ${axis}:`, error);
+    } finally {
+      setMovementActionPending(false);
     }
   };
 
   const handleControlAction = async (action: 'pause' | 'resume' | 'cancel' | 'stop' | 'firmware-restart' | 'disable-motors') => {
+    if (controlActionPending) {
+      return;
+    }
+
+    setControlActionPending(true);
     try {
       let result;
       switch (action) {
@@ -372,10 +411,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       }
     } catch (error) {
       console.error(`Error performing ${action}:`, error);
+    } finally {
+      setControlActionPending(false);
     }
   };
 
   const handleFilamentAction = async (action: 'load' | 'unload' | 'change') => {
+    if (filamentActionPending) {
+      return;
+    }
+
+    setFilamentActionPending(true);
     try {
       const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
         load: () => apiClient.loadFilament(printer.id),
@@ -388,12 +434,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       }
     } catch (error) {
       console.error(`Error during filament ${action}:`, error);
+    } finally {
+      setFilamentActionPending(false);
     }
   };
 
   const handleHotendTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter' || hotendTemp === '') return;
+    if (e.key !== 'Enter' || hotendTemp === '' || temperatureActionPending) return;
 
+    setTemperatureActionPending(true);
     try {
       const currentBedTemp = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : bedTemp;
       const result = await apiClient.setTemperatures(printer.id, {
@@ -406,12 +455,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       }
     } catch (error) {
       console.error('Error setting hotend temperature:', error);
+    } finally {
+      setTemperatureActionPending(false);
     }
   };
 
   const handleBedTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter' || bedTemp === '') return;
+    if (e.key !== 'Enter' || bedTemp === '' || temperatureActionPending) return;
 
+    setTemperatureActionPending(true);
     try {
       const currentHotendTemp = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : hotendTemp;
       const result = await apiClient.setTemperatures(printer.id, {
@@ -424,38 +476,25 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       }
     } catch (error) {
       console.error('Error setting bed temperature:', error);
+    } finally {
+      setTemperatureActionPending(false);
     }
   };
 
   const handleApplyPreset = async (preset: string) => {
-    try {
-      let targets: TempTargets;
+    if (temperatureActionPending) {
+      return;
+    }
 
-      switch (preset.toLowerCase()) {
-        case 'abs':
-          targets = { hotend: 250, bed: 100 };
-          break;
-        case 'asa':
-          targets = { hotend: 260, bed: 100 };
-          break;
-        case 'pla':
-          targets = { hotend: 210, bed: 60 };
-          break;
-        case 'pc':
-          targets = { hotend: 280, bed: 110 };
-          break;
-        case 'pctg':
-          targets = { hotend: 240, bed: 85 };
-          break;
-        case 'petg':
-          targets = { hotend: 230, bed: 75 };
-          break;
-        case 'cooldown':
-          targets = { hotend: 0, bed: 0 };
-          break;
-        default:
-          console.warn(`Unknown preset: ${preset}`);
-          return;
+    setTemperatureActionPending(true);
+    try {
+      const targets = preset.toLowerCase() === 'cooldown'
+        ? { hotend: 0, bed: 0 }
+        : getPresetTargets(preset);
+
+      if (!targets) {
+        console.warn(`Unknown preset: ${preset}`);
+        return;
       }
 
       const result = await apiClient.setTemperatures(printer.id, targets);
@@ -468,6 +507,41 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       }
     } catch (error) {
       console.error(`Error applying ${preset} preset:`, error);
+    } finally {
+      setTemperatureActionPending(false);
+    }
+  };
+
+  const handleApplySingleHeaterPreset = async (heater: 'hotend' | 'bed', preset: string) => {
+    if (temperatureActionPending) {
+      return;
+    }
+
+    const presetTargets = getPresetTargets(preset);
+    if (!presetTargets) {
+      console.warn(`Unknown preset: ${preset}`);
+      return;
+    }
+
+    const currentHotend = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : Number(hotendTemp);
+    const currentBed = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : Number(bedTemp);
+    const targets: TempTargets = heater === 'hotend'
+      ? { hotend: presetTargets.hotend, bed: currentBed }
+      : { hotend: currentHotend, bed: presetTargets.bed };
+
+    setTemperatureActionPending(true);
+    try {
+      const result = await apiClient.setTemperatures(printer.id, targets);
+      if (result.success) {
+        setHotendTemp(targets.hotend);
+        setBedTemp(targets.bed);
+      } else {
+        console.error(`Failed to apply ${heater} preset:`, result.error);
+      }
+    } catch (error) {
+      console.error(`Error applying ${heater} preset:`, error);
+    } finally {
+      setTemperatureActionPending(false);
     }
   };
 
@@ -524,7 +598,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           {printerStatisticsQuery.isLoading ? (
             <div className="text-sm text-pf-text-secondary">Loading statistics…</div>
           ) : printerStatisticsQuery.data ? (
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
               <div>
                 <dt className="text-xs text-pf-text-secondary">Print time</dt>
                 <dd className="font-medium text-pf-text-primary">{formatHours(printerStatisticsQuery.data.totalPrintHours)}</dd>
@@ -574,7 +648,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           {printerVersionQuery.isLoading ? (
             <div className="text-sm text-pf-text-secondary">Loading version…</div>
           ) : printerVersionQuery.data ? (
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
               <div>
                 <dt className="text-xs text-pf-text-secondary">Firmware</dt>
                 <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.firmwareVersion || '—'}</dd>
@@ -606,37 +680,65 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* Control Section */}
         <CollapsibleSection
           title="Control"
+          collapsedTitle="Control and Quick Access"
           expanded={isControlExpanded}
           onToggle={setIsControlExpanded}
+          hideExpandedTitle
         >
-          <div className="flex flex-col gap-0">
-            {/* Control buttons row - matching DetailedPrinterCard sizing */}
-            <div className="grid grid-cols-3 gap-1 w-fit">
-              <ControlPadButton
-                disabled={!canPauseOrResumeNow}
-                onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
-                title={isPaused ? 'Resume print' : 'Pause print'}
-                padSize="small"
-              >
-                {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
-              </ControlPadButton>
-              <ControlPadButton
-                disabled={!canCancelNow}
-                onClick={() => handleControlAction('cancel')}
-                title="Cancel print"
-                padSize="small"
-              >
-                <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
-              </ControlPadButton>
-              <ControlPadButton
-                variant={isShutdown ? 'secondary' : 'danger'}
-                disabled={!canEmergencyStopNow}
-                onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
-                title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-                padSize="small"
-              >
-                {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
-              </ControlPadButton>
+          <div className="flex gap-4 items-start">
+            {/* Control buttons */}
+            <div className="flex flex-col gap-1">
+              <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Control</div>
+              <div className="grid grid-cols-3 gap-1 w-fit">
+                <ControlPadButton
+                  disabled={controlActionPending || !canPauseOrResumeNow}
+                  onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
+                  title={isPaused ? 'Resume print' : 'Pause print'}
+                  padSize="small"
+                >
+                  {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
+                </ControlPadButton>
+                <ControlPadButton
+                  disabled={controlActionPending || !canCancelNow}
+                  onClick={() => handleControlAction('cancel')}
+                  title="Cancel print"
+                  padSize="small"
+                >
+                  <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
+                </ControlPadButton>
+                <ControlPadButton
+                  variant={isShutdown ? 'secondary' : 'danger'}
+                  disabled={controlActionPending || !canEmergencyStopNow}
+                  onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
+                  title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
+                  padSize="small"
+                >
+                  {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
+                </ControlPadButton>
+              </div>
+            </div>
+
+            {/* Quick Access buttons */}
+            <div className="flex flex-col gap-1">
+              <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Quick Access</div>
+              <div className="grid grid-cols-2 gap-1 w-fit">
+                <ControlPadButton
+                  disabled={!canOpenFilesNow}
+                  onClick={() => setShowFiles(true)}
+                  title="View printer files"
+                  padSize="small"
+                >
+                  <FileIcon className="h-4 w-4" />
+                </ControlPadButton>
+                <ControlPadButton
+                  disabled={!canOpenHistoryNow}
+                  onClick={() => setShowHistory(true)}
+                  title="View print history"
+                  padSize="small"
+                >
+                  <HistoryIcon className="h-4 w-4" />
+                </ControlPadButton>
+              </div>
             </div>
           </div>
         </CollapsibleSection>
@@ -644,214 +746,217 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* Move Section */}
         <CollapsibleSection
           title="Move"
+          collapsedTitle="Movement, Macros, and Manual Move"
           expanded={isMoveExpanded}
           onToggle={setIsMoveExpanded}
+          hideExpandedTitle
         >
           <div className="flex gap-4 items-start">
-            {/* XY Pad */}
-            <div className="grid grid-cols-3 grid-rows-3 gap-1 w-40 h-36">
+            {/* XY + Z Pad */}
+            <div className="flex flex-col gap-1">
+              <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Move</div>
+              <div className="flex gap-2 items-start">
+            <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleHome('all')}
                 title="Home all axes"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isAllHomed).className ?? ''}`}
+                padSize="small"
+                className={getHomeButtonStyle(isHomedStateKnown, isAllHomed).className}
                 style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
-                iconCenter={<HomeIcon className="h-6 w-6" />}
-              ></Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+              >
+                <HomeIcon className="h-4 w-4" />
+              </ControlPadButton>
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Y', step)}
-                className="w-full h-full !p-0"
-                iconCenter={<ArrowUpIcon className="h-6 w-6" />}
-              ></Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canDisableMotorsNow}
+                padSize="small"
+              >
+                <ArrowUpIcon className="h-4 w-4" />
+              </ControlPadButton>
+              <ControlPadButton
+                disabled={controlActionPending || !canDisableMotorsNow}
                 onClick={() => handleControlAction('disable-motors')}
                 title="Disable Motors (M84)"
-                className="w-full h-full !p-0"
-                iconCenter={<DisableMotorsIcon className="w-6 h-6" />}
-              ></Button>
+                padSize="small"
+              >
+                <DisableMotorsIcon className="h-4 w-4" />
+              </ControlPadButton>
 
               {/* Middle row */}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('X', -step)}
-                className="w-full h-full !p-0"
-                iconCenter={<ArrowLeftIcon className="h-6 w-6" />}
-              ></Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+                padSize="small"
+              >
+                <ArrowLeftIcon className="h-4 w-4" />
+              </ControlPadButton>
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isXYHomed).className ?? ''}`}
+                padSize="small"
+                className={getHomeButtonStyle(isHomedStateKnown, isXYHomed).className}
                 style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
-                iconCenter={<HomeIcon className="h-6 w-6" />}
-              ></Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+              >
+                <HomeIcon className="h-4 w-4" />
+              </ControlPadButton>
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('X', step)}
-                className="w-full h-full !p-0"
-                iconCenter={<ArrowRightIcon className="h-6 w-6" />}
-              ></Button>
+                padSize="small"
+              >
+                <ArrowRightIcon className="h-4 w-4" />
+              </ControlPadButton>
 
               {/* Bottom row */}
               <div></div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Y', -step)}
-                className="w-full h-full !p-0"
-                iconCenter={<ArrowDownIcon className="h-6 w-6" />}
-              ></Button>
+                padSize="small"
+              >
+                <ArrowDownIcon className="h-4 w-4" />
+              </ControlPadButton>
               <div></div>
             </div>
 
             {/* Z Pad */}
-            <div className="grid grid-cols-1 grid-rows-3 gap-1 h-36" style={{ width: 'calc(160px / 3 - 4px / 3)' }}>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+            <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Z', step)}
-                className="w-full h-full !p-0"
+                padSize="small"
               >
                 Z+
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+              </ControlPadButton>
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleHome('z')}
                 title="Home Z"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isZHomed).className ?? ''}`}
+                padSize="small"
+                className={getHomeButtonStyle(isHomedStateKnown, isZHomed).className}
                 style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
-                iconCenter={<HomeIcon className="h-6 w-6" />}
-              ></Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canMoveNow}
+              >
+                <HomeIcon className="h-4 w-4" />
+              </ControlPadButton>
+              <ControlPadButton
+                disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Z', -step)}
-                className="w-full h-full !p-0"
+                padSize="small"
               >
                 Z-
-              </Button>
+              </ControlPadButton>
             </div>
+
+            </div>
+            </div>
+
+            {/* Filament buttons */}
+              <div className="flex flex-col gap-1">
+                <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Macros</div>
+                <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
+                <ControlPadButton
+                  disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                  onClick={() => handleFilamentAction('load')}
+                  title="Load Filament"
+                  padSize="small"
+                >
+                  <FilamentLoadIcon className="h-4 w-4" />
+                </ControlPadButton>
+                <ControlPadButton
+                  disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                  onClick={() => handleFilamentAction('unload')}
+                  title="Unload Filament"
+                  padSize="small"
+                >
+                  <FilamentUnloadIcon className="h-4 w-4" />
+                </ControlPadButton>
+                <ControlPadButton
+                  disabled={filamentActionPending || !canFilamentChange({ isOnline, isEnabled, support })}
+                  onClick={() => handleFilamentAction('change')}
+                  title="Change Filament (M600)"
+                  padSize="small"
+                >
+                  <FilamentChangeIcon className="h-4 w-4" />
+                </ControlPadButton>
+                </div>
+              </div>
           </div>
           {/* Move distance slider */}
-          <MoveDistanceSlider value={step} onChange={setStep} disabled={!canSetStepNow} />
-        </CollapsibleSection>
-
-        {/* Files and History Section */}
-        <CollapsibleSection
-          title="Quick Access"
-          expanded={isQuickAccessExpanded}
-          onToggle={setIsQuickAccessExpanded}
-        >
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={!canOpenFilesNow}
-              onClick={() => setShowFiles(true)}
-              className="flex items-center justify-center gap-2"
-              title="View printer files"
-              iconLeft={<FileIcon className="h-4 w-4" />}
-            >
-              <span>Files</span>
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={!canOpenHistoryNow}
-              onClick={() => setShowHistory(true)}
-              className="flex items-center justify-center gap-2"
-              title="View print history"
-              iconLeft={<HistoryIcon className="h-4 w-4" />}
-            >
-              <span>History</span>
-            </Button>
+          <div className="my-4">
+            <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Step Size</div>
+            <MoveDistanceSlider value={step} onChange={setStep} disabled={!canSetStepNow} />
+          </div>
+          {/* Manual Movement Inputs */}
+          <div className="mt-3">
+            <div className="flex gap-1 items-end">
+              <MovementInput
+                axis="X"
+                currentPosition={lastKnownX}
+                disabled={movementActionPending || !canManualMoveNow}
+                value={moveX}
+                max={500}
+                onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
+                onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
+                className="!w-16 min-w-0"
+              />
+              <MovementInput
+                axis="Y"
+                currentPosition={lastKnownY}
+                disabled={movementActionPending || !canManualMoveNow}
+                value={moveY}
+                max={500}
+                onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
+                onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
+                className="!w-16 min-w-0"
+              />
+              <MovementInput
+                axis="Z"
+                currentPosition={lastKnownZ}
+                disabled={movementActionPending || !canManualMoveNow}
+                value={moveZ}
+                max={500}
+                onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
+                onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
+                className="!w-16 min-w-0"
+              />
+              <ControlPadButton
+                disabled={movementActionPending || !canManualMoveNow || (moveX === '' && moveY === '' && moveZ === '')}
+                onClick={async () => {
+                  if (moveX !== '') await handleMove('X', Number(moveX));
+                  if (moveY !== '') await handleMove('Y', Number(moveY));
+                  if (moveZ !== '') await handleMove('Z', Number(moveZ));
+                }}
+                title="Move to entered coordinates"
+                padSize="small"
+                className="!bg-green-600 hover:!bg-green-700 !text-white"
+              >
+                <span className="text-[10px] font-bold">GO</span>
+              </ControlPadButton>
+            </div>
           </div>
         </CollapsibleSection>
 
-        {/* Manual Movement Input Section */}
+        {/* Temperatures Section */}
         <CollapsibleSection
-          title="Manual Move"
-          expanded={isManualMoveExpanded}
-          onToggle={setIsManualMoveExpanded}
+          title="Temps"
+          expanded={isTempsExpanded}
+          onToggle={setIsTempsExpanded}
         >
-          <div className="grid grid-cols-3 gap-2">
-            <MovementInput
-              axis="X"
-              currentPosition={lastKnownX}
-              disabled={!canManualMoveNow}
-              value={moveX}
-              onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-              onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
-              className="!w-full"
-            />
-            <MovementInput
-              axis="Y"
-              currentPosition={lastKnownY}
-              disabled={!canManualMoveNow}
-              value={moveY}
-              onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-              onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
-              className="!w-full"
-            />
-            <MovementInput
-              axis="Z"
-              currentPosition={lastKnownZ}
-              disabled={!canManualMoveNow}
-              value={moveZ}
-              onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-              onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
-              className="!w-full"
-            />
-          </div>
-        </CollapsibleSection>
-
-        {/* Temperatures Section - REDESIGNED */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Temps</div>
-            <div className="flex gap-1 items-stretch h-8">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canCooldownNow}
-                onClick={() => handleApplyPreset('cooldown')}
-                title="Cooldown"
-                className="shrink-0 px-2"
-                iconCenter={<SnowflakeIcon className="h-4 w-4" />}
-              ></Button>
+          <div className="flex justify-end gap-1 items-stretch h-8 pb-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={temperatureActionPending || !canCooldownNow}
+              onClick={() => handleApplyPreset('cooldown')}
+              title="Cooldown"
+              className="shrink-0 !px-2"
+              iconCenter={<SnowflakeIcon className={`h-4 w-4 ${((displayPrinter?.hotendTarget ?? 0) > 0 || (displayPrinter?.bedTarget ?? 0) > 0) ? 'text-pf-accent' : 'text-pf-text-secondary'}`} />}
+            ></Button>
+            <div className="relative w-24">
               <Select
                 value=""
                 onChange={(e) => {
@@ -860,98 +965,65 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                     handleApplyPreset(value);
                   }
                 }}
-                disabled={!canSetTemperaturesNow}
-                className="flex-1 text-xs"
+                disabled={temperatureActionPending || !canSetTemperaturesNow}
+                className="h-8 text-[10px] uppercase tracking-wide font-semibold !pr-6 !border-transparent !bg-transparent enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
               >
-                <option value="">Presets</option>
-                <option value="ABS">ABS</option>
-                <option value="ASA">ASA</option>
-                <option value="PLA">PLA</option>
-                <option value="PC">PC</option>
-                <option value="PCTG">PCTG</option>
-                <option value="PETG">PETG</option>
+                <option value="">PRESETS</option>
+                {materialPresets.map((preset) => (
+                  <option key={preset.value} value={preset.value}>{preset.label}</option>
+                ))}
               </Select>
             </div>
+          </div>
+
+          <div className="grid grid-cols-[minmax(0,1fr)_3rem_4.75rem_5rem_1.5rem] gap-2 pb-1 text-[10px] uppercase tracking-wide text-pf-text-secondary">
+            <span>Name</span>
+            <span className="text-right">State</span>
+            <span className="text-right">Current</span>
+            <span className="text-right">Target</span>
+            <span></span>
           </div>
 
           {/* Hotend Temperature Row */}
           <TemperatureControlRow
             icon={<NozzleIcon className="w-4 h-4 text-red-500" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />}
             label="Hotend"
-            liveReading={formatTempWithTarget(
+            stateLabel={(displayPrinter?.hotendTarget ?? 0) > 0 ? 'on' : 'off'}
+            liveReading={formatCurrentTemp(
               displayPrinter?.hotendTemp,
-              displayPrinter?.hotendTarget,
               lastKnownHotendTemp
             )}
             value={hotendTemp}
             onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleHotendTempKeyDown}
-            disabled={!canSetTemperaturesNow}
+            disabled={temperatureActionPending || !canSetTemperaturesNow}
+            presetOptions={hotendPresetOptions}
+            onPresetSelect={(preset) => {
+              void handleApplySingleHeaterPreset('hotend', preset);
+            }}
           />
 
           {/* Bed Temperature Row */}
           <TemperatureControlRow
             icon={<BedIcon className="w-4 h-4 text-blue-500" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />}
             label="Bed"
-            liveReading={formatTempWithTarget(
+            stateLabel={(displayPrinter?.bedTarget ?? 0) > 0 ? 'on' : 'off'}
+            liveReading={formatCurrentTemp(
               displayPrinter?.bedTemp,
-              displayPrinter?.bedTarget,
               lastKnownBedTemp
             )}
             value={bedTemp}
             onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleBedTempKeyDown}
-            disabled={!canSetTemperaturesNow}
+            disabled={temperatureActionPending || !canSetTemperaturesNow}
+            presetOptions={bedPresetOptions}
+            onPresetSelect={(preset) => {
+              void handleApplySingleHeaterPreset('bed', preset);
+            }}
           />
-        </div>
+        </CollapsibleSection>
 
-        {/* Filament Macros Section - capability-based */}
-        {support.supportsFilamentControl && (
-          <CollapsibleSection
-            title="Filament"
-            expanded={isFilamentExpanded}
-            onToggle={setIsFilamentExpanded}
-          >
-            <div className="grid grid-cols-3 gap-1">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                onClick={() => handleFilamentAction('load')}
-                title="Load Filament"
-                className="w-full text-xs inline-flex items-center justify-center gap-1"
-                iconLeft={<FilamentLoadIcon className="w-3.5 h-3.5" />}
-              >
-                Load
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                onClick={() => handleFilamentAction('unload')}
-                title="Unload Filament"
-                className="w-full text-xs inline-flex items-center justify-center gap-1"
-                iconLeft={<FilamentUnloadIcon className="w-3.5 h-3.5" />}
-              >
-                Unload
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!canFilamentChange({ isOnline, isEnabled, support })}
-                onClick={() => handleFilamentAction('change')}
-                title="Change Filament (M600)"
-                className="w-full text-xs inline-flex items-center justify-center gap-1"
-                iconLeft={<FilamentChangeIcon className="w-3.5 h-3.5" />}
-              >
-                Change
-              </Button>
-            </div>
-          </CollapsibleSection>
-        )}
+
 
         {/* Spool Section - Only show when Spoolman is configured */}
         {displayPrinter?.spoolInfo && (
@@ -961,17 +1033,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           onToggle={setIsSpoolExpanded}
           headerActions={
             <div className="flex items-center gap-0.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={spoolActionPending}
-                onClick={() => setShowSpoolPicker(true)}
-                className="!p-1 !h-auto"
-                title="Change spool"
-                aria-label="Change spool"
-                iconCenter={<FilamentChangeIcon className="h-4 w-4" />}
-              ></Button>
               {displayPrinter?.spoolInfo?.hasActiveSpool && (
                 <Button
                   type="button"
@@ -982,8 +1043,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                     setSpoolActionPending(true);
                     try {
                       await apiClient.clearActiveSpool(printer.id);
-                      refetch();
-                      setTimeout(() => refetch(), 2000);
+                      // Optimistically update cached printers to clear spool info
+                      // SignalR will deliver the authoritative update on next status cycle
+                      queryClient.setQueryData<Printer[]>(['printers'], (old) =>
+                        old?.map(p => p.id === printer.id
+                          ? { ...p, spoolInfo: { hasActiveSpool: false } }
+                          : p
+                        )
+                      );
                     } catch (err) {
                       console.error('Failed to eject spool:', err);
                     } finally {
@@ -996,54 +1063,21 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   iconCenter={<EjectIcon className="h-4 w-4" />}
                 ></Button>
               )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={spoolActionPending}
+                onClick={() => setShowSpoolPicker(true)}
+                className="!p-1 !h-auto"
+                title="Change spool"
+                aria-label="Change spool"
+                iconCenter={<FilamentChangeIcon className="h-4 w-4" />}
+              ></Button>
             </div>
           }
         >
-          {displayPrinter?.spoolInfo?.hasActiveSpool ? (
-            <div className="space-y-2 text-xs">
-              {displayPrinter.spoolInfo.vendor && (
-                <div className="flex justify-between">
-                  <span className="text-pf-text-secondary">Vendor:</span>
-                  <span className="text-pf-text-primary font-medium">{displayPrinter.spoolInfo.vendor}</span>
-                </div>
-              )}
-              {displayPrinter.spoolInfo.material && (
-                <div className="flex justify-between">
-                  <span className="text-pf-text-secondary">Material:</span>
-                  <span className="text-pf-text-primary font-medium">{displayPrinter.spoolInfo.material}</span>
-                </div>
-              )}
-              {displayPrinter.spoolInfo.colorHex && (
-                <div className="flex justify-between items-center">
-                  <span className="text-pf-text-secondary">Color:</span>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-3 h-3 rounded-sm border border-pf-border"
-                      style={{ backgroundColor: displayPrinter.spoolInfo.colorHex }}
-                      title={displayPrinter.spoolInfo.colorHex}
-                    />
-                    <span className="text-pf-text-primary font-medium">{displayPrinter.spoolInfo.colorHex}</span>
-                  </div>
-                </div>
-              )}
-              {displayPrinter.spoolInfo.spoolName && (
-                <div className="flex justify-between">
-                  <span className="text-pf-text-secondary">Spool:</span>
-                  <span className="text-pf-text-primary font-medium">{displayPrinter.spoolInfo.spoolName}</span>
-                </div>
-              )}
-              {displayPrinter.spoolInfo.remainingWeightG !== undefined && displayPrinter.spoolInfo.remainingWeightG !== null && (
-                <div className="flex justify-between">
-                  <span className="text-pf-text-secondary">Remaining:</span>
-                  <span className="text-pf-text-primary font-medium">{Math.round(displayPrinter.spoolInfo.remainingWeightG)}g</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-xs text-pf-text-tertiary">
-              <p>No spool loaded</p>
-            </div>
-          )}
+          <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo} />
         </CollapsibleSection>
         )}
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
@@ -1073,15 +1107,32 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onClose={() => setShowSpoolPicker(false)}
         printerId={printer.id}
         activeSpoolId={displayPrinter?.spoolInfo?.activeSpoolId}
-        onSelect={async (spoolId) => {
+        onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
             await apiClient.setActiveSpool(printer.id, spoolId);
             setShowSpoolPicker(false);
-            // Immediate refetch + delayed re-fetch to pick up spool info
-            // after the Moonraker subscription service updates the status cache
-            refetch();
-            setTimeout(() => refetch(), 2000);
+            // Optimistically update cached printers with new spool info
+            queryClient.setQueryData<Printer[]>(['printers'], (old) =>
+              old?.map(p => p.id === printer.id
+                ? {
+                    ...p,
+                    spoolInfo: {
+                      hasActiveSpool: true,
+                      activeSpoolId: spool.id,
+                      spoolName: spool.name,
+                      material: spool.material,
+                      colorHex: spool.colorHex ?? undefined,
+                      filamentName: spool.filamentName ?? undefined,
+                      vendor: spool.vendor ?? undefined,
+                      remainingWeightG: spool.remainingWeightG ?? undefined,
+                      spoolInUse: true,
+                    },
+                  }
+                : p
+              )
+            );
+            // SignalR will deliver the authoritative update on next status cycle
           } catch (err) {
             console.error('Failed to set active spool:', err);
           } finally {

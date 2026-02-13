@@ -15,6 +15,7 @@ export { FileUpload, type FileUploadProps } from './FileUpload';
 export { FormField, type FormFieldProps } from './FormField';
 export { Input, type InputProps } from './Input';
 export { Label, type LabelProps } from './Label';
+export { LoadedFilamentCard, type LoadedFilamentCardProps } from './LoadedFilamentCard';
 export { MoveDistanceSlider } from './MoveDistanceSlider';
 export { MovementInput, type MovementInputProps } from './MovementInput';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
