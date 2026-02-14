@@ -41,8 +41,7 @@ function AddPrinterModalContent({
     manufacturerId: undefined,
     modelId: undefined,
     apiKey: undefined,
-    // Digest authentication for PrusaLink - username defaults to "maker"
-    username: 'maker',
+    username: undefined,
     password: undefined,
     cameraStreamUrl: '',
     cameraSnapshotUrl: '',
@@ -101,8 +100,8 @@ function AddPrinterModalContent({
     }
 
     // Check authentication requirements per backend
-    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
-      errors.password = ['Password is required for PrusaLink (Settings → Network → Credentials)'];
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.apiKey?.trim()) {
+      errors.apiKey = ['API Key is required for PrusaLink (Settings → Network → Credentials)'];
     }
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
@@ -156,8 +155,8 @@ function AddPrinterModalContent({
     }
     
     // Validate authentication per backend
-    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
-      errors.password = ['Password is required for PrusaLink printers'];
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.apiKey?.trim()) {
+      errors.apiKey = ['API Key is required for PrusaLink printers'];
     }
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
@@ -206,7 +205,7 @@ function AddPrinterModalContent({
       manufacturerId: undefined,
       modelId: undefined,
       apiKey: undefined,
-      username: 'maker', // Reset to default
+      username: undefined,
       password: undefined,
       cameraStreamUrl: '',
       cameraSnapshotUrl: '',
@@ -330,47 +329,33 @@ function AddPrinterModalContent({
               />
             </FormField>
 
-            {/* PrusaLink Authentication (Digest Auth with Username/Password) */}
+            {/* PrusaLink Authentication (API Key) */}
             {formData.backend === PrinterBackend.PrusaLink && (
-              <>
-                <FormField
-                  label="Username"
-                  helper="Default is 'maker' for most PrusaLink printers"
-                >
+              <FormField
+                label="API Key"
+                required
+                error={validationErrors.apiKey?.[0]}
+                helper="Get this from printer: Settings → Network → Credentials"
+              >
+                <div className="relative">
                   <Input
-                    type="text"
-                    value={formData.username || 'maker'}
-                    onChange={(e) => handleInputChange('username', e.target.value)}
-                    placeholder="maker"
-                    aria-label="Username for PrusaLink"
+                    type={showPassword ? 'text' : 'password'}
+                    value={formData.apiKey || ''}
+                    onChange={(e) => handleInputChange('apiKey', e.target.value)}
+                    placeholder="Enter API key from printer"
+                    aria-label="API Key for PrusaLink"
+                    className="pr-10"
                   />
-                </FormField>
-                <FormField
-                  label="Password"
-                  required
-                  error={validationErrors.password?.[0]}
-                  helper="Get this from printer: Settings → Network → Credentials"
-                >
-                  <div className="relative">
-                    <Input
-                      type={showPassword ? 'text' : 'password'}
-                      value={formData.password || ''}
-                      onChange={(e) => handleInputChange('password', e.target.value)}
-                      placeholder="Enter password from printer"
-                      aria-label="Password for PrusaLink"
-                      className="pr-10"
-                    />
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
-                    />
-                  </div>
-                </FormField>
-              </>
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
+                    aria-label={showPassword ? 'Hide API key' : 'Show API key'}
+                    iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                  />
+                </div>
+              </FormField>
             )}
 
             {/* OctoPrint Authentication (API Key) */}

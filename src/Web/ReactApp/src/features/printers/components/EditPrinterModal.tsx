@@ -69,21 +69,10 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         backend: typeof printerDetails.backend === 'string'
           ? (printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString) ?? PrinterBackend.Unknown)
           : printerDetails.backend,
-        // PrusaLink doesn't use API keys - only username/password for Digest Auth
-        // Clear apiKey for PrusaLink to prevent confusion with legacy data
-        apiKey: (typeof printerDetails.backend === 'string' 
-          ? printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString)
-          : printerDetails.backend) === PrinterBackend.PrusaLink 
-            ? undefined 
-            : printerDetails.apiKey,
-        // Default username to 'maker' for PrusaLink if not set
-        username: printerDetails.username || (
-          (typeof printerDetails.backend === 'string' 
-            ? printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString)
-            : printerDetails.backend) === PrinterBackend.PrusaLink 
-            ? 'maker' 
-            : undefined
-        ),
+        // PrusaLink uses API key for authentication (same as OctoPrint)
+        apiKey: printerDetails.apiKey,
+        // Legacy: keep username/password if present for backward compatibility
+        username: printerDetails.username,
         password: printerDetails.password,
         cameraStreamUrl: printerDetails.cameraStreamUrl,
         cameraSnapshotUrl: printerDetails.cameraSnapshotUrl,
@@ -401,16 +390,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     setError('');
     try {
       // Include toolheads in the update if we have any
-      // Ensure username defaults to 'maker' for PrusaLink printers
-      // Clear apiKey for PrusaLink (uses Digest Auth, not API key)
       const updateData: UpdatePrinterDto = {
         ...formData,
-        apiKey: formData.backend === PrinterBackend.PrusaLink 
-          ? undefined 
-          : formData.apiKey,
-        username: formData.backend === PrinterBackend.PrusaLink 
-          ? (formData.username || 'maker') 
-          : formData.username,
         toolheads: toolheads.length > 0 ? toolheads : undefined,
       };
       const result = await updateMutation.mutateAsync({ id: printerId, printer: updateData });
@@ -476,8 +457,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     }
 
     // Check authentication requirements per backend
-    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
-      errors.password = ['Password is required for PrusaLink (Settings → Network → Credentials)'];
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.apiKey?.trim()) {
+      errors.apiKey = ['API Key is required for PrusaLink (Settings → Network → Credentials)'];
     }
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
@@ -493,7 +474,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
 
     try {
       const result = await apiClient.testConnection({
-        serverUrl: formData.serverUrl,
+        serverUrl: formData.serverUrl!,
         backend: formData.backend,
         apiKey: formData.apiKey,
         username: formData.username,
@@ -635,26 +616,17 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             )}
-            {/* PrusaLink uses Digest Authentication (username/password) */}
+            {/* PrusaLink uses API Key authentication */}
             {formData.backend === PrinterBackend.PrusaLink && (
-              <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField label="Username">
-                  <Input
-                    type="text"
-                    value={formData.username || 'maker'}
-                    onChange={e => handleInputChange('username', e.target.value)}
-                    placeholder="maker"
-                    title="PrusaLink username (usually 'maker')"
-                  />
-                </FormField>
-                <FormField label="Password" error={validationErrors.password?.[0]}>
+              <div className="col-span-2">
+                <FormField label="API Key" error={validationErrors.apiKey?.[0]}>
                   <div className="relative">
                     <Input
                       type={showPassword ? 'text' : 'password'}
-                      value={formData.password || ''}
-                      onChange={e => handleInputChange('password', e.target.value)}
+                      value={formData.apiKey || ''}
+                      onChange={e => handleInputChange('apiKey', e.target.value)}
                       placeholder="From printer Settings → Network → Credentials"
-                      title="PrusaLink password from printer settings"
+                      title="PrusaLink API key from printer settings"
                       className="pr-10"
                     />
                     <Button
@@ -662,7 +634,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       variant="subtle"
                       onClick={() => setShowPassword(!showPassword)}
                       className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showPassword ? 'Hide API key' : 'Show API key'}
                       iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
                     />
                   </div>

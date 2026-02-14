@@ -508,6 +508,7 @@ public class PrintJobManagementService(
 
             // Update status to Starting
             job.Status = PrintJobStatus.Starting;
+            job.FailureReason = null;
             job.ActualStartTime = DateTime.UtcNow;
             job.UpdatedAt = DateTime.UtcNow;
             await _repository.SaveChangesAsync(cancellationToken);

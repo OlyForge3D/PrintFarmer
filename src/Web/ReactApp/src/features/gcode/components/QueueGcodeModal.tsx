@@ -94,6 +94,14 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
   const [error, setError] = useState<string | null>(null);
   const [successState, setSuccessState] = useState<SuccessState | null>(null);
 
+  // Override state: allows user to bypass model matching and see all printers
+  const [overrideModelFilter, setOverrideModelFilter] = useState(false);
+  const [allPrinters, setAllPrinters] = useState<PrinterOption[] | null>(null);
+  const [loadingAllPrinters, setLoadingAllPrinters] = useState(false);
+
+  // Use overridden printer list when model filter is bypassed
+  const effectivePrinters = overrideModelFilter && allPrinters ? allPrinters : printers;
+
   // Filament picker state
   const [filaments, setFilaments] = useState<SpoolmanFilament[]>([]);
   // undefined = user hasn't chosen yet; null = user explicitly cleared
@@ -130,6 +138,22 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
     [filaments, effectiveFilamentId]
   );
 
+  const handleShowAllPrinters = async () => {
+    setLoadingAllPrinters(true);
+    try {
+      const all = await fetchPrinters(
+        undefined,
+        file.extractedNozzleDiameter,
+        file.extractedMaterial || undefined
+      );
+      setAllPrinters(all);
+      setOverrideModelFilter(true);
+      setAutoAssign(false);
+    } finally {
+      setLoadingAllPrinters(false);
+    }
+  };
+
   const buildRequest = (): EnqueuePrintJobRequest => {
     const req: EnqueuePrintJobRequest = {
       gcodeFileId: file.id,
@@ -144,7 +168,8 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
 
     if (typeof requiredNozzle === 'number') req.requiredNozzleDiameter = requiredNozzle;
     if (typeof requiredMaterial === 'string' && requiredMaterial.length > 0) req.requiredMaterialType = requiredMaterial;
-    if (typeof requiredModelValue === 'string' && requiredModelValue.length > 0) req.requiredPrinterModel = requiredModelValue;
+    // Omit model filter when user overrides — they've explicitly chosen a printer
+    if (!overrideModelFilter && typeof requiredModelValue === 'string' && requiredModelValue.length > 0) req.requiredPrinterModel = requiredModelValue;
 
     // Include selected Spoolman filament
     if (selectedFilament) {
@@ -219,13 +244,16 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
 
   // All printer compatibility filtering is now done server-side.
   // Printers returned from the API are already filtered by model, nozzle, and material.
+  // When override is active, effectivePrinters contains all printers (no model filter).
 
   if (!isOpen) return null;
 
-  // Check if there are no printers available (could mean no compatible printers when model filter is applied)
-  const noPrintersAvailable = printers.length === 0;
-  const availablePrinters = printers.filter(p => p.isAvailable);
+  // Use effectivePrinters for availability checks (respects override mode)
+  const noPrintersAvailable = effectivePrinters.length === 0;
+  const availablePrinters = effectivePrinters.filter(p => p.isAvailable);
   const noAvailablePrinters = availablePrinters.length === 0;
+  // Original model-filtered list is empty but we haven't overridden yet
+  const noModelMatch = printers.length === 0 && !!requiredModel && !overrideModelFilter;
 
   // Success state - show after job is queued
   if (successState) {
@@ -320,14 +348,14 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
             <Button 
               variant="secondary" 
               onClick={handleQueue} 
-              disabled={loading || startNowLoading || noPrintersAvailable || noAvailablePrinters}
+              disabled={loading || startNowLoading || noPrintersAvailable || noAvailablePrinters || (!autoAssign && !selectedPrinter)}
             >
               {loading ? 'Queueing…' : 'Queue for Later'}
             </Button>
             <Button 
               variant="primary" 
               onClick={handleQueueAndStart} 
-              disabled={loading || startNowLoading || noPrintersAvailable || noAvailablePrinters}
+              disabled={loading || startNowLoading || noPrintersAvailable || noAvailablePrinters || (!autoAssign && !selectedPrinter)}
             >
               {startNowLoading ? (
                 <span className="flex items-center gap-2">
@@ -348,20 +376,44 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
           <div className="font-medium text-pf-text-primary">{file.name}</div>
         </div>
 
-        {noPrintersAvailable && requiredModel && (
+        {noModelMatch && (
           <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
             <div className="font-medium">No compatible printers found</div>
             <div className="text-sm mt-1">
-              No printers match the required model "{requiredModel}". 
-              Add a printer with this model or a matching alias to your fleet.
+              No printers match the required model &ldquo;{requiredModel}&rdquo;.
+              You can add a matching alias to a printer, or select any printer manually.
             </div>
+            <Button
+              variant="secondary"
+              className="mt-2"
+              onClick={handleShowAllPrinters}
+              disabled={loadingAllPrinters}
+            >
+              {loadingAllPrinters ? (
+                <span className="flex items-center gap-2">
+                  <Spinner className="h-4 w-4" />
+                  Loading printers…
+                </span>
+              ) : (
+                'Show all printers'
+              )}
+            </Button>
           </div>
         )}
 
-        {noPrintersAvailable && !requiredModel && (
+        {noPrintersAvailable && !requiredModel && !overrideModelFilter && (
           <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
             <div className="font-medium">No printers configured</div>
             <div className="text-sm mt-1">Add at least one printer before queuing jobs.</div>
+          </div>
+        )}
+
+        {overrideModelFilter && (
+          <div className="text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+            <div className="font-medium">Model filter bypassed</div>
+            <div className="text-sm mt-1">
+              Showing all printers. The file expects model &ldquo;{requiredModel}&rdquo; — select the correct printer manually.
+            </div>
           </div>
         )}
 
@@ -372,7 +424,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
           </div>
         )}
 
-        {!noPrintersAvailable && availablePrinters.length > 0 && (
+        {!noPrintersAvailable && availablePrinters.length > 0 && !overrideModelFilter && (
           <div>
             <Checkbox 
               label="Auto-assign best available printer (recommended)" 
@@ -392,7 +444,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
                 onChange={(e) => setSelectedPrinter((e.target as HTMLSelectElement).value || undefined)}
               >
                 <option value="">-- Select printer --</option>
-                {printers.map(p => (
+                {effectivePrinters.map(p => (
                   <option key={p.id} value={p.id} disabled={!p.isAvailable}>
                     {p.name} — {p.model} {p.isAvailable ? '' : '(offline)'}
                   </option>

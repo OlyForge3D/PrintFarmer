@@ -369,7 +369,9 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     ISupportsCamera,
     ISupportsHistory,
     ISupportsFileDelete,
-    ISupportsPrinterInformation
+    ISupportsPrinterInformation,
+    ISupportsStatus,
+    ISupportsCompositeStatus
 {
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));

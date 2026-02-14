@@ -80,30 +80,33 @@ namespace Farm.Backend.Plugin.OctoPrint
         Task<string?> GetCameraStreamUrlAsync(string baseUrl, PrinterCredential? credential);
 
         /// <summary>
-        /// Gets the list of available gcode files on the printer.
+        /// Gets the list of available gcode file names on the printer.
         /// </summary>
         /// <param name="baseUrl">Base URL of OctoPrint server</param>
         /// <param name="credential">Printer credential for authentication</param>
-        Task<string[]> GetFileListAsync(string baseUrl, PrinterCredential? credential);
+        Task<string[]> GetFileNameListAsync(string baseUrl, PrinterCredential? credential);
 
         /// <summary>
         /// Gets the list of completed print jobs from OctoPrint history.
         /// Returns null if history is not available or API call fails.
         /// </summary>
         /// <param name="baseUrl">Base URL of OctoPrint server</param>
-        /// <param name="credential">Printer credential for authentication</param>
         /// <param name="limit">Maximum number of history entries to return</param>
         /// <param name="start">Offset index for pagination</param>
-        Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, PrinterCredential? credential, int? limit = null, int? start = null);
+        /// <param name="since">Filter to only return jobs started after this UTC timestamp</param>
+        /// <param name="credential">Printer credential for authentication</param>
+        /// <param name="ct">Cancellation token</param>
+        Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default);
 
         /// <summary>
         /// Gets details for a specific print job from OctoPrint history.
         /// Returns null if the job is not found or API call fails.
         /// </summary>
         /// <param name="baseUrl">Base URL of OctoPrint server</param>
-        /// <param name="credential">Printer credential for authentication</param>
         /// <param name="jobId">Unique identifier of the history job</param>
-        Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, PrinterCredential? credential, string jobId);
+        /// <param name="credential">Printer credential for authentication</param>
+        /// <param name="ct">Cancellation token</param>
+        Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default);
 
         /// <summary>
         /// Gets aggregated print job statistics (totals) from OctoPrint history.
@@ -111,7 +114,8 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// </summary>
         /// <param name="baseUrl">Base URL of OctoPrint server</param>
         /// <param name="credential">Printer credential for authentication</param>
-        Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential);
+        /// <param name="ct">Cancellation token</param>
+        Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
         /// <summary>
         /// Creates a PrinterDto from OctoPrint printer entity and status information.
@@ -154,14 +158,16 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// </summary>
         /// <param name="baseUrl">Base URL of OctoPrint server</param>
         /// <param name="credential">Printer credential for authentication</param>
-        Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential);
+        /// <param name="ct">Cancellation token</param>
+        Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
         /// <summary>
         /// Homes Z axis using native OctoPrint /api/printer/printhead endpoint.
         /// </summary>
         /// <param name="baseUrl">Base URL of OctoPrint server</param>
         /// <param name="credential">Printer credential for authentication</param>
-        Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential);
+        /// <param name="ct">Cancellation token</param>
+        Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
         /// <summary>
         /// Sets target temperature for bed using native OctoPrint API endpoint /api/printer/bed.
@@ -180,19 +186,7 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <param name="tool">Tool index to set temperature for (default "tool0" for first hotend)</param>
         Task<bool> SetHotendTempAsync(string baseUrl, PrinterCredential? credential, double hotendTemp, string tool = "tool0");
 
-        /// <summary>
-        /// Pauses the current print job.
-        /// </summary>
-        /// <param name="baseUrl">Base URL of OctoPrint server</param>
-        /// <param name="credential">Printer credential for authentication</param>
-        Task<bool> PauseAsync(string baseUrl, PrinterCredential? credential);
-
-        /// <summary>
-        /// Resumes a paused print job.
-        /// </summary>
-        /// <param name="baseUrl">Base URL of OctoPrint server</param>
-        /// <param name="credential">Printer credential for authentication</param>
-        Task<bool> ResumeAsync(string baseUrl, PrinterCredential? credential);
+        // PauseAsync and ResumeAsync are provided by ISupportsControlOperations base interface
 
         /// <summary>
         /// Cancels the current print job.
@@ -254,14 +248,7 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <returns>Success status</returns>
         Task<bool> MoveFileAsync(string baseUrl, PrinterCredential? credential, string source, string destination);
 
-        /// <summary>
-        /// Deletes a file or folder from the printer.
-        /// </summary>
-        /// <param name="baseUrl">Base URL of OctoPrint server</param>
-        /// <param name="credential">Printer credential for authentication</param>
-        /// <param name="path">File/folder path to delete (e.g., "folder/file.gcode")</param>
-        /// <returns>Success status</returns>
-        Task<bool> DeleteFileAsync(string baseUrl, PrinterCredential? credential, string path);
+        // DeleteFileAsync is inherited from ISupportsFileDelete with matching signature
 
         /// <summary>
         /// Creates a new folder on the printer's storage.

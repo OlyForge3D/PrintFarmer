@@ -39,19 +39,46 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         };
     }
 
+    /// <summary>
+    /// Resolves PrusaLink digest auth credentials from available auth data.
+    /// PrusaLink uses "maker" as username with the API key as password.
+    /// Supports legacy username/password credentials for backward compatibility.
+    /// </summary>
+    private static (string Username, string Password)? ResolvePrusaLinkDigestAuth(PrinterCredential? credentials)
+    {
+        if (credentials == null)
+        {
+            return null;
+        }
+
+        // Legacy: explicit username/password
+        if (credentials.HasDigestAuth)
+        {
+            return (credentials.Username!, credentials.Password!);
+        }
+
+        // New: API key with hardcoded "maker" username
+        if (credentials.HasApiKey)
+        {
+            return ("maker", credentials.ApiKey!);
+        }
+
+        return null;
+    }
+
     // Intentionally caches HttpClient instances per credential set for connection reuse
 #pragma warning disable IDISP015 // Member should not return created and cached instance
     private HttpClient GetClientForCredentials(PrinterCredential? credentials)
 #pragma warning restore IDISP015
     {
-        // If no digest auth credentials, use the default client
-        if (credentials == null || !credentials.HasDigestAuth)
+        var auth = ResolvePrusaLinkDigestAuth(credentials);
+        if (auth == null)
         {
             return _httpClient;
         }
 
         // Create a cache key for these credentials
-        string cacheKey = $"{credentials.Username}:{credentials.Password?.GetHashCode()}";
+        string cacheKey = $"{auth.Value.Username}:{auth.Value.Password.GetHashCode()}";
 
         lock (_clientLock)
         {
@@ -61,7 +88,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             }
 
             // Create a new HttpClient with DigestAuthHandler
-            DigestAuthHandler handler = new(credentials.Username!, credentials.Password!);
+            DigestAuthHandler handler = new(auth.Value.Username, auth.Value.Password);
             HttpClient newClient = new(handler, disposeHandler: true)
             {
                 Timeout = _httpClient.Timeout
@@ -670,9 +697,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<bool> PausePrintLegacyAsync(string baseUrl, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
-        if (!credentials.HasDigestAuth)
+        if (ResolvePrusaLinkDigestAuth(credentials) == null)
         {
-            _logger?.LogWarning("[PrusaLink] PausePrintLegacy requires digest auth credentials");
+            _logger?.LogWarning("[PrusaLink] PausePrintLegacy requires digest auth credentials (username/password or API key)");
             return false;
         }
 
@@ -700,9 +727,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<bool> ResumePrintLegacyAsync(string baseUrl, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
-        if (!credentials.HasDigestAuth)
+        if (ResolvePrusaLinkDigestAuth(credentials) == null)
         {
-            _logger?.LogWarning("[PrusaLink] ResumePrintLegacy requires digest auth credentials");
+            _logger?.LogWarning("[PrusaLink] ResumePrintLegacy requires digest auth credentials (username/password or API key)");
             return false;
         }
 
@@ -730,9 +757,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<bool> SetToolTemperatureLegacyAsync(string baseUrl, double temperature, PrinterCredential? credentials, int toolIndex = 0, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
-        if (!credentials.HasDigestAuth)
+        if (ResolvePrusaLinkDigestAuth(credentials) == null)
         {
-            _logger?.LogWarning("[PrusaLink] SetToolTemperatureLegacy requires digest auth credentials");
+            _logger?.LogWarning("[PrusaLink] SetToolTemperatureLegacy requires digest auth credentials (username/password or API key)");
             return false;
         }
 
@@ -764,9 +791,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<bool> SetBedTemperatureLegacyAsync(string baseUrl, double temperature, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
-        if (!credentials.HasDigestAuth)
+        if (ResolvePrusaLinkDigestAuth(credentials) == null)
         {
-            _logger?.LogWarning("[PrusaLink] SetBedTemperatureLegacy requires digest auth credentials");
+            _logger?.LogWarning("[PrusaLink] SetBedTemperatureLegacy requires digest auth credentials (username/password or API key)");
             return false;
         }
 
@@ -794,9 +821,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<bool> JogPrintHeadLegacyAsync(string baseUrl, double? x, double? y, double? z, double? feedRate, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
-        if (!credentials.HasDigestAuth)
+        if (ResolvePrusaLinkDigestAuth(credentials) == null)
         {
-            _logger?.LogWarning("[PrusaLink] JogPrintHeadLegacy requires digest auth credentials");
+            _logger?.LogWarning("[PrusaLink] JogPrintHeadLegacy requires digest auth credentials (username/password or API key)");
             return false;
         }
 
@@ -831,9 +858,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<bool> HomePrintHeadLegacyAsync(string baseUrl, bool homeX, bool homeY, bool homeZ, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
-        if (!credentials.HasDigestAuth)
+        if (ResolvePrusaLinkDigestAuth(credentials) == null)
         {
-            _logger?.LogWarning("[PrusaLink] HomePrintHeadLegacy requires digest auth credentials");
+            _logger?.LogWarning("[PrusaLink] HomePrintHeadLegacy requires digest auth credentials (username/password or API key)");
             return false;
         }
 

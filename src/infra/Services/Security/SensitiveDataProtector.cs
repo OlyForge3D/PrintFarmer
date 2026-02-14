@@ -59,10 +59,10 @@ public class SensitiveDataProtector : ISensitiveDataProtector
         }
         catch (Exception ex)
         {
-            // Log but don't throw - the data might be in plaintext (migration scenario)
-            // or corrupted. Return null to indicate decryption failed.
-            _logger.LogWarning(ex, "Failed to decrypt sensitive data - data may be plaintext or corrupted");
-            return null;
+            // Data is likely plaintext (not yet encrypted or migration scenario).
+            // Return the original value so credentials still work.
+            _logger.LogWarning(ex, "Failed to decrypt sensitive data - returning as plaintext");
+            return protectedText;
         }
     }
 }

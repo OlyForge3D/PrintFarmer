@@ -111,16 +111,22 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
             "ISupportsFileList",
             "ISupportsFileDownload",
             "ISupportsFileUpload",
+            "ISupportsFileDelete",
             "ISupportsStartPrint",
             "ISupportsHistory",
             "ISupportsTemperatureControl",
             "ISupportsMovement",
             "ISupportsControlOperations",
             "ISupportsCamera",
+            "ISupportsConfiguredCameraDetection",
             "ISupportsFileMetadata",
             "ISupportsPrinterInformation",
-            "ISupportsFileDelete",
-            "ISupportsFilamentControl"
+            "ISupportsFilamentControl",
+            "ISupportsSpoolman",
+            "ISupportsStatus",
+            "ISupportsCompositeStatus",
+            "ISupportsControlRestart",
+            "ISupportsGcodeExecution"
         };
 
         return capabilityNames

@@ -74,6 +74,7 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
         {
             IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
             HttpClient httpClient = httpClientFactory.CreateClient();
+
             // Per-request CTS timeouts (from BackendTimeoutSettings) control actual cancellation;
             // HttpClient.Timeout is just a ceiling to avoid orphaned connections.
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
@@ -106,7 +107,11 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
             typeof(ISupportsHistory),
             typeof(ISupportsTemperatureControl),
             typeof(ISupportsControlOperations),
-            typeof(ISupportsCamera)
+            typeof(ISupportsCamera),
+            typeof(ISupportsPrinterInformation),
+            typeof(ISupportsGcodeExecution),
+            typeof(ISupportsOctoPrintTemperature),
+            typeof(ISupportsMovement)
         };
     }
 

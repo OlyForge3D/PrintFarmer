@@ -29,7 +29,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
     ISupportsPrinterInformation,
     ISupportsHistory,
     ISupportsFilamentControl,
-    ISupportsSpoolman
+    ISupportsSpoolman,
+    ISupportsStatus,
+    ISupportsCompositeStatus,
+    ISupportsControlRestart,
+    ISupportsGcodeExecution
 {
     private readonly HttpClient _http = http;
     private readonly IUnifiedLoggingService _logger = logger;

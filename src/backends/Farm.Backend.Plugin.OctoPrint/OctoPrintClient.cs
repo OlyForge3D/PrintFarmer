@@ -1,4 +1,4 @@
-﻿#pragma warning disable S1006, CA1033, S1939, CS1066 // Default parameters, explicit interface implementations, interface inheritance, and optional arguments on interface implementations are intentional
+﻿#pragma warning disable S1006, S1939, CS1066 // Default parameters, interface inheritance, and optional arguments on interface implementations are intentional
 
 using System;
 using System.Net.Http;
@@ -20,11 +20,15 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     ISupportsFileList,
     ISupportsFileUpload,
     ISupportsFileDelete,
+    ISupportsStartPrint,
     ISupportsCamera,
     ISupportsPrinterInformation,
     ISupportsHistory,
     ISupportsTemperatureControl,
-    ISupportsControlOperations
+    ISupportsControlOperations,
+    ISupportsGcodeExecution,
+    ISupportsOctoPrintTemperature,
+    ISupportsMovement
 {
     private readonly HttpClient _httpClient = httpClient;
     private readonly ILogger<OctoPrintClient>? _logger = logger;
@@ -268,6 +272,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
+    /// <summary>
+    /// ISupportsStartPrint implementation — delegates to StartJobAsync.
+    /// </summary>
+    public Task<bool> StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        return StartJobAsync(baseUrl, credential, fileName);
+    }
+
     public async Task<bool> CancelJobAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
@@ -336,7 +348,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         return Task.FromResult<string?>($"{baseUrl}/webcam/?action=stream");
     }
 
-    public async Task<string[]> GetFileListAsync(string baseUrl, PrinterCredential? credential)
+    public async Task<string[]> GetFileNameListAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         try
@@ -572,7 +584,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         return SendWithRetryAsync(request, cancellationToken: cancellationToken);
     }
 
-    public async Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, PrinterCredential? credential, int? limit = null, int? start = null)
+    public async Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history");
@@ -608,7 +620,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
-    public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, PrinterCredential? credential, string jobId)
+    public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
@@ -632,7 +644,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// </summary>
     /// <param name="baseUrl">Base URL of OctoPrint server</param>
     /// <param name="credential">Printer credential for authentication</param>
-    public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential)
+    /// <param name="ct">Cancellation token</param>
+    public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history?limit=0");
@@ -684,9 +697,10 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// Deletes a job from history (wrapper for interface compatibility)
     /// </summary>
     /// <param name="baseUrl">Base URL of OctoPrint server</param>
-    /// <param name="credential">Printer credential for authentication</param>
     /// <param name="jobId">The job identifier to delete</param>
-    public async Task<bool> DeleteHistoryJobAsync(string baseUrl, PrinterCredential? credential, string jobId)
+    /// <param name="credential">Printer credential for authentication</param>
+    /// <param name="ct">Cancellation token</param>
+    public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
@@ -708,10 +722,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// Sets temperatures (unified method for both bed and hotend temperatures)
     /// </summary>
     /// <param name="baseUrl">Base URL of OctoPrint server</param>
-    /// <param name="credential">Printer credential for authentication</param>
     /// <param name="hotendTemp">Target hotend temperature in Celsius (optional)</param>
     /// <param name="bedTemp">Target bed temperature in Celsius (optional)</param>
-    public async Task<bool> SetTemperaturesAsync(string baseUrl, PrinterCredential? credential, double? hotendTemp = null, double? bedTemp = null)
+    /// <param name="credential">Printer credential for authentication</param>
+    /// <param name="ct">Cancellation token</param>
+    public async Task<bool> SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         bool success = true;
 
@@ -783,7 +798,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// </summary>
     /// <param name="baseUrl">Base URL of OctoPrint server</param>
     /// <param name="credential">Printer credential for authentication</param>
-    public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential)
+    /// <param name="ct">Cancellation token</param>
+    public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
@@ -810,7 +826,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// </summary>
     /// <param name="baseUrl">Base URL of OctoPrint server</param>
     /// <param name="credential">Printer credential for authentication</param>
-    public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential)
+    /// <param name="ct">Cancellation token</param>
+    public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
@@ -892,52 +909,25 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     }
 
     /// <summary>
-    /// Pauses the current print job.
+    /// Pauses the current print job. Implements ISupportsControlOperations.PauseAsync.
     /// </summary>
-    /// <param name="baseUrl">Base URL of OctoPrint server</param>
-    /// <param name="credential">Printer credential for authentication</param>
-    public async Task<bool> PauseAsync(string baseUrl, PrinterCredential? credential)
-    {
-        baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
-        request.Headers.Add("X-Api-Key", credential?.ApiKey);
-        request.Content = new StringContent("{\"command\":\"pause\",\"action\":\"pause\"}", Encoding.UTF8, "application/json");
+    public Task<bool> PauseAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+        => PauseJobAsync(baseUrl, credential);
 
-        try
-        {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex)
-        {
-            LogError("Pause print failed", ex);
-            throw;
-        }
-    }
+    /// <summary>
+    /// Resumes a paused print job. Implements ISupportsControlOperations.ResumeAsync.
+    /// </summary>
+    public Task<bool> ResumeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+        => ResumeJobAsync(baseUrl, credential);
 
-    public async Task<bool> ResumeAsync(string baseUrl, PrinterCredential? credential)
-    {
-        baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
-        request.Headers.Add("X-Api-Key", credential?.ApiKey);
-        request.Content = new StringContent("{\"command\":\"pause\",\"action\":\"resume\"}", Encoding.UTF8, "application/json");
+    /// <summary>
+    /// Cancels the current print job. Implements ISupportsControlOperations.CancelAsync.
+    /// </summary>
+    public Task<bool> CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+        => CancelJobAsync(baseUrl, credential);
 
-        try
-        {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex)
-        {
-            LogError("Resume print failed", ex);
-            throw;
-        }
-    }
-
-    public async Task<bool> CancelPrintAsync(string baseUrl, PrinterCredential? credential)
-    {
-        return await CancelJobAsync(baseUrl, credential);
-    }
+    public Task<bool> CancelPrintAsync(string baseUrl, PrinterCredential? credential)
+        => CancelJobAsync(baseUrl, credential);
 
     /// <summary>
     /// Jogs the printhead (moves axes incrementally without homing).
@@ -1117,15 +1107,16 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// Uses OctoPrint /api/files/local/{path} DELETE endpoint.
     /// </summary>
     /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="filePath">File/folder path to delete (e.g., "folder/file.gcode")</param>
     /// <param name="credential">Printer credential for authentication</param>
-    /// <param name="path">File/folder path to delete (e.g., "folder/file.gcode")</param>
+    /// <param name="ct">Cancellation token</param>
     /// <returns>Success status</returns>
-    public async Task<bool> DeleteFileAsync(string baseUrl, PrinterCredential? credential, string path)
+    public async Task<bool> DeleteFileAsync(string baseUrl, string filePath, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
 
         // Clean path
-        string cleanPath = path.TrimStart('/');
+        string cleanPath = filePath.TrimStart('/');
 
         HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/files/local/{cleanPath}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
@@ -1710,8 +1701,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
-    // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
-    async Task<byte[]?> ISupportsFileDownload.DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct = default)
+    // ========== ISupportsFileDownload ==========
+
+    /// <summary>
+    /// Downloads a file from OctoPrint storage without credentials (ISupportsFileDownload).
+    /// </summary>
+    public async Task<byte[]?> DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct = default)
     {
         try
         {
@@ -1726,10 +1721,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
-    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    // ========== ISupportsFileList ==========
+
+    /// <summary>
+    /// Gets a list of files with metadata from the printer (ISupportsFileList).
+    /// </summary>
+    public async Task<List<PrinterFileInfo>> GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        List<PrinterFileInfo> filesWithMetadata = await GetFileListWithMetadataAsync(baseUrl, credential);
-        return filesWithMetadata;
+        return await GetFileListWithMetadataAsync(baseUrl, credential);
     }
 
     private async Task<List<PrinterFileInfo>> GetFileListWithMetadataAsync(string baseUrl, PrinterCredential? credential)
@@ -1809,7 +1808,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
-    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
+    // ========== ISupportsFileUpload ==========
+
+    /// <summary>
+    /// Uploads a G-code file to the printer (ISupportsFileUpload).
+    /// </summary>
+    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // Convert Stream to byte array for the existing UploadFileAsync method
         if (fileContent is MemoryStream ms)
@@ -1822,25 +1826,38 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         return await UploadFileAsync(baseUrl, credential, memoryStream.ToArray(), fileName, null, false);
     }
 
-    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
+    // ========== ISupportsCamera ==========
+
+    /// <summary>
+    /// Gets the camera stream URL (ISupportsCamera overload with frontendPort).
+    /// </summary>
+    public async Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         return await GetCameraStreamUrlAsync(baseUrl, credential);
     }
 
-    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
+    /// <summary>
+    /// Gets the camera snapshot URL (ISupportsCamera).
+    /// </summary>
+    public Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
             // OctoPrint snapshot is typically /webcam/?action=snapshot
-            return await Task.FromResult($"{baseUrl.TrimEnd('/')}/webcam/?action=snapshot");
+            return Task.FromResult<string?>($"{baseUrl.TrimEnd('/')}/webcam/?action=snapshot");
         }
         catch
         {
-            return null;
+            return Task.FromResult<string?>(null);
         }
     }
 
-    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    // ========== ISupportsPrinterInformation ==========
+
+    /// <summary>
+    /// Gets printer information from OctoPrint version API (ISupportsPrinterInformation).
+    /// </summary>
+    public async Task<StandardPrinterInfo> GetPrinterInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
@@ -1861,55 +1878,54 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
-    /// <summary>
-    /// ISupportsHistory implementations - get and manage print history.
-    /// OctoPrint doesn't support server-side date filtering, so 'since' parameter is ignored.
-    /// Incremental filtering is handled by the caller (PrintJobManagementService).
-    /// </summary>
-    /// <param name="baseUrl">The base URL of the OctoPrint server.</param>
-    /// <param name="limit">Maximum number of history entries to return.</param>
-    /// <param name="start">Starting index for pagination.</param>
-    /// <param name="since">Ignored - OctoPrint doesn't support server-side date filtering.</param>
-    /// <param name="credential">Printer credential for authentication.</param>
-    /// <param name="ct">Cancellation token for async operation.</param>
-    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await GetHistoryListAsync(baseUrl, credential, limit, start);
-
-    async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await GetHistoryJobAsync(baseUrl, credential, jobId);
-
-    async Task<HistoryTotals?> ISupportsHistory.GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await GetHistoryTotalsAsync(baseUrl, credential);
-
-    async Task<bool> ISupportsHistory.DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await DeleteHistoryJobAsync(baseUrl, credential, jobId);
+    // ========== ISupportsGcodeExecution ==========
 
     /// <summary>
-    /// ISupportsTemperatureControl implementation - set temperatures.
+    /// Sends a raw G-code command without credentials (ISupportsGcodeExecution).
     /// </summary>
-    /// <param name="baseUrl">The base URL of the OctoPrint server.</param>
-    /// <param name="hotendTemp">Target hotend temperature in Celsius.</param>
-    /// <param name="bedTemp">Target bed temperature in Celsius.</param>
-    /// <param name="credential">Printer credential for authentication.</param>
-    /// <param name="ct">Cancellation token for async operation.</param>
-    async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await SetTemperaturesAsync(baseUrl, credential, hotendTemp, bedTemp);
+    public Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default)
+        => SendGcodeAsync(baseUrl, null, gcode);
+
+    // ========== ISupportsOctoPrintTemperature ==========
 
     /// <summary>
-    /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
+    /// Sets bed temperature using API key string (ISupportsOctoPrintTemperature).
     /// </summary>
-    /// <param name="baseUrl">The base URL of the OctoPrint server.</param>
-    /// <param name="credential">Printer credential for authentication.</param>
-    /// <param name="ct">Cancellation token for async operation.</param>
-    async Task<bool> ISupportsControlOperations.PauseAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await PauseJobAsync(baseUrl, credential);
+    public Task<bool> SetBedTempAsync(string baseUrl, string apiKey, double bedTemp, CancellationToken ct = default)
+        => SetBedTempAsync(baseUrl, new PrinterCredential { ApiKey = apiKey }, bedTemp);
 
-    async Task<bool> ISupportsControlOperations.ResumeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await ResumeJobAsync(baseUrl, credential);
+    /// <summary>
+    /// Sets hotend temperature using API key string (ISupportsOctoPrintTemperature).
+    /// </summary>
+    public Task<bool> SetHotendTempAsync(string baseUrl, string apiKey, double hotendTemp, string tool = "tool0", CancellationToken ct = default)
+        => SetHotendTempAsync(baseUrl, new PrinterCredential { ApiKey = apiKey }, hotendTemp, tool);
 
-    async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await CancelJobAsync(baseUrl, credential);
+    // ========== ISupportsMovement ==========
 
-    async Task<bool> ISupportsFileDelete.DeleteFileAsync(string baseUrl, string filePath, PrinterCredential? credential, CancellationToken ct)
-        => await DeleteFileAsync(baseUrl, credential, filePath);
+    /// <summary>
+    /// Homes all axes (ISupportsMovement.HomeAsync).
+    /// </summary>
+    public Task<bool> HomeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+        => SendHomeAsync(baseUrl, credential);
+
+    /// <summary>
+    /// Homes all axes without credentials (ISupportsMovement.SendHomeAsync).
+    /// </summary>
+    public Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
+        => SendHomeAsync(baseUrl, (PrinterCredential?)null);
+
+    /// <summary>
+    /// Moves the printer incrementally (ISupportsMovement.MoveAsync).
+    /// </summary>
+    public Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
+        => JogAsync(baseUrl, credential, x, y, z, f);
+
+    /// <summary>
+    /// Absolute positioning is not supported by OctoPrint (ISupportsMovement.MoveToAsync).
+    /// </summary>
+    public Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        _logger?.LogWarning("MoveToAsync (absolute positioning) is not supported by OctoPrint");
+        return Task.FromResult(false);
+    }
 }
