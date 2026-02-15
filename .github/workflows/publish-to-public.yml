@@ -1,0 +1,212 @@
+name: Publish to Public Repo
+
+# Manual trigger only
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        default: 'minor'
+        options:
+          - micro
+          - minor
+          - major
+      public_repo:
+        description: 'Public repository (org/repo)'
+        required: true
+        default: 'OlyForge3D/printfarmer'
+        type: string
+      dry_run:
+        description: 'Dry run (do not push)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish-squashed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Add public remote
+        env:
+          PUBLIC_REPO_PAT: ${{ secrets.PUBLIC_REPO_PAT }}
+        run: |
+          if [ -z "$PUBLIC_REPO_PAT" ]; then
+            echo "Error: PUBLIC_REPO_PAT secret is not set"
+            exit 1
+          fi
+          git remote add public "https://x-access-token:${PUBLIC_REPO_PAT}@github.com/${{ inputs.public_repo }}.git"
+
+      - name: Fetch public repo tags
+        run: |
+          # Fetch tags from public repo (may fail if repo is empty/new)
+          git fetch public --tags 2>/dev/null || echo "No tags in public repo yet"
+
+      - name: Calculate new version
+        id: version
+        run: |
+          # Get latest version tag from public repo
+          LATEST_TAG=$(git tag --sort=-version:refname | grep "^v[0-9]" | head -1 || echo "")
+          
+          if [ -z "$LATEST_TAG" ]; then
+            # No existing version, start at v0.1.0
+            MAJOR=0
+            MINOR=1
+            PATCH=0
+            PREV_TAG=""
+            FIRST_RELEASE="true"
+            echo "No previous version found, starting at v0.1.0"
+          else
+            # Parse current version
+            VERSION=${LATEST_TAG#v}
+            MAJOR=$(echo $VERSION | cut -d. -f1)
+            MINOR=$(echo $VERSION | cut -d. -f2)
+            PATCH=$(echo $VERSION | cut -d. -f3)
+            PREV_TAG="$LATEST_TAG"
+            FIRST_RELEASE="false"
+            echo "Current version: $LATEST_TAG"
+          fi
+          
+          # Bump version
+          case "${{ inputs.bump }}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            micro)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+          echo "first_release=$FIRST_RELEASE" >> $GITHUB_OUTPUT
+          
+          echo "New version: $NEW_VERSION (bump: ${{ inputs.bump }})"
+
+      - name: Generate release notes from commits
+        id: release-notes
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          PREV_TAG="${{ steps.version.outputs.prev_tag }}"
+          
+          if [ "${{ steps.version.outputs.first_release }}" = "true" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" HEAD | grep -v "Bump version to" | grep -v "\[skip ci\]" | head -50)
+            CHANGELOG_LINK=""
+          else
+            COMMITS=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" | grep -v "Bump version to" | grep -v "\[skip ci\]")
+            CHANGELOG_LINK="**Full Changelog**: https://github.com/${{ inputs.public_repo }}/compare/${PREV_TAG}...${NEW_VERSION}"
+          fi
+          
+          {
+            echo "## What's Changed"
+            echo ""
+            echo "$COMMITS"
+            echo ""
+            if [ -n "$CHANGELOG_LINK" ]; then
+              echo "$CHANGELOG_LINK"
+            fi
+          } > /tmp/release_notes.md
+          
+          echo "Generated release notes:"
+          cat /tmp/release_notes.md
+
+      - name: Create squashed release branch
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          PREV_TAG="${{ steps.version.outputs.prev_tag }}"
+          
+          if [ "${{ steps.version.outputs.first_release }}" = "true" ]; then
+            # First release - create orphan branch
+            git checkout --orphan release-squash
+            git commit -m "$NEW_VERSION - Initial release"
+          else
+            # Squash from previous tag
+            git checkout -b release-squash "$PREV_TAG"
+            git merge --squash HEAD@{1}  # Merge from where we were (master/main)
+            git commit -m "$NEW_VERSION"
+          fi
+          
+          # Tag it
+          git tag "$NEW_VERSION"
+          
+          echo "Created squashed commit:"
+          git log -1 --oneline
+
+      - name: Push to public repo (dry run)
+        if: inputs.dry_run
+        run: |
+          echo "=== DRY RUN ==="
+          echo "Would push to: ${{ inputs.public_repo }}"
+          echo "New version: ${{ steps.version.outputs.new_version }}"
+          echo "Previous version: ${{ steps.version.outputs.prev_tag }}"
+          echo "Bump type: ${{ inputs.bump }}"
+          echo ""
+          echo "Squashed commit:"
+          git log -1
+          echo ""
+          echo "Release notes:"
+          cat /tmp/release_notes.md
+
+      - name: Push to public repo
+        if: ${{ !inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          
+          # Push branch and tag
+          git push public release-squash:main --force
+          git push public "$NEW_VERSION"
+          
+          echo "Successfully pushed $NEW_VERSION to ${{ inputs.public_repo }}"
+
+      - name: Create release in public repo
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_PAT }}
+        run: |
+          gh release create "${{ steps.version.outputs.new_version }}" \
+            --repo "${{ inputs.public_repo }}" \
+            --title "${{ steps.version.outputs.new_version }}" \
+            --notes-file /tmp/release_notes.md \
+            --draft
+          
+          echo "Created draft release: https://github.com/${{ inputs.public_repo }}/releases"
+
+      - name: Summary
+        run: |
+          echo "## Publish Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Bump Type | ${{ inputs.bump }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Previous Version | ${{ steps.version.outputs.prev_tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| New Version | ${{ steps.version.outputs.new_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Public Repo | ${{ inputs.public_repo }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dry Run | ${{ inputs.dry_run }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.dry_run }}" = "false" ]; then
+            echo "✅ Published to https://github.com/${{ inputs.public_repo }}/releases" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ Dry run completed - no changes pushed" >> $GITHUB_STEP_SUMMARY
+          fi
