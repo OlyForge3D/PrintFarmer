@@ -64,7 +64,7 @@ src/tests/_temp/
 # Test result artifacts
 *.trx
 TestResults/
-src/src/
+/src/src/
 test-logs/
 
 # Coverage artifacts
