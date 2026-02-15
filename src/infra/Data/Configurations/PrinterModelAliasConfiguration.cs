@@ -13,7 +13,7 @@ public class PrinterModelAliasConfiguration : IEntityTypeConfiguration<PrinterMo
         _ = builder.Property(a => a.SlicerType).HasMaxLength(128);
         _ = builder.Property(a => a.CreatedAt).IsRequired();
         _ = builder.HasOne(a => a.PrinterModel)
-            .WithMany()
+            .WithMany(m => m.Aliases)
             .HasForeignKey(a => a.PrinterModelId)
             .OnDelete(DeleteBehavior.Cascade);
 

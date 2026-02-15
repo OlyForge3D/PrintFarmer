@@ -78,7 +78,7 @@ public sealed class SdcpClientWebSocketFragmentationTests
 
         var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
         using var httpClient = new HttpClient();
-        var client = new SdcpClient(httpClient, logger.Object);
+        var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
         var status = await client.GetStatusAsync(baseUrl);
 

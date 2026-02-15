@@ -17,11 +17,13 @@ public static class BackendClientServiceCollectionExtensions
     /// <typeparam name="TImplementation">The client implementation (e.g., MoonrakerClient)</typeparam>
     /// <param name="services">The service collection to register with</param>
     /// <param name="clientFactory">Factory function to create the client instance with configured HttpClient</param>
-    /// <param name="timeoutSeconds">HTTP client timeout in seconds (default: 10)</param>
+    /// <param name="timeoutSeconds">HTTP client timeout in seconds (default: 300). Set high because
+    /// individual operations should use per-request CancellationTokenSource timeouts; the HttpClient
+    /// timeout is only a safety net to avoid permanently hung connections.</param>
     public static void AddBackendClient<TInterface, TImplementation>(
         this IServiceCollection services,
         Func<HttpClient, TImplementation> clientFactory,
-        int timeoutSeconds = 10)
+        int timeoutSeconds = 300)
         where TInterface : class
         where TImplementation : class, TInterface
     {
@@ -46,11 +48,13 @@ public static class BackendClientServiceCollectionExtensions
     /// <typeparam name="TLogger">The logger type for dependency injection</typeparam>
     /// <param name="services">The service collection to register with</param>
     /// <param name="clientFactory">Factory function to create the client with HttpClient and Logger</param>
-    /// <param name="timeoutSeconds">HTTP client timeout in seconds (default: 10)</param>
+    /// <param name="timeoutSeconds">HTTP client timeout in seconds (default: 300). Set high because
+    /// individual operations should use per-request CancellationTokenSource timeouts; the HttpClient
+    /// timeout is only a safety net to avoid permanently hung connections.</param>
     public static void AddBackendClientWithLogging<TInterface, TImplementation, TLogger>(
         this IServiceCollection services,
         Func<HttpClient, Microsoft.Extensions.Logging.ILogger<TLogger>?, TImplementation> clientFactory,
-        int timeoutSeconds = 10)
+        int timeoutSeconds = 300)
         where TInterface : class
         where TImplementation : class, TInterface
         where TLogger : class

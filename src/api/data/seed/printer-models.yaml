@@ -1071,7 +1071,7 @@
   aliases:
     - slicerModelName: Prusa MINI
       slicerType: OrcaSlicer
-    - slicerModelName: Original Prusa MINI & MINI+
+    - slicerModelName: MINIIS
       slicerType: PrusaSlicer
 
 - name: Prusa MK3S
@@ -1100,7 +1100,7 @@
   aliases:
     - slicerModelName: Prusa MK3S
       slicerType: OrcaSlicer
-    - slicerModelName: Original Prusa i3 MK3S & MK3S+
+    - slicerModelName: MK3S
       slicerType: PrusaSlicer
 
 - name: Prusa MK3.5
@@ -1160,7 +1160,7 @@
   aliases:
     - slicerModelName: Prusa MK4
       slicerType: OrcaSlicer
-    - slicerModelName: Original Prusa MK4
+    - slicerModelName: MK4IS
       slicerType: PrusaSlicer
 
 - name: Prusa MK4S
@@ -1190,7 +1190,7 @@
   aliases:
     - slicerModelName: Prusa MK4S
       slicerType: OrcaSlicer
-    - slicerModelName: Original Prusa MK4S
+    - slicerModelName: MK4S
       slicerType: PrusaSlicer
 
 - name: Prusa CORE One
@@ -1220,7 +1220,7 @@
   aliases:
     - slicerModelName: Prusa CORE One
       slicerType: OrcaSlicer
-    - slicerModelName: Prusa CORE One
+    - slicerModelName: COREONE
       slicerType: PrusaSlicer
 
 - name: Prusa CORE One L
@@ -1250,7 +1250,7 @@
   aliases:
     - slicerModelName: Prusa CORE One L
       slicerType: OrcaSlicer
-    - slicerModelName: Prusa CORE One L
+    - slicerModelName: COREONEL
       slicerType: PrusaSlicer
 
 - name: Prusa XL

@@ -10,6 +10,7 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Logging;
 
@@ -360,7 +361,7 @@ public class SdcpAttributes
     public string? MainboardID { get; set; }
 }
 
-public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient,
+public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger, BackendTimeoutSettings timeouts) : PrinterClientBase, ISdcpClient,
     ISupportsFileList,
     ISupportsFileUpload,
     ISupportsStartPrint,
@@ -368,12 +369,14 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     ISupportsCamera,
     ISupportsHistory,
     ISupportsFileDelete,
-    ISupportsPrinterInformation
+    ISupportsPrinterInformation,
+    ISupportsStatus,
+    ISupportsCompositeStatus
 {
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly BackendTimeoutSettings _timeouts = timeouts ?? throw new ArgumentNullException(nameof(timeouts));
 
-    private const int DefaultOperationTimeoutSeconds = 10;
     private const string SdcpLogCategory = "SDCP";
     private const int SdcpWebSocketPort = 3030;
 
@@ -632,7 +635,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            cts.CancelAfter(_timeouts.CommandTimeout);
 
             string requestId = Guid.NewGuid().ToString("N");
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "TestConnection", correlationId: requestId, cts.Token);
@@ -711,7 +714,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds)); // SDCP may be slower than HTTP APIs
+            cts.CancelAfter(_timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetStatus", correlationId: requestId, cts.Token);
@@ -807,7 +810,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetJob", correlationId: requestId, cts.Token);
@@ -880,7 +883,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetCompositeStatus", correlationId: requestId, cts.Token);
@@ -1133,7 +1136,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 }.Uri;
 
                 using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(TimeSpan.FromSeconds(5));
+                cts.CancelAfter(_timeouts.StatusPollTimeout);
 
                 try
                 {
@@ -1190,7 +1193,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 }.Uri;
 
                 using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(TimeSpan.FromSeconds(5));
+                cts.CancelAfter(_timeouts.StatusPollTimeout);
 
                 try
                 {
@@ -1262,7 +1265,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetFileList", correlationId: requestId, cts.Token);
@@ -1345,7 +1348,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "SendCommand", correlationId: requestId, cts.Token);
@@ -1417,7 +1420,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(60)); // Allow more time for file uploads
+            cts.CancelAfter(_timeouts.FileUploadTimeout);
 
             // SDCP v3 docs show HTTP upload endpoints living on port 3030.
             // Some printers may expose SDCP behind a reverse proxy on port 80; if the stream is seekable,
@@ -1576,7 +1579,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, _) = await ConnectWebSocketAsync(baseUrl, operation: "GetHistoryIds", correlationId: requestId, cts.Token);
@@ -1747,7 +1750,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, _) = await ConnectWebSocketAsync(baseUrl, operation: "GetHistoryDetail", correlationId: requestId, cts.Token);
@@ -1789,7 +1792,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            cts.CancelAfter(_timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetAttributes", correlationId: requestId, cts.Token);

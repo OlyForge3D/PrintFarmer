@@ -170,6 +170,7 @@ public static class ServiceCollectionExtensions
         RegisterImportingServices(services);
         RegisterCatalogServices(services);
         RegisterSlicingServices(services, configuration);
+        _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
         RegisterBackendClientPlugins(services);  // Register backend client plugins FIRST - they register HTTP clients
         RegisterHttpClients(services);
         RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients

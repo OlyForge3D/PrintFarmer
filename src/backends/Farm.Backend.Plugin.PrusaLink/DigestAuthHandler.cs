@@ -10,15 +10,20 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// Used by PrusaLink for privileged API access that requires user credentials.
 ///
 /// Flow:
-/// 1. Initial request returns 401 with WWW-Authenticate header containing realm, nonce, etc.
-/// 2. Client computes digest response using MD5 hash of credentials + nonce
-/// 3. Retry request with Authorization header containing digest response
+/// 1. Pre-authenticate using cached nonce if available (avoids consuming stream content)
+/// 2. If no cached nonce, initial request returns 401 with WWW-Authenticate header
+/// 3. Client computes digest response using MD5 hash of credentials + nonce
+/// 4. Retry request with Authorization header containing digest response
+///
+/// Nonce caching is critical for file uploads: without it, the request body stream
+/// is consumed on the initial 401 and cannot be replayed for the authenticated retry.
 /// </summary>
 public class DigestAuthHandler : DelegatingHandler
 {
     private readonly string? _username;
     private readonly string? _password;
     private int _nonceCount;
+    private DigestChallenge? _cachedChallenge;
 
     public DigestAuthHandler(string? username, string? password)
         : base(new HttpClientHandler())
@@ -44,7 +49,21 @@ public class DigestAuthHandler : DelegatingHandler
             return await base.SendAsync(request, cancellationToken);
         }
 
-        // First attempt - may get 401 with WWW-Authenticate
+        // Pre-authenticate using cached challenge if available.
+        // This avoids a 401 round-trip and, critically, prevents consuming
+        // non-rewindable stream content (e.g., file uploads) on the initial attempt.
+        if (_cachedChallenge != null)
+        {
+            string preAuth = ComputeDigestResponse(
+                _cachedChallenge,
+                request.Method.Method,
+                request.RequestUri?.PathAndQuery ?? "/",
+                _username,
+                _password);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Digest", preAuth);
+        }
+
+        // Send the request (pre-authenticated if nonce was cached)
         HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
 
         if (response.StatusCode != HttpStatusCode.Unauthorized)
@@ -68,8 +87,11 @@ public class DigestAuthHandler : DelegatingHandler
             return response;
         }
 
+        // Cache the new challenge and reset nonce count (nc is per-nonce per RFC 7616)
+        _cachedChallenge = ParseDigestChallenge(digestHeader.Parameter);
+        _nonceCount = 0;
+
         // Dispose the 401 response since we're going to retry
-        DigestChallenge challenge = ParseDigestChallenge(digestHeader.Parameter);
 #pragma warning disable IDISP017 // Prefer using - intentional manual dispose before retry
         response.Dispose();
 #pragma warning restore IDISP017
@@ -78,7 +100,7 @@ public class DigestAuthHandler : DelegatingHandler
         using HttpRequestMessage retryRequest = await CloneRequestAsync(request);
 
         string digestResponse = ComputeDigestResponse(
-            challenge,
+            _cachedChallenge,
             retryRequest.Method.Method,
             retryRequest.RequestUri?.PathAndQuery ?? "/",
             _username,
@@ -93,7 +115,7 @@ public class DigestAuthHandler : DelegatingHandler
     {
         HttpRequestMessage clone = new(request.Method, request.RequestUri);
 
-        // Copy headers
+        // Copy headers (skip Authorization — caller sets a fresh one)
         foreach (KeyValuePair<string, IEnumerable<string>> header in request.Headers)
         {
             clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
@@ -102,7 +124,21 @@ public class DigestAuthHandler : DelegatingHandler
         // Copy content if present
         if (request.Content != null)
         {
-            byte[] contentBytes = await request.Content.ReadAsByteArrayAsync();
+            // After the first SendAsync the underlying stream has been consumed.
+            // ReadAsByteArrayAsync() on an already-serialized StreamContent returns
+            // empty bytes because the stream position is at the end and the internal
+            // buffer was never populated. Instead, access the raw stream directly,
+            // rewind it if possible, and copy into a fresh byte array.
+            Stream contentStream = await request.Content.ReadAsStreamAsync();
+            if (contentStream.CanSeek)
+            {
+                contentStream.Position = 0;
+            }
+
+            using MemoryStream ms = new();
+            await contentStream.CopyToAsync(ms);
+            byte[] contentBytes = ms.ToArray();
+
             clone.Content = new ByteArrayContent(contentBytes);
 
             // Copy content headers

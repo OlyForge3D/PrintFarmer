@@ -260,6 +260,39 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         return GetCameraStreamUrlAsync(baseUrl.ToString(), frontendPort, ct);
     }
 
+    /// <summary>
+    /// Queries the printer's storage API and returns the path of the first available,
+    /// writable storage (e.g. "/usb/" or "/local/"). Falls back to "/usb/" if the
+    /// query fails, since most Prusa printers with PrusaLink use USB storage.
+    /// </summary>
+    private async Task<string> ResolveStoragePathAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
+    {
+        try
+        {
+            StorageListResponse storage = await _apiClient.GetStorageAsync(baseUrl, credential, ct: ct);
+            Storage? writable = storage.StorageList
+                .FirstOrDefault(s => s.Available && !s.ReadOnly);
+            if (writable != null)
+            {
+                // Ensure path is in the format "/usb" (no trailing slash) for URL composition
+                string path = writable.Path.TrimEnd('/');
+                if (!path.StartsWith('/'))
+                {
+                    path = "/" + path;
+                }
+
+                _logger?.LogInformation("Resolved PrusaLink storage path: {Path}", path);
+                return path;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to query PrusaLink storage, falling back to /usb");
+        }
+
+        return "/usb";
+    }
+
     // File upload and management methods - Using comprehensive API client
     public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {
@@ -271,7 +304,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             // Build a rooted path using Uri to avoid manual separators
             // Note: Uri(Uri, string) requires the baseUri to be absolute
             string filePath = new Uri(new Uri("http://localhost/"), fileName).LocalPath;
-            return await _apiClient.UploadFileAsync(baseUrl, "/local", filePath, fileContent, credential, printAfterUpload: false, overwrite: true, ct);
+            string storagePath = await ResolveStoragePathAsync(baseUrl, credential, ct);
+            return await _apiClient.UploadFileAsync(baseUrl, storagePath, filePath, fileContent, credential, printAfterUpload: false, overwrite: true, ct);
         }
         catch (Exception ex)
         {
@@ -295,7 +329,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             // Build a rooted path using Uri to avoid manual separators
             // Note: Uri(Uri, string) requires the baseUri to be absolute
             string filePath = new Uri(new Uri("http://localhost/"), fileName).LocalPath;
-            return await _apiClient.StartPrintAsync(baseUrl, "/local", filePath, credential, ct);
+            string storagePath = await ResolveStoragePathAsync(baseUrl, credential, ct);
+            return await _apiClient.StartPrintAsync(baseUrl, storagePath, filePath, credential, ct);
         }
         catch (Exception ex)
         {
@@ -315,7 +350,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, credential, ct: ct);
+            string storagePath = await ResolveStoragePathAsync(baseUrl, credential, ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, storagePath, string.Empty, credential, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
                 // Return names of non-folder entries; FolderInfo.Children is an array so prefer Length checks
@@ -370,7 +406,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, credential, ct: ct);
+            string storagePath = await ResolveStoragePathAsync(baseUrl, credential, ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, storagePath, string.Empty, credential, ct: ct);
             if (folderInfo is FolderInfo folder && folder.Children != null)
             {
                 foreach (FileInfoBase child in folder.Children)
@@ -626,7 +663,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, credential, ct: ct);
+            string storagePath = await ResolveStoragePathAsync(baseUrl, credential, ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, storagePath, string.Empty, credential, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
                 // Return names of non-folder entries with size information

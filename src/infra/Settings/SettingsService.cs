@@ -247,6 +247,7 @@ public class SettingsService : ISettingsService
             int? order = classDisplayAttr?.Order;
 
             List<SettingPropertyMetadata> props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => p.GetCustomAttribute<JsonIgnoreAttribute>() == null)
                 .Select(p =>
                 {
                     JsonPropertyNameAttribute? jsonAttr = p.GetCustomAttribute<JsonPropertyNameAttribute>() ?? throw new InvalidOperationException($"Property '{p.Name}' in settings class '{type.Name}' is missing [JsonPropertyName] attribute.");

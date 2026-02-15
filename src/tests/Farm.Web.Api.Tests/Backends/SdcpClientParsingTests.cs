@@ -469,7 +469,7 @@ public sealed class SdcpClientParsingTests
             string baseUrl = $"http://127.0.0.1:{port}";
             var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
             using var httpClient = new HttpClient();
-            var client = new SdcpClient(httpClient, logger.Object);
+            var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
             var status = await client.GetStatusAsync(baseUrl);
 
@@ -607,7 +607,7 @@ public sealed class SdcpClientParsingTests
         string baseUrl = $"http://127.0.0.1:{port}";
         var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
         using var httpClient = new HttpClient();
-        var client = new SdcpClient(httpClient, logger.Object);
+        var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
         return new SdcpTestEnvironment(app, client, baseUrl);
     }
@@ -688,7 +688,7 @@ public sealed class SdcpClientParsingTests
         string baseUrl = $"http://127.0.0.1:{port}";
         var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
         using var httpClient = new HttpClient();
-        var client = new SdcpClient(httpClient, logger.Object);
+        var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
         return new SdcpTestEnvironment(app, client, baseUrl);
     }
