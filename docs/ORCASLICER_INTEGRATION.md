@@ -172,13 +172,13 @@ LABEL prebuild="true" purpose="orcaslicer-binaries" version="${ORCASLICER_VERSIO
 
 ```bash
 # Option 1: Build script (recommended)
-./build-orcaslicer-optimized.sh
+./scripts/build-orcaslicer-optimized.sh
 
 # With specific version
-ORCASLICER_VERSION=2.3.1 ./build-orcaslicer-optimized.sh
+ORCASLICER_VERSION=2.3.1 ./scripts/build-orcaslicer-optimized.sh
 
 # With GitHub token (avoid rate limits)
-GITHUB_TOKEN=your_token ./build-orcaslicer-optimized.sh
+GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
 
 # Option 2: Manual two-stage build
 # Step 1: Build binary layer (slow first time, cached after)
@@ -798,7 +798,7 @@ To load bed STL models:
 |------|---------|
 | `scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries` | Binary layer |
 | `Dockerfile.multistage` | Worker build (orcaslicer-worker target) |
-| `build-orcaslicer-optimized.sh` | Build script |
+| `scripts/build-orcaslicer-optimized.sh` | Build script |
 | `docker-compose.yml` | Service definitions |
 
 ---

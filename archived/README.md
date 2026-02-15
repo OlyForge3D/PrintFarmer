@@ -17,7 +17,7 @@ Contains legacy build and deployment scripts replaced by automated setup scripts
 Contains development and testing utilities moved for organization.
 
 ### `documentation/`
-Contains legacy documentation and summary files superseded by comprehensive documentation system.
+Contains legacy documentation and summary files superseded by comprehensive `docs/` system (files moved to `docs/` and `docs/architecture/`).
 
 **Moved from:**
 - `src/client/` → `archived/blazor-client/client/`

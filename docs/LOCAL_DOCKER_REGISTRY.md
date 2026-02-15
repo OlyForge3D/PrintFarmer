@@ -13,7 +13,7 @@ This guide shows how to set up a private Docker registry in your home network fo
 
 ```bash
 # Run the setup script
-./setup-local-registry.sh
+./scripts/setup-local-registry.sh
 
 # Or manual setup:
 docker run -d --name local-registry --restart=always \
@@ -156,7 +156,7 @@ volumes:
 
 1. **Build on Dev Machine**:
    ```bash
-   ./build-orcaslicer-optimized.sh
+   ./scripts/build-orcaslicer-optimized.sh
    
    # Tag for registry
    docker tag orcaslicer-binaries:2.3.1 localhost:5000/orcaslicer-binaries:2.3.1
@@ -240,7 +240,7 @@ docker login localhost:5000
 3. **Port 5000 already in use (macOS)**
    - macOS Monterey+ uses port 5000 for AirPlay Receiver
    - The setup script automatically detects this and uses port 5001
-   - Or manually set a different port: `REGISTRY_PORT=5001 ./setup-local-registry.sh`
+   - Or manually set a different port: `REGISTRY_PORT=5001 ./scripts/setup-local-registry.sh`
    - Linux systems typically don't have this conflict
 
 3. **Images not found**

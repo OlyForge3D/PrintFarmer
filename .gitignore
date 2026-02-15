@@ -30,7 +30,7 @@ deployment/
 node_modules/
 
 # Publish output
-#wwwroot/
+wwwroot/
 
 # Environment files
 .env

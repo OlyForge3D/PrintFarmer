@@ -132,13 +132,41 @@ jobs:
           echo "Generated release notes:"
           cat /tmp/release_notes.md
 
+      - name: Remove excluded files
+        run: |
+          EXCLUDE_FILE=".github/public-exclude.txt"
+          if [ ! -f "$EXCLUDE_FILE" ]; then
+            echo "Warning: $EXCLUDE_FILE not found, skipping exclusion"
+            exit 0
+          fi
+
+          echo "Removing files listed in $EXCLUDE_FILE..."
+          REMOVED=0
+          while IFS= read -r pattern || [ -n "$pattern" ]; do
+            # Skip comments and blank lines
+            [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+
+            # Remove trailing slash for directory patterns
+            clean="${pattern%/}"
+
+            # Use git rm to remove from index (handles globs)
+            if git rm -rf --ignore-unmatch -- "$clean" 2>/dev/null; then
+              if ! git diff --cached --quiet -- "$clean" 2>/dev/null; then
+                echo "  Removed: $pattern"
+                REMOVED=$((REMOVED + 1))
+              fi
+            fi
+          done < "$EXCLUDE_FILE"
+
+          echo "Removed $REMOVED entries from the working tree"
+
       - name: Create squashed release branch
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           PREV_TAG="${{ steps.version.outputs.prev_tag }}"
           
           if [ "${{ steps.version.outputs.first_release }}" = "true" ]; then
-            # First release - create orphan branch
+            # First release - create orphan branch with cleaned tree
             git checkout --orphan release-squash
             git commit -m "$NEW_VERSION - Initial release"
           else
@@ -165,6 +193,10 @@ jobs:
           echo ""
           echo "Squashed commit:"
           git log -1
+          echo ""
+          echo "Files in squashed commit:"
+          git ls-tree -r --name-only HEAD | head -100
+          echo "... ($(git ls-tree -r --name-only HEAD | wc -l) total files)"
           echo ""
           echo "Release notes:"
           cat /tmp/release_notes.md

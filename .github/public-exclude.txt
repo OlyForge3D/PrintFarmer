@@ -1,0 +1,54 @@
+# Files and directories to exclude from public releases
+# One pattern per line, supports glob patterns
+# Managed in the private repo, never published
+
+# Internal tooling
+.beads/
+.deploy-config
+.devcontainer/
+.env
+.env.template
+.pids/
+
+# Internal docs and plans
+AGENTS.md
+
+# Dev/debug scripts
+scripts/build-and-push-registry.sh
+scripts/build-orcaslicer-optimized.sh
+scripts/debug-deployment.sh
+scripts/debug-docker-build.sh
+scripts/debug_integration.sh
+scripts/dotnet-install.sh
+scripts/pfdev
+scripts/pull-from-registry.sh
+scripts/registry-manager.sh
+scripts/run_dbheavy_individual.sh
+scripts/setup-local-registry.sh
+scripts/setup-thumbnails.sh
+scripts/signalr-health-check.sh
+scripts/test-orcaslicer-optimization.sh
+scripts/test-simple-browser.html
+scripts/test_perimeters_regex.csx
+scripts/test_probe.csx
+scripts/update-frontend.sh
+scripts/validate-signalr-fixes.sh
+scripts/verify-base-worker.sh
+scripts/verify-cancel-fix.sh
+scripts/verify-prusaslicer-worker.sh
+
+# Build artifacts and local state
+build_context/
+logs/
+node_modules/
+archived/
+devnotes/
+
+# Internal CI/copilot instructions
+.github/instructions/
+.github/copilot-instructions.md
+.github/workflows/publish-to-public.yml
+
+# Prototype/sample files
+sample_profiles/
+proto/
