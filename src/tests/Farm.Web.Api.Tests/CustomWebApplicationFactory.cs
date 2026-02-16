@@ -107,6 +107,40 @@ namespace Farm.Web.Api.Tests
                     AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     db.Database.EnsureCreated();
                 }
+
+                // Re-configure SlicerDbContext to use the same test SQLite database.
+                // AddSlicerModule registered it with production defaults; override here.
+                ServiceDescriptor? slicerDbDescriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
+                if (slicerDbDescriptor != null)
+                {
+                    services.Remove(slicerDbDescriptor);
+                }
+
+                ServiceDescriptor? slicerFactoryDescriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(IDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>));
+                if (slicerFactoryDescriptor != null)
+                {
+                    services.Remove(slicerFactoryDescriptor);
+                }
+
+                ServiceDescriptor? slicerSingletonOpts = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>)
+                    && d.Lifetime == ServiceLifetime.Singleton);
+                if (slicerSingletonOpts != null)
+                {
+                    services.Remove(slicerSingletonOpts);
+                }
+
+                services.AddDbContext<Farm.Slicer.Module.Data.SlicerDbContext>(options =>
+                {
+                    options.UseSqlite(_connectionString);
+                });
+
+                DbContextOptionsBuilder<Farm.Slicer.Module.Data.SlicerDbContext> slicerOptionsBuilder = new();
+                slicerOptionsBuilder.UseSqlite(_connectionString);
+                services.AddSingleton(slicerOptionsBuilder.Options);
+                services.AddDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>();
             });
         }
 

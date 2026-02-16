@@ -33,6 +33,9 @@ public static class ControllerStartup
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
             });
 
+        // TODO(PFarm1-24w): Once old slicer controllers are deleted, add a
+        // ProjectReference to Farm.Slicer.Module.Api and enable:
+        // .AddSlicerControllers();
         return services;
     }
 }

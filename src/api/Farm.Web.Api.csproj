@@ -65,10 +65,17 @@
 
   <ItemGroup>
     <ProjectReference Include="..\import\Farm.Importing.csproj" />
+    <!-- Slicer module (DbContext, repos, metrics, config) -->
+    <ProjectReference Include="..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
+    <!-- NOTE: Farm.Slicer.Module.Api is NOT referenced until old controllers are removed (PFarm1-24w).
+         Adding it now causes ASP.NET Core to auto-discover duplicate controllers with unresolved DI. -->
     <!-- Slicer libraries -->
     <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
+    <!-- Slicer migration assemblies (loaded at runtime via MigrationsAssembly) -->
+    <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.PostgreSQL\Farm.Slicer.Migrations.PostgreSQL.csproj" />
+    <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.SqlServer\Farm.Slicer.Migrations.SqlServer.csproj" />
   </ItemGroup>
 
 

@@ -17,6 +17,7 @@ using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Database;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
+using Farm.Slicer.Module;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.Interfaces;
@@ -94,6 +95,10 @@ builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Envir
 
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
+
+// Register slicer module (SlicerDbContext, module repositories, metrics, and configuration).
+// During transition both AppDbContext and SlicerDbContext coexist sharing the same underlying database.
+builder.Services.AddSlicerModule(builder.Configuration);
 
 // Register SystemLog logger provider to capture all application logs to the database
 builder.Logging.AddSystemLogProvider(LogLevel.Information);
@@ -338,6 +343,10 @@ app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
 // Slicer registry events hub (worker registration, heartbeat, deregistration, profile import events)
 app.MapHub<SlicerHub>("/hubs/slicer-registry");
+
+// TODO(PFarm1-24w): Replace above explicit hub mapping with module extension after
+// adding ProjectReference to Farm.Slicer.Module.Api and removing old SlicerHub:
+// app.MapSlicerHubs();
 
 // Slicer progress hub for job processing progress events
 app.MapHub<SlicerProgressHub>("/hubs/slicers");

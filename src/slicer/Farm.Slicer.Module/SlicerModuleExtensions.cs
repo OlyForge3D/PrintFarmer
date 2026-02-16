@@ -44,7 +44,7 @@ public static class SlicerModuleExtensions
 
         string connectionString = configuration.GetConnectionString("Default")
             ?? configuration.GetValue<string>("DB_CONNECTION")
-            ?? "Data Source=slicer.db";
+            ?? "Data Source=farm.db";
 
         _ = services.AddDbContext<SlicerDbContext>(options =>
             ConfigureProvider(options, provider, connectionString));
@@ -67,12 +67,16 @@ public static class SlicerModuleExtensions
     {
         if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
         {
-            _ = options.UseSqlServer(connectionString);
+            _ = options.UseSqlServer(
+                connectionString,
+                x => x.MigrationsAssembly("Farm.Slicer.Migrations.SqlServer"));
         }
         else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase)
               || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
         {
-            _ = options.UseNpgsql(connectionString);
+            _ = options.UseNpgsql(
+                connectionString,
+                x => x.MigrationsAssembly("Farm.Slicer.Migrations.PostgreSQL"));
         }
         else
         {
