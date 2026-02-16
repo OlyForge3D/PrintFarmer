@@ -69,6 +69,7 @@
     <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
+    <ProjectReference Include="..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />
   </ItemGroup>
 
 

@@ -1,4 +1,5 @@
-﻿using Farm.Backend.Plugin.Moonraker;
+﻿using Farm.Backend.Plugin.FlashForge;
+using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
@@ -20,6 +21,7 @@ builder.Services.AddSingleton<INetworkDiscoveryProbe, MoonrakerDiscoveryProbe>()
 builder.Services.AddSingleton<INetworkDiscoveryProbe, PrusaLinkDiscoveryProbe>();
 builder.Services.AddSingleton<INetworkDiscoveryProbe, OctoPrintDiscoveryProbe>();
 builder.Services.AddSingleton<INetworkDiscoveryProbe, SdcpDiscoveryProbe>();
+builder.Services.AddSingleton<INetworkDiscoveryProbe, FlashForgeDiscoveryProbe>();
 
 // Register shared core discovery service
 builder.Services.AddSingleton<ICoreNetworkDiscoveryService, CoreNetworkDiscoveryService>();

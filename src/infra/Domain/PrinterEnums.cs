@@ -66,7 +66,10 @@ public enum PrinterBackend
     SDCP = 3,
 
     /// <summary>OctoPrint API (OctoPrint server).</summary>
-    OctoPrint = 4
+    OctoPrint = 4,
+
+    /// <summary>FlashForge proprietary TCP protocol (FlashForge/Adventurer/Creator printers).</summary>
+    FlashForge = 5
 }
 
 /// <summary>

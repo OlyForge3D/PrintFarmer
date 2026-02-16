@@ -288,6 +288,7 @@ export enum PrinterBackend {
   PrusaLink = 2,
   SDCP = 3,
   OctoPrint = 4,
+  FlashForge = 5,
 }
 
 export enum MotionType {
@@ -302,7 +303,8 @@ export type PrinterBackendString =
   | "Moonraker"
   | "PrusaLink"
   | "SDCP"
-  | "OctoPrint";
+  | "OctoPrint"
+  | "FlashForge";
 export type MotionTypeString = "Cartesian" | "CoreXY" | "Delta" | "Unknown";
 
 export interface PrinterSpoolInfo {
