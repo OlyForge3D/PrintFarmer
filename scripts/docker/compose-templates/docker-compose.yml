@@ -137,7 +137,7 @@ services:
       - "${HTTP_PORT:-8080}:80"
       - "${HTTPS_PORT:-8443}:443"
     volumes:
-      - ./deploy/nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/${NGINX_CONFIG:-nginx-proxy.conf}:/etc/nginx/nginx.conf:ro
       - ./deploy/nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - frontend

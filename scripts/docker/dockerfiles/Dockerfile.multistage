@@ -37,6 +37,7 @@ WORKDIR /src
 RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
+    dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
     dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj
 
 # Build and publish all services: sequential restore, then sequential publish
@@ -45,6 +46,7 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
 RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
+    dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
@@ -55,6 +57,8 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Printer Discovery..." && \
     dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Publishing Slicer Host..." && \
+    dotnet publish ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj -c Release -o /app/publish/slicer-host --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Building backend plugins..." && \
     dotnet build ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
@@ -66,10 +70,12 @@ RUN echo "Checking published artifacts..." && \
     echo "API publish directory:" && ls -lah /app/publish/api/ 2>&1 | head -20 && \
     echo "OrcaSlicer Worker publish directory:" && ls -lah /app/publish/orcaslicer-worker/ 2>&1 | head -20 && \
     echo "Printer Discovery publish directory:" && ls -lah /app/publish/printer-discovery/ 2>&1 | head -20 && \
+    echo "Slicer Host publish directory:" && ls -lah /app/publish/slicer-host/ 2>&1 | head -20 && \
     echo "Checking for plugin DLLs in API directory:" && ls -lah /app/publish/api/Farm.Backend.Plugin.*.dll 2>&1 && \
     ([ -f /app/publish/api/Farm.Web.Api.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Web.Api.dll"; exit 1)) && \
     ([ -f /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll ] || (echo "✗ MISSING: /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll"; exit 1)) && \
     ([ -f /app/publish/printer-discovery/PrinterDiscoveryService.dll ] || (echo "✗ MISSING: /app/publish/printer-discovery/PrinterDiscoveryService.dll"; exit 1)) && \
+    ([ -f /app/publish/slicer-host/Farm.Slicer.Host.dll ] || (echo "✗ MISSING: /app/publish/slicer-host/Farm.Slicer.Host.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.Core.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Core.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.Moonraker.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Moonraker.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll"; exit 1)) && \
@@ -138,6 +144,36 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
     CMD curl -f http://localhost:5000/healthz || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
+
+############################################################
+# Slicer Host Runtime Container (split mode only)
+# Standalone slicer service with its own database and HTTP
+# clients that call back to the main API for cross-domain
+# data (printers, catalog models, manufacturers).
+############################################################
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-host-runtime
+WORKDIR /app
+EXPOSE 5246
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuser; fi
+
+RUN mkdir -p /app/artifacts /data && chown -R appuser:appuser /app /data
+
+COPY --chown=appuser:appuser --from=shared-build /app/publish/slicer-host .
+
+ENV ASPNETCORE_URLS=http://+:5246
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:5246/healthz || exit 1
+
+ENTRYPOINT ["dotnet", "Farm.Slicer.Host.dll"]
 
 ############################################################
 # OrcaSlicer Binary Layer (cached layer for binary assets)

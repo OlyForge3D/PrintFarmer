@@ -117,6 +117,8 @@ OPTIONS:
     --include-registry      Include local registry
     --include-discovery     Include printer discovery service
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
+    --enable-slicer-host        Enable standalone slicer-host service (split mode, switches nginx config)
+    --enable-pgadmin            Enable pgAdmin web UI (PostgreSQL only)
 
     --db-provider PROVIDER  Database provider (postgres|sqlserver, default: postgres)
     --cleanup-generated     Remove generated files after deployment (default keeps them)
@@ -187,6 +189,7 @@ parse_args() {
     INCLUDE_DISCOVERY="false"
     ENABLE_ORCA_WORKER=""
     ENABLE_PGADMIN="false"
+    ENABLE_SLICER_HOST="false"
     API_PORT=""
     DB_PROVIDER="${DB_PROVIDER:-postgres}"
     KEEP_GENERATED="true"
@@ -220,6 +223,8 @@ parse_args() {
                 ENABLE_ORCA_WORKER="$2"; shift 2 ;;
             --enable-pgadmin)
                 ENABLE_PGADMIN="true"; shift ;;
+            --enable-slicer-host)
+                ENABLE_SLICER_HOST="true"; shift ;;
             --db-provider)
                 DB_PROVIDER="$2"; shift 2 ;;
             --cleanup-generated)
@@ -724,6 +729,19 @@ generate_compose() {
         log_info "OrcaSlicer worker service disabled (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
     fi
     
+    # Conditionally merge standalone slicer-host addon if enabled
+    if [[ "$ENABLE_SLICER_HOST" == "true" ]]; then
+        if merge_addon_services "$compose_file" "slicer-host"; then
+            log_info "Merged standalone slicer-host service (ENABLE_SLICER_HOST=$ENABLE_SLICER_HOST)"
+            addons_merged=true
+            # Switch nginx to the split-mode config that routes /api/slicer to slicer-host
+            sed -i 's|/deploy/nginx/${NGINX_CONFIG:-nginx-proxy.conf}|/deploy/nginx/nginx-proxy-split.conf|' "$compose_file"
+            log_info "Switched nginx config to nginx-proxy-split.conf for slicer routing"
+        else
+            log_warning "Failed to merge slicer-host service, continuing without it"
+        fi
+    fi
+    
     # Conditionally merge pgAdmin addon if enabled and using PostgreSQL
     if [[ "$ENABLE_PGADMIN" == "true" ]]; then
         local db_provider_lower=$(printf '%s' "$DB_PROVIDER" | tr '[:upper:]' '[:lower:]')
@@ -958,6 +976,9 @@ show_dry_run() {
     fi
     if [[ "$INCLUDE_REGISTRY" == "true" ]]; then
         echo "  - Includes local registry"
+    fi
+    if [[ "$ENABLE_SLICER_HOST" == "true" ]]; then
+        echo "  - Includes standalone slicer-host service (split mode)"
     fi
     
     echo
