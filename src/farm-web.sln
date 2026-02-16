@@ -67,6 +67,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Migrations.Post
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Migrations.SqlServer", "migrations\Farm.Slicer.Migrations.SqlServer\Farm.Slicer.Migrations.SqlServer.csproj", "{E995CE2A-4E6B-4598-A2F5-CB26E4C49B64}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Module.Tests", "tests\Farm.Slicer.Module.Tests\Farm.Slicer.Module.Tests.csproj", "{BE67C667-C916-4ABD-8D00-0C838F614DE7}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "api", "api", "{D82C56D6-B2CD-F611-9E31-04638F7EC30E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -353,6 +357,18 @@ Global
 		{E995CE2A-4E6B-4598-A2F5-CB26E4C49B64}.Release|x64.Build.0 = Release|Any CPU
 		{E995CE2A-4E6B-4598-A2F5-CB26E4C49B64}.Release|x86.ActiveCfg = Release|Any CPU
 		{E995CE2A-4E6B-4598-A2F5-CB26E4C49B64}.Release|x86.Build.0 = Release|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Debug|x64.Build.0 = Debug|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Debug|x86.Build.0 = Debug|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Release|x64.ActiveCfg = Release|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Release|x64.Build.0 = Release|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Release|x86.ActiveCfg = Release|Any CPU
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -373,5 +389,6 @@ Global
 		{9EC583F0-E220-476B-A7C4-BADAC282AEC9} = {E34191D6-EE5B-7B1D-025F-EDB47609777D}
 		{FC9050CE-C5BB-4013-B200-0942CE917E83} = {D4C4D1C2-DE9C-AF20-17FD-0A3EB2BFD436}
 		{E995CE2A-4E6B-4598-A2F5-CB26E4C49B64} = {D4C4D1C2-DE9C-AF20-17FD-0A3EB2BFD436}
+		{BE67C667-C916-4ABD-8D00-0C838F614DE7} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal
