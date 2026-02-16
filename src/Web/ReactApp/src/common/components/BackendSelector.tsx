@@ -71,6 +71,7 @@ export function BackendSelector(props: BackendSelectorProps) {
         value={effectiveValue ?? ''}
         onChange={handleChange}
         aria-label={ariaLabel}
+        title={ariaLabel}
         className={className}
         required={required}
         disabled={disabled}
@@ -98,6 +99,7 @@ export function BackendSelector(props: BackendSelectorProps) {
       value={value ?? ''}
       onChange={handleChange}
       aria-label={ariaLabel}
+      title={ariaLabel}
       className={className}
       required={required}
       disabled={disabled}
