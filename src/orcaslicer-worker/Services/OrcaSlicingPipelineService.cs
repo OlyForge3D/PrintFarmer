@@ -1,8 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core; // shared interfaces
 
 namespace Farm.OrcaSlicer.Worker.Services;

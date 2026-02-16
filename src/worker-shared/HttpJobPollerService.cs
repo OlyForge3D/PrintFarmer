@@ -1,9 +1,10 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Slicing; // ClaimJobRequest & completion DTOs
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

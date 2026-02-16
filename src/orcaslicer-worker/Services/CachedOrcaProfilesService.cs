@@ -1,8 +1,8 @@
 ﻿using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
 
 namespace Farm.OrcaSlicer.Worker.Services;

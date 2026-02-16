@@ -1,7 +1,8 @@
 ﻿using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Models;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.Slicer.Worker.Core;

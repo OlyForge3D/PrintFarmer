@@ -10,10 +10,10 @@ using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Telemetry;
 using Farm.OrcaSlicer.Worker.Services;
+using Farm.Slicer.Module.Dtos;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Tools.AdminCli;

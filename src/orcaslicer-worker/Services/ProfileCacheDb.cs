@@ -1,6 +1,6 @@
 ﻿using System.Text.Json;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Dtos;
 using Microsoft.Data.Sqlite;
 
 namespace Farm.OrcaSlicer.Worker.Services;

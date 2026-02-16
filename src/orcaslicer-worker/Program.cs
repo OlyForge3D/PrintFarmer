@@ -1,7 +1,7 @@
 ﻿using System.Net.Http.Headers;
 using System.Text.Json;
-using Farm.Infrastructure; // For AllProfilesResponseDto
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Dtos;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)

@@ -1,6 +1,4 @@
-﻿using Farm.Infrastructure;
-
-namespace Farm.Slicer.Worker.Core;
+﻿namespace Farm.Slicer.Worker.Core;
 
 public static class WorkerIdentity
 {

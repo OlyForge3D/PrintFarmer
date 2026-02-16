@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Configuration;
 

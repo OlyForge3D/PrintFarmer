@@ -1,8 +1,8 @@
 ﻿using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure.Contracts.Slicing;
-using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Domain;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
