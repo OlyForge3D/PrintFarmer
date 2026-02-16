@@ -2,6 +2,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Slicer.Host;
+using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
@@ -15,6 +16,11 @@ builder.Configuration.AddEnvironmentVariables("PFARM__");
 // ── Database ──────────────────────────────────────────────────────────────────
 // SlicerDbContext (module-owned; multi-provider: SQLite, PostgreSQL, SQL Server)
 builder.Services.AddSlicerModule(builder.Configuration);
+
+// ── Cross-domain lookup services (HTTP → main API) ───────────────────────────
+// Resolves printers, catalog models, and manufacturer names from the main API
+// via REST calls with in-memory caching.
+builder.Services.AddCrossDomainLookupServices(builder.Configuration);
 
 // ── Slicer services (stub implementations — transitional) ─────────────────────
 // Once real implementations are migrated into Farm.Slicer.Module, this call

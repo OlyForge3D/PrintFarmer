@@ -44,7 +44,10 @@ public static class StubServiceRegistrations
 
         // Profiles (used by ProfilesController)
         RegisterStub<IProfilesService>(services);
-        RegisterStub<ICatalogServiceAdapter>(services);
+
+        // NOTE: ICatalogServiceAdapter and IPrinterLookupService are registered
+        // as real HTTP-backed implementations in AddCrossDomainLookupServices()
+        // rather than as stubs, so they resolve cross-domain data from the main API.
 
         // Orca bundle services (used by ProfilesController overloads)
         RegisterStub<IOrcaBundleExportService>(services);
