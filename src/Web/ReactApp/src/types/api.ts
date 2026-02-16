@@ -77,7 +77,7 @@ export interface PrinterIdentity {
   id: string;
   /** Display name for the printer */
   name: string;
-  /** Backend type (Moonraker, PrusaLink, OctoPrint, SDCP) */
+  /** Backend type (Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge) */
   backend: PrinterBackend;
 }
 

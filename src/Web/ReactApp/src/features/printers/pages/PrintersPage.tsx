@@ -29,7 +29,7 @@ import { PrinterMaintenanceActionsModal } from '@/features/maintenance/component
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
-type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
+type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint' | 'FlashForge';
 
 // Helper function to get backend name from enum value
 function getBackendName(backend: PrinterBackend | string | number): string {
@@ -346,6 +346,7 @@ export function PrintersPage() {
                     <option value="PrusaLink">PrusaLink</option>
                     <option value="SDCP">SDCP</option>
                     <option value="OctoPrint">OctoPrint</option>
+                    <option value="FlashForge">FlashForge</option>
                   </Select>
                 </div>
 

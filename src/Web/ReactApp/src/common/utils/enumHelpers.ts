@@ -26,6 +26,7 @@ export function getPrinterBackendOptions(): EnumOption[] {
     PrinterBackend.PrusaLink,
     PrinterBackend.SDCP,
     PrinterBackend.OctoPrint,
+    PrinterBackend.FlashForge,
   ];
 
   return orderedBackends
@@ -46,6 +47,7 @@ export function getPrinterBackendStringOptions(): StringEnumOption[] {
     'PrusaLink',
     'SDCP',
     'OctoPrint',
+    'FlashForge',
   ];
 
   return orderedBackends.map((backend) => ({
@@ -64,6 +66,7 @@ export function printerBackendStringToEnum(value: PrinterBackendString | undefin
     'PrusaLink': PrinterBackend.PrusaLink,
     'SDCP': PrinterBackend.SDCP,
     'OctoPrint': PrinterBackend.OctoPrint,
+    'FlashForge': PrinterBackend.FlashForge,
   };
   return mapping[value];
 }
@@ -79,6 +82,7 @@ export function printerBackendEnumToString(value: PrinterBackend | undefined): P
     [PrinterBackend.PrusaLink]: 'PrusaLink',
     [PrinterBackend.SDCP]: 'SDCP',
     [PrinterBackend.OctoPrint]: 'OctoPrint',
+    [PrinterBackend.FlashForge]: 'FlashForge',
   };
   return mapping[value];
 }

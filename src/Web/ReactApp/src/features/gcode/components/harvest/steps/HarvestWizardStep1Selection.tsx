@@ -21,7 +21,7 @@ function backendToString(backend: PrinterBackend | string | undefined): string {
   
   // If it's already a string (from API), return it directly if valid
   if (typeof backend === 'string') {
-    const validBackends = ['Moonraker', 'PrusaLink', 'SDCP', 'OctoPrint'];
+    const validBackends = ['Moonraker', 'PrusaLink', 'SDCP', 'OctoPrint', 'FlashForge'];
     return validBackends.includes(backend) ? backend : 'Unknown';
   }
   
@@ -32,6 +32,7 @@ function backendToString(backend: PrinterBackend | string | undefined): string {
     [PrinterBackend.PrusaLink]: 'PrusaLink',
     [PrinterBackend.SDCP]: 'SDCP',
     [PrinterBackend.OctoPrint]: 'OctoPrint',
+    [PrinterBackend.FlashForge]: 'FlashForge',
   };
   return backendNames[backend] || 'Unknown';
 }

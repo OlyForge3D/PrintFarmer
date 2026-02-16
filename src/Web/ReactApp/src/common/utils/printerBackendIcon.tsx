@@ -33,6 +33,9 @@ export function getBackendIcon(backend: PrinterBackend | number | string) {
       case 'octoprint':
         backendValue = PrinterBackend.OctoPrint;
         break;
+      case 'flashforge':
+        backendValue = PrinterBackend.FlashForge;
+        break;
       default:
         backendValue = undefined;
     }
@@ -71,6 +74,12 @@ export function getBackendIcon(backend: PrinterBackend | number | string) {
           title="OctoPrint"
           className="inline h-5 w-5 align-middle mr-1"
         />
+      );
+    case PrinterBackend.FlashForge:
+      return (
+        <span title="FlashForge" aria-label="FlashForge" role="img" className="mr-1">
+          🔥
+        </span>
       );
     default:
       return (

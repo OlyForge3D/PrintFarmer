@@ -375,15 +375,15 @@ function AddPrinterModalContent({
               </FormField>
             )}
 
-            {/* Show backend/frontend port fields for Moonraker */}
-            {formData.backend === PrinterBackend.Moonraker && (
+            {/* Show backend/frontend port fields for Moonraker and FlashForge */}
+            {(formData.backend === PrinterBackend.Moonraker || formData.backend === PrinterBackend.FlashForge) && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField label="Backend Port (API)">
                   <Input
                     type="number"
-                    value={formData.backendPort ?? 7125}
-                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || 7125)}
-                    placeholder="7125"
+                    value={formData.backendPort ?? (formData.backend === PrinterBackend.FlashForge ? 8899 : 7125)}
+                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || (formData.backend === PrinterBackend.FlashForge ? 8899 : 7125))}
+                    placeholder={formData.backend === PrinterBackend.FlashForge ? '8899' : '7125'}
                     min={1}
                     max={65535}
                     aria-label="Backend port"

@@ -23,6 +23,7 @@ function getBackendName(backend: PrinterBackend | string): string {
         case PrinterBackend.PrusaLink: return 'PrusaLink';
         case PrinterBackend.SDCP: return 'SDCP';
         case PrinterBackend.OctoPrint: return 'OctoPrint';
+        case PrinterBackend.FlashForge: return 'FlashForge';
         default: return `Unknown (${backend})`;
     }
 }
