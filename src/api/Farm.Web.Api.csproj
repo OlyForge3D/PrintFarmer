@@ -22,7 +22,7 @@
     <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj" />
-    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.2" />
     <!-- TODO: Re-add OpenAPI packages after .NET 10 migration rewrite -->
     <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />

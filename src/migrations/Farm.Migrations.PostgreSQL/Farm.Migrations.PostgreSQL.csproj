@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
     <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
   </ItemGroup>
 
