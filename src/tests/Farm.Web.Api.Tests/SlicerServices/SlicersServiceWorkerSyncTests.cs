@@ -155,7 +155,7 @@ namespace Farm.Web.Api.Tests.SlicerServices
             _ = apiKey.Should().NotBeNullOrWhiteSpace();
 
             // Verify slicer service exists
-            SlicerService? slicer = await db.SlicerServices.FindAsync(id);
+            SlicerService? slicer = await db.Set<SlicerService>().FindAsync(id);
             _ = slicer.Should().NotBeNull();
             _ = slicer!.Name.Should().Be("sync-test-worker");
 

@@ -227,10 +227,10 @@ namespace Farm.Web.Api.Tests
             try
             {
                 // Ensure root "/" folder exists for "gcode" category
-                FolderNode? existingGcodeRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
+                FolderNode? existingGcodeRoot = await context.Set<FolderNode>().AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
                 if (existingGcodeRoot == null)
                 {
-                    context.Folders.Add(new FolderNode
+                    context.Set<FolderNode>().Add(new FolderNode
                     {
                         Id = Guid.NewGuid(),
                         Path = "/",
@@ -240,10 +240,10 @@ namespace Farm.Web.Api.Tests
                 }
 
                 // Ensure root "/" folder exists for "models" category
-                FolderNode? existingModelsRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "models");
+                FolderNode? existingModelsRoot = await context.Set<FolderNode>().AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "models");
                 if (existingModelsRoot == null)
                 {
-                    context.Folders.Add(new FolderNode
+                    context.Set<FolderNode>().Add(new FolderNode
                     {
                         Id = Guid.NewGuid(),
                         Path = "/",
@@ -428,7 +428,7 @@ namespace Farm.Web.Api.Tests
             {
                 AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                Worker? existingWorker = await context.Workers.FirstOrDefaultAsync(w => w.ApiKey == workerKey);
+                Worker? existingWorker = await context.Set<Worker>().FirstOrDefaultAsync(w => w.ApiKey == workerKey);
                 if (existingWorker == null)
                 {
                     var worker = new Worker
@@ -444,7 +444,7 @@ namespace Farm.Web.Api.Tests
                         ActiveJobs = 0,
                         LastHeartbeat = DateTime.UtcNow
                     };
-                    context.Workers.Add(worker);
+                    context.Set<Worker>().Add(worker);
                     await context.SaveChangesAsync();
                 }
             }

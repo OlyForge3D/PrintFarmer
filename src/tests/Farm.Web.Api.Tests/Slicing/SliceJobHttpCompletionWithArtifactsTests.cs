@@ -121,7 +121,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         // Assert - Job state persisted (query DB directly to bypass any EF caching issues)
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        SliceJob? updatedJob = await verifyDb.SliceJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
+        SliceJob? updatedJob = await verifyDb.Set<SliceJob>().AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
         _ = updatedJob.Should().NotBeNull();
         _ = updatedJob!.Status.Should().Be(SliceJobStatus.Completed);
         _ = updatedJob.CompletedAt.Should().NotBeNull();
@@ -196,7 +196,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         // Query DB directly to bypass EF caching issues
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        SliceJob? updatedJob = await verifyDb.SliceJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
+        SliceJob? updatedJob = await verifyDb.Set<SliceJob>().AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
         _ = updatedJob!.Status.Should().Be(SliceJobStatus.Completed);
         _ = updatedJob.ArtifactsCount.Should().Be(1);
     }
@@ -336,7 +336,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         Artifact logArtifact = artifacts.Should().ContainSingle(a => a.Kind == "log").Subject;
         _ = logArtifact.SizeBytes.Should().BeGreaterThan(5000); // Large log should be >5KB
 
-        SliceJob? updatedJob = await verifyDb.SliceJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
+        SliceJob? updatedJob = await verifyDb.Set<SliceJob>().AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
         _ = updatedJob!.ArtifactsCount.Should().Be(4);
         _ = updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(5000);
     }

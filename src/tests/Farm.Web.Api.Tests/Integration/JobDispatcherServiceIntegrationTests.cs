@@ -69,7 +69,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        context.Workers.Add(worker);
+        context.Set<Worker>().Add(worker);
         await context.SaveChangesAsync();
         return worker;
     }
@@ -97,7 +97,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        context.SliceJobs.Add(job);
+        context.Set<SliceJob>().Add(job);
         await context.SaveChangesAsync();
         return job;
     }
@@ -113,8 +113,8 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.SliceJobs.RemoveRange(context.SliceJobs);
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Act
@@ -133,8 +133,8 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.SliceJobs.RemoveRange(context.SliceJobs);
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create job but no workers
@@ -156,8 +156,8 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.SliceJobs.RemoveRange(context.SliceJobs);
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         await CreateTestWorkerAsync();
@@ -173,7 +173,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Assert - Either dispatch succeeded (if worker call works) or failed,
         // but at least we know it tried to process the queued job and not the processing one
         // We can verify by checking the processing job is still processing
-        SliceJob? unchangedJob = await context.SliceJobs.FindAsync(processingJob.Id);
+        SliceJob? unchangedJob = await context.Set<SliceJob>().FindAsync(processingJob.Id);
         unchangedJob!.Status.Should().Be(SliceJobStatus.Processing);
     }
 
@@ -190,7 +190,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         var job = new SliceJob
@@ -218,7 +218,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         Worker testWorker = await CreateTestWorkerAsync("only-worker");
@@ -249,7 +249,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         Worker busyWorker = await CreateTestWorkerAsync("busy", totalSlots: 10, activeJobs: 9);
@@ -281,7 +281,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create a fresh worker
@@ -306,7 +306,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
-        context.Workers.Add(staleWorker);
+        context.Set<Worker>().Add(staleWorker);
         await context.SaveChangesAsync();
 
         var job = new SliceJob
@@ -335,7 +335,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create workers with different capabilities
@@ -388,8 +388,8 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.SliceJobs.RemoveRange(context.SliceJobs);
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create a processing job (not queued)
@@ -411,8 +411,8 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.SliceJobs.RemoveRange(context.SliceJobs);
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create job but NO workers
@@ -438,7 +438,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create workers with same capacity but different load
@@ -471,7 +471,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create workers with different success rates
@@ -517,7 +517,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        context.Workers.AddRange(reliableWorker, unreliableWorker);
+        context.Set<Worker>().AddRange(reliableWorker, unreliableWorker);
         await context.SaveChangesAsync();
 
         var job = new SliceJob
@@ -546,7 +546,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create workers with different processing speeds
@@ -594,7 +594,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        context.Workers.AddRange(fastWorker, slowWorker);
+        context.Set<Worker>().AddRange(fastWorker, slowWorker);
         await context.SaveChangesAsync();
 
         var job = new SliceJob
@@ -623,7 +623,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create workers with matching and non-matching capabilities
@@ -661,8 +661,8 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.SliceJobs.RemoveRange(context.SliceJobs);
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         await CreateTestWorkerAsync();
@@ -677,8 +677,8 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
 
         // Assert - Verify we attempted dispatch (will fail due to no real workers)
         // Check that we found the high priority job by checking job states
-        SliceJob? lowPriority = await context.SliceJobs.FindAsync(lowPriorityJob.Id);
-        SliceJob? highPriority = await context.SliceJobs.FindAsync(highPriorityJob.Id);
+        SliceJob? lowPriority = await context.Set<SliceJob>().FindAsync(lowPriorityJob.Id);
+        SliceJob? highPriority = await context.Set<SliceJob>().FindAsync(highPriorityJob.Id);
 
         // The dispatcher should prioritize, so if dispatch failed, low-priority should still be Queued
         // If dispatch succeeded, one job would be Processing and one Queued
@@ -698,8 +698,8 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up
-        context.SliceJobs.RemoveRange(context.SliceJobs);
-        context.Workers.RemoveRange(context.Workers);
+        context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>());
         await context.SaveChangesAsync();
 
         // Create multiple workers

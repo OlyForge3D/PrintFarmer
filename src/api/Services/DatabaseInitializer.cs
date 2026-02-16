@@ -421,10 +421,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
 
             foreach (string folderType in folderTypes)
             {
-                bool rootExists = await _context.Folders.AnyAsync(f => f.Path == folderPath && f.FolderType == folderType);
+                bool rootExists = await _context.Set<FolderNode>().AnyAsync(f => f.Path == folderPath && f.FolderType == folderType);
                 if (!rootExists)
                 {
-                    _context.Folders.Add(new FolderNode
+                    _context.Set<FolderNode>().Add(new FolderNode
                     {
                         Id = Guid.NewGuid(),
                         Path = folderPath,

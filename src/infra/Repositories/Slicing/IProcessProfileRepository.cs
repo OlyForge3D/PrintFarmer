@@ -43,17 +43,17 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     public async Task<ProcessProfile?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        await _db.ProcessProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+        await _db.Set<ProcessProfile>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public async Task<IReadOnlyList<ProcessProfile>> GetByUserAsync(Guid userId, CancellationToken ct = default) =>
-        await _db.ProcessProfiles.AsNoTracking().Where(p => p.CreatedByUserId == userId || p.IsPublic).OrderBy(p => p.Name).ToListAsync(ct);
+        await _db.Set<ProcessProfile>().AsNoTracking().Where(p => p.CreatedByUserId == userId || p.IsPublic).OrderBy(p => p.Name).ToListAsync(ct);
 
     public async Task<IReadOnlyList<ProcessProfile>> GetPublicAsync(CancellationToken ct = default) =>
-        await _db.ProcessProfiles.AsNoTracking().Where(p => p.IsPublic).OrderBy(p => p.Name).ToListAsync(ct);
+        await _db.Set<ProcessProfile>().AsNoTracking().Where(p => p.IsPublic).OrderBy(p => p.Name).ToListAsync(ct);
 
     public async Task<IReadOnlyList<ProcessProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem, Guid? userId = null, CancellationToken ct = default)
     {
-        IQueryable<ProcessProfile> query = _db.ProcessProfiles.AsNoTracking().Where(p => p.SlicerType == engine);
+        IQueryable<ProcessProfile> query = _db.Set<ProcessProfile>().AsNoTracking().Where(p => p.SlicerType == engine);
         if (!includeSystem)
         {
             query = query.Where(p => !p.IsSystem);
@@ -69,7 +69,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
 
     public async Task<ProcessProfile?> GetDefaultAsync(SlicerType engine, Guid? userId = null, CancellationToken ct = default)
     {
-        IQueryable<ProcessProfile> query = _db.ProcessProfiles.AsNoTracking().Where(p => p.SlicerType == engine && p.IsDefault);
+        IQueryable<ProcessProfile> query = _db.Set<ProcessProfile>().AsNoTracking().Where(p => p.SlicerType == engine && p.IsDefault);
         if (userId.HasValue)
         {
             query = query.Where(p => p.CreatedByUserId == userId || p.CreatedByUserId == null);
@@ -79,33 +79,33 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     }
 
     public async Task<ProcessProfile?> GetByHashAsync(string hash, CancellationToken ct = default) =>
-        await _db.ProcessProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
+        await _db.Set<ProcessProfile>().AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
 
     public async Task AddAsync(ProcessProfile profile, CancellationToken ct = default)
     {
         profile.CreatedAt = DateTime.UtcNow;
         profile.UpdatedAt = profile.CreatedAt;
-        _ = await _db.ProcessProfiles.AddAsync(profile, ct);
+        _ = await _db.Set<ProcessProfile>().AddAsync(profile, ct);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task UpdateAsync(ProcessProfile profile, CancellationToken ct = default)
     {
         profile.UpdatedAt = DateTime.UtcNow;
-        _ = _db.ProcessProfiles.Update(profile);
+        _ = _db.Set<ProcessProfile>().Update(profile);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(ProcessProfile profile, CancellationToken ct = default)
     {
-        _ = _db.ProcessProfiles.Remove(profile);
+        _ = _db.Set<ProcessProfile>().Remove(profile);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task SetDefaultAsync(ProcessProfile profile, Guid? userId, CancellationToken ct = default)
     {
         // Clear existing defaults in same scope (user or global)
-        IQueryable<ProcessProfile> scope = _db.ProcessProfiles.Where(p => p.SlicerType == profile.SlicerType && p.Id != profile.Id && p.IsDefault);
+        IQueryable<ProcessProfile> scope = _db.Set<ProcessProfile>().Where(p => p.SlicerType == profile.SlicerType && p.Id != profile.Id && p.IsDefault);
         if (userId.HasValue)
         {
             scope = scope.Where(p => p.CreatedByUserId == userId);
@@ -140,12 +140,12 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
             throw new ArgumentException("Imported profile must have a hash", nameof(imported));
         }
 
-        ProcessProfile? existing = await _db.ProcessProfiles.FirstOrDefaultAsync(p => p.Hash == imported.Hash, ct);
+        ProcessProfile? existing = await _db.Set<ProcessProfile>().FirstOrDefaultAsync(p => p.Hash == imported.Hash, ct);
         if (existing == null)
         {
             imported.CreatedAt = DateTime.UtcNow;
             imported.UpdatedAt = imported.CreatedAt;
-            _ = await _db.ProcessProfiles.AddAsync(imported, ct);
+            _ = await _db.Set<ProcessProfile>().AddAsync(imported, ct);
             _ = await _db.SaveChangesAsync(ct);
             return imported;
         }
@@ -177,7 +177,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// <param name="ct">Cancellation token.</param>
     /// <returns>List of system OrcaSlicer process profiles.</returns>
     public async Task<IReadOnlyList<ProcessProfile>> GetSystemOrcaProfilesAsync(CancellationToken ct = default) =>
-        await _db.ProcessProfiles
+        await _db.Set<ProcessProfile>()
             .AsNoTracking()
             .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer)
             .OrderBy(p => p.Quality)
@@ -193,7 +193,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// <returns>The count of profiles deleted.</returns>
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
     {
-        List<ProcessProfile> profilesToDelete = await _db.ProcessProfiles
+        List<ProcessProfile> profilesToDelete = await _db.Set<ProcessProfile>()
             .Where(p => p.IsSystem && p.SlicerType == engine)
             .ToListAsync(ct);
 
@@ -202,7 +202,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
             return 0;
         }
 
-        _db.ProcessProfiles.RemoveRange(profilesToDelete);
+        _db.Set<ProcessProfile>().RemoveRange(profilesToDelete);
         _ = await _db.SaveChangesAsync(ct);
         return profilesToDelete.Count;
     }

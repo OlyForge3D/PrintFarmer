@@ -15,22 +15,22 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
 
     public async Task AddAsync(Model3D model, CancellationToken ct)
     {
-        _ = await _db.Models3D.AddAsync(model, ct);
+        _ = await _db.Set<Model3D>().AddAsync(model, ct);
     }
 
     public async Task<Model3D?> GetByHashAsync(string fileHash, CancellationToken ct)
     {
-        return await _db.Models3D.FirstOrDefaultAsync(m => m.FileHash == fileHash, ct);
+        return await _db.Set<Model3D>().FirstOrDefaultAsync(m => m.FileHash == fileHash, ct);
     }
 
     public async Task<Model3D?> GetByIdAsync(Guid id, CancellationToken ct)
     {
-        return await _db.Models3D.FirstOrDefaultAsync(m => m.Id == id && m.IsValid, ct);
+        return await _db.Set<Model3D>().FirstOrDefaultAsync(m => m.Id == id && m.IsValid, ct);
     }
 
     public async Task<Model3D?> GetByIdWithTagsAsync(Guid id, CancellationToken ct)
     {
-        return await _db.Models3D
+        return await _db.Set<Model3D>()
             .Where(m => m.Id == id && m.IsValid)
             .Include(m => m.Tags)
             .FirstOrDefaultAsync(ct);
@@ -38,7 +38,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
 
     public async Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct)
     {
-        return await _db.Models3D
+        return await _db.Set<Model3D>()
             .Where(m => m.IsValid)
             .Include(m => m.Tags)
             .OrderByDescending(m => m.UploadedAt)
@@ -61,12 +61,12 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
         // Get valid models by finding the folder with the matching path, then getting all models in that folder
         // For root directory ("/"), also include files with NULL folder (orphaned files)
         return directory == "/"
-            ? await _db.Models3D
+            ? await _db.Set<Model3D>()
                 .Where(m => m.IsValid && ((m.Folder != null && m.Folder.Path == directory) || m.Folder == null))
                 .Include(m => m.Tags)
                 .OrderByDescending(m => m.UploadedAt)
                 .ToListAsync(ct)
-            : await _db.Models3D
+            : await _db.Set<Model3D>()
                 .Where(m => m.IsValid && m.Folder != null && m.Folder.Path == directory)
                 .Include(m => m.Tags)
                 .OrderByDescending(m => m.UploadedAt)
@@ -83,7 +83,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
         string normalizedParent = parentDirectory.TrimEnd(Path.DirectorySeparatorChar);
 
         // Get all unique subdirectories that are direct children of the parent from Folder entities
-        List<string> subdirs = await _db.Folders
+        List<string> subdirs = await _db.Set<FolderNode>()
             .Where(f => f.FolderType == "models" && f.Path.StartsWith(normalizedParent))
             .Select(f => f.Path)
             .Distinct()
@@ -119,7 +119,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
         }
 
         // Also include folders from the Folder table that exist at this level
-        List<FolderNode> foldersFolders = await _db.Folders
+        List<FolderNode> foldersFolders = await _db.Set<FolderNode>()
             .Where(f => f.FolderType == "models" && !f.DeletedAt.HasValue)
             .AsNoTracking()
             .ToListAsync();
@@ -155,7 +155,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
 
     public async Task<int> CountValidAsync(CancellationToken ct)
     {
-        return await _db.Models3D.Where(m => m.IsValid).CountAsync(ct);
+        return await _db.Set<Model3D>().Where(m => m.IsValid).CountAsync(ct);
     }
 
     public async Task<(List<Model3D> Models, int TotalCount)> QueryModelsAsync(
@@ -169,7 +169,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
         CancellationToken ct)
     {
         // Start with base query - only valid models
-        IQueryable<Model3D> query = _db.Models3D.Where(m => m.IsValid);
+        IQueryable<Model3D> query = _db.Set<Model3D>().Where(m => m.IsValid);
 
         // Always include tags for all queries
         query = query.Include(m => m.Tags);
@@ -233,7 +233,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
     public async Task<IReadOnlyList<Model3D>> SearchAsync(string? query, Guid[]? tagIds, string sortBy, bool descending, int skip, int take, CancellationToken ct)
     {
         // Load all valid models with includes first (required for SQLite compatibility with case-insensitive Contains)
-        List<Model3D> allModels = await _db.Models3D
+        List<Model3D> allModels = await _db.Set<Model3D>()
             .Where(m => m.IsValid)
             .Include(m => m.Tags)
             .ToListAsync(ct);
@@ -275,13 +275,13 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
 
     public async Task RemoveAsync(Model3D model, CancellationToken ct)
     {
-        _ = _db.Models3D.Remove(model);
+        _ = _db.Set<Model3D>().Remove(model);
         await Task.CompletedTask;
     }
 
     public async Task UpdateAsync(Model3D model, CancellationToken ct)
     {
-        _ = _db.Models3D.Update(model);
+        _ = _db.Set<Model3D>().Update(model);
         await Task.CompletedTask;
     }
 

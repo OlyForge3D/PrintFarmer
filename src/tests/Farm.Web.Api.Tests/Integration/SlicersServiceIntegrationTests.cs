@@ -68,7 +68,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         apiKey.Should().NotBeNullOrEmpty();
         apiKey.Should().NotContain("="); // Base64 padding removed
 
-        SlicerService? createdSlicer = await context.SlicerServices.FindAsync(id);
+        SlicerService? createdSlicer = await context.Set<SlicerService>().FindAsync(id);
         createdSlicer.Should().NotBeNull();
         createdSlicer!.Name.Should().Be(dto.Name);
         createdSlicer.SlicerType.Should().Be(dto.SlicerType);
@@ -99,7 +99,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
 
         // Assert
-        SlicerService? createdSlicer = await context.SlicerServices.FindAsync(id);
+        SlicerService? createdSlicer = await context.Set<SlicerService>().FindAsync(id);
         createdSlicer.Should().NotBeNull();
         createdSlicer!.Name.Should().Be("orca-service");
     }
@@ -125,7 +125,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
 
         // Assert - Should be capped by global settings
-        SlicerService? createdSlicer = await context.SlicerServices.FindAsync(id);
+        SlicerService? createdSlicer = await context.Set<SlicerService>().FindAsync(id);
         createdSlicer.Should().NotBeNull();
         createdSlicer!.MaxConcurrentJobs.Should().BeLessThanOrEqualTo(100); // Typical global limit
     }
@@ -151,7 +151,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
 
         // Assert - Check Worker record created
-        Worker? worker = context.Workers.FirstOrDefault(w => w.ServiceId == id.ToString());
+        Worker? worker = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
         worker.Should().NotBeNull();
         worker!.Name.Should().Be(dto.Name);
         worker.EndpointUrl.Should().Be(dto.Host);
@@ -172,8 +172,8 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up any existing slicers
-        context.SlicerServices.RemoveRange(context.SlicerServices);
-        context.Workers.RemoveRange(context.Workers.Where(w => w.ServiceId != null));
+        context.Set<SlicerService>().RemoveRange(context.Set<SlicerService>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>().Where(w => w.ServiceId != null));
         await context.SaveChangesAsync();
 
         // Act
@@ -192,8 +192,8 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up existing data
-        context.SlicerServices.RemoveRange(context.SlicerServices);
-        context.Workers.RemoveRange(context.Workers.Where(w => w.ServiceId != null));
+        context.Set<SlicerService>().RemoveRange(context.Set<SlicerService>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>().Where(w => w.ServiceId != null));
         await context.SaveChangesAsync();
 
         var dto1 = new RegisterSlicerDto
@@ -292,7 +292,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         };
 
         (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
-        DateTime createdAt = (await context.SlicerServices.FindAsync(id))!.LastSeen;
+        DateTime createdAt = (await context.Set<SlicerService>().FindAsync(id))!.LastSeen;
 
         // Wait a moment to ensure time difference
         await Task.Delay(100);
@@ -308,7 +308,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Assert
         result.Should().BeTrue();
 
-        SlicerService? updated = await context.SlicerServices.FindAsync(id);
+        SlicerService? updated = await context.Set<SlicerService>().FindAsync(id);
         updated.Should().NotBeNull();
         updated!.Status.Should().Be("Busy");
         updated.LastSeen.Should().BeAfter(createdAt);
@@ -362,7 +362,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         await slicersService.HeartbeatAsync(id, heartbeatDto, CancellationToken.None);
 
         // Assert - Check Worker record updated with status
-        Worker? worker = context.Workers.FirstOrDefault(w => w.ServiceId == id.ToString());
+        Worker? worker = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
         worker.Should().NotBeNull();
         worker!.Status.Should().Be("Busy");
         worker.LastHeartbeat.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
@@ -397,7 +397,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Assert
         result.Should().BeTrue();
 
-        SlicerService? deleted = await context.SlicerServices.FindAsync(id);
+        SlicerService? deleted = await context.Set<SlicerService>().FindAsync(id);
         deleted.Should().BeNull();
     }
 
@@ -438,7 +438,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         await slicersService.DeregisterAsync(id, CancellationToken.None);
 
         // Assert - Check Worker record marked offline
-        Worker? worker = context.Workers.FirstOrDefault(w => w.ServiceId == id.ToString());
+        Worker? worker = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
         worker.Should().NotBeNull();
         worker!.Status.Should().Be("Offline");
         worker.OfflineAt.Should().NotBeNull();
@@ -475,7 +475,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         newKey.Should().NotBe(originalKey);
         newKey.Should().NotContain("="); // Base64 padding removed
 
-        SlicerService? updated = await context.SlicerServices.FindAsync(id);
+        SlicerService? updated = await context.Set<SlicerService>().FindAsync(id);
         updated!.ApiKey.Should().Be(newKey);
         updated.ApiKeyRotatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
     }
@@ -517,7 +517,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         string? newKey = await slicersService.RotateApiKeyAsync(id, CancellationToken.None);
 
         // Assert - Check Worker record updated
-        Worker? worker = context.Workers.FirstOrDefault(w => w.ServiceId == id.ToString());
+        Worker? worker = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
         worker.Should().NotBeNull();
         worker!.ApiKey.Should().Be(newKey);
     }
@@ -561,8 +561,8 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up any data from previous test
-        context.SlicerServices.RemoveRange(context.SlicerServices);
-        context.Workers.RemoveRange(context.Workers.Where(w => w.ServiceId != null));
+        context.Set<SlicerService>().RemoveRange(context.Set<SlicerService>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>().Where(w => w.ServiceId != null));
         await context.SaveChangesAsync();
 
         var dto = new RegisterSlicerDto
@@ -588,7 +588,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
 
         // Assert 2
         heartbeatResult.Should().BeTrue();
-        SlicerService? afterHeartbeat = await context.SlicerServices.FindAsync(id);
+        SlicerService? afterHeartbeat = await context.Set<SlicerService>().FindAsync(id);
         afterHeartbeat!.Status.Should().Be("Busy");
 
         // Act 3: Deregister
@@ -596,7 +596,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
 
         // Assert 3
         deregisterResult.Should().BeTrue();
-        SlicerService? afterDeregister = await context.SlicerServices.FindAsync(id);
+        SlicerService? afterDeregister = await context.Set<SlicerService>().FindAsync(id);
         afterDeregister.Should().BeNull();
     }
 
@@ -609,8 +609,8 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Clean up existing data
-        context.SlicerServices.RemoveRange(context.SlicerServices);
-        context.Workers.RemoveRange(context.Workers.Where(w => w.ServiceId != null));
+        context.Set<SlicerService>().RemoveRange(context.Set<SlicerService>());
+        context.Set<Worker>().RemoveRange(context.Set<Worker>().Where(w => w.ServiceId != null));
         await context.SaveChangesAsync();
 
         var orcaDto = new RegisterSlicerDto

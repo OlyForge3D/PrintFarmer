@@ -176,7 +176,7 @@ public class PrintApprovalsControllerTests : IDisposable
             FolderType = "gcode",
             CreatedAt = DateTime.UtcNow
         };
-        _context.Folders.Add(folder);
+        _context.Set<FolderNode>().Add(folder);
         await _context.SaveChangesAsync();
 
         // Create GcodeFile (required for PrintJob)

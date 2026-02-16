@@ -15,7 +15,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
 
     public async Task<Tag?> GetByIdAsync(Guid id, CancellationToken ct)
     {
-        return await _dbContext.Tags
+        return await _dbContext.Set<Tag>()
             .FirstOrDefaultAsync(t => t.Id == id, ct);
     }
 
@@ -27,13 +27,13 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         }
 
         // Since tags are normalized to PascalCase on creation, we can do exact matching
-        return await _dbContext.Tags
+        return await _dbContext.Set<Tag>()
             .FirstOrDefaultAsync(t => t.Name == name, ct);
     }
 
     public async Task<IReadOnlyList<Tag>> ListAllAsync(CancellationToken ct)
     {
-        return await _dbContext.Tags
+        return await _dbContext.Set<Tag>()
             .OrderBy(t => t.Name)
             .ToListAsync(ct);
     }
@@ -42,14 +42,14 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     {
         ArgumentNullException.ThrowIfNull(tag);
 
-        _ = await _dbContext.Tags.AddAsync(tag, ct);
+        _ = await _dbContext.Set<Tag>().AddAsync(tag, ct);
     }
 
     public async Task RemoveAsync(Tag tag, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tag);
 
-        _ = _dbContext.Tags.Remove(tag);
+        _ = _dbContext.Set<Tag>().Remove(tag);
         await Task.CompletedTask; // Repository pattern consistency
     }
 
@@ -80,7 +80,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             return true;
         }
 
-        bool hasInModel3D = await _dbContext.Models3D
+        bool hasInModel3D = await _dbContext.Set<Model3D>()
             .Where(m => m.Id == objectId)
             .AnyAsync(m => m.Tags.Any(t => t.Id == tagId), ct);
 
@@ -96,7 +96,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task AssignTagAsync(Guid objectId, Guid tagId, CancellationToken ct)
     {
-        Tag tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct) ?? throw new InvalidOperationException($"Tag with ID {tagId} not found.");
+        Tag tag = await _dbContext.Set<Tag>().FirstOrDefaultAsync(t => t.Id == tagId, ct) ?? throw new InvalidOperationException($"Tag with ID {tagId} not found.");
 
         // Try GcodeFile first
         GcodeFile? gcodeFile = await _dbContext.GcodeFiles
@@ -114,7 +114,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         }
 
         // Try Model3D
-        Model3D? model3d = await _dbContext.Models3D
+        Model3D? model3d = await _dbContext.Set<Model3D>()
             .Include(m => m.Tags)
             .FirstOrDefaultAsync(m => m.Id == objectId, ct);
 
@@ -136,7 +136,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task RemoveTagAsync(Guid objectId, Guid tagId, CancellationToken ct)
     {
-        Tag? tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
+        Tag? tag = await _dbContext.Set<Tag>().FirstOrDefaultAsync(t => t.Id == tagId, ct);
         if (tag == null)
         {
             return;
@@ -154,7 +154,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         }
 
         // Try Model3D
-        Model3D? model3d = await _dbContext.Models3D
+        Model3D? model3d = await _dbContext.Set<Model3D>()
             .Include(m => m.Tags)
             .FirstOrDefaultAsync(m => m.Id == objectId, ct);
 
@@ -182,7 +182,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             return gcodeFileTags;
         }
 
-        List<Tag> model3dTags = await _dbContext.Models3D
+        List<Tag> model3dTags = await _dbContext.Set<Model3D>()
             .Where(m => m.Id == objectId)
             .SelectMany(m => m.Tags)
             .ToListAsync(ct);
@@ -210,7 +210,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         }
 
         // Try Model3D
-        Model3D? model3d = await _dbContext.Models3D
+        Model3D? model3d = await _dbContext.Set<Model3D>()
             .Include(m => m.Tags)
             .FirstOrDefaultAsync(m => m.Id == objectId, ct);
 
@@ -238,7 +238,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 .Where(g => g.Tags.Any(t => t.Id == tagId))
                 .Select(g => g.Id)
                 .ToListAsync(ct),
-            "Model3D" => await _dbContext.Models3D
+            "Model3D" => await _dbContext.Set<Model3D>()
                 .Where(m => m.Tags.Any(t => t.Id == tagId))
                 .Select(m => m.Id)
                 .ToListAsync(ct),
@@ -263,7 +263,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                     .Where(g => tagIdList.All(tagId => g.Tags.Any(t => t.Id == tagId)))
                     .Select(g => g.Id)
                     .ToListAsync(ct),
-                "Model3D" => await _dbContext.Models3D
+                "Model3D" => await _dbContext.Set<Model3D>()
                     .Where(m => tagIdList.All(tagId => m.Tags.Any(t => t.Id == tagId)))
                     .Select(m => m.Id)
                     .ToListAsync(ct),
@@ -288,7 +288,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                     .Where(g => g.Tags.Any(t => tagIdList.Contains(t.Id)))
                     .Select(g => g.Id)
                     .ToListAsync(ct),
-                "Model3D" => await _dbContext.Models3D
+                "Model3D" => await _dbContext.Set<Model3D>()
                     .Where(m => m.Tags.Any(t => tagIdList.Contains(t.Id)))
                     .Select(m => m.Id)
                     .ToListAsync(ct),
@@ -310,7 +310,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             "GcodeFile" => await _dbContext.GcodeFiles
                 .Where(g => g.Id == objectId)
                 .AnyAsync(g => g.Tags.Any(t => t.Id == tagId), ct),
-            "Model3D" => await _dbContext.Models3D
+            "Model3D" => await _dbContext.Set<Model3D>()
                 .Where(m => m.Id == objectId)
                 .AnyAsync(m => m.Tags.Any(t => t.Id == tagId), ct),
             _ => false
@@ -326,7 +326,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task AssignTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
     {
-        Tag tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct) ?? throw new InvalidOperationException($"Tag with ID {tagId} not found.");
+        Tag tag = await _dbContext.Set<Tag>().FirstOrDefaultAsync(t => t.Id == tagId, ct) ?? throw new InvalidOperationException($"Tag with ID {tagId} not found.");
 
         switch (objectType)
         {
@@ -342,7 +342,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 break;
 
             case "Model3D":
-                Model3D? model3d = await _dbContext.Models3D
+                Model3D? model3d = await _dbContext.Set<Model3D>()
                     .Include(m => m.Tags)
                     .FirstOrDefaultAsync(m => m.Id == objectId, ct);
                 if (model3d != null && !model3d.Tags.Any(t => t.Id == tagId))
@@ -363,7 +363,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task RemoveTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
     {
-        Tag? tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
+        Tag? tag = await _dbContext.Set<Tag>().FirstOrDefaultAsync(t => t.Id == tagId, ct);
         if (tag == null)
         {
             return;
@@ -383,7 +383,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 break;
 
             case "Model3D":
-                Model3D? model3d = await _dbContext.Models3D
+                Model3D? model3d = await _dbContext.Set<Model3D>()
                     .Include(m => m.Tags)
                     .FirstOrDefaultAsync(m => m.Id == objectId, ct);
                 if (model3d != null)
@@ -417,7 +417,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 break;
 
             case "Model3D":
-                Model3D? model3d = await _dbContext.Models3D
+                Model3D? model3d = await _dbContext.Set<Model3D>()
                     .Include(m => m.Tags)
                     .FirstOrDefaultAsync(m => m.Id == objectId, ct);
                 if (model3d != null)
@@ -436,7 +436,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task RemoveAllObjectsFromTagAsync(Guid tagId, CancellationToken ct)
     {
-        Tag? tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
+        Tag? tag = await _dbContext.Set<Tag>().FirstOrDefaultAsync(t => t.Id == tagId, ct);
         if (tag == null)
         {
             return;
@@ -458,7 +458,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         }
 
         // Remove from all Model3Ds
-        List<Model3D> models3dWithTag = await _dbContext.Models3D
+        List<Model3D> models3dWithTag = await _dbContext.Set<Model3D>()
             .Include(m => m.Tags)
             .Where(m => m.Tags.Any(t => t.Id == tagId))
             .ToListAsync(ct);
@@ -487,7 +487,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 .Where(g => g.Id == objectId)
                 .SelectMany(g => g.Tags)
                 .ToListAsync(ct),
-            "Model3D" => await _dbContext.Models3D
+            "Model3D" => await _dbContext.Set<Model3D>()
                 .Where(m => m.Id == objectId)
                 .SelectMany(m => m.Tags)
                 .ToListAsync(ct),
@@ -506,7 +506,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             .Where(g => g.Tags.Any(t => t.Id == tagId))
             .CountAsync(ct);
 
-        int model3dCount = await _dbContext.Models3D
+        int model3dCount = await _dbContext.Set<Model3D>()
             .Where(m => m.Tags.Any(t => t.Id == tagId))
             .CountAsync(ct);
 
@@ -524,7 +524,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             .Where(g => g.Tags.Any(t => t.Id == tagId))
             .MaxAsync(g => (DateTime?)g.UpdatedAt, ct);
 
-        DateTime? model3dLastUsed = await _dbContext.Models3D
+        DateTime? model3dLastUsed = await _dbContext.Set<Model3D>()
             .Where(m => m.Tags.Any(t => t.Id == tagId))
             .MaxAsync(m => (DateTime?)m.UpdatedAt, ct);
 
@@ -546,7 +546,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             "GcodeFile" => await _dbContext.GcodeFiles
                 .Select(g => g.Id)
                 .ToListAsync(ct),
-            "Model3D" => await _dbContext.Models3D
+            "Model3D" => await _dbContext.Set<Model3D>()
                 .Select(m => m.Id)
                 .ToListAsync(ct),
             _ => []

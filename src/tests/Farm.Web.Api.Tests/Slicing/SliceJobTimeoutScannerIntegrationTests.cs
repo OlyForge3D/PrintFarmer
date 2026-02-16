@@ -35,7 +35,7 @@ public class SliceJobTimeoutScannerIntegrationTests(CustomWebApplicationFactory 
             CreatedAt = DateTime.UtcNow.AddMinutes(-30)
         };
 
-        _ = db.SliceJobs.Add(job);
+        _ = db.Set<SliceJob>().Add(job);
         _ = await db.SaveChangesAsync();
 
         // Resolve the scanner from DI if available, otherwise construct one manually
@@ -50,7 +50,7 @@ public class SliceJobTimeoutScannerIntegrationTests(CustomWebApplicationFactory 
         // Re-fetch job using a fresh scope/db context so we observe DB changes made by scanner
         using IServiceScope verifyScope = _factory.Services.CreateScope();
         AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        SliceJob? updated = await verifyDb.SliceJobs.FindAsync(job.Id);
+        SliceJob? updated = await verifyDb.Set<SliceJob>().FindAsync(job.Id);
         Assert.NotNull(updated);
 
         // After one retry, status should be Queued or Failed depending on max attempts; we seeded RetryCount=0 so expect Queued

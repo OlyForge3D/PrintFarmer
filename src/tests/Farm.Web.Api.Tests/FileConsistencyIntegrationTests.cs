@@ -284,7 +284,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     private Model3D CreateAndPersistModel3D(string fileName, FileHealthStatus healthStatus)
     {
         // Root folder should already exist from database seeding, but if not, create it
-        FolderNode? rootFolder = _dbContext.Folders.FirstOrDefault(f => f.Path == "/" && f.FolderType == "models");
+        FolderNode? rootFolder = _dbContext.Set<FolderNode>().FirstOrDefault(f => f.Path == "/" && f.FolderType == "models");
         if (rootFolder == null)
         {
             rootFolder = new FolderNode
@@ -294,7 +294,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
                 FolderType = "models",
                 CreatedAt = DateTime.UtcNow
             };
-            _dbContext.Folders.Add(rootFolder);
+            _dbContext.Set<FolderNode>().Add(rootFolder);
             _dbContext.SaveChanges();
         }
 
@@ -316,14 +316,14 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        _ = _dbContext.Models3D.Add(model);
+        _ = _dbContext.Set<Model3D>().Add(model);
         return model;
     }
 
     private GcodeFile CreateAndPersistGcodeFile(string fileName, FileHealthStatus healthStatus)
     {
         // Root folder should already exist from database seeding, but if not, create it
-        FolderNode? rootFolder = _dbContext.Folders.FirstOrDefault(f => f.Path == "/" && f.FolderType == "gcode");
+        FolderNode? rootFolder = _dbContext.Set<FolderNode>().FirstOrDefault(f => f.Path == "/" && f.FolderType == "gcode");
         if (rootFolder == null)
         {
             rootFolder = new FolderNode
@@ -333,7 +333,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
                 FolderType = "gcode",
                 CreatedAt = DateTime.UtcNow
             };
-            _dbContext.Folders.Add(rootFolder);
+            _dbContext.Set<FolderNode>().Add(rootFolder);
             _dbContext.SaveChanges();
         }
 

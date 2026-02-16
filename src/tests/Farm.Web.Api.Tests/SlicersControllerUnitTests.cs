@@ -163,7 +163,7 @@ namespace Farm.Web.Api.Tests
             _ = result.Should().BeOfType<CreatedResult>();
 
             // Verify DB
-            SlicerService? svc = await db.SlicerServices.FirstOrDefaultAsync(s => s.Name == "unit-orca");
+            SlicerService? svc = await db.Set<SlicerService>().FirstOrDefaultAsync(s => s.Name == "unit-orca");
             _ = svc.Should().NotBeNull();
 
             // Verify hub broadcast attempted
@@ -177,7 +177,7 @@ namespace Farm.Web.Api.Tests
         public async Task ListAsync_ReturnsSeededServices()
         {
             using AppDbContext db = CreateInMemoryDb();
-            _ = db.SlicerServices.Add(new SlicerService { Id = System.Guid.NewGuid(), Name = "s1" });
+            _ = db.Set<SlicerService>().Add(new SlicerService { Id = System.Guid.NewGuid(), Name = "s1" });
             _ = await db.SaveChangesAsync();
 
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out _);
@@ -210,7 +210,7 @@ namespace Farm.Web.Api.Tests
         {
             using AppDbContext db = CreateInMemoryDb();
             Guid id = System.Guid.NewGuid();
-            _ = db.SlicerServices.Add(new SlicerService { Id = id, Name = "h1", Tags = "0", Status = "Online" });
+            _ = db.Set<SlicerService>().Add(new SlicerService { Id = id, Name = "h1", Tags = "0", Status = "Online" });
             _ = await db.SaveChangesAsync();
 
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
@@ -235,7 +235,7 @@ namespace Farm.Web.Api.Tests
 
             _ = res.Should().BeOfType<NoContentResult>();
 
-            SlicerService? svc = await db.SlicerServices.FindAsync(id);
+            SlicerService? svc = await db.Set<SlicerService>().FindAsync(id);
             _ = svc.Should().NotBeNull();
             _ = svc!.Status.Should().Be("Updated");
             _ = svc.Tags.Should().Be("3");
@@ -251,7 +251,7 @@ namespace Farm.Web.Api.Tests
         {
             using AppDbContext db = CreateInMemoryDb();
             Guid id = System.Guid.NewGuid();
-            _ = db.SlicerServices.Add(new SlicerService { Id = id, Name = "d1" });
+            _ = db.Set<SlicerService>().Add(new SlicerService { Id = id, Name = "d1" });
             _ = await db.SaveChangesAsync();
 
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
@@ -274,7 +274,7 @@ namespace Farm.Web.Api.Tests
             IActionResult res = await controller.DeregisterAsync(id);
             _ = res.Should().BeOfType<NoContentResult>();
 
-            SlicerService? svc = await db.SlicerServices.FindAsync(id);
+            SlicerService? svc = await db.Set<SlicerService>().FindAsync(id);
             _ = svc.Should().BeNull();
 
             clientProxy.Verify(p => p.SendCoreAsync(

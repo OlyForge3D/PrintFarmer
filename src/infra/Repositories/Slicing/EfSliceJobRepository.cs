@@ -18,17 +18,17 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
 
     public async Task AddAsync(SliceJob job, CancellationToken ct = default)
     {
-        _ = await _db.SliceJobs.AddAsync(job, ct);
+        _ = await _db.Set<SliceJob>().AddAsync(job, ct);
     }
 
     public async Task<SliceJob?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        return await _db.SliceJobs.FindAsync(new object[] { id }, ct);
+        return await _db.Set<SliceJob>().FindAsync(new object[] { id }, ct);
     }
 
     public async Task<IReadOnlyList<SliceJob>> GetByUserIdAsync(Guid userId, int? limit = null, int? offset = null, CancellationToken ct = default)
     {
-        IOrderedQueryable<SliceJob> query = _db.SliceJobs
+        IOrderedQueryable<SliceJob> query = _db.Set<SliceJob>()
             .Where(j => j.UserId == userId)
             .OrderByDescending(j => j.QueuedAt);
 
@@ -47,7 +47,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
 
     public async Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default)
     {
-        IOrderedQueryable<SliceJob> query = _db.SliceJobs
+        IOrderedQueryable<SliceJob> query = _db.Set<SliceJob>()
             .Where(j => j.Status == status)
             .OrderByDescending(j => j.QueuedAt);
 
@@ -61,7 +61,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
 
     public async Task<IReadOnlyList<SliceJob>> GetJobsByWorkerIdAsync(Guid workerId, CancellationToken ct = default)
     {
-        return await _db.SliceJobs
+        return await _db.Set<SliceJob>()
             .Where(j => j.WorkerId == workerId && j.Status == SliceJobStatus.Processing)
             .OrderByDescending(j => j.StartedAt)
             .ToListAsync(ct);
@@ -69,7 +69,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
 
     public async Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default)
     {
-        IOrderedQueryable<SliceJob> query = _db.SliceJobs
+        IOrderedQueryable<SliceJob> query = _db.Set<SliceJob>()
             .Where(j => j.Status == SliceJobStatus.Queued)
             .OrderByDescending(j => j.Priority)
             .ThenBy(j => j.QueuedAt);
@@ -157,7 +157,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
         // Aggregate bytes from artifacts table
         if (ids.Length > 0)
         {
-            long totalBytes = await _db.Artifacts.Where(a => ids.Contains(a.Id)).SumAsync(a => a.SizeBytes, ct);
+            long totalBytes = await _db.Set<Artifact>().Where(a => ids.Contains(a.Id)).SumAsync(a => a.SizeBytes, ct);
             job.ArtifactsTotalBytes = totalBytes;
             job.ArtifactsCount = ids.Length;
         }
@@ -203,7 +203,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
         DateTime leaseExpiration = now.AddSeconds(leaseDurationSeconds);
 
         // Base query: queued or expired lease
-        IQueryable<SliceJob> baseQuery = _db.SliceJobs
+        IQueryable<SliceJob> baseQuery = _db.Set<SliceJob>()
             .Where(j => j.Status == SliceJobStatus.Queued ||
                        (j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now))
             .OrderBy(j => j.Priority)
@@ -250,7 +250,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
     public async Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default)
     {
         DateTime threshold = DateTime.UtcNow.AddSeconds(-maxAgeSeconds);
-        IOrderedQueryable<SliceJob> query = _db.SliceJobs
+        IOrderedQueryable<SliceJob> query = _db.Set<SliceJob>()
             .Where(j => j.Status == SliceJobStatus.Processing &&
                         ((j.LeaseExpiresAt != null && j.LeaseExpiresAt < DateTime.UtcNow) || (j.StartedAt != null && j.StartedAt < threshold)))
             .OrderBy(j => j.StartedAt);
@@ -310,19 +310,19 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
     public async Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default)
     {
         // Try to find a job with matching CorrelationId and checksum if those fields are populated
-        SliceJob? job = await _db.SliceJobs.FirstOrDefaultAsync(j => j.CorrelationId == correlationId && (j.Checksum == checksum || j.Checksum == null), ct);
+        SliceJob? job = await _db.Set<SliceJob>().FirstOrDefaultAsync(j => j.CorrelationId == correlationId && (j.Checksum == checksum || j.Checksum == null), ct);
         if (job != null)
         {
             return job;
         }
 
         // Fallback: attempt lookup by correlation only
-        return await _db.SliceJobs.FirstOrDefaultAsync(j => j.CorrelationId == correlationId, ct);
+        return await _db.Set<SliceJob>().FirstOrDefaultAsync(j => j.CorrelationId == correlationId, ct);
     }
 
     public async Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken ct = default)
     {
-        return await _db.SliceJobs.AnyAsync(j => j.CorrelationId == correlationId && (j.Checksum == checksum || j.Checksum == null), ct);
+        return await _db.Set<SliceJob>().AnyAsync(j => j.CorrelationId == correlationId && (j.Checksum == checksum || j.Checksum == null), ct);
     }
 
     public async Task SaveChangesAsync(CancellationToken ct = default)

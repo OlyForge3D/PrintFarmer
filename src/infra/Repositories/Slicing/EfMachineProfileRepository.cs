@@ -12,11 +12,11 @@ public class EfMachineProfileRepository(AppDbContext db) : IMachineProfileReposi
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     public async Task<MachineProfile?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        await _db.MachineProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+        await _db.Set<MachineProfile>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public async Task<IReadOnlyList<MachineProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default)
     {
-        IQueryable<MachineProfile> query = _db.MachineProfiles.AsNoTracking().Where(p => p.SlicerType == engine);
+        IQueryable<MachineProfile> query = _db.Set<MachineProfile>().AsNoTracking().Where(p => p.SlicerType == engine);
 
         if (!includeSystem)
         {
@@ -32,37 +32,37 @@ public class EfMachineProfileRepository(AppDbContext db) : IMachineProfileReposi
     }
 
     public async Task<MachineProfile?> GetByHashAsync(string hash, CancellationToken ct = default) =>
-        await _db.MachineProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
+        await _db.Set<MachineProfile>().AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
 
     public async Task AddAsync(MachineProfile profile, CancellationToken ct = default)
     {
-        _ = _db.MachineProfiles.Add(profile);
+        _ = _db.Set<MachineProfile>().Add(profile);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task UpdateAsync(MachineProfile profile, CancellationToken ct = default)
     {
-        _ = _db.MachineProfiles.Update(profile);
+        _ = _db.Set<MachineProfile>().Update(profile);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(MachineProfile profile, CancellationToken ct = default)
     {
-        _ = _db.MachineProfiles.Remove(profile);
+        _ = _db.Set<MachineProfile>().Remove(profile);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
     {
-        List<MachineProfile> profiles = await _db.MachineProfiles
+        List<MachineProfile> profiles = await _db.Set<MachineProfile>()
             .Where(p => p.IsSystem && p.SlicerType == engine)
             .ToListAsync(ct);
 
-        _db.MachineProfiles.RemoveRange(profiles);
+        _db.Set<MachineProfile>().RemoveRange(profiles);
         _ = await _db.SaveChangesAsync(ct);
         return profiles.Count;
     }
 
     public async Task<bool> HasAnyForPrinterModelAsync(Guid printerModelId, CancellationToken ct = default) =>
-        await _db.MachineProfiles.AsNoTracking().AnyAsync(p => p.PrinterModelId == printerModelId, ct);
+        await _db.Set<MachineProfile>().AsNoTracking().AnyAsync(p => p.PrinterModelId == printerModelId, ct);
 }

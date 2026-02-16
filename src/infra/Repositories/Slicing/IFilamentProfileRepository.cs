@@ -56,11 +56,11 @@ public class EfFilamentProfileRepository(AppDbContext db) : IFilamentProfileRepo
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     public async Task<FilamentProfile?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        await _db.FilamentProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+        await _db.Set<FilamentProfile>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public async Task<IReadOnlyList<FilamentProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default)
     {
-        IQueryable<FilamentProfile> query = _db.FilamentProfiles.AsNoTracking().Where(p => p.SlicerType == engine);
+        IQueryable<FilamentProfile> query = _db.Set<FilamentProfile>().AsNoTracking().Where(p => p.SlicerType == engine);
 
         if (!includeSystem)
         {
@@ -76,33 +76,33 @@ public class EfFilamentProfileRepository(AppDbContext db) : IFilamentProfileRepo
     }
 
     public async Task<FilamentProfile?> GetByHashAsync(string hash, CancellationToken ct = default) =>
-        await _db.FilamentProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
+        await _db.Set<FilamentProfile>().AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
 
     public async Task AddAsync(FilamentProfile profile, CancellationToken ct = default)
     {
-        _ = _db.FilamentProfiles.Add(profile);
+        _ = _db.Set<FilamentProfile>().Add(profile);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task UpdateAsync(FilamentProfile profile, CancellationToken ct = default)
     {
-        _ = _db.FilamentProfiles.Update(profile);
+        _ = _db.Set<FilamentProfile>().Update(profile);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(FilamentProfile profile, CancellationToken ct = default)
     {
-        _ = _db.FilamentProfiles.Remove(profile);
+        _ = _db.Set<FilamentProfile>().Remove(profile);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
     {
-        List<FilamentProfile> profiles = await _db.FilamentProfiles
+        List<FilamentProfile> profiles = await _db.Set<FilamentProfile>()
             .Where(p => p.IsSystem && p.SlicerType == engine)
             .ToListAsync(ct);
 
-        _db.FilamentProfiles.RemoveRange(profiles);
+        _db.Set<FilamentProfile>().RemoveRange(profiles);
         _ = await _db.SaveChangesAsync(ct);
         return profiles.Count;
     }

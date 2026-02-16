@@ -32,7 +32,7 @@ public class SliceJobTimeoutRecoveryTests
         await repo.RenewLeaseAsync(job.Id, 300);
         await repo.SaveChangesAsync();
 
-        SliceJob? reloaded = await db.SliceJobs.FindAsync(job.Id);
+        SliceJob? reloaded = await db.Set<SliceJob>().FindAsync(job.Id);
 #pragma warning disable CS8602 // Dereference of a possibly null reference.
         _ = Assert.NotNull(reloaded.LeaseExpiresAt);
 #pragma warning restore CS8602 // Dereference of a possibly null reference.
@@ -51,7 +51,7 @@ public class SliceJobTimeoutRecoveryTests
 
         // First retry should requeue
         await repo.IncrementRetryAndRequeueAsync(job.Id, maxRetries: 3);
-        SliceJob? j1 = await db.SliceJobs.FindAsync(job.Id);
+        SliceJob? j1 = await db.Set<SliceJob>().FindAsync(job.Id);
 #pragma warning disable CS8602 // Dereference of a possibly null reference.
         Assert.Equal(SliceJobStatus.Queued, j1.Status);
 #pragma warning restore CS8602 // Dereference of a possibly null reference.
@@ -63,7 +63,7 @@ public class SliceJobTimeoutRecoveryTests
         await repo.SaveChangesAsync();
 
         await repo.IncrementRetryAndRequeueAsync(job.Id, maxRetries: 3);
-        SliceJob? j2 = await db.SliceJobs.FindAsync(job.Id);
+        SliceJob? j2 = await db.Set<SliceJob>().FindAsync(job.Id);
 #pragma warning disable CS8602 // Dereference of a possibly null reference.
         Assert.Equal(SliceJobStatus.Failed, j2.Status);
 #pragma warning restore CS8602 // Dereference of a possibly null reference.

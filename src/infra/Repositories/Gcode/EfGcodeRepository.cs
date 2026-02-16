@@ -217,7 +217,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
         }
 
         // Get all unique subdirectories from Folder entities for gcode files
-        List<string> subdirs = await _db.Folders
+        List<string> subdirs = await _db.Set<FolderNode>()
             .Where(f => f.FolderType == "gcode" && !f.DeletedAt.HasValue && f.Path.StartsWith(normalizedParent))
             .Select(f => f.Path)
             .Distinct()

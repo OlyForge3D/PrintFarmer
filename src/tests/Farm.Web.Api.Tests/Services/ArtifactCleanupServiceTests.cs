@@ -58,7 +58,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
                 Sha256 = "abc123",
                 CreatedAt = DateTime.UtcNow.AddDays(-2)
             };
-            _ = db.Artifacts.Add(oldArtifact);
+            _ = db.Set<Artifact>().Add(oldArtifact);
             _ = await db.SaveChangesAsync();
         }
 
@@ -71,7 +71,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         // Verify artifact still exists (dry-run didn't delete)
         using (AppDbContext db = dbFactory.CreateDbContext())
         {
-            Artifact? stillExists = await db.Artifacts.FirstOrDefaultAsync(a => a.RelativePath == "2023/01/01/test.gcode");
+            Artifact? stillExists = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.RelativePath == "2023/01/01/test.gcode");
             _ = stillExists.Should().NotBeNull("dry-run mode should not delete artifacts");
         }
     }
@@ -124,8 +124,8 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
                 Sha256 = "def456",
                 CreatedAt = DateTime.UtcNow
             };
-            _ = db.Artifacts.Add(oldArtifact);
-            _ = db.Artifacts.Add(newArtifact);
+            _ = db.Set<Artifact>().Add(oldArtifact);
+            _ = db.Set<Artifact>().Add(newArtifact);
             _ = await db.SaveChangesAsync();
         }
 
@@ -138,10 +138,10 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         // Verify old artifact is gone, new one remains
         using (AppDbContext db = dbFactory.CreateDbContext())
         {
-            Artifact? oldStillExists = await db.Artifacts.FirstOrDefaultAsync(a => a.RelativePath == "2023/01/01/old.gcode");
+            Artifact? oldStillExists = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.RelativePath == "2023/01/01/old.gcode");
             _ = oldStillExists.Should().BeNull("old artifact should be deleted");
 
-            Artifact? newStillExists = await db.Artifacts.FirstOrDefaultAsync(a => a.RelativePath == "2023/12/31/new.gcode");
+            Artifact? newStillExists = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.RelativePath == "2023/12/31/new.gcode");
             _ = newStillExists.Should().NotBeNull("new artifact should remain");
         }
     }

@@ -69,33 +69,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<GcodeHarvestQueueItem> GcodeHarvestQueueItems => Set<GcodeHarvestQueueItem>();
 
-    // 3D Model Management & Slicer Integration
-    public DbSet<Model3D> Models3D => Set<Model3D>();
-
-    public DbSet<Tag> Tags => Set<Tag>();
-
-    public DbSet<FolderNode> Folders => Set<FolderNode>();
-
-    public DbSet<ProcessProfile> ProcessProfiles => Set<ProcessProfile>();
-
-    public DbSet<MachineModelProfile> MachineModelProfiles => Set<MachineModelProfile>();
-
-    public DbSet<MachineProfile> MachineProfiles => Set<MachineProfile>();
-
-    public DbSet<FilamentProfile> FilamentProfiles => Set<FilamentProfile>();
-
-    public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
-
-    public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
-
-    public DbSet<SliceJob> SliceJobs => Set<SliceJob>();
-
-    public DbSet<Worker> Workers => Set<Worker>();
-
     public DbSet<UserTask> UserTasks => Set<UserTask>();
-
-    // Slicing artifacts (G-code outputs, thumbnails, logs, previews)
-    public DbSet<Artifact> Artifacts => Set<Artifact>();
 
     // Print approvals (pending Upload+Print approvals)
     public DbSet<PrintApproval> PrintApprovals => Set<PrintApproval>();

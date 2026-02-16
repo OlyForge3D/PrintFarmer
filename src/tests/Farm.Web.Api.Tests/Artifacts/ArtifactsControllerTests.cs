@@ -37,7 +37,7 @@ public class ArtifactsControllerTests(CustomWebApplicationFactory factory) : ICl
             ModelFileName = "model.stl",
             ModelFileUrl = "http://example/model.stl"
         };
-        _ = db.SliceJobs.Add(sliceJob);
+        _ = db.Set<SliceJob>().Add(sliceJob);
         _ = await db.SaveChangesAsync();
 
         string kind = "gcode";

@@ -15,14 +15,14 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
     public async Task AddAsync(Worker worker)
     {
         ArgumentNullException.ThrowIfNull(worker);
-        _ = await _context.Workers.AddAsync(worker);
+        _ = await _context.Set<Worker>().AddAsync(worker);
     }
 
     public async Task<Worker?> GetByIdAsync(Guid id)
     {
         // Return tracked entity (needed for update scenarios such as heartbeat/status changes)
         // Callers that need a read-only instance should project or detach manually.
-        return await _context.Workers.FirstOrDefaultAsync(w => w.Id == id);
+        return await _context.Set<Worker>().FirstOrDefaultAsync(w => w.Id == id);
     }
 
     public async Task<Worker?> GetByServiceIdAsync(string serviceId)
@@ -30,12 +30,12 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceId);
 
         // Return tracked entity so callers (e.g., SlicersService heartbeat sync) can mutate and persist.
-        return await _context.Workers.FirstOrDefaultAsync(w => w.ServiceId == serviceId);
+        return await _context.Set<Worker>().FirstOrDefaultAsync(w => w.ServiceId == serviceId);
     }
 
     public async Task<IReadOnlyList<Worker>> GetAllAsync(int limit = 100, int offset = 0)
     {
-        return await _context.Workers
+        return await _context.Set<Worker>()
             .AsNoTracking()
             .OrderByDescending(w => w.LastHeartbeat)
             .Skip(offset)
@@ -46,7 +46,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
     public async Task<IReadOnlyList<Worker>> GetByStatusAsync(string status, int limit = 100, int offset = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(status);
-        return await _context.Workers
+        return await _context.Set<Worker>()
             .AsNoTracking()
             .Where(w => w.Status == status)
             .OrderByDescending(w => w.LastHeartbeat)
@@ -57,7 +57,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 
     public async Task<IReadOnlyList<Worker>> GetAvailableWorkersAsync(int limit = 100)
     {
-        return await _context.Workers
+        return await _context.Set<Worker>()
             .AsNoTracking()
             .Where(w => w.Status == WorkerStatus.Online && (w.TotalSlots - w.ActiveJobs) > 0 && !w.IsDisabled)
             .OrderByDescending(w => w.TotalSlots - w.ActiveJobs) // Prefer workers with more capacity
@@ -77,7 +77,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 
         // Get available workers and filter by capabilities in memory
         // Note: This is not optimal for large datasets, but works for typical worker counts
-        List<Worker> availableWorkers = await _context.Workers
+        List<Worker> availableWorkers = await _context.Set<Worker>()
             .AsNoTracking()
             .Where(w => w.Status == WorkerStatus.Online && (w.TotalSlots - w.ActiveJobs) > 0 && !w.IsDisabled)
             .ToListAsync();
@@ -114,7 +114,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
     {
         DateTime cutoffTime = DateTime.UtcNow - heartbeatTimeout;
 
-        return await _context.Workers
+        return await _context.Set<Worker>()
             .AsNoTracking()
             .Where(w => w.Status == WorkerStatus.Online && w.LastHeartbeat < cutoffTime)
             .ToListAsync();
@@ -124,7 +124,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(status);
 
-        Worker? worker = await _context.Workers.FindAsync(id);
+        Worker? worker = await _context.Set<Worker>().FindAsync(id);
         if (worker != null)
         {
             worker.Status = status;
@@ -143,7 +143,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 
     public async Task UpdateHeartbeatAsync(Guid id, int freeSlots, int totalSlots)
     {
-        Worker? worker = await _context.Workers.FindAsync(id);
+        Worker? worker = await _context.Set<Worker>().FindAsync(id);
         if (worker != null)
         {
             worker.LastHeartbeat = DateTime.UtcNow;
@@ -168,7 +168,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 
     public async Task IncrementActiveJobsAsync(Guid id)
     {
-        Worker? worker = await _context.Workers.FindAsync(id);
+        Worker? worker = await _context.Set<Worker>().FindAsync(id);
         if (worker != null)
         {
             worker.ActiveJobs++;
@@ -185,7 +185,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 
     public async Task DecrementActiveJobsAsync(Guid id, bool success, double processingTimeSeconds)
     {
-        Worker? worker = await _context.Workers.FindAsync(id);
+        Worker? worker = await _context.Set<Worker>().FindAsync(id);
         if (worker != null)
         {
             worker.ActiveJobs = Math.Max(0, worker.ActiveJobs - 1);
@@ -226,7 +226,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
 
-        Worker? worker = await _context.Workers.FindAsync(id);
+        Worker? worker = await _context.Set<Worker>().FindAsync(id);
         if (worker != null)
         {
             worker.IsDisabled = true;
@@ -237,7 +237,7 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 
     public async Task EnableWorkerAsync(Guid id)
     {
-        Worker? worker = await _context.Workers.FindAsync(id);
+        Worker? worker = await _context.Set<Worker>().FindAsync(id);
         if (worker != null)
         {
             worker.IsDisabled = false;
@@ -248,16 +248,16 @@ public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 
     public async Task DeleteAsync(Guid id)
     {
-        Worker? worker = await _context.Workers.FindAsync(id);
+        Worker? worker = await _context.Set<Worker>().FindAsync(id);
         if (worker != null)
         {
-            _ = _context.Workers.Remove(worker);
+            _ = _context.Set<Worker>().Remove(worker);
         }
     }
 
     public async Task UpdateTotalSlotsAsync(Guid id, int totalSlots)
     {
-        Worker? worker = await _context.Workers.FindAsync(id);
+        Worker? worker = await _context.Set<Worker>().FindAsync(id);
         if (worker != null)
         {
             worker.TotalSlots = totalSlots;

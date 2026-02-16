@@ -47,7 +47,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     /// </summary>
     private async Task<FolderNode> GetOrCreateModelFolderAsync(AppDbContext context)
     {
-        FolderNode? folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
+        FolderNode? folder = await context.Set<FolderNode>().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
         if (folder == null)
         {
             folder = new FolderNode
@@ -56,7 +56,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
                 Path = "/",
                 FolderType = "model"
             };
-            context.Folders.Add(folder);
+            context.Set<FolderNode>().Add(folder);
             await context.SaveChangesAsync();
         }
         return folder;
@@ -108,7 +108,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        context.Models3D.Add(model);
+        context.Set<Model3D>().Add(model);
         await context.SaveChangesAsync();
 
         return model;
@@ -400,7 +400,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        context.Models3D.Add(model);
+        context.Set<Model3D>().Add(model);
         await context.SaveChangesAsync();
 
         var profile = new SlicerProfileDto();

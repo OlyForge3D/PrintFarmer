@@ -208,7 +208,7 @@ public class PrintApprovalServiceTests : IDisposable
             FolderType = "gcode",
             CreatedAt = DateTime.UtcNow
         };
-        _context.Folders.Add(folder);
+        _context.Set<FolderNode>().Add(folder);
         await _context.SaveChangesAsync();
 
         // Create a valid GcodeFile (required for PrintJob foreign key)
