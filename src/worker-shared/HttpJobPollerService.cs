@@ -54,8 +54,9 @@ public abstract class HttpJobPollerService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Resolve API base URL from hierarchical config or environment variable, fall back to dev default.
-        string apiBaseUrl = _configuration["Worker:ApiBaseUrl"]
+        // Resolve API base URL — prefer unified SlicerApi:BaseUrl, then legacy keys.
+        string apiBaseUrl = _configuration["SlicerApi:BaseUrl"]
+                              ?? _configuration["Worker:ApiBaseUrl"]
                               ?? Environment.GetEnvironmentVariable("WORKER_API_BASE_URL")
                               ?? DefaultApiBaseUrl;
         int pollIntervalSeconds = int.Parse(_configuration["Worker:PollIntervalSeconds"] ?? "5");

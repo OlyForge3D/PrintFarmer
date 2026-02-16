@@ -19,7 +19,9 @@ public class HttpProgressReporter : IProgressReporter
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(configuration);
-        _apiBaseUrl = configuration["Worker:ApiBaseUrl"] ?? "http://api:5245";
+        _apiBaseUrl = configuration["SlicerApi:BaseUrl"]
+                   ?? configuration["Worker:ApiBaseUrl"]
+                   ?? "http://api:5245";
         _workerId = WorkerIdentity.Create();
     }
 
