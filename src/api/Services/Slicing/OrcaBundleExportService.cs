@@ -6,7 +6,6 @@ using Farm.Infrastructure.Repositories.Filament;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
-using ExportOrcaBundleRequest = Farm.Slicer.Module.Models.ExportOrcaBundleRequest;
 
 namespace Farm.Web.Api.Services.Slicing;
 

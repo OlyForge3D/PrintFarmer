@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using SlicerModelAliasDto = Farm.Slicer.Module.Dtos.SlicerModelAliasDto;
 
 namespace Farm.Infrastructure.Services.Catalog;
 

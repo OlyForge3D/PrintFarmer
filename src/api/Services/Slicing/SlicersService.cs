@@ -18,8 +18,6 @@ using Farm.Slicer.Module.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using RegisterSlicerDto = Farm.Slicer.Module.Contracts.RegisterSlicerDto;
-using HeartbeatDto = Farm.Slicer.Module.Contracts.HeartbeatDto;
 
 namespace Farm.Web.Api.Services.Slicing
 {

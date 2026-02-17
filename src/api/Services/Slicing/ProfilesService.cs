@@ -18,45 +18,6 @@ using Farm.Slicer.Module.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.SignalR;
 
-// Module DTO type aliases for IProfilesService interface compliance
-using ProcessProfileExtendedDto = Farm.Slicer.Module.Dtos.ProcessProfileExtendedDto;
-using ImportProcessProfileDto = Farm.Slicer.Module.Dtos.ImportProcessProfileDto;
-using ProcessProfileExportDto = Farm.Slicer.Module.Dtos.ProcessProfileExportDto;
-using ExtendedProfilesResponseDto = Farm.Slicer.Module.Dtos.ExtendedProfilesResponseDto;
-using HierarchicalProfilesResponseDto = Farm.Slicer.Module.Dtos.HierarchicalProfilesResponseDto;
-using SlicerProfileListItemDto = Farm.Slicer.Module.Dtos.SlicerProfileListItemDto;
-using ProcessProfileDto = Farm.Slicer.Module.Dtos.ProcessProfileDto;
-using AllProfilesResponseDto = Farm.Slicer.Module.Dtos.AllProfilesResponseDto;
-using MachineProfileDto = Farm.Slicer.Module.Dtos.MachineProfileDto;
-using ImportedProfileNamesDto = Farm.Slicer.Module.Dtos.ImportedProfileNamesDto;
-using FilamentProfileDto = Farm.Slicer.Module.Dtos.FilamentProfileDto;
-using BulkProfileImportResultDto = Farm.Slicer.Module.Dtos.BulkProfileImportResultDto;
-using BulkProfileImportRequest = Farm.Slicer.Module.Dtos.BulkProfileImportRequest;
-using CloneProfilesResponseDto = Farm.Slicer.Module.Dtos.CloneProfilesResponseDto;
-using CloneProfilesRequestDto = Farm.Slicer.Module.Dtos.CloneProfilesRequestDto;
-using BulkImportFromWorkerResultDto = Farm.Slicer.Module.Dtos.BulkImportFromWorkerResultDto;
-using BulkImportFromWorkerRequest = Farm.Slicer.Module.Dtos.BulkImportFromWorkerRequest;
-using SelectiveProfileImportResultDto = Farm.Slicer.Module.Dtos.SelectiveProfileImportResultDto;
-using SelectiveProfileImportRequest = Farm.Slicer.Module.Dtos.SelectiveProfileImportRequest;
-using ProcessProfileResponseDto = Farm.Slicer.Module.Dtos.ProcessProfileResponseDto;
-using CreateProcessProfileDto = Farm.Slicer.Module.Dtos.CreateProcessProfileDto;
-using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
-using BulkDeleteResultDto = Farm.Slicer.Module.Dtos.BulkDeleteResultDto;
-using CloneSingleProfileResponseDto = Farm.Slicer.Module.Dtos.CloneSingleProfileResponseDto;
-using CloneSingleProfileRequestDto = Farm.Slicer.Module.Dtos.CloneSingleProfileRequestDto;
-using CustomProfileDto = Farm.Slicer.Module.Dtos.CustomProfileDto;
-using UploadProfileRequestDto = Farm.Slicer.Module.Dtos.UploadProfileRequestDto;
-using CustomProfilesListResponseDto = Farm.Slicer.Module.Dtos.CustomProfilesListResponseDto;
-using UpdateCustomProfileRequestDto = Farm.Slicer.Module.Dtos.UpdateCustomProfileRequestDto;
-using ProcessProfileListItemDto = Farm.Slicer.Module.Dtos.ProcessProfileListItemDto;
-using FilamentProfileListItemDto = Farm.Slicer.Module.Dtos.FilamentProfileListItemDto;
-using MachineProfileListItemDto = Farm.Slicer.Module.Dtos.MachineProfileListItemDto;
-using HierarchicalManufacturerProfilesDto = Farm.Slicer.Module.Dtos.HierarchicalManufacturerProfilesDto;
-using HierarchicalPrinterModelProfilesDto = Farm.Slicer.Module.Dtos.HierarchicalPrinterModelProfilesDto;
-using ManufacturerProfilesDto = Farm.Slicer.Module.Dtos.ManufacturerProfilesDto;
-using PrinterModelProfilesDto = Farm.Slicer.Module.Dtos.PrinterModelProfilesDto;
-using MachineModelProfileDto = Farm.Slicer.Module.Dtos.MachineModelProfileDto;
-
 namespace Farm.Web.Api.Services.Slicing
 {
     /// <summary>

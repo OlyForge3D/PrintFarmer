@@ -2,10 +2,6 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Slicer.Module.Services;
-using OrcaBundlePreviewDto = Farm.Slicer.Module.Models.OrcaBundlePreviewDto;
-using OrcaFilamentPresetDto = Farm.Slicer.Module.Models.OrcaFilamentPresetDto;
-using OrcaPrinterPresetDto = Farm.Slicer.Module.Models.OrcaPrinterPresetDto;
-using OrcaProcessPresetDto = Farm.Slicer.Module.Models.OrcaProcessPresetDto;
 
 namespace Farm.Web.Api.Services.Slicing;
 

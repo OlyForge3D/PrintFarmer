@@ -13,6 +13,8 @@ using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Tags;
+using CreateFolderRequest = Farm.Infrastructure.CreateFolderRequest;
+using FolderOperationResultDto = Farm.Infrastructure.FolderOperationResultDto;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;

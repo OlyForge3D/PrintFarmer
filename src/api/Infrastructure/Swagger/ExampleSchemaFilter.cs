@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Discovery;
+using Farm.Slicer.Module.Services;
+using SlicerEngineInfo = Farm.Slicer.Module.Services.SlicerEngineInfo;
 
 // Explicit using to disambiguate from Moonraker's LoginRequest
 using AuthLoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;

@@ -1,5 +1,3 @@
-using Farm.Infrastructure;
-
 namespace Farm.Web.Api.Services.SlicerServices;
 
 /// <summary>

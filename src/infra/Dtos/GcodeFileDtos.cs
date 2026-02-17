@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+﻿using TagDto = Farm.Slicer.Module.Dtos.TagDto;
+
+namespace Farm.Infrastructure;
 
 // G-code Library & Job Queue DTOs
 

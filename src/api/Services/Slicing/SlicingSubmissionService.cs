@@ -10,16 +10,10 @@ using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.FileManagement;
+using ISlicerOrchestrator = Farm.Slicer.Module.Services.ISlicerOrchestrator;
+using SlicingSubmissionResult = Farm.Slicer.Module.Services.SlicingSubmissionResult;
 using ModuleSlicingJobDto = Farm.Slicer.Module.Dtos.SlicingJobDto;
 using ModuleSlicingJobStatus = Farm.Slicer.Module.Dtos.SlicingJobStatus;
-using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
-using SlicingSubmissionResult = Farm.Slicer.Module.Services.SlicingSubmissionResult;
-using SliceResultDto = Farm.Slicer.Module.Dtos.SliceResultDto;
-using SliceMetadataDto = Farm.Slicer.Module.Dtos.SliceMetadataDto;
-using ISlicerOrchestrator = Farm.Slicer.Module.Services.ISlicerOrchestrator;
-using SlicingJobRequest = Farm.Slicer.Module.Models.SlicingJobRequest;
-using SlicingJobResponse = Farm.Slicer.Module.Models.SlicingJobResponse;
-using SlicerEngineType = Farm.Slicer.Module.Models.SlicerEngineType;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 

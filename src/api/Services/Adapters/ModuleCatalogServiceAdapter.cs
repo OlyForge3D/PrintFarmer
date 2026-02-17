@@ -1,7 +1,6 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Slicer.Module.Services;
-using SlicerModelAliasDto = Farm.Slicer.Module.Dtos.SlicerModelAliasDto;
 
 namespace Farm.Web.Api.Services.Adapters;
 
@@ -51,9 +50,8 @@ public sealed class ModuleCatalogServiceAdapter(ICatalogService catalogService) 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct = default)
     {
-        IEnumerable<Farm.Infrastructure.SlicerModelAliasDto> aliases =
+        IEnumerable<SlicerModelAliasDto> aliases =
             await _catalogService.GetModelAliasesAsync(modelId, ct);
-        return aliases.Select(a => new SlicerModelAliasDto(a.Id, a.PrinterModelId, a.SlicerModelName, a.SlicerType))
-            .ToList();
+        return aliases.ToList();
     }
 }

@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using SlicerModelAliasDto = Farm.Slicer.Module.Dtos.SlicerModelAliasDto;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;

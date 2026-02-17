@@ -1,6 +1,7 @@
 ﻿using Farm.Api.Controllers;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using TagDto = Farm.Slicer.Module.Dtos.TagDto;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

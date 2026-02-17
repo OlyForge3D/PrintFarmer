@@ -1,4 +1,8 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using DistributedSlicingJob = Farm.Slicer.Module.Models.DistributedSlicingJob;
+using SlicerEngineType = Farm.Slicer.Module.Models.SlicerEngineType;
+using SlicerQueueStats = Farm.Slicer.Module.Services.SlicerQueueStats;
+using SlicingResult = Farm.Slicer.Module.Models.SlicingResult;
 
 namespace Farm.Infrastructure;
 
@@ -194,30 +198,7 @@ public interface ISlicerFileStorage
 }
 
 // ISlicerOrchestrator and ISlicerProgressNotifier have been migrated to Farm.Slicer.Module.Services.
-
-/// <summary>
-/// Supporting data structures
-/// </summary>
-public class SlicerQueueStats
-{
-    public SlicerEngineType Engine { get; set; }
-
-    public long QueuedJobs { get; set; }
-
-    public long ProcessingJobs { get; set; }
-
-    public long CompletedJobs { get; set; }
-
-    public long FailedJobs { get; set; }
-
-    public int ActiveWorkers { get; set; }
-
-    public double AverageProcessingTimeSeconds { get; set; }
-
-    public TimeSpan? EstimatedWaitTime { get; set; }
-
-    public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
-}
+// SlicerQueueStats has been migrated to Farm.Slicer.Module.Services (imported via type alias above).
 
 public class SlicerValidationResult
 {

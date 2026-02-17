@@ -1,5 +1,6 @@
-﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Slicer.Messaging;
+﻿using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Messaging;
+using Farm.Slicer.Module.Models;
 
 namespace Farm.Slicer.Module.Tests.SlicerServices.Messaging;
 

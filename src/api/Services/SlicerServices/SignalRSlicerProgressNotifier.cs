@@ -2,10 +2,6 @@
 using Farm.Slicer.Module.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
-using DistributedSlicingJob = Farm.Slicer.Module.Models.DistributedSlicingJob;
-using SlicingProgressUpdate = Farm.Slicer.Module.Models.SlicingProgressUpdate;
-using SlicingResult = Farm.Slicer.Module.Models.SlicingResult;
-
 namespace Farm.Web.Api.Services.SlicerServices;
 
 /// <summary>
@@ -55,7 +51,7 @@ public class SignalRSlicerProgressNotifier(
             {
                 JobId = job.Id,
                 UserId = job.UserId,
-                Status = (Farm.Infrastructure.SlicingJobStatus)(int)job.Status,
+                Status = job.Status,
                 Success = result.Success,
                 ResultFileUrl = result.ResultFileUrl,
                 ProcessingTimeSeconds = result.ProcessingTimeSeconds,
@@ -106,7 +102,7 @@ public class SignalRSlicerProgressNotifier(
             {
                 JobId = job.Id,
                 UserId = job.UserId,
-                Status = (Farm.Infrastructure.SlicingJobStatus)(int)job.Status,
+                Status = job.Status,
                 ErrorMessage = errorMessage,
                 FailedAt = job.CompletedAt ?? DateTime.UtcNow,
                 RetryCount = job.RetryCount,

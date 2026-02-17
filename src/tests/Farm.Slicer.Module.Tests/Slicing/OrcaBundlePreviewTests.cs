@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using ImportOrcaBundleDto = Farm.Slicer.Module.Models.ImportOrcaBundleDto;
+using OrcaBundlePreviewDto = Farm.Slicer.Module.Models.OrcaBundlePreviewDto;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;

@@ -22,14 +22,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
-// Module DTO type aliases for IModel3DFileService interface compliance
-using Model3DDto = Farm.Slicer.Module.Dtos.Model3DDto;
-using Model3DEntryDto = Farm.Slicer.Module.Dtos.Model3DEntryDto;
-using Model3DListResponse = Farm.Slicer.Module.Dtos.Model3DListResponse;
-using Model3DUploadResultDto = Farm.Slicer.Module.Dtos.Model3DUploadResultDto;
-using Model3DValidationResultDto = Farm.Slicer.Module.Dtos.Model3DValidationResultDto;
-using TagDto = Farm.Slicer.Module.Dtos.TagDto;
-
 namespace Farm.Web.Api.Services.Model
 {
     /// <summary>

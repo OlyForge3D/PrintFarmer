@@ -8,6 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using SlicerQueueStats = Farm.Slicer.Module.Services.SlicerQueueStats;
 
 namespace Farm.Web.Api.Services.SlicerServices
 {

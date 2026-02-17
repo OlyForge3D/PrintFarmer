@@ -1,16 +1,7 @@
 ﻿using Farm.Infrastructure.Telemetry;
-
-using SlicingJobRequest = Farm.Slicer.Module.Models.SlicingJobRequest;
-using SlicingJobResponse = Farm.Slicer.Module.Models.SlicingJobResponse;
-using SlicingJobStatusResponse = Farm.Slicer.Module.Models.SlicingJobStatusResponse;
-using SlicingJobStatus = Farm.Slicer.Module.Dtos.SlicingJobStatus;
-using SlicingJobPriority = Farm.Slicer.Module.Models.SlicingJobPriority;
 using SlicerEngineInfo = Farm.Slicer.Module.Services.SlicerEngineInfo;
-using SlicerEngineType = Farm.Slicer.Module.Models.SlicerEngineType;
-using SlicerQueueStats = Farm.Slicer.Module.Services.SlicerQueueStats;
 using SlicerOrchestratorHealth = Farm.Slicer.Module.Services.SlicerOrchestratorHealth;
-using MessageEnvelope = Farm.Slicer.Module.Messaging.MessageEnvelope;
-using SlicingJobContent = Farm.Slicer.Module.Messaging.SlicingJobContent;
+using SlicerQueueStats = Farm.Slicer.Module.Services.SlicerQueueStats;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -42,19 +33,19 @@ public class SlicerOrchestrator(
             MessageEnvelope envelope = request.GetOrCreateEnvelope();
 
             // Check for existing job (idempotency)
-            Farm.Infrastructure.DistributedSlicingJob? existingJob = await _jobQueue.FindExistingJobAsync(envelope.CorrelationId, envelope.Checksum, cancellationToken);
+            DistributedSlicingJob? existingJob = await _jobQueue.FindExistingJobAsync(envelope.CorrelationId, envelope.Checksum, cancellationToken);
             if (existingJob != null)
             {
                 _logger.LogInformation($"Found existing job {existingJob.Id} for correlation {envelope.CorrelationId}, returning existing response");
 
                 // Return existing job response
-                Farm.Infrastructure.SlicerQueueStats infraStats = await _jobQueue.GetQueueStatsAsync((Farm.Infrastructure.SlicerEngineType)(int)request.SlicerEngine, cancellationToken);
+                SlicerQueueStats infraStats = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)request.SlicerEngine, cancellationToken);
                 return new SlicingJobResponse
                 {
                     JobId = existingJob.Id,
                     Status = (SlicingJobStatus)(int)existingJob.Status,
                     EstimatedCompletionTime = existingJob.CompletedAt ?? DateTime.UtcNow.Add(infraStats.EstimatedWaitTime ?? TimeSpan.Zero),
-                    QueuePosition = existingJob.Status == Farm.Infrastructure.SlicingJobStatus.Queued ? (int)infraStats.QueuedJobs : 0,
+                    QueuePosition = existingJob.Status == SlicingJobStatus.Queued ? (int)infraStats.QueuedJobs : 0,
                     SlicerWorkerUrl = new Uri(GetSlicerWorkerUrl(request.SlicerEngine), UriKind.RelativeOrAbsolute)
                 };
             }
@@ -71,17 +62,17 @@ public class SlicerOrchestrator(
             }
 
             // Create new job with envelope (construct infra type for queue)
-            Farm.Infrastructure.DistributedSlicingJob job = new()
+            DistributedSlicingJob job = new()
             {
                 Id = envelope.JobId,
                 UserId = request.UserId,
                 PrinterId = request.PrinterId,
                 ModelFileUrl = request.ModelFileUrl,
                 ModelFileName = request.ModelFileName,
-                EngineType = (Farm.Infrastructure.SlicerEngineType)(int)request.SlicerEngine,
+                EngineType = (SlicerEngineType)(int)request.SlicerEngine,
                 SlicerEngine = request.SlicerEngine.ToString(),
-                Priority = (Farm.Infrastructure.SlicingJobPriority)(int)request.Priority,
-                Status = Farm.Infrastructure.SlicingJobStatus.Queued,
+                Priority = (SlicingJobPriority)(int)request.Priority,
+                Status = SlicingJobStatus.Queued,
                 CreatedAt = DateTime.UtcNow,
                 CorrelationId = envelope.CorrelationId,
                 Checksum = envelope.Checksum,
@@ -116,7 +107,7 @@ public class SlicerOrchestrator(
             await _jobQueue.EnqueueAsync(job, cancellationToken);
 
             // Get queue stats for estimated completion time
-            Farm.Infrastructure.SlicerQueueStats infraStatsForNew = await _jobQueue.GetQueueStatsAsync((Farm.Infrastructure.SlicerEngineType)(int)request.SlicerEngine, cancellationToken);
+            SlicerQueueStats infraStatsForNew = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)request.SlicerEngine, cancellationToken);
             DateTime estimatedCompletion = DateTime.UtcNow.Add(infraStatsForNew.EstimatedWaitTime ?? TimeSpan.Zero);
 
             _logger.LogInformation($"Submitted new slicing job {job.Id} (correlation {envelope.CorrelationId}) for user {request.UserId} with engine {request.SlicerEngine}");
@@ -141,7 +132,7 @@ public class SlicerOrchestrator(
     {
         try
         {
-            Farm.Infrastructure.DistributedSlicingJob? job = await _jobQueue.GetJobAsync(jobId, cancellationToken);
+            DistributedSlicingJob? job = await _jobQueue.GetJobAsync(jobId, cancellationToken);
             if (job == null)
             {
                 return null;
@@ -183,14 +174,14 @@ public class SlicerOrchestrator(
     {
         try
         {
-            Farm.Infrastructure.DistributedSlicingJob? job = await _jobQueue.GetJobAsync(jobId, cancellationToken);
+            DistributedSlicingJob? job = await _jobQueue.GetJobAsync(jobId, cancellationToken);
             if (job == null)
             {
                 _logger.LogWarning($"Cannot cancel job {jobId} - job not found");
                 return false;
             }
 
-            if (job.Status == Farm.Infrastructure.SlicingJobStatus.Completed || job.Status == Farm.Infrastructure.SlicingJobStatus.Error || job.Status == Farm.Infrastructure.SlicingJobStatus.Cancelled)
+            if (job.Status == SlicingJobStatus.Completed || job.Status == SlicingJobStatus.Error || job.Status == SlicingJobStatus.Cancelled)
             {
                 _logger.LogWarning($"Cannot cancel job {jobId} - job is already in final state: {job.Status}");
                 return false;
@@ -234,7 +225,7 @@ public class SlicerOrchestrator(
             EngineMetadata meta = kvp.Value;
             try
             {
-                Farm.Infrastructure.SlicerQueueStats queueStats = await _jobQueue.GetQueueStatsAsync((Farm.Infrastructure.SlicerEngineType)(int)meta.EngineType, cancellationToken);
+                SlicerQueueStats queueStats = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)meta.EngineType, cancellationToken);
                 engineInfos.Add(new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,
@@ -284,7 +275,7 @@ public class SlicerOrchestrator(
 
             foreach (SlicerEngineType engineType in _engineCatalog.Keys)
             {
-                Farm.Infrastructure.SlicerQueueStats infraStats = await _jobQueue.GetQueueStatsAsync((Farm.Infrastructure.SlicerEngineType)(int)engineType, cancellationToken);
+                SlicerQueueStats infraStats = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)engineType, cancellationToken);
                 stats[engineType] = new SlicerQueueStats
                 {
                     Engine = engineType,
@@ -312,10 +303,10 @@ public class SlicerOrchestrator(
     {
         try
         {
-            List<Farm.Infrastructure.DistributedSlicingJob> jobs = await _jobQueue.GetUserJobsAsync(userId, limit, cancellationToken);
+            List<DistributedSlicingJob> jobs = await _jobQueue.GetUserJobsAsync(userId, limit, cancellationToken);
 
             List<SlicingJobStatusResponse> responses = new(jobs.Count);
-            foreach (Farm.Infrastructure.DistributedSlicingJob job in jobs)
+            foreach (DistributedSlicingJob job in jobs)
             {
                 SlicingJobStatusResponse r = new()
                 {
@@ -365,7 +356,7 @@ public class SlicerOrchestrator(
             EngineMetadata meta = kvp.Value;
             try
             {
-                Farm.Infrastructure.SlicerQueueStats queueStats = await _jobQueue.GetQueueStatsAsync((Farm.Infrastructure.SlicerEngineType)(int)meta.EngineType, cancellationToken);
+                SlicerQueueStats queueStats = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)meta.EngineType, cancellationToken);
                 health.Engines[meta.EngineType] = new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,

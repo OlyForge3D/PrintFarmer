@@ -1,7 +1,6 @@
 ﻿using System.Text.Json;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Dtos;
 using FluentAssertions;
 using Xunit;
 
