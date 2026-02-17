@@ -12,6 +12,7 @@ describe('enumHelpers', () => {
         { value: 2, label: 'PrusaLink' },
         { value: 3, label: 'SDCP' },
         { value: 4, label: 'OctoPrint' },
+        { value: 5, label: 'FlashForge' },
       ]);
     });
 
@@ -31,6 +32,7 @@ describe('enumHelpers', () => {
       expect(getPrinterBackendName(PrinterBackend.PrusaLink)).toBe('PrusaLink');
       expect(getPrinterBackendName(PrinterBackend.SDCP)).toBe('SDCP');
       expect(getPrinterBackendName(PrinterBackend.OctoPrint)).toBe('OctoPrint');
+      expect(getPrinterBackendName(PrinterBackend.FlashForge)).toBe('FlashForge');
     });
 
     it('should return empty string for undefined', () => {

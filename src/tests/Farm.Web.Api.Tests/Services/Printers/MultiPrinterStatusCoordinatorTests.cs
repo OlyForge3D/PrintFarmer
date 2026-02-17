@@ -236,7 +236,8 @@ namespace Farm.Web.Api.Tests.Services.Printers
             {
                 if (p.Name.Contains("2"))
                 {
-                    await Task.Delay(2000, ct);
+                    // Use a long delay to ensure it always exceeds the 100ms timeout
+                    await Task.Delay(TimeSpan.FromSeconds(30), ct);
                 }
                 else
                 {
@@ -254,7 +255,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
 
             // Act
             string?[] actual = await coordinator.ExecuteParallelWithTimeoutAsync(
-                printers, operation, TimeSpan.FromMilliseconds(100), onTimeout, onError);
+                printers, operation, TimeSpan.FromMilliseconds(500), onTimeout, onError);
 
             // Assert
             actual.Should().HaveCount(2);

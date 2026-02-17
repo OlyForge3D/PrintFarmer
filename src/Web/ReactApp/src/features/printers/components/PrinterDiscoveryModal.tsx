@@ -185,6 +185,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
         return <span title="SDCP" aria-label="SDCP" role="img">📡</span>;
       case PrinterBackend.OctoPrint:
         return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-6 w-6 align-middle" />;
+      case PrinterBackend.FlashForge:
+        return <span title="FlashForge" aria-label="FlashForge" role="img">🔥</span>;
       default:
         return <span title="Other" aria-label="Other" role="img">🖨️</span>;
     }
@@ -195,6 +197,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
       case PrinterBackend.Moonraker: return 'bg-pf-accent-bg text-pf-text-primary border border-pf-border-medium';
       case PrinterBackend.PrusaLink: return 'bg-pf-warning text-pf-bg-0 border border-pf-border-medium';
       case PrinterBackend.SDCP: return 'bg-pf-accent text-pf-bg-0 border border-pf-border-medium';
+      case PrinterBackend.FlashForge: return 'bg-orange-600 text-white border border-pf-border-medium';
       default: return 'bg-pf-bg-2 text-pf-text-primary border border-pf-border';
     }
   };
@@ -272,7 +275,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 { value: PrinterBackend.Moonraker, label: 'Moonraker' },
                 { value: PrinterBackend.PrusaLink, label: 'PrusaLink' },
                 { value: PrinterBackend.SDCP, label: 'SDCP' },
-                { value: PrinterBackend.OctoPrint, label: 'OctoPrint' }
+                { value: PrinterBackend.OctoPrint, label: 'OctoPrint' },
+                { value: PrinterBackend.FlashForge, label: 'FlashForge' }
               ].map(backend => (
                 <Checkbox
                   key={backend.value}

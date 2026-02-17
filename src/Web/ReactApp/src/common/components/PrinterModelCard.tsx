@@ -83,6 +83,8 @@ function getBackendDisplay(backend?: PrinterBackendString): string | null {
       return 'OctoPrint';
     case 'SDCP':
       return 'SDCP';
+    case 'FlashForge':
+      return 'FlashForge';
     default:
       return null;
   }

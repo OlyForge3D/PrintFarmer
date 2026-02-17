@@ -1075,7 +1075,13 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     // Print control methods (ISupportsStartPrint + ISupportsControlOperations)
     public async Task<bool> StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint, new { Filename = fileName, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 }, ct);
+        // SDCP protocol requires the full storage path — files uploaded via /uploadFile/upload
+        // are stored under /local/ on the printer.
+        string sdcpPath = fileName.StartsWith("/local/", StringComparison.OrdinalIgnoreCase)
+            ? fileName
+            : $"/local/{fileName}";
+
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint, new { Filename = sdcpPath, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 }, ct);
     }
 
     public Task<bool> StartPrintAsync(Uri baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -1383,13 +1389,14 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
                     await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
 
-                    // ACK code 0 = success, anything else is error
+                    // ACK code 0 = success, 1 = error, 2 = file not found
+                    int? ack = ackResponse?.Data?.Data?.Ack;
                     LogSdcp(
-                        LogLevel.Debug,
-                        "SDCP WS command ack received",
+                        ack == 0 ? LogLevel.Debug : LogLevel.Warning,
+                        ack == 0 ? "SDCP WS command ack received" : $"SDCP WS command rejected (Ack={ack})",
                         requestId,
-                        new { operation = "SendCommand", cmd, ack = ackResponse?.Data?.Data?.Ack, wsUrl });
-                    return ackResponse?.Data?.Data?.Ack == 0;
+                        new { operation = "SendCommand", cmd, ack, wsUrl });
+                    return ack == 0;
                 }
 
                 LogSdcp(

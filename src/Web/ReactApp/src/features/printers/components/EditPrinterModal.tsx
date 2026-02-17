@@ -592,7 +592,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 />
               </FormField>
             {/* Moonraker/PrusaLink port/API key fields */}
-            {formData.backend === PrinterBackend.Moonraker && (
+            {(formData.backend === PrinterBackend.Moonraker || formData.backend === PrinterBackend.FlashForge) && (
               <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField label="Backend Port (API)">
                   <Input

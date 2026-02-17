@@ -285,6 +285,7 @@ export function CollapsedPrinterCard({
             <div
               className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden"
               role="progressbar"
+              aria-label="Print progress"
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(Math.max(0, Math.min(100, progress)))}
