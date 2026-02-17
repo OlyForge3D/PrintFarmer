@@ -4,8 +4,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+
+using CircuitState = Farm.Slicer.Module.Services.CircuitState;
 
 namespace Farm.Web.Api.Services.Workers;
 

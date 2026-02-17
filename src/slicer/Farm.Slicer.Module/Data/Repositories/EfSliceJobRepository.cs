@@ -14,6 +14,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task AddAsync(SliceJob job, CancellationToken ct = default)
     {
         _ = await _db.SliceJobs.AddAsync(job, ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     /// <inheritdoc/>
@@ -103,6 +104,8 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         {
             job.ProgressPercent = progressPercent.Value;
         }
+
+        await SaveChangesAsync(ct);
     }
 
     /// <inheritdoc/>
@@ -118,6 +121,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.StartedAt = DateTime.UtcNow;
         job.WorkerId = workerId;
         job.UpdatedAt = DateTime.UtcNow;
+        await SaveChangesAsync(ct);
     }
 
     /// <inheritdoc/>
@@ -137,6 +141,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.EstimatedPrintTimeSeconds = estimatedPrintTimeSeconds;
         job.FilamentUsedGrams = filamentUsedGrams;
         job.UpdatedAt = DateTime.UtcNow;
+        await SaveChangesAsync(ct);
     }
 
     /// <inheritdoc/>
@@ -172,6 +177,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         }
 
         job.UpdatedAt = DateTime.UtcNow;
+        await SaveChangesAsync(ct);
     }
 
     /// <inheritdoc/>
@@ -187,6 +193,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.CompletedAt = DateTime.UtcNow;
         job.ErrorMessage = errorMessage;
         job.UpdatedAt = DateTime.UtcNow;
+        await SaveChangesAsync(ct);
     }
 
     /// <inheritdoc/>
@@ -201,6 +208,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.ProgressPercent = progressPercent;
         job.ProgressMessage = progressMessage;
         job.UpdatedAt = DateTime.UtcNow;
+        await SaveChangesAsync(ct);
     }
 
     /// <inheritdoc/>

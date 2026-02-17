@@ -1054,7 +1054,7 @@ public class ProfilesController(
             Guid userId = GetCurrentUserId();
 
             CloneSingleProfileResponseDto result = await _profilesService.CloneSingleProfileAsync(request, userId, ct);
-            return CreatedAtAction(nameof(GetProfileAsync), new { id = result.Id }, result);
+            return Created($"/api/slicer/profiles/{result.Id}", result);
         }
         catch (ArgumentException ex)
         {
@@ -1095,7 +1095,7 @@ public class ProfilesController(
             Guid userId = GetCurrentUserId();
 
             CustomProfileDto result = await _profilesService.UploadCustomProfileAsync(request, userId, ct);
-            return CreatedAtAction(nameof(GetProfileAsync), new { id = result.Id }, result);
+            return Created($"/api/slicer/profiles/{result.Id}", result);
         }
         catch (ArgumentException ex)
         {

@@ -45,7 +45,7 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         IActionResult result = await controller.UploadAsync(jobId, file, CancellationToken.None);
 
         // Assert
-        _ = result.Should().BeOfType<CreatedAtActionResult>();
+        _ = result.Should().BeOfType<CreatedResult>();
     }
 
     [Fact(DisplayName = "Upload with empty file returns 400")]

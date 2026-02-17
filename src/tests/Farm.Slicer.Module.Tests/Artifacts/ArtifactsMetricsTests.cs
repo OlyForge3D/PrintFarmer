@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Slicer.Module.Tests.TestInfrastructure;

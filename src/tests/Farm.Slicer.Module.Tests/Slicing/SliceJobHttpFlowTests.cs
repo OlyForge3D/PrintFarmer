@@ -49,7 +49,7 @@ public class SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output) 
         };
 
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
-        _ = submitResp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        _ = submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
         SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
         _ = submitted.Should().NotBeNull();
         _ = submitted!.JobId.Should().NotBe(Guid.Empty);

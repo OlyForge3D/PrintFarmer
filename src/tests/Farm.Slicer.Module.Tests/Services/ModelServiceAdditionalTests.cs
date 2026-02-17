@@ -4,6 +4,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -22,6 +28,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
+
+// Module DTO type aliases — service now returns module DTOs
+using Model3DUploadResultDto = Farm.Slicer.Module.Dtos.Model3DUploadResultDto;
+using Model3DValidationResultDto = Farm.Slicer.Module.Dtos.Model3DValidationResultDto;
 
 namespace Farm.Slicer.Module.Tests.Services
 {

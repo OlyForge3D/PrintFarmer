@@ -11,6 +11,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -139,7 +140,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         _ = artifacts.Should().HaveCount(3);
         _ = artifacts.Should().Contain(a => a.Id == primaryArtifact.Id && a.Kind == "gcode");
         _ = artifacts.Should().Contain(a => a.Id == thumbnailArtifact.Id && a.Kind == "thumbnail");
-        _ = artifacts.Should().Contain(a => a.Kind == "log" && a.FileName == "slicer-log.txt");
+        _ = artifacts.Should().Contain(a => a.Kind == "log" && a.FileName == "slicing.log");
     }
 
     [Fact(DisplayName = "Complete job with only G-code (minimal artifacts)")]

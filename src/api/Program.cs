@@ -101,10 +101,6 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 // During transition both AppDbContext and SlicerDbContext coexist sharing the same underlying database.
 builder.Services.AddSlicerModule(builder.Configuration);
 
-// Register stub implementations for slicer module service interfaces.
-// These are no-op proxies used until real service implementations are migrated into the module.
-builder.Services.AddSlicerModuleStubServices();
-
 // Register SystemLog logger provider to capture all application logs to the database
 builder.Logging.AddSystemLogProvider(LogLevel.Information);
 

@@ -172,7 +172,7 @@ public class JobDispatcherServiceTests
         public Task SaveChangesAsync() => Task.CompletedTask;
     }
 
-    private class StubSliceJobEventService : Farm.Web.Api.Services.Slicing.ISliceJobEventService
+    private class StubSliceJobEventService : Farm.Slicer.Module.Services.ISliceJobEventService
     {
         public Task NotifyJobQueuedAsync(SliceJob job, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task NotifyJobStartedAsync(SliceJob job, CancellationToken cancellationToken = default) => Task.CompletedTask;

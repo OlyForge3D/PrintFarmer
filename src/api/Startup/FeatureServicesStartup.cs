@@ -41,7 +41,7 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService, Farm.Web.Api.Services.FileManagement.StoredFileOperationsService>();
 
         // 3MF to STL Conversion Service
-        services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
+        services.AddScoped<Farm.Slicer.Module.Services.I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
 
         // Print Job Management Service (renamed from PrintQueueService)
         services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobManagementRepository>();

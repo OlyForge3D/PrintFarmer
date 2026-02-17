@@ -6,6 +6,7 @@ using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;

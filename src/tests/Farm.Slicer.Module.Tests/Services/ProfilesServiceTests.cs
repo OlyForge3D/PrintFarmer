@@ -15,6 +15,10 @@ using Microsoft.AspNetCore.SignalR;
 using Moq;
 using Xunit;
 
+// Module DTO type aliases — service now returns module DTOs
+using ProcessProfileResponseDto = Farm.Slicer.Module.Dtos.ProcessProfileResponseDto;
+using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
+
 namespace Farm.Slicer.Module.Tests.Services
 {
     public class ProfilesServiceTests
@@ -28,7 +32,7 @@ namespace Farm.Slicer.Module.Tests.Services
             Mock<ICatalogService> catalogService = new(MockBehavior.Loose);
             Mock<IProfileParsingService> parsingService = new(MockBehavior.Loose);
             Mock<IHubContext<SlicerHub>> hubContext = new(MockBehavior.Loose);
-            Mock<ISlicersService> slicersService = new(MockBehavior.Loose);
+            Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Loose);
 
             return new ProfilesService(
                 repo,

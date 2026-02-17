@@ -79,7 +79,7 @@ public class SliceJobController(
         await _jobRepository.AddAsync(job, ct);
         await _eventService.NotifyJobQueuedAsync(job, ct);
 
-        return CreatedAtAction(nameof(GetAsync), new { id = job.Id }, new SubmitSliceJobResponse
+        return Created($"/api/slice/{job.Id}", new SubmitSliceJobResponse
         {
             JobId = job.Id,
             Status = job.Status,

@@ -12,6 +12,14 @@ using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.FileManagement;
 using ModuleSlicingJobDto = Farm.Slicer.Module.Dtos.SlicingJobDto;
 using ModuleSlicingJobStatus = Farm.Slicer.Module.Dtos.SlicingJobStatus;
+using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
+using SlicingSubmissionResult = Farm.Slicer.Module.Services.SlicingSubmissionResult;
+using SliceResultDto = Farm.Slicer.Module.Dtos.SliceResultDto;
+using SliceMetadataDto = Farm.Slicer.Module.Dtos.SliceMetadataDto;
+using ISlicerOrchestrator = Farm.Slicer.Module.Services.ISlicerOrchestrator;
+using SlicingJobRequest = Farm.Slicer.Module.Models.SlicingJobRequest;
+using SlicingJobResponse = Farm.Slicer.Module.Models.SlicingJobResponse;
+using SlicerEngineType = Farm.Slicer.Module.Models.SlicerEngineType;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 
@@ -27,7 +35,7 @@ public class SlicingSubmissionService(
     ISlicerOrchestrator orchestrator,
     IHostEnvironment env,
     IUnifiedLoggingService logger,
-    IStoredFileOperationsService fileOperations) : ISlicingSubmissionService
+    IStoredFileOperationsService fileOperations) : Farm.Slicer.Module.Services.ISlicingSubmissionService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly IModel3DFileRepository _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
@@ -62,8 +70,7 @@ public class SlicingSubmissionService(
                 PrinterId = printerId,
                 ModelFileUrl = new Uri(modelFileUrl, UriKind.RelativeOrAbsolute),
                 ModelFileName = modelFile.FileName,
-                SlicerEngine = Enum.Parse<SlicerEngineType>(slicerEngine, true),
-                SlicerProfile = profile
+                SlicerEngine = Enum.Parse<SlicerEngineType>(slicerEngine, true)
             };
 
             SlicingJobResponse response = await _orchestrator.SubmitJobAsync(request);
@@ -105,7 +112,8 @@ public class SlicingSubmissionService(
                     PrinterId = printerId,
                     ModelFilePath = modelFileUrl,
                     GcodeFilePath = null,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    Profile = profile
                 };
 
                 SlicingJobStore.AddOrUpdate(response.JobId, storeJob);
@@ -159,8 +167,7 @@ public class SlicingSubmissionService(
                 PrinterId = printerId,
                 ModelFileUrl = new Uri(modelFileUrl, UriKind.RelativeOrAbsolute),
                 ModelFileName = model.FileName,
-                SlicerEngine = Enum.Parse<SlicerEngineType>(slicerEngine, true),
-                SlicerProfile = profile
+                SlicerEngine = Enum.Parse<SlicerEngineType>(slicerEngine, true)
             };
 
             SlicingJobResponse response = await _orchestrator.SubmitJobAsync(request);
@@ -202,7 +209,8 @@ public class SlicingSubmissionService(
                     PrinterId = printerId,
                     ModelFilePath = modelFileUrl,
                     GcodeFilePath = null,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    Profile = profile
                 };
 
                 SlicingJobStore.AddOrUpdate(response.JobId, storeJob);

@@ -8,7 +8,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Gcode;
@@ -19,6 +18,8 @@ using Farm.Slicer.Module.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using RegisterSlicerDto = Farm.Slicer.Module.Contracts.RegisterSlicerDto;
+using HeartbeatDto = Farm.Slicer.Module.Contracts.HeartbeatDto;
 
 namespace Farm.Web.Api.Services.Slicing
 {
@@ -40,7 +41,7 @@ namespace Farm.Web.Api.Services.Slicing
     /// enabling the job queue system to intelligently distribute slicing jobs across available
     /// workers based on their capacity and health status.
     /// </remarks>
-    public class SlicersService : ISlicersService
+    public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     {
         private readonly ISlicersRepository _repo;
         private readonly IWorkerRepository _workerRepo;

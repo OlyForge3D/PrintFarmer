@@ -88,7 +88,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
         using IServiceScope scope = _scopeFactory.CreateScope();
 
         // First check if slicing is available - if no slicer workers, skip task creation entirely
-        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        Farm.Slicer.Module.Services.ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Services.ISlicersService>();
         IReadOnlyList<SlicerService> slicerWorkers = await slicersService.ListAsync(ct);
 
         if (slicerWorkers.Count == 0)

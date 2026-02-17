@@ -179,6 +179,7 @@ public static class ServiceCollectionExtensions
         RegisterArtifactServices(services, configuration, disableBackgroundServices);
         RegisterSetupAndSchemaServices(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
+        RegisterSlicerModuleAdapters(services);
 
         return services;
     }
@@ -454,22 +455,22 @@ public static class ServiceCollectionExtensions
 
         // Configuration
         _ = services.Configure<Services.Workers.WorkerAuthSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.WorkerAuthSettings.SectionName));
-        _ = services.AddSingleton<Services.Workers.IWorkerAuthService, Services.Workers.WorkerAuthService>();
+        _ = services.AddSingleton<Farm.Slicer.Module.Services.IWorkerAuthService, Services.Workers.WorkerAuthService>();
         _ = services.Configure<Farm.Infrastructure.Settings.SlicerSettings>(configuration.GetSection(Farm.Infrastructure.Settings.SlicerSettings.SectionName));
 
         // Core slicing services
-        _ = services.AddScoped<ISlicersService, SlicersService>();
-        _ = services.AddScoped<IProfilesService, ProfilesService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicersService, SlicersService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.IProfilesService, ProfilesService>();
         _ = services.AddScoped<Services.Slicing.IProfileParsingService, Services.Slicing.ProfileParsingService>();
-        _ = services.AddScoped<Services.Slicing.IOrcaBundleParsingService, Services.Slicing.OrcaBundleParsingService>();
-        _ = services.AddScoped<Services.Slicing.IOrcaPresetMappingService, Services.Slicing.OrcaPresetMappingService>();
-        _ = services.AddScoped<Services.Slicing.IOrcaBundleExportService, Services.Slicing.OrcaBundleExportService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaBundleParsingService, Services.Slicing.OrcaBundleParsingService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaPresetMappingService, Services.Slicing.OrcaPresetMappingService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaBundleExportService, Services.Slicing.OrcaBundleExportService>();
 
         // Job queue and orchestration
         _ = services.AddScoped<ISlicerJobQueue, Services.SlicerServices.DbSlicerJobQueue>();
-        _ = services.AddSingleton<ISlicerProgressNotifier, Services.SlicerServices.SignalRSlicerProgressNotifier>();
-        _ = services.AddScoped<ISlicerOrchestrator, Services.SlicerServices.SlicerOrchestrator>();
-        _ = services.AddScoped<Services.Slicing.ISliceJobEventService, Services.Slicing.SliceJobEventService>();
+        _ = services.AddSingleton<Farm.Slicer.Module.Services.ISlicerProgressNotifier, Services.SlicerServices.SignalRSlicerProgressNotifier>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerOrchestrator, Services.SlicerServices.SlicerOrchestrator>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISliceJobEventService, Services.Slicing.SliceJobEventService>();
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
         _ = services.AddScoped<IJobDispatcherService, JobDispatcherService>();
@@ -484,7 +485,7 @@ public static class ServiceCollectionExtensions
         });
 
         // Submission and file storage
-        _ = services.AddScoped<Services.Slicing.ISlicingSubmissionService, Services.Slicing.SlicingSubmissionService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicingSubmissionService, Services.Slicing.SlicingSubmissionService>();
         _ = services.AddScoped<Services.SlicerServices.LocalSlicerFileStorage>();
         _ = services.AddScoped<ISlicerFileStorage>(sp => sp.GetRequiredService<Services.SlicerServices.LocalSlicerFileStorage>());
 
@@ -590,7 +591,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IStoredFileOperationsService, StoredFileOperationsService>();
 
         // Model services
-        _ = services.AddScoped<Services.Model.IModel3DFileService, Services.Model.Model3DFileService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.IModel3DFileService, Services.Model.Model3DFileService>();
         _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
         _ = services.AddSingleton<IVirusScanner, ClamAVVirusScanner>();
         _ = services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();
@@ -626,13 +627,34 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddSingleton<Services.Artifacts.ArtifactsMetrics>();
         _ = services.Configure<ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
-        _ = services.AddScoped<Services.Artifacts.IArtifactsService, Services.Artifacts.ArtifactsService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.IArtifactsService, Services.Artifacts.ArtifactsService>();
         _ = services.AddScoped<Services.Artifacts.IArtifactCleanupService, Services.Artifacts.ArtifactCleanupService>();
 
         if (!disableBackgroundServices)
         {
             _ = services.AddHostedService<Services.Artifacts.ArtifactCleanupHostedService>();
         }
+    }
+
+    #endregion
+
+    #region Slicer Module Adapters
+
+    /// <summary>
+    /// Registers adapter implementations that bridge slicer module interfaces to API/infra services.
+    /// These replace the DispatchProxy stubs in <see cref="Farm.Web.Api.Startup.SlicerModuleStubRegistrations"/>.
+    /// </summary>
+    private static void RegisterSlicerModuleAdapters(IServiceCollection services)
+    {
+        // API temp-path provider (needed by the module adapter)
+        _ = services.AddSingleton<Infrastructure.Temp.ITempPathProvider, Infrastructure.Temp.DefaultTempPathProvider>();
+
+        // Module adapters (bridge module interfaces → API implementations)
+        _ = services.AddScoped<Farm.Slicer.Module.Services.IFileManagementService, Services.Adapters.ModuleFileManagementAdapter>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.IStoredFileOperationsService, Services.Adapters.ModuleStoredFileOpsAdapter>();
+        _ = services.AddSingleton<Farm.Slicer.Module.Services.ITempPathProvider, Services.Adapters.ModuleTempPathAdapter>();
+        _ = services.AddSingleton<Farm.Slicer.Module.Services.IRateLimitService, Services.Adapters.ModuleRateLimitAdapter>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ICatalogServiceAdapter, Services.Adapters.ModuleCatalogServiceAdapter>();
     }
 
     #endregion

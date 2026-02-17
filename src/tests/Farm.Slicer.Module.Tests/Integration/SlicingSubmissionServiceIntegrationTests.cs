@@ -16,6 +16,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
+using ISlicingSubmissionService = Farm.Slicer.Module.Services.ISlicingSubmissionService;
+using SlicingSubmissionResult = Farm.Slicer.Module.Services.SlicingSubmissionResult;
+using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
+using ProcessProfileDto = Farm.Slicer.Module.Dtos.ProcessProfileDto;
+using FilamentProfileDto = Farm.Slicer.Module.Dtos.FilamentProfileDto;
+
 namespace Farm.Slicer.Module.Tests.Integration;
 
 /// <summary>

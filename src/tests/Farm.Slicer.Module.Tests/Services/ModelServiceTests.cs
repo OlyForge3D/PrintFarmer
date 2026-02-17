@@ -22,6 +22,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
+// Module DTO type aliases — service now returns module DTOs
+using Model3DUploadResultDto = Farm.Slicer.Module.Dtos.Model3DUploadResultDto;
+
 namespace Farm.Slicer.Module.Tests.Services
 {
     public class ModelServiceTests

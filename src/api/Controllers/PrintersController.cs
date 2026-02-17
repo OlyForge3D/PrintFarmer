@@ -46,7 +46,7 @@ public class PrintersController(
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
-    Services.Slicing.ISlicersService slicersService,
+    Farm.Slicer.Module.Services.ISlicersService slicersService,
     IPrinterVersionCache printerVersionCache)
     : ControllerBase
 {
@@ -57,7 +57,7 @@ public class PrintersController(
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly Services.Slicing.ISlicersService _slicersService = slicersService;
+    private readonly Farm.Slicer.Module.Services.ISlicersService _slicersService = slicersService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed

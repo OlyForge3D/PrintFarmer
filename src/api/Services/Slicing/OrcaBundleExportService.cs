@@ -1,11 +1,12 @@
 ﻿using System.Linq;
 using System.Text.Json;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Filament;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
+using ExportOrcaBundleRequest = Farm.Slicer.Module.Models.ExportOrcaBundleRequest;
 
 namespace Farm.Web.Api.Services.Slicing;
 

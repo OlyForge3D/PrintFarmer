@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Services.Slicing;
 
 namespace Farm.Web.Api.Services.JobDispatch;

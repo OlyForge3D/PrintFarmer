@@ -1,7 +1,10 @@
-﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
+
+using DistributedSlicingJob = Farm.Slicer.Module.Models.DistributedSlicingJob;
+using SlicingProgressUpdate = Farm.Slicer.Module.Models.SlicingProgressUpdate;
+using SlicingResult = Farm.Slicer.Module.Models.SlicingResult;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -10,7 +13,7 @@ namespace Farm.Web.Api.Services.SlicerServices;
 /// </summary>
 public class SignalRSlicerProgressNotifier(
     IHubContext<SlicerProgressHub> hubContext,
-    IUnifiedLoggingService logger) : ISlicerProgressNotifier
+    IUnifiedLoggingService logger) : Farm.Slicer.Module.Services.ISlicerProgressNotifier
 {
     private readonly IHubContext<SlicerProgressHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -52,7 +55,7 @@ public class SignalRSlicerProgressNotifier(
             {
                 JobId = job.Id,
                 UserId = job.UserId,
-                Status = job.Status,
+                Status = (Farm.Infrastructure.SlicingJobStatus)(int)job.Status,
                 Success = result.Success,
                 ResultFileUrl = result.ResultFileUrl,
                 ProcessingTimeSeconds = result.ProcessingTimeSeconds,
@@ -103,7 +106,7 @@ public class SignalRSlicerProgressNotifier(
             {
                 JobId = job.Id,
                 UserId = job.UserId,
-                Status = job.Status,
+                Status = (Farm.Infrastructure.SlicingJobStatus)(int)job.Status,
                 ErrorMessage = errorMessage,
                 FailedAt = job.CompletedAt ?? DateTime.UtcNow,
                 RetryCount = job.RetryCount,

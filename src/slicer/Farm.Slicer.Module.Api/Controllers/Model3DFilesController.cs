@@ -43,7 +43,7 @@ public class Model3DFilesController(
         try
         {
             Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
-            return CreatedAtAction(nameof(GetModelAsync), new { id = result.Id }, result);
+            return Created($"/api/models/{result.Id}", result);
         }
         catch (ArgumentException ex)
         {

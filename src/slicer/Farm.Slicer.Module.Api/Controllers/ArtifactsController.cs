@@ -51,7 +51,7 @@ public class ArtifactsController(
         }
 
         Artifact artifact = await _service.UploadAsync(file, jobId, null, "gcode", ct);
-        return CreatedAtAction(nameof(GetAsync), new { id = artifact.Id }, new
+        return Created($"/api/artifacts/{artifact.Id}", new
         {
             id = artifact.Id,
             jobId = artifact.JobId,

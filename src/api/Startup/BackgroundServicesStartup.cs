@@ -26,7 +26,7 @@ public static class BackgroundServicesStartup
 
         // Circuit breaker for worker failure tracking
         services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>(configuration.GetSection("CircuitBreaker"));
-        services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
+        services.AddSingleton<Farm.Slicer.Module.Services.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
         services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
 
         // Stale worker cleanup service

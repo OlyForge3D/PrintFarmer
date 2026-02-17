@@ -81,7 +81,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
 
             IActionResult result = await controller.UploadModelAsync(fakeFile);
 
-            CreatedAtActionResult created = Assert.IsType<CreatedAtActionResult>(result);
+            CreatedResult created = Assert.IsType<CreatedResult>(result);
             Model3DUploadResultDto value = Assert.IsType<Model3DUploadResultDto>(created.Value);
             Assert.Equal(uploadResult.Id, value.Id);
 

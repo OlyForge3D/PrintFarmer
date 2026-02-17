@@ -1,19 +1,9 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Farm.Slicer.Module.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Services.Workers;
-
-/// <summary>
-/// Validates worker API key headers against configured shared key.
-/// </summary>
-public interface IWorkerAuthService
-{
-    /// <summary>
-    /// Returns true if the request contains a valid worker API key header.
-    /// </summary>
-    bool IsAuthorized(HttpContext httpContext);
-}
 
 public sealed class WorkerAuthService(IConfiguration configuration, IHostEnvironment env) : IWorkerAuthService
 {

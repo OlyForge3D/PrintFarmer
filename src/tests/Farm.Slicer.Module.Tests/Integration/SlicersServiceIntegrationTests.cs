@@ -12,6 +12,10 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
+using ISlicersService = Farm.Slicer.Module.Services.ISlicersService;
+using RegisterSlicerDto = Farm.Slicer.Module.Contracts.RegisterSlicerDto;
+using HeartbeatDto = Farm.Slicer.Module.Contracts.HeartbeatDto;
+
 namespace Farm.Slicer.Module.Tests.Integration;
 
 /// <summary>

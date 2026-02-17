@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Services;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.Slicing;

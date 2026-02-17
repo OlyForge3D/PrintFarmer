@@ -22,6 +22,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
+// Module DTO type aliases for IModel3DFileService interface compliance
+using Model3DDto = Farm.Slicer.Module.Dtos.Model3DDto;
+using Model3DEntryDto = Farm.Slicer.Module.Dtos.Model3DEntryDto;
+using Model3DListResponse = Farm.Slicer.Module.Dtos.Model3DListResponse;
+using Model3DUploadResultDto = Farm.Slicer.Module.Dtos.Model3DUploadResultDto;
+using Model3DValidationResultDto = Farm.Slicer.Module.Dtos.Model3DValidationResultDto;
+using TagDto = Farm.Slicer.Module.Dtos.TagDto;
+
 namespace Farm.Web.Api.Services.Model
 {
     /// <summary>
@@ -37,7 +45,7 @@ namespace Farm.Web.Api.Services.Model
     /// - Tag-based organization through Model3DTag relationships
     /// Physical files are stored with GUID-based names in a flat directory structure.
     /// </remarks>
-    public class Model3DFileService : IModel3DFileService
+    public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileService
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly IModel3DFileRepository _model3dFiles;
@@ -530,7 +538,7 @@ namespace Farm.Web.Api.Services.Model
                 }
 
                 // Step 5: Create folder and database record AFTER file is confirmed on disk
-                FolderNode rootFolder = await GetOrCreateFolderAsync("/", "models", ct);
+                FolderNode rootFolder = await _folderManagementService.GetOrCreateFolderAsync("/", "models", ct);
 
                 Model3D model = new()
                 {
@@ -636,10 +644,11 @@ namespace Farm.Web.Api.Services.Model
         /// Creates intermediate folders as needed (similar to mkdir -p).
         /// Folders are virtual entities existing only in database.
         /// </remarks>
-        public async Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
+        public async Task<Guid> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
         {
-            // Delegate to shared folder management service
-            return await _folderManagementService.GetOrCreateFolderAsync(directoryPath, folderType, ct);
+            // Delegate to shared folder management service, return folder ID per module interface contract
+            FolderNode folder = await _folderManagementService.GetOrCreateFolderAsync(directoryPath, folderType, ct);
+            return folder.Id;
         }
 
         #endregion

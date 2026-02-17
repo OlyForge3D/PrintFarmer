@@ -2,22 +2,9 @@
 using System.Text.Json;
 using System.Xml;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Services;
 
 namespace Farm.Infrastructure.Services.Models;
-
-/// <summary>
-/// Service for converting 3MF files to STL format for viewing
-/// </summary>
-public interface I3MfToStlConversionService
-{
-    /// <summary>
-    /// Converts a 3MF file to STL format
-    /// </summary>
-    /// <param name="threeMfBytes">The 3MF file content as bytes</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>STL file content as bytes, or null if conversion failed</returns>
-    Task<byte[]?> ConvertToSTLAsync(byte[] threeMfBytes, CancellationToken cancellationToken = default);
-}
 
 /// <summary>
 /// Implementation of 3MF to STL conversion service
