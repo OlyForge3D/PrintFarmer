@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts;
+﻿namespace Farm.Slicer.Module.Contracts;
 
 /// <summary>
 /// DTO for registering a new slicer worker with the orchestrator.

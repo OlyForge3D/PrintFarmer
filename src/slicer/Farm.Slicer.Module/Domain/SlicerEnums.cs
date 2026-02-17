@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Domain;
+﻿namespace Farm.Slicer.Module.Domain;
 
 // ===========================================================================
 // Slicer Module Enumerations

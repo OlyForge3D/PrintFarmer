@@ -4,6 +4,8 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.DTOs.Artifacts;
 using Farm.Web.Api.Services.Artifacts;
 using Microsoft.AspNetCore.Authorization;
@@ -21,11 +23,11 @@ namespace Farm.Web.Api.Controllers;
 [Authorize] // All endpoints require authentication
 public class ArtifactsController(
     IArtifactsService service,
-    Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository jobRepository,
+    ISliceJobRepository jobRepository,
     Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> settings) : ControllerBase
 {
     private readonly IArtifactsService _service = service ?? throw new ArgumentNullException(nameof(service));
-    private readonly Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
+    private readonly ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
     private readonly Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> _settings = settings ?? throw new ArgumentNullException(nameof(settings));
 
     /// <summary>
@@ -313,7 +315,7 @@ public class ArtifactsController(
         };
     }
 
-    private ArtifactDto Map(Farm.Infrastructure.Domain.Artifact a)
+    private ArtifactDto Map(Artifact a)
     {
         string download = $"/api/artifacts/{a.Id}/download";
 

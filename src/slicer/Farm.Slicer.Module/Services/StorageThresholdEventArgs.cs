@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Services;
+﻿namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Event arguments for storage threshold exceeded events.

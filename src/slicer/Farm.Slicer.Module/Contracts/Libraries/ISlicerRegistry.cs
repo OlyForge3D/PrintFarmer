@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts.Libraries;
+﻿namespace Farm.Slicer.Module.Contracts.Libraries;
 
 /// <summary>
 /// Registry that aggregates all registered slicer libraries.

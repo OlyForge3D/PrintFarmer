@@ -5,9 +5,9 @@ using System.Text.RegularExpressions;
 // ClaimJobRequest now lives in shared contracts
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
-using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.Authorization;

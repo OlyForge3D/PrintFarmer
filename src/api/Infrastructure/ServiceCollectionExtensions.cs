@@ -8,7 +8,6 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
-using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Authentication;
@@ -24,6 +23,8 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Extensions;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
@@ -258,7 +259,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().HarvestOperations);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Printers);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Folders);
-        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Model3dFiles);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Locations);
 
         // Tag repositories
@@ -272,9 +272,6 @@ public static class ServiceCollectionExtensions
 
         // Filament repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
-
-        // Artifacts repository
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Artifacts.IArtifactsRepository, Farm.Infrastructure.Repositories.Artifacts.EfArtifactsRepository>();
 
         // Password policy repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Infrastructure.Repositories.PasswordPolicy.PasswordPolicyRepository>();
@@ -290,9 +287,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
         _ = services.AddScoped<ISlicersRepository, EfSlicersRepository>();
         _ = services.AddScoped<ISliceJobRepository, EfSliceJobRepository>();
-
-        // Worker repository
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Workers.IWorkerRepository, Farm.Infrastructure.Repositories.Workers.EfWorkerRepository>();
 
         // Task repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tasks.IUserTaskRepository, Farm.Infrastructure.Repositories.Tasks.EfUserTaskRepository>();
@@ -382,13 +376,13 @@ public static class ServiceCollectionExtensions
             cfg.GetSection("Email").Bind(opts);
             return opts;
         });
-        
+
         // Register HttpClient for Mailjet
         _ = services.AddHttpClient("Mailjet", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(10);
         });
-        
+
         _ = services.AddScoped<IEmailService>(sp =>
         {
             IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();

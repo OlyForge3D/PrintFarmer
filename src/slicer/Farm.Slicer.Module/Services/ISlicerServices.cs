@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 

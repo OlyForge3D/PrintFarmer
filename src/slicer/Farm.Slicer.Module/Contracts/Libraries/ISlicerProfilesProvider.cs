@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts.Libraries;
+﻿namespace Farm.Slicer.Module.Contracts.Libraries;
 
 /// <summary>
 /// Provides access to official and system profiles for a slicer.

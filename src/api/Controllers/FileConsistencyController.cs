@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.FileConsistency;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

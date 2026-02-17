@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts.Libraries;
+﻿namespace Farm.Slicer.Module.Contracts.Libraries;
 
 /// <summary>
 /// Represents a versioned slicer library (e.g., OrcaSlicer 2.3.1, PrusaSlicer 2.9.3).

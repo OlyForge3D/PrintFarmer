@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Dtos;
+﻿namespace Farm.Slicer.Module.Dtos;
 
 /// <summary>
 /// Request DTO for searching and filtering 3D model files.

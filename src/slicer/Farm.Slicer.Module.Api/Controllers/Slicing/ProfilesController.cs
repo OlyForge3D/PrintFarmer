@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
@@ -471,7 +471,8 @@ public class ProfilesController(
             }
 
             _logger.LogError("Failed to connect to OrcaSlicer worker: {Message}", ex.Message);
-            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
                 "OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
         }
         catch (Exception ex)
@@ -508,7 +509,8 @@ public class ProfilesController(
             }
 
             _logger.LogError("Failed to connect to OrcaSlicer worker: {Message}", ex.Message);
-            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
                 "OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
         }
         catch (Exception ex)
@@ -918,7 +920,8 @@ public class ProfilesController(
                 return NotFound($"Printer model with ID {modelId} not found");
             }
 
-            _logger.LogInformation("Importing selected profiles for model {ModelName} (manufacturer: {Manufacturer})",
+            _logger.LogInformation(
+                "Importing selected profiles for model {ModelName} (manufacturer: {Manufacturer})",
                 model.Name, request.ManufacturerName);
 
             SelectiveProfileImportResultDto result = await _profilesService.ImportSelectedProfilesForModelAsync(modelId, request, ct);

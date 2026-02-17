@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Data;
+﻿using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 

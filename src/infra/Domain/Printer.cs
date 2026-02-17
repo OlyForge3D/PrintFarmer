@@ -160,8 +160,8 @@ public class Printer
 
     public Guid? TemplateMachineProfileId { get; set; } // Optional: reference machine profile for custom printers (e.g., CORE One L using CORE One profiles)
 
-    public MachineProfile? TemplateMachineProfile { get; set; }
-
+    // Note: MachineProfile navigation removed — MachineProfile is now in Farm.Slicer.Module.Domain.
+    // The relationship is maintained via TemplateMachineProfileId (soft reference).
     public Guid? LocationId { get; set; } // Optional location for organizing printers geographically
 
     public Location? Location { get; set; }

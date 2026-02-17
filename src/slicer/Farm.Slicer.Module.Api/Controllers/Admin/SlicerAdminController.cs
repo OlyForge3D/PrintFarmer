@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Models;

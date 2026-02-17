@@ -4,6 +4,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -46,7 +48,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -84,7 +86,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -110,7 +112,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -136,7 +138,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -169,7 +171,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up any existing slicers
         context.Set<SlicerService>().RemoveRange(context.Set<SlicerService>());
@@ -189,7 +191,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up existing data
         context.Set<SlicerService>().RemoveRange(context.Set<SlicerService>());
@@ -280,7 +282,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -340,7 +342,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -378,7 +380,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -421,7 +423,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -454,7 +456,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -500,7 +502,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var dto = new RegisterSlicerDto
         {
@@ -558,7 +560,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up any data from previous test
         context.Set<SlicerService>().RemoveRange(context.Set<SlicerService>());
@@ -606,7 +608,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up existing data
         context.Set<SlicerService>().RemoveRange(context.Set<SlicerService>());

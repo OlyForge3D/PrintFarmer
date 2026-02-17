@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts.Libraries;
+﻿namespace Farm.Slicer.Module.Contracts.Libraries;
 
 /// <summary>
 /// Provides access to slicer assets (bed textures, bed models, cover images).

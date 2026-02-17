@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Web.Api.Services.Model;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -48,11 +50,12 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Helper method to get or create a model folder for tests
+    /// Helper method to get or create a model folder for tests.
+    /// FolderNode lives in AppDbContext, not SlicerDbContext.
     /// </summary>
-    private async Task<FolderNode> GetOrCreateModelFolderAsync(AppDbContext context)
+    private async Task<FolderNode> GetOrCreateModelFolderAsync(AppDbContext appContext)
     {
-        FolderNode? folder = await context.Set<FolderNode>().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
+        FolderNode? folder = await appContext.Set<FolderNode>().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
         if (folder == null)
         {
             folder = new FolderNode
@@ -61,8 +64,8 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
                 Path = "/",
                 FolderType = "model"
             };
-            context.Set<FolderNode>().Add(folder);
-            await context.SaveChangesAsync();
+            appContext.Set<FolderNode>().Add(folder);
+            await appContext.SaveChangesAsync();
         }
         return folder;
     }
@@ -72,9 +75,10 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         string? path = null)
     {
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        AppDbContext appContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        FolderNode folder = await GetOrCreateModelFolderAsync(context);
+        FolderNode folder = await GetOrCreateModelFolderAsync(appContext);
 
         string filePath = Path.Combine(
             Path.GetTempPath(),
@@ -347,7 +351,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         Model3D model = await CreateTestModelAsync("to-delete.stl");
         Guid modelId = model.Id;

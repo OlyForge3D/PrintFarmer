@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Dtos;
+﻿namespace Farm.Slicer.Module.Dtos;
 
 /// <summary>
 /// Slicer-specific model name alias mapping (e.g., OrcaSlicer "Prusa MK4" -> PrusaSlicer "MK4").

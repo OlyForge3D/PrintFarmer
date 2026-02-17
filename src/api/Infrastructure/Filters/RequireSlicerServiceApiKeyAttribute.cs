@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Primitives;

@@ -1,7 +1,7 @@
-using System.Text.Json;
-using Farm.Slicer.Module.Domain;
+﻿using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

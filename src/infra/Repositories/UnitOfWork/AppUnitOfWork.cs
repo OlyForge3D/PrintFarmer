@@ -7,11 +7,11 @@ using Farm.Infrastructure.Repositories.Folder;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Locations;
-using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.Security;
+using Farm.Slicer.Module.Data;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork;
 
@@ -19,10 +19,11 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork;
 /// Unit of Work implementation providing coordinated access to all repositories.
 /// Ensures all repositories share a single DbContext instance for atomic transactions.
 /// </summary>
-public class AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector) : IUnitOfWork
+public class AppUnitOfWork(AppDbContext db, SlicerDbContext slicerDb, ISensitiveDataProtector sensitiveDataProtector) : IUnitOfWork
 {
 #pragma warning disable CA2213 // DbContext is injected and managed by DI container lifetime
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
+    private readonly SlicerDbContext _slicerDb = slicerDb ?? throw new ArgumentNullException(nameof(slicerDb));
     private readonly ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
 #pragma warning restore CA2213
     private ICameraRepository? _cameraRepository;
@@ -32,7 +33,6 @@ public class AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDat
     private IPrintersRepository? _printersRepository;
 #pragma warning restore CA1859 // Use concrete types when possible for improved performance
     private IFolderRepository? _folderRepository;
-    private IModel3DFileRepository? _model3dFileRepository;
     private ILocationRepository? _locationRepository;
     private IQueueRepository? _queueRepository;
     private ITagRepository? _tagRepository;
@@ -66,11 +66,7 @@ public class AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDat
     /// </summary>
     public IFolderRepository Folders => _folderRepository ??= new EfFolderRepository(_db);
 
-    /// <summary>
-    /// Lazy-initializes the 3D Model File repository, reusing the same DbContext.
-    /// Coordinated with folder operations for model file organization.
-    /// </summary>
-    public IModel3DFileRepository Model3dFiles => _model3dFileRepository ??= new EfModel3DFileRepository(_db);
+    // Note: IModel3DFileRepository removed — Model3D repos are now in Farm.Slicer.Module.
 
     /// <summary>
     /// Lazy-initializes the Location repository, reusing the same DbContext.
@@ -89,7 +85,7 @@ public class AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDat
     /// Coordinated with tag operations for generic tagging support.
     /// Tag mappings are now managed via EF Core skip-navigation on StoredFile.Tags.
     /// </summary>
-    public ITagRepository Tags => _tagRepository ??= new EfTagRepository(_db);
+    public ITagRepository Tags => _tagRepository ??= new EfTagRepository(_db, _slicerDb);
 
     /// <summary>
     /// Persists all pending changes from both repositories in a single atomic transaction.

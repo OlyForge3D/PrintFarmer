@@ -1,4 +1,4 @@
-using Farm.Web.Api.Health;
+﻿using Farm.Web.Api.Health;
 
 namespace Farm.Web.Api.Startup;
 

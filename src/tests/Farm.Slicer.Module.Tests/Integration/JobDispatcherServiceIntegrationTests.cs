@@ -3,8 +3,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
-using Farm.Infrastructure.Repositories.Workers;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Web.Api.Services.JobDispatch;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -46,7 +47,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         string? capabilitiesJson = null)
     {
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var worker = new Worker
         {
@@ -81,7 +82,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         int slicerEngine = 0)
     {
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         var job = new SliceJob
         {
@@ -110,7 +111,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
@@ -130,7 +131,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
@@ -153,7 +154,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
@@ -187,7 +188,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -215,7 +216,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -246,7 +247,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -278,7 +279,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -332,7 +333,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -385,7 +386,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
@@ -408,7 +409,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
@@ -435,7 +436,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -468,7 +469,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -543,7 +544,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -620,7 +621,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<Worker>().RemoveRange(context.Set<Worker>());
@@ -658,7 +659,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());
@@ -695,7 +696,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IJobDispatcherService dispatcherService = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
-        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Clean up
         context.Set<SliceJob>().RemoveRange(context.Set<SliceJob>());

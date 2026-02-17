@@ -19,11 +19,8 @@ public class SlicingJobsController(
     IFileManagementService fileManagementService,
     IStoredFileOperationsService fileOperations) : ControllerBase
 {
-    private readonly ILogger<SlicingJobsController> _logger = logger;
     private readonly ITempPathProvider _tempPathProvider = tempPathProvider;
     private readonly ISlicerOrchestrator _orchestrator = orchestrator;
-    private readonly IFileManagementService _fileManagementService = fileManagementService;
-    private readonly IStoredFileOperationsService _fileOperations = fileOperations;
 
     /// <summary>
     /// Submits a new slicing job.

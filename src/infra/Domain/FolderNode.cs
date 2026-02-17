@@ -24,7 +24,7 @@ public class FolderNode
     public DateTime? DeletedAt { get; set; } // Soft delete support
 
     // Navigation properties to files in this folder
-    public ICollection<Model3D> Models { get; set; } = new List<Model3D>();
-
+    // Note: Model3D navigation removed — Model3D is now in Farm.Slicer.Module.Domain.
+    // The relationship is maintained via Model3D.FolderId (soft reference).
     public ICollection<GcodeFile> Files { get; set; } = new List<GcodeFile>();
 }

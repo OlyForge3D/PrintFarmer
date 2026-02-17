@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts;
+﻿namespace Farm.Slicer.Module.Contracts;
 
 /// <summary>
 /// Request to perform a dry run of slicer template rendering.

@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace Farm.Slicer.Module.Api.Filters;
@@ -9,7 +9,7 @@ namespace Farm.Slicer.Module.Api.Filters;
 /// to provide actual validation logic.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-public class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
+public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
 {
     /// <summary>The header name for the slicer API key.</summary>
     public const string HeaderName = "X-Slicer-Api-Key";
@@ -42,7 +42,7 @@ public class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
 /// to provide actual validation logic.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-public class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActionFilter
+public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActionFilter
 {
     /// <summary>The header name for the per-service API key.</summary>
     public const string HeaderName = "X-Slicer-Service-Api-Key";

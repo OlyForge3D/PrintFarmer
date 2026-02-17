@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Domain;
+﻿namespace Farm.Slicer.Module.Domain;
 
 /// <summary>
 /// Filament/Material profile from OrcaSlicer.

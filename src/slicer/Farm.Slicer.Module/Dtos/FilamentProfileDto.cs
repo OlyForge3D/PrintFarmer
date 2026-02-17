@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Farm.Slicer.Module.Json;
 
 namespace Farm.Slicer.Module.Dtos;

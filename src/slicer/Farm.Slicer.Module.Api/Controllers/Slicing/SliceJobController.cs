@@ -2,8 +2,8 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Slicer.Module.Contracts;
-using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.AspNetCore.Authorization;
@@ -33,8 +33,6 @@ public class SliceJobController(
     private readonly ISliceJobRepository _jobRepository = jobRepository;
     private readonly ISliceJobEventService _eventService = eventService;
     private readonly ILogger<SliceJobController> _logger = logger;
-    private readonly IHostEnvironment _env = env;
-    private readonly IProcessProfileRepository _profileRepository = profileRepository;
     private readonly IArtifactsService _artifactsService = artifactsService;
     private readonly IRateLimitService _rateLimitService = rateLimitService;
     private readonly SliceJobMetrics _metrics = metrics;
@@ -223,6 +221,7 @@ public class SliceJobController(
         {
             artifactIds.AddRange(request.AdditionalArtifactIds);
         }
+
         if (logArtifact is not null)
         {
             artifactIds.Add(logArtifact.Id);

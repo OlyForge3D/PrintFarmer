@@ -8,6 +8,7 @@ using Assimp;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Domain;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;

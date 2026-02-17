@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
 
 namespace Farm.Infrastructure.Repositories.FileConsistency;
 

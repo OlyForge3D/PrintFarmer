@@ -4,6 +4,8 @@ using System.Text;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -22,7 +24,7 @@ public class ArtifactsControllerTests(CustomWebApplicationFactory factory) : ICl
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         Guid jobId = Guid.NewGuid();
         // Minimal job row required to satisfy FK-less artifact (jobId stored but SliceJob not strictly required yet)
@@ -30,7 +32,7 @@ public class ArtifactsControllerTests(CustomWebApplicationFactory factory) : ICl
         {
             Id = jobId,
             UserId = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
+            Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             SlicerEngine = 0,

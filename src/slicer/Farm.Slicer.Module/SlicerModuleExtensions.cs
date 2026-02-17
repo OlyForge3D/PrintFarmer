@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Data;
+﻿using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;

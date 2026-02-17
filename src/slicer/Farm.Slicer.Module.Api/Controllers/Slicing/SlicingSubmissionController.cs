@@ -19,9 +19,6 @@ public class SlicingSubmissionController(
     IHostEnvironment env) : ControllerBase
 {
     private readonly ISlicingSubmissionService _submissionService = submissionService;
-    private readonly IConfiguration _cfg = cfg;
-    private readonly ITempPathProvider _tempPathProvider = tempPathProvider;
-    private readonly IHostEnvironment _env = env;
 
     /// <summary>
     /// Submits a new file for slicing.

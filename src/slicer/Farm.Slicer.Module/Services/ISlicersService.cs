@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Contracts;
+﻿using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Domain;
 
 namespace Farm.Slicer.Module.Services;

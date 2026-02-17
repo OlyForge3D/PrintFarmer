@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Services.Configuration;
+﻿namespace Farm.Slicer.Module.Services.Configuration;
 
 /// <summary>
 /// Settings for job dispatch retry configuration with exponential backoff.

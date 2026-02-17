@@ -6,10 +6,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
@@ -36,8 +38,6 @@ namespace Farm.Slicer.Module.Tests.Controllers
         private Mock<IUnitOfWork> CreateMockUnitOfWork()
         {
             var mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
-            var mockModel3dRepo = new Mock<IModel3DFileRepository>(MockBehavior.Loose);
-            mockUoW.Setup(u => u.Model3dFiles).Returns(mockModel3dRepo.Object);
             return mockUoW;
         }
 
@@ -107,7 +107,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             _ = mockService.Setup(s => s.ListModelsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.ListModelsAsync();
 
@@ -130,7 +130,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3DDto?)null);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelAsync(Guid.NewGuid());
 
@@ -151,7 +151,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             _ = mockService.Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             FormFile fakeFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
 
@@ -176,7 +176,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             _ = mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -196,7 +196,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             _ = mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ThrowsAsync(new KeyNotFoundException());
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -216,7 +216,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelFilePathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -236,7 +236,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelThumbnailPathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 
@@ -265,7 +265,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             TestFileSystem testFs = TestFileSystemFactory.WithFile(filePath, Encoding.UTF8.GetBytes("test stl content"));
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, testFs, mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, testFs, mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -290,7 +290,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, configReal, testFs, mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, configReal, testFs, mockFileManagement.Object, mockUoW.Object, new Mock<IModel3DFileRepository>().Object, new Mock<ITagRepository>().Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 

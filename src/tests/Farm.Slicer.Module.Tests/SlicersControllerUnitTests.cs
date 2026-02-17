@@ -6,8 +6,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
-using Farm.Infrastructure.Repositories.Workers;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
@@ -27,7 +28,7 @@ namespace Farm.Slicer.Module.Tests
 {
     public class SlicersControllerUnitTests
     {
-        private static AppDbContext CreateInMemoryDb()
+        private static SlicerDbContext CreateInMemoryDb()
         {
             return TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
         }
@@ -129,7 +130,7 @@ namespace Farm.Slicer.Module.Tests
         [Fact]
         public async Task RegisterAsync_CreatesService_And_Broadcasts()
         {
-            using AppDbContext db = CreateInMemoryDb();
+            using SlicerDbContext db = CreateInMemoryDb();
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
 
             EfSlicersRepository repo = new EfSlicersRepository(db);
@@ -176,7 +177,7 @@ namespace Farm.Slicer.Module.Tests
         [Fact]
         public async Task ListAsync_ReturnsSeededServices()
         {
-            using AppDbContext db = CreateInMemoryDb();
+            using SlicerDbContext db = CreateInMemoryDb();
             _ = db.Set<SlicerService>().Add(new SlicerService { Id = System.Guid.NewGuid(), Name = "s1" });
             _ = await db.SaveChangesAsync();
 
@@ -208,7 +209,7 @@ namespace Farm.Slicer.Module.Tests
         [Fact]
         public async Task HeartbeatAsync_UpdatesAndBroadcasts()
         {
-            using AppDbContext db = CreateInMemoryDb();
+            using SlicerDbContext db = CreateInMemoryDb();
             Guid id = System.Guid.NewGuid();
             _ = db.Set<SlicerService>().Add(new SlicerService { Id = id, Name = "h1", Tags = "0", Status = "Online" });
             _ = await db.SaveChangesAsync();
@@ -249,7 +250,7 @@ namespace Farm.Slicer.Module.Tests
         [Fact]
         public async Task DeregisterAsync_RemovesAndBroadcasts()
         {
-            using AppDbContext db = CreateInMemoryDb();
+            using SlicerDbContext db = CreateInMemoryDb();
             Guid id = System.Guid.NewGuid();
             _ = db.Set<SlicerService>().Add(new SlicerService { Id = id, Name = "d1" });
             _ = await db.SaveChangesAsync();

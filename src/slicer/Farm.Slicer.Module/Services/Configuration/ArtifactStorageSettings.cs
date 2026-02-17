@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Services.Configuration;
+﻿namespace Farm.Slicer.Module.Services.Configuration;
 
 /// <summary>
 /// Configuration options for local artifact storage. Cloud storage is intentionally out of scope.

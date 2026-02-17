@@ -7,8 +7,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
@@ -80,7 +82,6 @@ namespace Farm.Slicer.Module.Tests.Services
 
             // Wrap the repository in a UnitOfWork mock
             Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
-            mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
             mockUoW.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
             // Mock IStoragePathService (like GcodeFilesService does)
@@ -88,7 +89,7 @@ namespace Farm.Slicer.Module.Tests.Services
             string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile file = CreateFormFile("file", "dummy-content", "model.stl");
 
@@ -119,7 +120,7 @@ namespace Farm.Slicer.Module.Tests.Services
                 FilePath = "path",
                 FileSizeBytes = 12,
                 FileHash = contentHash,
-                FileFormat = Farm.Infrastructure.Domain.ModelFileFormat.STL,
+                FileFormat = ModelFileFormat.STL,
                 UploadedAt = DateTime.UtcNow,
                 IsValid = true,
                 CreatedAt = DateTime.UtcNow,
@@ -144,7 +145,6 @@ namespace Farm.Slicer.Module.Tests.Services
 
             // Wrap the repository in a UnitOfWork mock
             Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
-            mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
             mockUoW.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
             // Mock IStoragePathService (like GcodeFilesService does)
@@ -152,7 +152,7 @@ namespace Farm.Slicer.Module.Tests.Services
             string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
             Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);

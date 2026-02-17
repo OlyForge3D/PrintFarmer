@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Domain;
+﻿namespace Farm.Slicer.Module.Domain;
 
 /// <summary>
 /// Represents a worker node in the distributed slicing system.

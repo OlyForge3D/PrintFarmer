@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Json;
 using Farm.Web.Api.Infrastructure.Filters;

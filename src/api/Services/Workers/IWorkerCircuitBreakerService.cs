@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Repositories.Workers;
+﻿using Farm.Slicer.Module.Data.Repositories;
 
 namespace Farm.Web.Api.Services.Workers;
 

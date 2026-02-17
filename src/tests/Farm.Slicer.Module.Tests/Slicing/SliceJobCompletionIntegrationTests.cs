@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -30,7 +32,7 @@ public class SliceJobCompletionIntegrationTests(CustomWebApplicationFactory fact
     public async Task SliceJob_Service_Completion_Flow_Succeeds()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
@@ -38,7 +40,7 @@ public class SliceJobCompletionIntegrationTests(CustomWebApplicationFactory fact
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
+            Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow.AddMinutes(-5),
             StartedAt = DateTime.UtcNow.AddMinutes(-4),
             SlicerEngine = 0,
@@ -66,7 +68,7 @@ public class SliceJobCompletionIntegrationTests(CustomWebApplicationFactory fact
         // 4. Reload and assert
         SliceJob? updated = await jobRepo.GetByIdAsync(job.Id);
         _ = updated.Should().NotBeNull();
-        _ = updated!.Status.Should().Be(Farm.Infrastructure.Domain.SliceJobStatus.Completed);
+        _ = updated!.Status.Should().Be(SliceJobStatus.Completed);
         _ = updated.ResultFileUrl.Should().Be(resultUrl);
         _ = updated.ProgressPercent.Should().Be(100);
         _ = updated.EstimatedPrintTimeSeconds.Should().Be(1234);
@@ -91,7 +93,7 @@ public class SliceJobCompletionIntegrationTests(CustomWebApplicationFactory fact
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
+            Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow.AddMinutes(-2),
             StartedAt = DateTime.UtcNow.AddMinutes(-1),
             SlicerEngine = 0,

@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace Farm.Slicer.Module.Api.Filters;
@@ -9,7 +9,7 @@ namespace Farm.Slicer.Module.Api.Filters;
 /// to provide actual authorization logic.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-public class RequirePermissionAttribute(string permission) : Attribute, IAsyncActionFilter
+public sealed class RequirePermissionAttribute(string permission) : Attribute, IAsyncActionFilter
 {
     /// <summary>Gets the required permission name.</summary>
     public string Permission { get; } = permission;

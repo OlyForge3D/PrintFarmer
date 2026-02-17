@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Web.Api.Services.Authentication;
@@ -60,75 +62,77 @@ namespace Farm.Slicer.Module.Tests
 
             builder.ConfigureServices(services =>
             {
-                // Replace AppDbContext with test SQLite
-                ServiceDescriptor? dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+                // Replace SlicerDbContext with test SQLite
+                ServiceDescriptor? dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<SlicerDbContext>));
                 if (dbContextDescriptor != null)
                 {
                     services.Remove(dbContextDescriptor);
                 }
 
-                ServiceDescriptor? dbContextFactoryDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IDbContextFactory<AppDbContext>));
+                ServiceDescriptor? dbContextFactoryDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IDbContextFactory<SlicerDbContext>));
                 if (dbContextFactoryDescriptor != null)
                 {
                     services.Remove(dbContextFactoryDescriptor);
                 }
 
                 ServiceDescriptor? singletonOptionsDescriptor = services.FirstOrDefault(d =>
-                    d.ServiceType == typeof(DbContextOptions<AppDbContext>) && d.Lifetime == ServiceLifetime.Singleton);
+                    d.ServiceType == typeof(DbContextOptions<SlicerDbContext>) && d.Lifetime == ServiceLifetime.Singleton);
                 if (singletonOptionsDescriptor != null)
                 {
                     services.Remove(singletonOptionsDescriptor);
                 }
+
+                services.AddDbContext<SlicerDbContext>(options =>
+                {
+                    options.UseSqlite(_connectionString);
+                });
+
+                DbContextOptionsBuilder<SlicerDbContext> optionsBuilder = new DbContextOptionsBuilder<SlicerDbContext>();
+                optionsBuilder.UseSqlite(_connectionString);
+                services.AddSingleton(optionsBuilder.Options);
+                services.AddDbContextFactory<SlicerDbContext>();
+
+                ServiceProvider sp = services.BuildServiceProvider();
+                using (IServiceScope scope = sp.CreateScope())
+                {
+                    SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+                    db.Database.EnsureCreated();
+                }
+
+                // Re-configure AppDbContext to use the same test SQLite database so that
+                // FolderNode and other infra entities share the same in-memory DB.
+                ServiceDescriptor? appDbDescriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+                if (appDbDescriptor != null) { services.Remove(appDbDescriptor); }
+
+                ServiceDescriptor? appFactoryDescriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(IDbContextFactory<AppDbContext>));
+                if (appFactoryDescriptor != null) { services.Remove(appFactoryDescriptor); }
+
+                ServiceDescriptor? appSingletonOpts = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(DbContextOptions<AppDbContext>)
+                    && d.Lifetime == ServiceLifetime.Singleton);
+                if (appSingletonOpts != null) { services.Remove(appSingletonOpts); }
 
                 services.AddDbContext<AppDbContext>(options =>
                 {
                     options.UseSqlite(_connectionString);
                 });
 
-                DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-                optionsBuilder.UseSqlite(_connectionString);
-                services.AddSingleton(optionsBuilder.Options);
+                DbContextOptionsBuilder<AppDbContext> appOptionsBuilder = new();
+                appOptionsBuilder.UseSqlite(_connectionString);
+                services.AddSingleton(appOptionsBuilder.Options);
                 services.AddDbContextFactory<AppDbContext>();
 
-                ServiceProvider sp = services.BuildServiceProvider();
-                using (IServiceScope scope = sp.CreateScope())
+                // Create AppDbContext tables in the shared DB
+                ServiceProvider sp2 = services.BuildServiceProvider();
+                using (IServiceScope scope2 = sp2.CreateScope())
                 {
-                    AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    db.Database.EnsureCreated();
+                    AppDbContext appDb = scope2.ServiceProvider.GetRequiredService<AppDbContext>();
+                    var appCreator = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)appDb).Instance
+                        .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
+                    try { appCreator.CreateTables(); } catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
                 }
-
-                // Replace SlicerDbContext with test SQLite
-                ServiceDescriptor? slicerDbDescriptor = services.FirstOrDefault(d =>
-                    d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
-                if (slicerDbDescriptor != null)
-                {
-                    services.Remove(slicerDbDescriptor);
-                }
-
-                ServiceDescriptor? slicerFactoryDescriptor = services.FirstOrDefault(d =>
-                    d.ServiceType == typeof(IDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>));
-                if (slicerFactoryDescriptor != null)
-                {
-                    services.Remove(slicerFactoryDescriptor);
-                }
-
-                ServiceDescriptor? slicerSingletonOpts = services.FirstOrDefault(d =>
-                    d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>)
-                    && d.Lifetime == ServiceLifetime.Singleton);
-                if (slicerSingletonOpts != null)
-                {
-                    services.Remove(slicerSingletonOpts);
-                }
-
-                services.AddDbContext<Farm.Slicer.Module.Data.SlicerDbContext>(options =>
-                {
-                    options.UseSqlite(_connectionString);
-                });
-
-                DbContextOptionsBuilder<Farm.Slicer.Module.Data.SlicerDbContext> slicerOptionsBuilder = new();
-                slicerOptionsBuilder.UseSqlite(_connectionString);
-                services.AddSingleton(slicerOptionsBuilder.Options);
-                services.AddDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>();
             });
         }
 
@@ -225,11 +229,18 @@ namespace Farm.Slicer.Module.Tests
             AsyncServiceScope scope = Services.CreateAsyncScope();
             try
             {
-                AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                await context.Database.EnsureDeletedAsync();
-                await context.Database.EnsureCreatedAsync();
+                SlicerDbContext slicerContext = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+                await slicerContext.Database.EnsureDeletedAsync();
+                await slicerContext.Database.EnsureCreatedAsync();
 
-                await SeedRootFoldersAsync(context);
+                // EnsureCreated on a second context is a no-op if the DB already exists.
+                // Use CreateTables() to add AppDbContext tables to the shared DB.
+                AppDbContext appContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var creator = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)appContext).Instance
+                    .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
+                try { creator.CreateTables(); } catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
+
+                await SeedRootFoldersAsync(appContext);
             }
             finally
             {
@@ -371,7 +382,7 @@ namespace Farm.Slicer.Module.Tests
         {
             using (AsyncServiceScope scope = Services.CreateAsyncScope())
             {
-                AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
                 Worker? existingWorker = await context.Set<Worker>().FirstOrDefaultAsync(w => w.ApiKey == workerKey);
                 if (existingWorker == null)

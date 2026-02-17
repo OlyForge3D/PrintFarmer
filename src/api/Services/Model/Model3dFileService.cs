@@ -7,11 +7,14 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
 using Microsoft.AspNetCore.Http;
@@ -37,6 +40,8 @@ namespace Farm.Web.Api.Services.Model
     public class Model3DFileService : IModel3DFileService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IModel3DFileRepository _model3dFiles;
+        private readonly ITagRepository _tagRepository;
         private readonly IUnifiedLoggingService _logger;
         private readonly string _modelsPath;
         private readonly IModelAnalysisService? _analysisService;
@@ -49,6 +54,8 @@ namespace Farm.Web.Api.Services.Model
 
         public Model3DFileService(
             IUnitOfWork unitOfWork,
+            IModel3DFileRepository model3dFiles,
+            ITagRepository tagRepository,
             IUnifiedLoggingService logger,
             IConfiguration configuration,
             Farm.Web.Api.Services.IO.IFileSystem fileSystem,
@@ -60,6 +67,8 @@ namespace Farm.Web.Api.Services.Model
             IThumbnailGenerationService? thumbnailService = null)
         {
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
+            _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _analysisService = analysisService;
             _thumbnailService = thumbnailService;
@@ -88,9 +97,15 @@ namespace Farm.Web.Api.Services.Model
         /// </remarks>
         public async Task<IReadOnlyList<Model3DDto>> ListModelsAsync(CancellationToken ct)
         {
-            IReadOnlyList<Model3D> models = await _unitOfWork.Model3dFiles.ListValidAsync(ct);
+            IReadOnlyList<Model3D> models = await _model3dFiles.ListValidAsync(ct);
 
-            return models.Select(m => MapToDto(m)).ToList();
+            List<Model3DDto> result = new List<Model3DDto>();
+            foreach (Model3D m in models)
+            {
+                result.Add(await MapToDtoAsync(m));
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -169,11 +184,26 @@ namespace Farm.Web.Api.Services.Model
                 pageSize = 500;
             }
 
+            // Resolve path to folder IDs for the module repository
+            Guid[]? folderIds = null;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                try
+                {
+                    FolderNode folder = await _folderManagementService.GetOrCreateFolderAsync(path, "models", ct);
+                    folderIds = [folder.Id];
+                }
+                catch
+                {
+                    // Path doesn't exist — return empty results
+                    return new Model3DListResponse([], 0, 0, page, pageSize, 0, 0);
+                }
+            }
+
             // Call the efficient repository method that does everything at the database level
-            (List<Model3D>? models, int totalCount) = await _unitOfWork.Model3dFiles.QueryModelsAsync(
-                path,
+            (List<Model3D> models, int totalCount) = await _model3dFiles.QueryModelsAsync(
+                folderIds,
                 search,
-                tagIds,
                 sortBy,
                 sortOrder,
                 page,
@@ -214,8 +244,8 @@ namespace Farm.Web.Api.Services.Model
         /// <returns>Model DTO with file details, or null if not found</returns>
         public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdWithTagsAsync(id, ct);
-            return model == null ? null : MapToDto(model);
+            Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
+            return model == null ? null : await MapToDtoAsync(model);
         }
 
         /// <summary>
@@ -226,7 +256,7 @@ namespace Farm.Web.Api.Services.Model
         /// <returns>Full filesystem path to the model file, or null if not found</returns>
         public async Task<string?> GetModelFilePathAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
+            Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
             if (model == null)
             {
                 return null;
@@ -245,8 +275,8 @@ namespace Farm.Web.Api.Services.Model
         /// <returns>Full filesystem path to thumbnail, or null if thumbnail not available</returns>
         public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
-            return model == null ? null : _fileOperations.GetFullThumbnailPath(model);
+            Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
+            return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(model.FilePath, model.ThumbnailFileName));
         }
 
         /// <summary>
@@ -262,7 +292,7 @@ namespace Farm.Web.Api.Services.Model
         /// </remarks>
         public async Task DeleteModelAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
+            Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
             if (model == null)
             {
                 throw new KeyNotFoundException("Model not found");
@@ -288,8 +318,8 @@ namespace Farm.Web.Api.Services.Model
                     }
                 }
 
-                await _unitOfWork.Model3dFiles.RemoveAsync(model, ct);
-                await _unitOfWork.SaveChangesAsync(ct);
+                await _model3dFiles.RemoveAsync(model, ct);
+                await _model3dFiles.SaveChangesAsync(ct);
                 _logger.LogInformation($"Model deleted: {id}");
             }
             catch (Exception ex)
@@ -429,7 +459,7 @@ namespace Farm.Web.Api.Services.Model
                 }
 
                 // Step 3: Check for duplicates
-                Model3D? existingModel = await _unitOfWork.Model3dFiles.GetByHashAsync(fileHash, ct);
+                Model3D? existingModel = await _model3dFiles.GetByHashAsync(fileHash, ct);
                 string baseName = Path.GetFileNameWithoutExtension(originalName);
                 if (existingModel != null)
                 {
@@ -522,8 +552,8 @@ namespace Farm.Web.Api.Services.Model
                     TriangleCount = analysis?.TriangleCount
                 };
 
-                await _unitOfWork.Model3dFiles.AddAsync(model, ct);
-                await _unitOfWork.SaveChangesAsync(ct);
+                await _model3dFiles.AddAsync(model, ct);
+                await _model3dFiles.SaveChangesAsync(ct);
 
                 // Step 6: Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
                 try
@@ -546,7 +576,7 @@ namespace Farm.Web.Api.Services.Model
                             {
                                 // Update model with thumbnail filename
                                 model.ThumbnailFileName = thumbnailFileName;
-                                await _unitOfWork.SaveChangesAsync(ct);
+                                await _model3dFiles.SaveChangesAsync(ct);
 
                                 _logger.LogInformation($"Thumbnail generated successfully for model {modelId}");
                             }
@@ -690,7 +720,7 @@ namespace Farm.Web.Api.Services.Model
             try
             {
                 // Get the model from database
-                Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(modelId, ct);
+                Model3D? model = await _model3dFiles.GetByIdAsync(modelId, ct);
                 if (model == null)
                 {
                     _logger.LogWarning($"[MoveToFolder] Model not found: {modelId}");
@@ -704,7 +734,8 @@ namespace Farm.Web.Api.Services.Model
                 model.FolderId = targetFolder.Id;
 
                 // Save changes to database
-                await _unitOfWork.SaveChangesAsync(ct);
+                await _model3dFiles.UpdateAsync(model, ct);
+                await _model3dFiles.SaveChangesAsync(ct);
 
                 _logger.LogInformation($"[MoveToFolder] Moved model {model.FileName} to folder {targetFolderPath}");
                 return true;
@@ -736,14 +767,15 @@ namespace Farm.Web.Api.Services.Model
         /// the model storage directory and encoding it for safe transmission in HTTP URLs.
         /// </para>
         /// </remarks>
-        private Model3DDto MapToDto(Model3D model)
+        private async Task<Model3DDto> MapToDtoAsync(Model3D model)
         {
             string? thumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(model.Id);
 
-            // Map tags from the eagerly-loaded Tags collection
-            TagDto[] tags = model.Tags
-                ?.Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
-                .ToArray() ?? Array.Empty<TagDto>();
+            // Map tags from the tag repository
+            IReadOnlyList<Tag> tagEntities = await _tagRepository.GetTagsByObjectAsync(model.Id, CancellationToken.None);
+            TagDto[] tags = tagEntities
+                .Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                .ToArray();
 
             return new Model3DDto
             {
@@ -767,7 +799,7 @@ namespace Farm.Web.Api.Services.Model
         /// <returns>A Model3DEntryDto representing the file in folder browser context.</returns>
         /// <remarks>
         /// This mapping is used for listing files in virtual folder hierarchies. The thumbnail URL uses the same
-        /// download endpoint pattern as MapToDto for consistency and efficiency.
+        /// download endpoint pattern as MapToDtoAsync for consistency and efficiency.
         /// </remarks>
         private Model3DEntryDto MapToEntryDto(Model3D file, string virtualPath)
         {

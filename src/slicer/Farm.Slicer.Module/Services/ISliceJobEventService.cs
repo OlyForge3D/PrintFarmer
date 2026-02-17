@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Domain;
+﻿using Farm.Slicer.Module.Domain;
 
 namespace Farm.Slicer.Module.Services;
 

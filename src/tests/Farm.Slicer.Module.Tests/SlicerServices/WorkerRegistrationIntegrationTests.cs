@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;

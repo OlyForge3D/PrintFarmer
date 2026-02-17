@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
 
 namespace Farm.Web.Api.Services.Slicing
 {

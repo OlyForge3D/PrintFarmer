@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts;
+﻿namespace Farm.Slicer.Module.Contracts;
 
 /// <summary>
 /// Request sent by a worker to claim the next available slice job (pull model).

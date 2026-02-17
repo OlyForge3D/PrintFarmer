@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts;
+﻿namespace Farm.Slicer.Module.Contracts;
 
 /// <summary>
 /// Request to renew a worker's lease on a claimed slicing job.

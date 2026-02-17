@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Dtos;
+﻿using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,12 +23,7 @@ public class Model3DFilesController(
 {
     private readonly ILogger<Model3DFilesController> _logger = logger;
     private readonly IModel3DFileService _modelService = modelService;
-    private readonly IConfiguration _configuration = configuration;
-    private readonly IStoredFileOperationsService _fileOperations = fileOperations;
     private readonly I3MfToStlConversionService _threeMfConverter = threeMfConverter;
-
-    private readonly string _modelsPath = configuration["Storage:ModelsPath"]
-                                          ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
 
     /// <summary>
     /// Uploads a 3D model file (STL, 3MF, OBJ, etc.) with validation and thumbnail generation.
@@ -437,8 +432,14 @@ public class Model3DFilesController(
             try
             {
                 bool success = await _modelService.MoveToFolderAsync(id, request.TargetFolderPath, ct);
-                if (success) moved++;
-                else errors++;
+                if (success)
+                {
+                    moved++;
+                }
+                else
+                {
+                    errors++;
+                }
             }
             catch (Exception ex)
             {

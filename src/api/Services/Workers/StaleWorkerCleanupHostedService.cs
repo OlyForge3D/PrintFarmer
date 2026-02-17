@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Workers;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Background;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

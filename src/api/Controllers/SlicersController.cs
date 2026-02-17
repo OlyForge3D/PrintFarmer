@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Infrastructure.Filters;
 using Farm.Web.Api.Services.SlicerServices;
 using Microsoft.AspNetCore.Mvc;

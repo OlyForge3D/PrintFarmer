@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Domain;
+﻿namespace Farm.Slicer.Module.Domain;
 
 /// <summary>
 /// Represents a persisted slicing output (G-code, preview image, log, etc.) stored locally on disk.

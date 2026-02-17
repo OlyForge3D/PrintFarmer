@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -120,7 +122,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
 
         // Assert - Job state persisted (query DB directly to bypass any EF caching issues)
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         SliceJob? updatedJob = await verifyDb.Set<SliceJob>().AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
         _ = updatedJob.Should().NotBeNull();
         _ = updatedJob!.Status.Should().Be(SliceJobStatus.Completed);
@@ -195,7 +197,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
 
         // Query DB directly to bypass EF caching issues
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         SliceJob? updatedJob = await verifyDb.Set<SliceJob>().AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
         _ = updatedJob!.Status.Should().Be(SliceJobStatus.Completed);
         _ = updatedJob.ArtifactsCount.Should().Be(1);
@@ -328,7 +330,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
 
         // Verify all artifacts persisted (use fresh scope to avoid stale tracking)
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         IArtifactsService verifyArtifactsService = verifyScope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IReadOnlyList<Artifact> artifacts = await verifyArtifactsService.ListByJobAsync(job.Id, default);
         _ = artifacts.Should().HaveCount(4);

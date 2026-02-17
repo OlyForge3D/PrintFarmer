@@ -1866,7 +1866,8 @@ public sealed class MoonrakerSubscriptionService(
         var graceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _offlineGraceTimers[printerId] = graceCts;
 
-        _ = Task.Run(async () =>
+        _ = Task.Run(
+            async () =>
         {
             try
             {

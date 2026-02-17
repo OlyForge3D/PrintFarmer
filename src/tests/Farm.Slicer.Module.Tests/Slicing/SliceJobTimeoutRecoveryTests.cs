@@ -2,7 +2,9 @@
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -11,18 +13,18 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 
 public class SliceJobTimeoutRecoveryTests
 {
-    private AppDbContext CreateInMemoryContext()
+    private SlicerDbContext CreateInMemoryContext()
     {
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<SlicerDbContext> options = new DbContextOptionsBuilder<SlicerDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
-        return new AppDbContext(options);
+        return new SlicerDbContext(options);
     }
 
     [Fact]
     public async Task RenewLeaseAsync_ExtendsLease()
     {
-        await using AppDbContext db = CreateInMemoryContext();
+        await using SlicerDbContext db = CreateInMemoryContext();
         EfSliceJobRepository repo = new EfSliceJobRepository(db);
 
         SliceJob job = new SliceJob { Id = Guid.NewGuid(), Status = SliceJobStatus.Processing, ClaimedAt = DateTime.UtcNow, LeaseExpiresAt = DateTime.UtcNow.AddSeconds(10) };
@@ -42,7 +44,7 @@ public class SliceJobTimeoutRecoveryTests
     [Fact]
     public async Task IncrementRetryAndRequeueAsync_RequeuesOrFails()
     {
-        await using AppDbContext db = CreateInMemoryContext();
+        await using SlicerDbContext db = CreateInMemoryContext();
         EfSliceJobRepository repo = new EfSliceJobRepository(db);
 
         SliceJob job = new SliceJob { Id = Guid.NewGuid(), Status = SliceJobStatus.Processing, RetryCount = 0 };

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.FileConsistency;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 

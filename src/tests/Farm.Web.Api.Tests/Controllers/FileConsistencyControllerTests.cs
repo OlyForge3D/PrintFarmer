@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
 using Farm.Infrastructure.Repositories.FileConsistency;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.DTOs;

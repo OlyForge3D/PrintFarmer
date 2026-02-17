@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Api.Hubs;
+﻿using Farm.Slicer.Module.Api.Hubs;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;

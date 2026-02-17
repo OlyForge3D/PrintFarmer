@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Repositories.Workers;
+using Farm.Slicer.Module.Data.Repositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 

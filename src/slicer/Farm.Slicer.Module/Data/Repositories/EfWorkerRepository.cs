@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
 

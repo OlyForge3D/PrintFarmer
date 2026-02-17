@@ -4,7 +4,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Artifacts;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
@@ -28,7 +30,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
     {
         // Arrange
         using IServiceScope scope = _factory.Services.CreateScope();
-        IDbContextFactory<AppDbContext> dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        IDbContextFactory<SlicerDbContext> dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<SlicerDbContext>>();
         IArtifactsRepository artifactsRepo = scope.ServiceProvider.GetRequiredService<IArtifactsRepository>();
         IWebHostEnvironment env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
         ILogger<ArtifactCleanupService> logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
@@ -44,7 +46,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         ArtifactCleanupService cleanupService = new ArtifactCleanupService(artifactsRepo, Options.Create(settings), env, logger);
 
         // Create an old artifact (2 days ago)
-        using (AppDbContext db = dbFactory.CreateDbContext())
+        using (SlicerDbContext db = dbFactory.CreateDbContext())
         {
             Artifact oldArtifact = new Artifact
             {
@@ -69,7 +71,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         _ = deletedCount.Should().Be(1, "one artifact should be identified for cleanup");
 
         // Verify artifact still exists (dry-run didn't delete)
-        using (AppDbContext db = dbFactory.CreateDbContext())
+        using (SlicerDbContext db = dbFactory.CreateDbContext())
         {
             Artifact? stillExists = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.RelativePath == "2023/01/01/test.gcode");
             _ = stillExists.Should().NotBeNull("dry-run mode should not delete artifacts");
@@ -81,7 +83,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
     {
         // Arrange
         using IServiceScope scope = _factory.Services.CreateScope();
-        IDbContextFactory<AppDbContext> dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        IDbContextFactory<SlicerDbContext> dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<SlicerDbContext>>();
         IArtifactsRepository artifactsRepo = scope.ServiceProvider.GetRequiredService<IArtifactsRepository>();
         IWebHostEnvironment env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
         ILogger<ArtifactCleanupService> logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
@@ -97,7 +99,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         ArtifactCleanupService cleanupService = new ArtifactCleanupService(artifactsRepo, Options.Create(settings), env, logger);
 
         // Create an old artifact (2 days ago) and a new one (today)
-        using (AppDbContext db = dbFactory.CreateDbContext())
+        using (SlicerDbContext db = dbFactory.CreateDbContext())
         {
             Artifact oldArtifact = new Artifact
             {
@@ -136,7 +138,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         _ = deletedCount.Should().Be(1, "one old artifact should be deleted");
 
         // Verify old artifact is gone, new one remains
-        using (AppDbContext db = dbFactory.CreateDbContext())
+        using (SlicerDbContext db = dbFactory.CreateDbContext())
         {
             Artifact? oldStillExists = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.RelativePath == "2023/01/01/old.gcode");
             _ = oldStillExists.Should().BeNull("old artifact should be deleted");

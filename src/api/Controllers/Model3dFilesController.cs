@@ -5,12 +5,15 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
@@ -36,6 +39,8 @@ public class Model3DFilesController(
     Services.IO.IFileSystem fileSystem,
     IFileManagementService fileManagementService,
     IUnitOfWork unitOfWork,
+    IModel3DFileRepository model3dFiles,
+    ITagRepository tagRepository,
     IFolderManagementService folderService,
     IStoredFileOperationsService fileOperations,
     I3MfToStlConversionService threeMfConverter) : ControllerBase
@@ -44,7 +49,8 @@ public class Model3DFilesController(
     private readonly IModel3DFileService _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
     private readonly Services.IO.IFileSystem _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-    private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    private readonly IModel3DFileRepository _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
+    private readonly ITagRepository _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
     private readonly IFolderManagementService _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
     private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
     private readonly I3MfToStlConversionService _threeMfConverter = threeMfConverter ?? throw new ArgumentNullException(nameof(threeMfConverter));
@@ -195,11 +201,14 @@ public class Model3DFilesController(
     {
         try
         {
-            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdWithTagsAsync(id, ct);
+            Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
             if (model == null)
             {
                 return NotFound();
             }
+
+            // Get tags from tag repository (Model3D no longer has Tags navigation property)
+            IReadOnlyList<Tag> modelTags = await _tagRepository.GetTagsByObjectAsync(model.Id, ct);
 
             Model3DDto dto = new Model3DDto
             {
@@ -217,7 +226,7 @@ public class Model3DFilesController(
                 TriangleCount = model.TriangleCount,
                 IsValid = model.IsValid,
                 ValidationErrors = model.ValidationErrors,
-                Tags = model.Tags.Select(t => new TagDto
+                Tags = modelTags.Select(t => new TagDto
                 {
                     Id = t.Id,
                     Name = t.Name,
@@ -518,7 +527,7 @@ public class Model3DFilesController(
     {
         try
         {
-            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
+            Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
             if (model == null)
             {
                 return NotFound();
@@ -529,8 +538,8 @@ public class Model3DFilesController(
                 model.FileName = dto.Name.Trim();
             }
 
-            await _unitOfWork.Model3dFiles.UpdateAsync(model, ct);
-            await _unitOfWork.SaveChangesAsync(ct);
+            await _model3dFiles.UpdateAsync(model, ct);
+            await _model3dFiles.SaveChangesAsync(ct);
             return NoContent();
         }
         catch (Exception ex)
@@ -585,35 +594,39 @@ public class Model3DFilesController(
             }
 
             int skip = (request.Page - 1) * request.PageSize;
-            int totalCount = await _unitOfWork.Model3dFiles.CountValidAsync(ct);
+            int totalCount = await _model3dFiles.CountValidAsync(ct);
 
-            IReadOnlyList<Model3D> models = await _unitOfWork.Model3dFiles.SearchAsync(
+            IReadOnlyList<Model3D> models = await _model3dFiles.SearchAsync(
                 request.Query,
-                request.TagIds,
                 request.SortBy ?? "uploadedAt",
                 request.Descending,
                 skip,
                 request.PageSize,
                 ct);
 
-            List<Model3DDto> modelDtos = models.Select(m => new Model3DDto
+            List<Model3DDto> modelDtos = new List<Model3DDto>();
+            foreach (Model3D m in models)
             {
-                Id = m.Id,
-                FileName = m.FileName,
-                Name = m.Name,
-                FileSize = m.FileSizeBytes,
-                FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
-                UploadedAt = m.UploadedAt,
-                Url = _fileOperations.BuildModel3DFileUrl(m.Id, m.FileFormat),
-                ThumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(m.Id),
-                Tags = m.Tags.Select(t => new TagDto
+                IReadOnlyList<Tag> tags = await _tagRepository.GetTagsByObjectAsync(m.Id, ct);
+                modelDtos.Add(new Model3DDto
                 {
-                    Id = t.Id,
-                    Name = t.Name,
-                    Color = t.Color,
-                    Description = t.Description
-                }).ToArray()
-            }).ToList();
+                    Id = m.Id,
+                    FileName = m.FileName,
+                    Name = m.Name,
+                    FileSize = m.FileSizeBytes,
+                    FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
+                    UploadedAt = m.UploadedAt,
+                    Url = _fileOperations.BuildModel3DFileUrl(m.Id, m.FileFormat),
+                    ThumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(m.Id),
+                    Tags = tags.Select(t => new TagDto
+                    {
+                        Id = t.Id,
+                        Name = t.Name,
+                        Color = t.Color,
+                        Description = t.Description
+                    }).ToArray()
+                });
+            }
 
             Model3DSearchResultDto result = new Model3DSearchResultDto
             {

@@ -6,8 +6,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
-using Farm.Infrastructure.Repositories.Workers;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
@@ -27,7 +28,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
     /// </summary>
     public class SlicersServiceWorkerSyncTests
     {
-        private static AppDbContext CreateDb() => TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        private static SlicerDbContext CreateDb() => TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
 
         private static Mock<IHubContext<SlicerHub>> CreateMockHub(out Mock<IClientProxy> clientProxy)
         {
@@ -122,7 +123,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
         [Fact(DisplayName = "RegisterAsync creates Worker with matching capabilities and slots")]
         public async Task RegisterAsync_Should_Create_Worker()
         {
-            using AppDbContext db = CreateDb();
+            using SlicerDbContext db = CreateDb();
             EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
@@ -178,7 +179,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
         [Fact(DisplayName = "HeartbeatAsync updates Worker FreeSlots, ActiveJobs, Status")]
         public async Task HeartbeatAsync_Should_Update_Worker()
         {
-            using AppDbContext db = CreateDb();
+            using SlicerDbContext db = CreateDb();
             EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
@@ -230,7 +231,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
         [Fact(DisplayName = "DeregisterAsync marks Worker Offline")]
         public async Task DeregisterAsync_Should_Mark_Worker_Offline()
         {
-            using AppDbContext db = CreateDb();
+            using SlicerDbContext db = CreateDb();
             EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);

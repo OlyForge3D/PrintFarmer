@@ -4,7 +4,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Web.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.Artifacts;
@@ -34,7 +36,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
     public async Task Completion_Persists_Log_Text_As_Artifact()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         // Manually construct controller (controllers aren't added to root service provider in this test host)

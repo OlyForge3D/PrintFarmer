@@ -1,7 +1,7 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
-using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Microsoft.AspNetCore.Authorization;

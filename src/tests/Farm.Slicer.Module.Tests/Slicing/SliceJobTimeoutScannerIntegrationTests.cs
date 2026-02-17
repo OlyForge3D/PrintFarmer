@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Workers;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
@@ -21,7 +23,7 @@ public class SliceJobTimeoutScannerIntegrationTests(CustomWebApplicationFactory 
     public async Task Scanner_Requeues_ExpiredLease_And_IncrementsMetrics()
     {
         using IServiceScope scope = _factory.Services.CreateScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         // Seed a processing job whose lease expired
         SliceJob job = new SliceJob
@@ -49,7 +51,7 @@ public class SliceJobTimeoutScannerIntegrationTests(CustomWebApplicationFactory 
 
         // Re-fetch job using a fresh scope/db context so we observe DB changes made by scanner
         using IServiceScope verifyScope = _factory.Services.CreateScope();
-        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SlicerDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         SliceJob? updated = await verifyDb.Set<SliceJob>().FindAsync(job.Id);
         Assert.NotNull(updated);
 

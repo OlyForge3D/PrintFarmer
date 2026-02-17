@@ -18,11 +18,8 @@ public class FolderNodeConfiguration : IEntityTypeConfiguration<FolderNode>
         _ = builder.Property(f => f.FolderType).IsRequired().HasMaxLength(50);
         _ = builder.Property(f => f.CreatedAt).IsRequired();
 
-        // Navigation: FolderNode -> Models (inverse of Model3D.Folder)
-        _ = builder.HasMany(f => f.Models)
-            .WithOne(m => m.Folder)
-            .HasForeignKey(m => m.FolderId)
-            .OnDelete(DeleteBehavior.SetNull);
+        // Navigation: FolderNode -> Models removed (Model3D migrated to Farm.Slicer.Module)
+        // The FK relationship is maintained via FolderId soft reference on Model3D.
 
         // Navigation: FolderNode -> Files (inverse of GcodeFile.Folder)
         _ = builder.HasMany(f => f.Files)

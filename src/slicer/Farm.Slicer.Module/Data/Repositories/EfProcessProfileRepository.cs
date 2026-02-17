@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Domain;
+﻿using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Slicer.Module.Data.Repositories;

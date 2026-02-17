@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.FileConsistency;
@@ -12,14 +14,19 @@ namespace Farm.Infrastructure.Repositories.FileConsistency;
 /// <summary>
 /// Entity Framework implementation for file audit repository.
 /// Provides read access to files and write access to audit results.
+/// Uses AppDbContext for GcodeFile/FileHealthAudit (core domain) and
+/// SlicerDbContext for Model3D (slicer module domain).
 /// </summary>
-public class EfFileAuditRepository(IDbContextFactory<AppDbContext> dbFactory) : IFileAuditRepository
+public class EfFileAuditRepository(
+    IDbContextFactory<AppDbContext> dbFactory,
+    IDbContextFactory<SlicerDbContext> slicerDbFactory) : IFileAuditRepository
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
+    private readonly IDbContextFactory<SlicerDbContext> _slicerDbFactory = slicerDbFactory ?? throw new ArgumentNullException(nameof(slicerDbFactory));
 
     public async Task<IReadOnlyList<Model3D>> GetAllModel3DFilesAsync(CancellationToken ct = default)
     {
-        using AppDbContext db = _dbFactory.CreateDbContext();
+        using SlicerDbContext db = _slicerDbFactory.CreateDbContext();
         return await db.Set<Model3D>().AsNoTracking().ToListAsync(ct);
     }
 
@@ -31,7 +38,7 @@ public class EfFileAuditRepository(IDbContextFactory<AppDbContext> dbFactory) : 
 
     public async Task<IReadOnlyList<string>> GetAllModel3DPathsAsync(CancellationToken ct = default)
     {
-        using AppDbContext db = _dbFactory.CreateDbContext();
+        using SlicerDbContext db = _slicerDbFactory.CreateDbContext();
         return await db.Set<Model3D>()
             .AsNoTracking()
             .Select(m => m.FilePath)

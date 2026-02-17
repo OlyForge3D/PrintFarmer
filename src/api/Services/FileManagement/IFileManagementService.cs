@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
 
 namespace Farm.Web.Api.Services.FileManagement;
 

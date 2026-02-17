@@ -2,6 +2,8 @@
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
@@ -34,19 +36,19 @@ public static class TestHelpers
     }
 
     /// <summary>
-    /// Create an AppDbContext backed by a SQLite in-memory open connection.
+    /// Create an SlicerDbContext backed by a SQLite in-memory open connection.
     /// This provides relational behaviors (FKs, Include/ThenInclude) suitable for tests that rely on SQL semantics.
     /// Caller should dispose the returned context when done.
     /// </summary>
-    public static AppDbContext CreateSqliteInMemoryDb()
+    public static SlicerDbContext CreateSqliteInMemoryDb()
     {
         SqliteConnection connection = new SqliteConnection("DataSource=:memory:");
         connection.Open();
-        DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<SlicerDbContext> opts = new DbContextOptionsBuilder<SlicerDbContext>()
             .UseSqlite(connection)
             .Options;
 
-        AppDbContext ctx = new AppDbContext(opts);
+        SlicerDbContext ctx = new SlicerDbContext(opts);
         _ = ctx.Database.EnsureCreated();
         return ctx;
     }

@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Data.Repositories;
+﻿using Farm.Slicer.Module.Data.Repositories;
 
 namespace Farm.Slicer.Module.Services;
 

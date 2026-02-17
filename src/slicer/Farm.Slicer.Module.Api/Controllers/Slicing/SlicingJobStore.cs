@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Farm.Slicer.Module.Dtos;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;

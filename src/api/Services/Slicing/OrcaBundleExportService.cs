@@ -4,7 +4,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Filament;
-using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 
 namespace Farm.Web.Api.Services.Slicing;
 

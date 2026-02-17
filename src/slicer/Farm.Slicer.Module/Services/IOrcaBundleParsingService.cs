@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Models;
+﻿using Farm.Slicer.Module.Models;
 
 namespace Farm.Slicer.Module.Services;
 

@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Api.Filters;
+﻿using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;

@@ -7,7 +7,8 @@ using System.Text;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -52,7 +53,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Queued,
+            Status = SliceJobStatus.Queued,
             QueuedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             UserId = Guid.NewGuid(),
@@ -84,7 +85,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Queued,
+            Status = SliceJobStatus.Queued,
             QueuedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             UserId = Guid.NewGuid(),
@@ -121,7 +122,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
+            Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow.AddMinutes(-2),
             StartedAt = DateTime.UtcNow.AddMinutes(-1),
             UpdatedAt = DateTime.UtcNow,
@@ -155,7 +156,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
+            Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow.AddMinutes(-2),
             StartedAt = DateTime.UtcNow.AddMinutes(-1),
             UpdatedAt = DateTime.UtcNow,
@@ -196,7 +197,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
+            Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow.AddMinutes(-3),
             StartedAt = DateTime.UtcNow.AddMinutes(-2),
             UpdatedAt = DateTime.UtcNow,
@@ -236,7 +237,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
+            Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow.AddMinutes(-3),
             StartedAt = DateTime.UtcNow.AddMinutes(-2),
             UpdatedAt = DateTime.UtcNow,
@@ -282,7 +283,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            Status = Farm.Infrastructure.Domain.SliceJobStatus.Queued,
+            Status = SliceJobStatus.Queued,
             QueuedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             UserId = Guid.NewGuid(),

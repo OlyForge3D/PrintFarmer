@@ -10,6 +10,8 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Tests.Infrastructure;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -31,6 +33,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
     private AppDbContext _dbContext = null!;
+    private SlicerDbContext _slicerDbContext = null!;
     private string _modelStoragePath = null!;
     private string _gcodeStoragePath = null!;
 
@@ -48,6 +51,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _client = await _factory.CreateAdminClientAsync();
         IServiceScope scope = _factory.Services.CreateScope();
         _dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        _slicerDbContext = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         // Setup test storage directories
         _modelStoragePath = Path.Combine(Path.GetTempPath(), "test_models_" + Guid.NewGuid());
         _gcodeStoragePath = Path.Combine(Path.GetTempPath(), "test_gcode_" + Guid.NewGuid());
@@ -58,6 +62,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _client?.Dispose();
+        _slicerDbContext?.Dispose();
         _dbContext?.Dispose();
         // Cleanup test directories
         if (Directory.Exists(_modelStoragePath))
@@ -79,6 +84,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         Model3D model1 = CreateAndPersistModel3D("test-model-1.stl", FileHealthStatus.Healthy);
         Model3D model2 = CreateAndPersistModel3D("test-model-2.stl", FileHealthStatus.Healthy);
         GcodeFile gcode1 = CreateAndPersistGcodeFile("test-print.gcode", FileHealthStatus.Healthy);
+        _ = await _slicerDbContext.SaveChangesAsync();
         _ = await _dbContext.SaveChangesAsync();
 
         // Act
@@ -103,7 +109,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         Model3D model = CreateAndPersistModel3D("test.stl", FileHealthStatus.Healthy);
         model.LastHealthCheckDate = DateTime.UtcNow.AddMinutes(-5);
         model.LastVerificationResult = "{\"verified\": true, \"hash_match\": true}";
-        _ = await _dbContext.SaveChangesAsync();
+        _ = await _slicerDbContext.SaveChangesAsync();
 
         // Act
         HttpResponseMessage response = await _client.GetAsync($"/api/fileconsistency/model3d/{model.Id}/health");
@@ -185,7 +191,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     {
         // Arrange
         Model3D model = CreateAndPersistModel3D("test-model.stl", FileHealthStatus.Unknown);
-        _ = await _dbContext.SaveChangesAsync();
+        _ = await _slicerDbContext.SaveChangesAsync();
 
         // Create audit result manually (simulating background service)
         FileHealthAudit auditResult = new FileHealthAudit
@@ -265,6 +271,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _ = CreateAndPersistModel3D("m2.stl", FileHealthStatus.Healthy);
         _ = CreateAndPersistModel3D("m3.stl", FileHealthStatus.Missing);
         _ = CreateAndPersistGcodeFile("g1.gcode", FileHealthStatus.Corrupted);
+        _ = await _slicerDbContext.SaveChangesAsync();
         _ = await _dbContext.SaveChangesAsync();
 
         // Act
@@ -316,7 +323,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        _ = _dbContext.Set<Model3D>().Add(model);
+        _ = _slicerDbContext.Set<Model3D>().Add(model);
         return model;
     }
 
