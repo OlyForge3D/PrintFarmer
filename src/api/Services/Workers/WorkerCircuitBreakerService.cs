@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Services;
-using CircuitState = Farm.Slicer.Module.Services.CircuitState;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -21,7 +20,7 @@ public class WorkerCircuitBreakerService(
 {
     private readonly ILogger<WorkerCircuitBreakerService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly CircuitBreakerSettings _settings = settings?.Value ?? new CircuitBreakerSettings();
-    private readonly ConcurrentDictionary<Guid, WorkerCircuitState> _circuitStates = new();
+    private readonly ConcurrentDictionary<Guid, WorkerCircuitRecord> _circuitStates = new();
 
     /// <summary>
     /// Record a job failure for a worker. Opens circuit if failure threshold exceeded.
@@ -36,7 +35,7 @@ public class WorkerCircuitBreakerService(
             return;
         }
 
-        WorkerCircuitState state = _circuitStates.GetOrAdd(workerId, _ => new WorkerCircuitState());
+        WorkerCircuitRecord state = _circuitStates.GetOrAdd(workerId, _ => new WorkerCircuitRecord());
 
         bool shouldDisableWorker;
         int failureCount;
@@ -52,11 +51,11 @@ public class WorkerCircuitBreakerService(
             failureCount = state.RecentFailures.Count;
 
             // Check if circuit should open
-            shouldDisableWorker = failureCount >= _settings.FailureThreshold && state.State != CircuitState.Open;
+            shouldDisableWorker = failureCount >= _settings.FailureThreshold && state.State != WorkerCircuitState.Open;
 
             if (shouldDisableWorker)
             {
-                state.State = CircuitState.Open;
+                state.State = WorkerCircuitState.Open;
                 state.OpenedAt = DateTime.UtcNow;
             }
         }
@@ -96,7 +95,7 @@ public class WorkerCircuitBreakerService(
             return;
         }
 
-        if (!_circuitStates.TryGetValue(workerId, out WorkerCircuitState? state))
+        if (!_circuitStates.TryGetValue(workerId, out WorkerCircuitRecord? state))
         {
             return; // No circuit state = never failed
         }
@@ -107,12 +106,12 @@ public class WorkerCircuitBreakerService(
         {
             state.RecentSuccesses++;
 
-            shouldEnableWorker = state.State == CircuitState.HalfOpen
+            shouldEnableWorker = state.State == WorkerCircuitState.HalfOpen
                 && state.RecentSuccesses >= _settings.SuccessThresholdToClose;
 
             if (shouldEnableWorker)
             {
-                state.State = CircuitState.Closed;
+                state.State = WorkerCircuitState.Closed;
                 state.RecentFailures.Clear();
                 state.RecentSuccesses = 0;
             }
@@ -146,19 +145,19 @@ public class WorkerCircuitBreakerService(
     {
         DateTime now = DateTime.UtcNow;
 
-        foreach (KeyValuePair<Guid, WorkerCircuitState> kvp in _circuitStates)
+        foreach (KeyValuePair<Guid, WorkerCircuitRecord> kvp in _circuitStates)
         {
             Guid workerId = kvp.Key;
-            WorkerCircuitState state = kvp.Value;
+            WorkerCircuitRecord state = kvp.Value;
 
             lock (state.Lock)
             {
-                if (state.State == CircuitState.Open)
+                if (state.State == WorkerCircuitState.Open)
                 {
                     double elapsed = (now - state.OpenedAt).TotalSeconds;
                     if (elapsed >= _settings.CooldownSeconds)
                     {
-                        state.State = CircuitState.HalfOpen;
+                        state.State = WorkerCircuitState.HalfOpen;
                         state.RecentSuccesses = 0;
                         _logger.LogInformation(
                             "Circuit transitioned to HALF-OPEN for worker {WorkerId} after {CooldownSeconds}s cooldown",
@@ -173,11 +172,11 @@ public class WorkerCircuitBreakerService(
     /// Get current circuit state for a worker.
     /// </summary>
     /// <param name="workerId">The unique identifier of the worker.</param>
-    public CircuitState GetCircuitState(Guid workerId)
+    public WorkerCircuitState GetCircuitState(Guid workerId)
     {
-        if (!_circuitStates.TryGetValue(workerId, out WorkerCircuitState? state))
+        if (!_circuitStates.TryGetValue(workerId, out WorkerCircuitRecord? state))
         {
-            return CircuitState.Closed;
+            return WorkerCircuitState.Closed;
         }
 
         lock (state.Lock)
@@ -192,15 +191,15 @@ public class WorkerCircuitBreakerService(
     /// <param name="workerId">The unique identifier of the worker to reset.</param>
     public void ResetCircuit(Guid workerId)
     {
-        if (_circuitStates.TryRemove(workerId, out WorkerCircuitState? state))
+        if (_circuitStates.TryRemove(workerId, out WorkerCircuitRecord? state))
         {
             _logger.LogInformation("Circuit manually RESET for worker {WorkerId}", workerId);
         }
     }
 
-    private sealed class WorkerCircuitState
+    private sealed class WorkerCircuitRecord
     {
-        public CircuitState State { get; set; } = CircuitState.Closed;
+        public WorkerCircuitState State { get; set; } = WorkerCircuitState.Closed;
 
         public List<DateTime> RecentFailures { get; } = new();
 

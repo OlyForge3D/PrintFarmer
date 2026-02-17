@@ -141,8 +141,8 @@ public class SliceJobController(
         // Check circuit breaker
         if (_circuitBreaker is not null)
         {
-            CircuitState state = _circuitBreaker.GetCircuitState(request.WorkerId);
-            if (state == CircuitState.Open)
+            WorkerCircuitState state = _circuitBreaker.GetCircuitState(request.WorkerId);
+            if (state == WorkerCircuitState.Open)
             {
                 return StatusCode(503, new { error = "Circuit breaker is open for this worker.", state = state.ToString() });
             }

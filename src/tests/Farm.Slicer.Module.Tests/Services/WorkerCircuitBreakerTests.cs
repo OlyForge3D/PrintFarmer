@@ -47,7 +47,7 @@ public class WorkerCircuitBreakerTests
         }
 
         // Assert
-        Assert.Equal(CircuitState.Open, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
         _workerRepoMock.Verify(r => r.DisableWorkerAsync(workerId, It.IsAny<string>()), Times.Once);
         _workerRepoMock.Verify(r => r.SaveChangesAsync(), Times.Once);
     }
@@ -66,7 +66,7 @@ public class WorkerCircuitBreakerTests
         }
 
         // Assert
-        Assert.Equal(CircuitState.Closed, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.Closed, service.GetCircuitState(workerId));
         _workerRepoMock.Verify(r => r.DisableWorkerAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
     }
 
@@ -91,7 +91,7 @@ public class WorkerCircuitBreakerTests
             service.RecordJobFailureAsync(workerId, _workerRepoMock.Object).Wait();
 #pragma warning restore xUnit1031 // Do not use blocking task operations in test method
         }
-        Assert.Equal(CircuitState.Open, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
 
         // Wait for cooldown
         Thread.Sleep(TimeSpan.FromSeconds(shortCooldown.CooldownSeconds + 0.5));
@@ -100,7 +100,7 @@ public class WorkerCircuitBreakerTests
         service.CheckCircuits();
 
         // Assert
-        Assert.Equal(CircuitState.HalfOpen, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.HalfOpen, service.GetCircuitState(workerId));
     }
 
     [Fact]
@@ -122,12 +122,12 @@ public class WorkerCircuitBreakerTests
         {
             await service.RecordJobFailureAsync(workerId, _workerRepoMock.Object);
         }
-        Assert.Equal(CircuitState.Open, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
 
         // Wait for cooldown and transition to half-open
         Thread.Sleep(TimeSpan.FromSeconds(shortCooldown.CooldownSeconds + 0.5));
         service.CheckCircuits();
-        Assert.Equal(CircuitState.HalfOpen, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.HalfOpen, service.GetCircuitState(workerId));
 
         // Act - record successes to close circuit
         for (int i = 0; i < shortCooldown.SuccessThresholdToClose; i++)
@@ -136,7 +136,7 @@ public class WorkerCircuitBreakerTests
         }
 
         // Assert
-        Assert.Equal(CircuitState.Closed, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.Closed, service.GetCircuitState(workerId));
     }
 
     [Fact]
@@ -153,13 +153,13 @@ public class WorkerCircuitBreakerTests
             service.RecordJobFailureAsync(workerId, _workerRepoMock.Object).Wait();
 #pragma warning restore xUnit1031 // Do not use blocking task operations in test method
         }
-        Assert.Equal(CircuitState.Open, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
 
         // Act
         service.ResetCircuit(workerId);
 
         // Assert
-        Assert.Equal(CircuitState.Closed, service.GetCircuitState(workerId));
+        Assert.Equal(WorkerCircuitState.Closed, service.GetCircuitState(workerId));
     }
 
     [Fact]

@@ -25,7 +25,7 @@ public interface IWorkerCircuitBreakerService
 
     /// <summary>Gets the current circuit state for a worker.</summary>
     /// <param name="workerId">The worker identifier.</param>
-    CircuitState GetCircuitState(Guid workerId);
+    WorkerCircuitState GetCircuitState(Guid workerId);
 
     /// <summary>Manually resets a worker's circuit to closed state.</summary>
     /// <param name="workerId">The worker identifier.</param>
