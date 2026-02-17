@@ -8,8 +8,10 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.Controllers.Slicing;
+using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.FileManagement;
+using ModuleSlicingJobDto = Farm.Slicer.Module.Dtos.SlicingJobDto;
+using ModuleSlicingJobStatus = Farm.Slicer.Module.Dtos.SlicingJobStatus;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 
@@ -94,20 +96,19 @@ public class SlicingSubmissionService(
                 sliceResult.Status = SlicingJobStatus.Queued.ToString();
                 sliceResult.Progress = 0;
 
-                SlicingJobDto storeJob = new()
+                ModuleSlicingJobDto storeJob = new()
                 {
                     JobId = jobId,
-                    Status = SlicingJobStatus.Queued,
+                    Status = ModuleSlicingJobStatus.Queued,
                     Progress = 0,
                     SlicerEngine = slicerEngine,
                     PrinterId = printerId,
                     ModelFilePath = modelFileUrl,
                     GcodeFilePath = null,
-                    Profile = profile,
                     CreatedAt = DateTime.UtcNow
                 };
 
-                _ = SlicingJobStore.Add(storeJob);
+                SlicingJobStore.AddOrUpdate(response.JobId, storeJob);
             }
 
             return new SlicingSubmissionResult(true, Result: sliceResult);
@@ -192,20 +193,19 @@ public class SlicingSubmissionService(
                 sliceResult.Status = SlicingJobStatus.Queued.ToString();
                 sliceResult.Progress = 0;
 
-                SlicingJobDto storeJob = new()
+                ModuleSlicingJobDto storeJob = new()
                 {
                     JobId = jobId,
-                    Status = SlicingJobStatus.Queued,
+                    Status = ModuleSlicingJobStatus.Queued,
                     Progress = 0,
                     SlicerEngine = slicerEngine,
                     PrinterId = printerId,
                     ModelFilePath = modelFileUrl,
                     GcodeFilePath = null,
-                    Profile = profile,
                     CreatedAt = DateTime.UtcNow
                 };
 
-                _ = SlicingJobStore.Add(storeJob);
+                SlicingJobStore.AddOrUpdate(response.JobId, storeJob);
             }
 
             _logger.LogInformation($"Slicing job submitted for uploaded model {modelId} ({model.FileName})");

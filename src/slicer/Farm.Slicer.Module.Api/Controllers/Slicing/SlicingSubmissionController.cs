@@ -11,7 +11,8 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 /// Endpoints for submitting slicing jobs via the new submission service.
 /// </summary>
 [ApiController]
-[Route("api/slicing/submit")]
+[Route("api/slicer")]
+[Tags("Slicer Submission")]
 public class SlicingSubmissionController(
     ISlicingSubmissionService submissionService,
     IConfiguration cfg,
@@ -28,7 +29,7 @@ public class SlicingSubmissionController(
     /// <param name="printerId">Target printer ID.</param>
     /// <param name="profileJson">Slicer profile JSON.</param>
     /// <param name="ct">Cancellation token.</param>
-    [HttpPost]
+    [HttpPost("slice")]
     public async Task<IActionResult> SubmitFileAsync(
         IFormFile file,
         [FromForm] string? slicerEngine,
@@ -68,7 +69,7 @@ public class SlicingSubmissionController(
     /// <param name="printerId">Target printer ID.</param>
     /// <param name="profileJson">Slicer profile JSON.</param>
     /// <param name="ct">Cancellation token.</param>
-    [HttpPost("model/{modelId}")]
+    [HttpPost("slice-model/{modelId}")]
     public async Task<IActionResult> SubmitModelAsync(
         Guid modelId,
         [FromForm] string? slicerEngine,

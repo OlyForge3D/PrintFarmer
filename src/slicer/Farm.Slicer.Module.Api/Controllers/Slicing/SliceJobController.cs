@@ -16,7 +16,8 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 /// API endpoints for slice job lifecycle management (submit, claim, progress, complete).
 /// </summary>
 [ApiController]
-[Route("api/slice-jobs")]
+[Route("api/slice")]
+[Tags("Slice Jobs")]
 public class SliceJobController(
     ISliceJobRepository jobRepository,
     ISliceJobEventService eventService,

@@ -1,17 +1,15 @@
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Contracts.Slicing;
+using Farm.Slicer.Module.Contracts;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
-using Farm.Infrastructure.Services.RateLimiting;
-using Farm.Web.Api.Controllers.Slicing;
-using Farm.Web.Api.Services.Artifacts;
-using Farm.Web.Api.Services.Slicing;
-using Farm.Web.Api.Services.Workers;
+using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Metrics;
+using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -49,9 +47,10 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         IRateLimitService rateLimit = scope.ServiceProvider.GetRequiredService<IRateLimitService>();
         SliceJobMetrics metrics = new SliceJobMetrics();
         IWorkerAuthService workerAuth = scope.ServiceProvider.GetRequiredService<IWorkerAuthService>();
+        IWorkerRepository workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
         DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
-        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics, workerAuth)
+        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics, workerAuth, workerRepository)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
@@ -82,7 +81,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             PrimaryArtifactId = primary.Id,
             LogText = "Layer 1 OK\nLayer 2 OK"
         };
-        IActionResult result = await controller.CompleteJobAsync(job.Id, request);
+        IActionResult result = await controller.CompleteAsync(job.Id, request, default);
 
         // Validate response
         OkObjectResult? ok = result as OkObjectResult;

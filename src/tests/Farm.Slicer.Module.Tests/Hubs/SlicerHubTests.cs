@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
-using Farm.Web.Api.Hubs;
+using Farm.Slicer.Module.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -14,6 +14,7 @@ namespace Farm.Slicer.Module.Tests.Hubs
         private readonly Mock<IHubCallerClients> _clientsMock;
         private readonly Mock<ISingleClientProxy> _callerMock;
         private readonly Mock<HubCallerContext> _contextMock;
+        private readonly Mock<IGroupManager> _groupsMock;
         private readonly SlicerHub _hub;
 
         public SlicerHubTests()
@@ -22,6 +23,7 @@ namespace Farm.Slicer.Module.Tests.Hubs
             _clientsMock = new Mock<IHubCallerClients>();
             _callerMock = new Mock<ISingleClientProxy>();
             _contextMock = new Mock<HubCallerContext>();
+            _groupsMock = new Mock<IGroupManager>();
 
             // Setup hub context
             _contextMock.Setup(c => c.ConnectionId).Returns("test-connection-id");
@@ -32,7 +34,8 @@ namespace Farm.Slicer.Module.Tests.Hubs
             _hub = new SlicerHub(_loggerMock.Object)
             {
                 Clients = _clientsMock.Object,
-                Context = _contextMock.Object
+                Context = _contextMock.Object,
+                Groups = _groupsMock.Object
             };
         }
 
@@ -62,7 +65,7 @@ namespace Farm.Slicer.Module.Tests.Hubs
             // Assert - verify logging was called
             _loggerMock.Verify(
                 x => x.Log(
-                    LogLevel.Debug,
+                    LogLevel.Information,
                     It.IsAny<EventId>(),
                     It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("connected") && v.ToString()!.Contains("SlicerHub")),
                     It.IsAny<Exception>(),
@@ -79,7 +82,7 @@ namespace Farm.Slicer.Module.Tests.Hubs
             // Assert
             _loggerMock.Verify(
                 x => x.Log(
-                    LogLevel.Debug,
+                    LogLevel.Information,
                     It.IsAny<EventId>(),
                     It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("disconnected") && v.ToString()!.Contains("SlicerHub")),
                     It.IsAny<Exception>(),
@@ -99,7 +102,7 @@ namespace Farm.Slicer.Module.Tests.Hubs
             // Assert
             _loggerMock.Verify(
                 x => x.Log(
-                    LogLevel.Debug,
+                    LogLevel.Information,
                     It.IsAny<EventId>(),
                     It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("disconnected") && v.ToString()!.Contains("SlicerHub")),
                     It.IsAny<Exception>(),
@@ -108,48 +111,42 @@ namespace Farm.Slicer.Module.Tests.Hubs
         }
 
         [Fact]
-        public async Task RequestRegistryUpdateAsync_LogsRequestInfo()
+        public async Task JoinServiceGroupAsync_AddsToGroup()
         {
             // Act
-            await _hub.RequestRegistryUpdateAsync();
+            await _hub.JoinServiceGroupAsync("svc-1");
 
             // Assert
-            _loggerMock.Verify(
-                x => x.Log(
-                    LogLevel.Debug,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("requested registry update")),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.Once);
-        }
-
-        [Fact]
-        public async Task RequestRegistryUpdateAsync_SendsAcknowledgmentToCaller()
-        {
-            // Act
-            await _hub.RequestRegistryUpdateAsync();
-
-            // Assert
-            _callerMock.Verify(c => c.SendCoreAsync(
-                "RegistryUpdateRequested",
-                It.Is<object[]>(args => args.Length == 0),
+            _groupsMock.Verify(g => g.AddToGroupAsync(
+                "test-connection-id",
+                "slicer-svc-1",
                 default), Times.Once);
         }
 
         [Fact]
-        public async Task RequestRegistryUpdateAsync_MultipleRequests_SendsMultipleAcknowledgments()
+        public async Task LeaveServiceGroupAsync_RemovesFromGroup()
         {
             // Act
-            await _hub.RequestRegistryUpdateAsync();
-            await _hub.RequestRegistryUpdateAsync();
-            await _hub.RequestRegistryUpdateAsync();
+            await _hub.LeaveServiceGroupAsync("svc-1");
 
             // Assert
-            _callerMock.Verify(c => c.SendCoreAsync(
-                "RegistryUpdateRequested",
-                It.Is<object[]>(args => args.Length == 0),
-                default), Times.Exactly(3));
+            _groupsMock.Verify(g => g.RemoveFromGroupAsync(
+                "test-connection-id",
+                "slicer-svc-1",
+                default), Times.Once);
+        }
+
+        [Fact]
+        public async Task JoinProgressGroupAsync_AddsToSlicingProgressGroup()
+        {
+            // Act
+            await _hub.JoinProgressGroupAsync();
+
+            // Assert
+            _groupsMock.Verify(g => g.AddToGroupAsync(
+                "test-connection-id",
+                "slicing-progress",
+                default), Times.Once);
         }
 
         [Fact]

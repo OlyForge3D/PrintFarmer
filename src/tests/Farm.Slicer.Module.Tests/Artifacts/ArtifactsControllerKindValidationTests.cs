@@ -1,9 +1,10 @@
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Services.Artifacts;
+using Farm.Slicer.Module.Services.Configuration;
+using Farm.Slicer.Module.Api.Controllers;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Tests.Slicing;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -20,19 +21,30 @@ namespace Farm.Slicer.Module.Tests.Artifacts
     {
         private readonly CustomWebApplicationFactory _factory = factory;
 
-        [Fact(DisplayName = "Unsupported kind returns 400 with allowedKinds (controller direct)")]
-        public async Task Unsupported_Kind_Returns_BadRequest_With_Allowed_List()
+        [Fact(DisplayName = "Upload with empty file returns 400 (controller direct)")]
+        public async Task Upload_Empty_File_Returns_BadRequest()
         {
             using IServiceScope scope = _factory.Services.CreateScope();
             IArtifactsService svc = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-            IOptions<ArtifactStorageSettings> opts = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
+            IOptions<ArtifactStorageSettings> opts = Options.Create(new ArtifactStorageSettings());
             JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
             ArtifactsController controller = new ArtifactsController(svc, jobRepo, opts);
-            TestFormFile file = new TestFormFile(Encoding.UTF8.GetBytes("dummy"), "a.txt", "text/plain");
-            IActionResult result = await controller.UploadAsync(Guid.NewGuid(), "invalid-kind", null, file, default);
+            TestFormFile file = new TestFormFile(Array.Empty<byte>(), "a.txt", "text/plain");
+            IActionResult result = await controller.UploadAsync(Guid.NewGuid(), file, default);
             _ = result.Should().BeOfType<BadRequestObjectResult>();
-            BadRequestObjectResult bad = (BadRequestObjectResult)result;
-            _ = bad.Value!.ToString()!.Should().Contain("allowedKinds");
+        }
+
+        [Fact(DisplayName = "Upload with file exceeding max size returns 400")]
+        public async Task Upload_Oversized_File_Returns_BadRequest()
+        {
+            using IServiceScope scope = _factory.Services.CreateScope();
+            IArtifactsService svc = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+            IOptions<ArtifactStorageSettings> opts = Options.Create(new ArtifactStorageSettings { MaxFileSizeBytes = 10 });
+            JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
+            ArtifactsController controller = new ArtifactsController(svc, jobRepo, opts);
+            TestFormFile file = new TestFormFile(new byte[20], "large.gcode", "application/octet-stream");
+            IActionResult result = await controller.UploadAsync(Guid.NewGuid(), file, default);
+            _ = result.Should().BeOfType<BadRequestObjectResult>();
         }
 
         private sealed class TestFormFile(byte[] d, string name, string ct) : IFormFile

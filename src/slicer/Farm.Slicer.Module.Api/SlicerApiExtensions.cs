@@ -24,13 +24,15 @@ public static class SlicerApiExtensions
 
     /// <summary>
     /// Maps slicer-module SignalR hubs to their endpoint routes.
-    /// Currently maps <see cref="SlicerHub"/> to <c>/hubs/slicer-registry</c>.
+    /// Maps <see cref="SlicerHub"/> to <c>/hubs/slicer-registry</c> and
+    /// <see cref="SlicerProgressHub"/> to <c>/hubs/slicers</c>.
     /// </summary>
     /// <param name="endpoints">The endpoint route builder (typically from <c>app.MapXxx</c>).</param>
     /// <returns>The endpoint route builder for chaining.</returns>
     public static IEndpointRouteBuilder MapSlicerHubs(this IEndpointRouteBuilder endpoints)
     {
         _ = endpoints.MapHub<SlicerHub>("/hubs/slicer-registry");
+        _ = endpoints.MapHub<SlicerProgressHub>("/hubs/slicers");
         return endpoints;
     }
 }

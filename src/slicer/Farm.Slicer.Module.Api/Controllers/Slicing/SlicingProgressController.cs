@@ -8,14 +8,15 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 /// Provides real-time slicing progress polling endpoints.
 /// </summary>
 [ApiController]
-[Route("api/slicing/progress")]
+[Route("api/slicer")]
+[Tags("Slicer Progress")]
 public class SlicingProgressController(IStoredFileOperationsService fileOperations) : ControllerBase
 {
 
     /// <summary>
     /// Gets the current progress of all active slicing jobs.
     /// </summary>
-    [HttpGet]
+    [HttpGet("progress")]
     public IActionResult GetAll()
     {
         var jobs = SlicingJobStore.GetAll()
@@ -37,7 +38,7 @@ public class SlicingProgressController(IStoredFileOperationsService fileOperatio
     /// Gets the progress of a specific slicing job.
     /// </summary>
     /// <param name="id">The job ID.</param>
-    [HttpGet("{id}")]
+    [HttpGet("progress/{id}")]
     public IActionResult Get(Guid id)
     {
         SlicingJobDto? job = SlicingJobStore.Get(id);

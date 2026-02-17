@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.SlicerServices;

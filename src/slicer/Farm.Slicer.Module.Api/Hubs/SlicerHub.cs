@@ -4,12 +4,42 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Slicer.Module.Api.Hubs;
 
 /// <summary>
+/// Well-known SignalR event names for the slicer hub.
+/// </summary>
+public static class SlicerHubEvents
+{
+    /// <summary>Event name for when a new slicer service registers.</summary>
+    public const string SlicerRegistered = "SlicerRegistered";
+
+    /// <summary>Event name for when a slicer service sends a heartbeat.</summary>
+    public const string SlicerHeartbeat = "SlicerHeartbeat";
+
+    /// <summary>Event name for when a slicer service deregisters.</summary>
+    public const string SlicerDeregistered = "SlicerDeregistered";
+
+    /// <summary>Event name for when a slicer service rotates its API key.</summary>
+    public const string SlicerApiKeyRotated = "SlicerApiKeyRotated";
+
+    /// <summary>Event name for when profile import starts.</summary>
+    public const string ProfileImportStarted = "ProfileImportStarted";
+
+    /// <summary>Event name for when profile import completes.</summary>
+    public const string ProfileImportCompleted = "ProfileImportCompleted";
+
+    /// <summary>Event name for when profile import fails.</summary>
+    public const string ProfileImportFailed = "ProfileImportFailed";
+
+    /// <summary>Event for a registry update request.</summary>
+    public const string RegistryUpdate = "RegistryUpdate";
+}
+
+/// <summary>
 /// SignalR hub for slicer service registration and status.
 /// Mapped to /hubs/slicer-registry.
 /// </summary>
 public class SlicerHub(ILogger<SlicerHub> logger) : Hub
 {
-    private readonly ILogger<SlicerHub> _logger = logger;
+    private readonly ILogger<SlicerHub> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public override Task OnConnectedAsync()

@@ -11,6 +11,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module;
+using Farm.Slicer.Module.Api;
 using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
@@ -99,6 +100,10 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 // Register slicer module (SlicerDbContext, module repositories, metrics, and configuration).
 // During transition both AppDbContext and SlicerDbContext coexist sharing the same underlying database.
 builder.Services.AddSlicerModule(builder.Configuration);
+
+// Register stub implementations for slicer module service interfaces.
+// These are no-op proxies used until real service implementations are migrated into the module.
+builder.Services.AddSlicerModuleStubServices();
 
 // Register SystemLog logger provider to capture all application logs to the database
 builder.Logging.AddSystemLogProvider(LogLevel.Information);
@@ -341,15 +346,8 @@ app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
-// Slicer registry events hub (worker registration, heartbeat, deregistration, profile import events)
-app.MapHub<SlicerHub>("/hubs/slicer-registry");
-
-// TODO(PFarm1-24w): Replace above explicit hub mapping with module extension after
-// adding ProjectReference to Farm.Slicer.Module.Api and removing old SlicerHub:
-// app.MapSlicerHubs();
-
-// Slicer progress hub for job processing progress events
-app.MapHub<SlicerProgressHub>("/hubs/slicers");
+// Slicer hubs (registry + progress) from slicer module
+app.MapSlicerHubs();
 
 // Prometheus metrics endpoint (guarded so tests without MeterProvider don't throw)
 try

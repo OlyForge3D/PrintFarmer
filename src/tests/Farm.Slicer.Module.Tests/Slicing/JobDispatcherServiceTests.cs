@@ -7,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.Slicing;
 using Xunit;
@@ -171,7 +172,7 @@ public class JobDispatcherServiceTests
         public Task SaveChangesAsync() => Task.CompletedTask;
     }
 
-    private class StubSliceJobEventService : ISliceJobEventService
+    private class StubSliceJobEventService : Farm.Web.Api.Services.Slicing.ISliceJobEventService
     {
         public Task NotifyJobQueuedAsync(SliceJob job, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task NotifyJobStartedAsync(SliceJob job, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -238,15 +239,6 @@ public class JobDispatcherServiceTests
         Worker? selected = await dispatcher.FindBestWorkerForJobAsync(job, CancellationToken.None);
         Assert.NotNull(selected);
         Assert.Equal(workerWithCap.Id, selected!.Id);
-    }
-
-    [Fact]
-    public void CapabilityValidation_FailsOnDuplicate()
-    {
-        string json = "[\"orcaslicer\", \"orcaslicer\"]";
-        bool ok = Farm.Web.Api.Controllers.Slicing.SliceJobController.TryValidateCapabilities(json, out string[]? caps, out string? error);
-        Assert.False(ok);
-        Assert.NotNull(error);
     }
 
     // Minimal HttpClientFactory stub

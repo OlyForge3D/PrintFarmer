@@ -11,7 +11,8 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 /// Provides endpoints for direct slicing job management via the orchestrator.
 /// </summary>
 [ApiController]
-[Route("api/slicing/jobs")]
+[Route("api/slicer")]
+[Tags("Slicer Jobs")]
 public class SlicingJobsController(
     ILogger<SlicingJobsController> logger,
     ITempPathProvider tempPathProvider,
@@ -28,7 +29,7 @@ public class SlicingJobsController(
     /// <param name="file">The model file to slice.</param>
     /// <param name="profileJson">Slicer profile configuration JSON.</param>
     /// <param name="ct">Cancellation token.</param>
-    [HttpPost]
+    [HttpPost("jobs")]
     public async Task<IActionResult> SubmitAsync(IFormFile file, [FromForm] string? profileJson, CancellationToken ct)
     {
         if (file.Length == 0)
@@ -68,7 +69,7 @@ public class SlicingJobsController(
     /// <summary>
     /// Gets all slicing jobs.
     /// </summary>
-    [HttpGet]
+    [HttpGet("jobs")]
     public IActionResult List()
     {
         var jobs = SlicingJobStore.GetAll();
@@ -79,7 +80,7 @@ public class SlicingJobsController(
     /// Gets a specific slicing job by ID.
     /// </summary>
     /// <param name="id">The job ID.</param>
-    [HttpGet("{id}")]
+    [HttpGet("jobs/{id}")]
     public IActionResult Get(Guid id)
     {
         SlicingJobDto? job = SlicingJobStore.Get(id);
@@ -91,7 +92,7 @@ public class SlicingJobsController(
     /// </summary>
     /// <param name="id">The job ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    [HttpGet("{id}/status")]
+    [HttpGet("jobs/{id}/status")]
     public async Task<IActionResult> GetStatusAsync(Guid id, CancellationToken ct)
     {
         SlicingJobStatusResponse? status = await _orchestrator.GetJobStatusAsync(id, ct);
@@ -103,7 +104,7 @@ public class SlicingJobsController(
     /// </summary>
     /// <param name="id">The job ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    [HttpPost("{id}/cancel")]
+    [HttpPost("jobs/{id}/cancel")]
     public async Task<IActionResult> CancelAsync(Guid id, CancellationToken ct)
     {
         bool cancelled = await _orchestrator.CancelJobAsync(id, ct);

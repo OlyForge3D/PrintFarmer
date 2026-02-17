@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Json;
+using Farm.Slicer.Module.Api;
 using Farm.Web.Api.Infrastructure.Filters;
 
 namespace Farm.Web.Api.Startup;
@@ -31,11 +32,9 @@ public static class ControllerStartup
 
                 // Default string enum converter for all other enums
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-            });
+            })
+            .AddSlicerControllers();
 
-        // TODO(PFarm1-24w): Once old slicer controllers are deleted, add a
-        // ProjectReference to Farm.Slicer.Module.Api and enable:
-        // .AddSlicerControllers();
         return services;
     }
 }

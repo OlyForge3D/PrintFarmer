@@ -8,7 +8,7 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Hubs;
+using Farm.Slicer.Module.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.SignalR;
