@@ -29,7 +29,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.msbuild" Version="6.0.4">
+    <PackageReference Include="coverlet.msbuild" Version="8.0.0">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <!-- Additional packages for slicer services testing -->
@@ -51,6 +51,7 @@
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.PrusaLink\Farm.Backend.Plugin.PrusaLink.csproj" />
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Sdcp\Farm.Backend.Plugin.Sdcp.csproj" />
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.OctoPrint\Farm.Backend.Plugin.OctoPrint.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />
   </ItemGroup>
 
   <!-- Exclude Docker integration tests moved to Farm.Web.IntegrationTests -->
