@@ -1,4 +1,5 @@
 using ModuleIFileManagement = Farm.Slicer.Module.Services.IFileManagementService;
+using Farm.Slicer.Module.Services;
 
 namespace Farm.Web.Api.Services.Adapters;
 

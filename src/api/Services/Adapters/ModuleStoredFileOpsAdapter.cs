@@ -1,4 +1,5 @@
 using ModuleIStoredFileOps = Farm.Slicer.Module.Services.IStoredFileOperationsService;
+using Farm.Slicer.Module.Services;
 
 namespace Farm.Web.Api.Services.Adapters;
 

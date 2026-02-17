@@ -1,7 +1,5 @@
 ﻿using Farm.Infrastructure.Telemetry;
-using SlicerEngineInfo = Farm.Slicer.Module.Services.SlicerEngineInfo;
-using SlicerOrchestratorHealth = Farm.Slicer.Module.Services.SlicerOrchestratorHealth;
-using SlicerQueueStats = Farm.Slicer.Module.Services.SlicerQueueStats;
+using Farm.Slicer.Module.Services;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 
@@ -11,12 +9,12 @@ namespace Farm.Web.Api.Services.SlicerServices;
 public class SlicerOrchestrator(
     ISlicerJobQueue jobQueue,
     ISlicerFileStorage fileStorage,
-    Farm.Slicer.Module.Services.ISlicerProgressNotifier progressNotifier,
-    IUnifiedLoggingService logger) : Farm.Slicer.Module.Services.ISlicerOrchestrator
+    ISlicerProgressNotifier progressNotifier,
+    IUnifiedLoggingService logger) : ISlicerOrchestrator
 {
     private readonly ISlicerJobQueue _jobQueue = jobQueue ?? throw new ArgumentNullException(nameof(jobQueue));
     private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
-    private readonly Farm.Slicer.Module.Services.ISlicerProgressNotifier _progressNotifier = progressNotifier ?? throw new ArgumentNullException(nameof(progressNotifier));
+    private readonly ISlicerProgressNotifier _progressNotifier = progressNotifier ?? throw new ArgumentNullException(nameof(progressNotifier));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Dictionary<SlicerEngineType, EngineMetadata> _engineCatalog = BuildStaticCatalog();
 

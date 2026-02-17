@@ -467,7 +467,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaBundleExportService, Services.Slicing.OrcaBundleExportService>();
 
         // Job queue and orchestration
-        _ = services.AddScoped<ISlicerJobQueue, Services.SlicerServices.DbSlicerJobQueue>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerJobQueue, Services.SlicerServices.DbSlicerJobQueue>();
         _ = services.AddSingleton<Farm.Slicer.Module.Services.ISlicerProgressNotifier, Services.SlicerServices.SignalRSlicerProgressNotifier>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerOrchestrator, Services.SlicerServices.SlicerOrchestrator>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISliceJobEventService, Services.Slicing.SliceJobEventService>();
@@ -487,7 +487,7 @@ public static class ServiceCollectionExtensions
         // Submission and file storage
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicingSubmissionService, Services.Slicing.SlicingSubmissionService>();
         _ = services.AddScoped<Services.SlicerServices.LocalSlicerFileStorage>();
-        _ = services.AddScoped<ISlicerFileStorage>(sp => sp.GetRequiredService<Services.SlicerServices.LocalSlicerFileStorage>());
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerFileStorage>(sp => sp.GetRequiredService<Services.SlicerServices.LocalSlicerFileStorage>());
 
         // Slicer Library Registration (plugin discovery)
         _ = services

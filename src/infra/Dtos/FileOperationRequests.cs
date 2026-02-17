@@ -27,10 +27,3 @@ public record MoveFilesRequest(
 public record MoveModelsRequest(
     [property: JsonPropertyName("modelIds")] IReadOnlyList<string> ModelIds,
     [property: JsonPropertyName("targetDirectoryId")] string TargetDirectoryId);
-
-/// <summary>
-/// Request to create a new folder in the models directory structure.
-/// </summary>
-/// <param name="Path">Relative path for the new folder.</param>
-public record CreateFolderRequest(
-    [property: JsonPropertyName("path")] string Path);

@@ -8,8 +8,9 @@ global using Farm.Infrastructure.Contracts.SignalR;
 global using Farm.Infrastructure.Contracts.Workers;
 
 // Slicer module namespaces (types migrated from infra to module)
-// NOTE: Farm.Slicer.Module.Services is NOT global — too many conflicts with Farm.Infrastructure types.
-// Import it per-file where needed.
+// NOTE: Farm.Slicer.Module.Services is NOT global — too many adapter bridge collisions
+// (IRateLimitService, IStoredFileOperationsService, ITempPathProvider, etc.).
+// Import it per-file in slicer-related files only.
 global using Farm.Slicer.Module.Contracts;
 global using Farm.Slicer.Module.Dtos;
 global using Farm.Slicer.Module.Messaging;

@@ -10,10 +10,8 @@ using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.FileManagement;
-using ISlicerOrchestrator = Farm.Slicer.Module.Services.ISlicerOrchestrator;
-using SlicingSubmissionResult = Farm.Slicer.Module.Services.SlicingSubmissionResult;
-using ModuleSlicingJobDto = Farm.Slicer.Module.Dtos.SlicingJobDto;
-using ModuleSlicingJobStatus = Farm.Slicer.Module.Dtos.SlicingJobStatus;
+using Farm.Slicer.Module.Services;
+using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 
@@ -97,10 +95,10 @@ public class SlicingSubmissionService(
                 sliceResult.Status = SlicingJobStatus.Queued.ToString();
                 sliceResult.Progress = 0;
 
-                ModuleSlicingJobDto storeJob = new()
+                SlicingJobDto storeJob = new()
                 {
                     JobId = jobId,
-                    Status = ModuleSlicingJobStatus.Queued,
+                    Status = SlicingJobStatus.Queued,
                     Progress = 0,
                     SlicerEngine = slicerEngine,
                     PrinterId = printerId,
@@ -194,10 +192,10 @@ public class SlicingSubmissionService(
                 sliceResult.Status = SlicingJobStatus.Queued.ToString();
                 sliceResult.Progress = 0;
 
-                ModuleSlicingJobDto storeJob = new()
+                SlicingJobDto storeJob = new()
                 {
                     JobId = jobId,
-                    Status = ModuleSlicingJobStatus.Queued,
+                    Status = SlicingJobStatus.Queued,
                     Progress = 0,
                     SlicerEngine = slicerEngine,
                     PrinterId = printerId,
