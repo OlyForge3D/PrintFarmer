@@ -465,8 +465,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaBundleExportService, Services.Slicing.OrcaBundleExportService>();
 
         // Job queue and orchestration
-        _ = services.AddSingleton<Farm.Slicer.Module.Services.ISlicerProgressNotifier, Services.SlicerServices.SignalRSlicerProgressNotifier>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISliceJobEventService, Services.Slicing.SliceJobEventService>();
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
         _ = services.AddScoped<IJobDispatcherService, JobDispatcherService>();

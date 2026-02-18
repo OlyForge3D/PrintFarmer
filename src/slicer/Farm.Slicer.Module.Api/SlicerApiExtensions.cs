@@ -1,4 +1,6 @@
 ﻿using Farm.Slicer.Module.Api.Hubs;
+using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +22,16 @@ public static class SlicerApiExtensions
     {
         _ = builder.AddApplicationPart(typeof(SlicerApiExtensions).Assembly);
         return builder;
+    }
+
+    /// <summary>
+    /// Registers slicer API-layer services (SignalR notifiers) into the DI container.
+    /// </summary>
+    public static IServiceCollection AddSlicerApiServices(this IServiceCollection services)
+    {
+        _ = services.AddSingleton<ISlicerProgressNotifier, SignalRSlicerProgressNotifier>();
+        _ = services.AddScoped<ISliceJobEventService, SliceJobEventService>();
+        return services;
     }
 
     /// <summary>

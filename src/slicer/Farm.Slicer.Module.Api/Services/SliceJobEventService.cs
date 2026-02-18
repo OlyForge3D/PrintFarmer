@@ -1,19 +1,17 @@
-﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
-using Farm.Slicer.Module.Api.Hubs;
+﻿using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Slicing;
+namespace Farm.Slicer.Module.Api.Services;
 
 public class SliceJobEventService(
     IHubContext<SlicerProgressHub> hubContext,
-    IUnifiedLoggingService logger) : ISliceJobEventService
+    ILogger<SliceJobEventService> logger) : ISliceJobEventService
 {
     private readonly IHubContext<SlicerProgressHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<SliceJobEventService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task NotifyJobQueuedAsync(SliceJob job, CancellationToken cancellationToken = default)
     {

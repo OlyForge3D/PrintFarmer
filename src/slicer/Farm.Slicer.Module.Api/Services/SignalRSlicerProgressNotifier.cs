@@ -1,18 +1,21 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Slicer.Module.Api.Hubs;
+﻿using Farm.Slicer.Module.Api.Hubs;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Models;
+using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.SlicerServices;
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// SignalR-based progress notifier for slicer operations
 /// </summary>
 public class SignalRSlicerProgressNotifier(
     IHubContext<SlicerProgressHub> hubContext,
-    IUnifiedLoggingService logger) : Farm.Slicer.Module.Services.ISlicerProgressNotifier
+    ILogger<SignalRSlicerProgressNotifier> logger) : ISlicerProgressNotifier
 {
     private readonly IHubContext<SlicerProgressHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<SignalRSlicerProgressNotifier> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Dictionary<Guid, HashSet<string>> _jobSubscriptions = [];
     private readonly Lock _lockObject = new();
 

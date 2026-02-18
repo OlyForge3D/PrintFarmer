@@ -1,4 +1,6 @@
-namespace Farm.Web.Api.Services.SlicerServices;
+using Farm.Slicer.Module.Dtos;
+
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// Notification sent via SignalR when a slicing job completes (success or failure result).

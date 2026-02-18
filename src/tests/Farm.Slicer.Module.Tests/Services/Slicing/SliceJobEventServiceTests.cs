@@ -1,9 +1,9 @@
-﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
-using Farm.Slicer.Module.Api.Hubs;
-using Farm.Web.Api.Services.SlicerServices;
-using Farm.Web.Api.Services.Slicing;
+﻿using Farm.Slicer.Module.Api.Hubs;
+using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -13,14 +13,14 @@ public class SliceJobEventServiceTests
 {
     private readonly SliceJobEventService _service;
     private readonly Mock<IHubContext<SlicerProgressHub>> _hubContextMock;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<SliceJobEventService>> _loggerMock;
     private readonly Mock<IClientProxy> _clientProxyMock;
     private readonly Mock<IHubClients> _hubClientsMock;
 
     public SliceJobEventServiceTests()
     {
         _hubContextMock = new Mock<IHubContext<SlicerProgressHub>>();
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<SliceJobEventService>>();
         _clientProxyMock = new Mock<IClientProxy>();
         _hubClientsMock = new Mock<IHubClients>();
 

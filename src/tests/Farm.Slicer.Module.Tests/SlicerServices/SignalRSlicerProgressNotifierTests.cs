@@ -1,8 +1,10 @@
-﻿using Farm.Infrastructure;
-using Farm.Slicer.Module.Api.Hubs;
-using Farm.Slicer.Module.Tests.TestUtils;
-using Farm.Web.Api.Services.SlicerServices;
+﻿using Farm.Slicer.Module.Api.Hubs;
+using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Models;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 
@@ -17,7 +19,7 @@ public class SignalRSlicerProgressNotifierTests
     private readonly Mock<IHubClients> _mockClients;
     private readonly Mock<IClientProxy> _mockClientProxy;
     private readonly Mock<IGroupManager> _mockGroupManager;
-    private readonly TestLoggingService _testLogger;
+    private readonly ILogger<SignalRSlicerProgressNotifier> _testLogger;
     private readonly SignalRSlicerProgressNotifier _notifier;
 
     public SignalRSlicerProgressNotifierTests()
@@ -26,7 +28,7 @@ public class SignalRSlicerProgressNotifierTests
         _mockClients = new Mock<IHubClients>();
         _mockClientProxy = new Mock<IClientProxy>();
         _mockGroupManager = new Mock<IGroupManager>();
-        _testLogger = new TestLoggingService();
+        _testLogger = NullLogger<SignalRSlicerProgressNotifier>.Instance;
 
         // Setup hub context
         _ = _mockHubContext.Setup(h => h.Clients).Returns(_mockClients.Object);

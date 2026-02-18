@@ -100,6 +100,7 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 // Register slicer module (SlicerDbContext, module repositories, metrics, and configuration).
 // During transition both AppDbContext and SlicerDbContext coexist sharing the same underlying database.
 builder.Services.AddSlicerModule(builder.Configuration);
+builder.Services.AddSlicerApiServices();
 
 // Register SystemLog logger provider to capture all application logs to the database
 builder.Logging.AddSystemLogProvider(LogLevel.Information);
