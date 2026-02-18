@@ -14,6 +14,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.SignalR;

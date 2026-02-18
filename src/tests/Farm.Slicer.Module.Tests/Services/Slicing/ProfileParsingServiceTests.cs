@@ -1,12 +1,11 @@
-﻿using Farm.Web.Api.Services.Slicing;
+﻿using Farm.Slicer.Module.Services;
 using Xunit;
-using ISlicerProfileParsingService = Farm.Web.Api.Services.Slicing.IProfileParsingService;
 
 namespace Farm.Slicer.Module.Tests.Services.Slicing;
 
 public class ProfileParsingServiceTests
 {
-    private readonly ISlicerProfileParsingService _service = new ProfileParsingService();
+    private readonly IProfileParsingService _service = new ProfileParsingService();
 
     #region Null/Empty Input Tests
 

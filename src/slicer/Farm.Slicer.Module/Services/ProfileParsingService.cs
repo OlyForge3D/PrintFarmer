@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Farm.Web.Api.Services.Slicing;
+namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Parses imported slicer profile JSON, extracts core metadata and produces a sanitized
@@ -19,7 +19,7 @@ public interface IProfileParsingService
     (string SanitizedRawJson, string SettingsJson, string Hash) ParseAndPrepare(string rawJson);
 }
 
-public sealed class ProfileParsingService : IProfileParsingService
+public sealed class ProfileParsingService : IProfileParsingService, ISlicerProfileParsingService
 {
     // Keys that are typically volatile or environment-specific and should not contribute to hash uniqueness
     private static readonly HashSet<string> VolatileKeys = new(StringComparer.OrdinalIgnoreCase)

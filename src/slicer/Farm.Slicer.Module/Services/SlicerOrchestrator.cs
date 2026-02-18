@@ -1,7 +1,9 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Slicer.Module.Services;
+﻿using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Messaging;
+using Farm.Slicer.Module.Models;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.SlicerServices;
+namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Orchestrator service for managing slicer operations and job distribution
@@ -10,12 +12,12 @@ public class SlicerOrchestrator(
     ISlicerJobQueue jobQueue,
     ISlicerFileStorage fileStorage,
     ISlicerProgressNotifier progressNotifier,
-    IUnifiedLoggingService logger) : ISlicerOrchestrator
+    ILogger<SlicerOrchestrator> logger) : ISlicerOrchestrator
 {
     private readonly ISlicerJobQueue _jobQueue = jobQueue ?? throw new ArgumentNullException(nameof(jobQueue));
     private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
     private readonly ISlicerProgressNotifier _progressNotifier = progressNotifier ?? throw new ArgumentNullException(nameof(progressNotifier));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<SlicerOrchestrator> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Dictionary<SlicerEngineType, EngineMetadata> _engineCatalog = BuildStaticCatalog();
 
     public async Task<SlicingJobResponse> SubmitJobAsync(SlicingJobRequest request, CancellationToken cancellationToken = default)

@@ -1,14 +1,10 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
 using Farm.Slicer.Module.Data.Repositories;
-using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.Workers;
+namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Circuit breaker service that tracks worker failure patterns and temporarily disables

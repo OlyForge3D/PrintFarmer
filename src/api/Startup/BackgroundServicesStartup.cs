@@ -55,13 +55,6 @@ public static class BackgroundServicesStartup
                 gcodeStoragePath);
         });
 
-        // Circuit breaker for worker failure tracking (slicer service implementation).
-        // TODO: Move to Farm.Slicer.Module once WorkerCircuitBreakerService is extracted (bead PFarm1-2ni.1.2).
-        if (configuration.GetValue("Slicer:Enabled", true))
-        {
-            services.AddSingleton<Farm.Slicer.Module.Services.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
-        }
-
         return services;
     }
 }

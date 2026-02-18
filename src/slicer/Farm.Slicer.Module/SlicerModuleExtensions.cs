@@ -1,6 +1,7 @@
 ﻿using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.HostedServices;
+using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.EntityFrameworkCore;
@@ -35,6 +36,7 @@ public static class SlicerModuleExtensions
 
         AddSlicerDatabase(services, configuration);
         AddSlicerRepositories(services);
+        AddSlicerServices(services);
         AddSlicerMetrics(services);
         AddSlicerConfiguration(services, configuration);
         AddSlicerHostedServices(services, configuration);
@@ -112,6 +114,21 @@ public static class SlicerModuleExtensions
     }
 
     /// <summary>
+    /// Registers module-level service implementations (business logic).
+    /// </summary>
+    private static void AddSlicerServices(IServiceCollection services)
+    {
+        _ = services.AddScoped<ISlicerJobQueue, DbSlicerJobQueue>();
+        _ = services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
+        _ = services.AddScoped<IOrcaBundleParsingService, OrcaBundleParsingService>();
+        _ = services.AddScoped<IProfileParsingService, ProfileParsingService>();
+        _ = services.AddScoped<ISlicerProfileParsingService>(sp => sp.GetRequiredService<IProfileParsingService>() as ISlicerProfileParsingService
+            ?? throw new InvalidOperationException("ProfileParsingService must implement ISlicerProfileParsingService"));
+
+        // Plugin discovery runs during startup via extension method DiscoverAndRegisterSlicerPlugins()
+    }
+
+    /// <summary>
     /// Registers metrics singletons for slicer telemetry.
     /// </summary>
     private static void AddSlicerMetrics(IServiceCollection services)
@@ -146,8 +163,8 @@ public static class SlicerModuleExtensions
         // Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
         _ = services.Configure<JobDispatchRetrySettings>(configuration.GetSection("JobDispatchRetry"));
 
-        // Circuit breaker for worker failure tracking
         _ = services.Configure<CircuitBreakerSettings>(configuration.GetSection("CircuitBreaker"));
+        _ = services.AddSingleton<IWorkerCircuitBreakerService, WorkerCircuitBreakerService>();
 
         _ = services.AddHostedService<JobTimeoutScannerHostedService>();
 

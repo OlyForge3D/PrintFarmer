@@ -1,8 +1,8 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Nodes;
-using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Models;
 
-namespace Farm.Web.Api.Services.Slicing;
+namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Parses OrcaSlicer config bundle JSON into structured preview DTOs.

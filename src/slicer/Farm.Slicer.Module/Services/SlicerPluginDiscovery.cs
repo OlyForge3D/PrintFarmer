@@ -3,7 +3,7 @@ using System.Reflection;
 using Farm.Slicer.Module.Contracts.Libraries;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Farm.Web.Api.Services.Slicing.Abstractions;
+namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Discovers and loads slicer library plugins from referenced assemblies.

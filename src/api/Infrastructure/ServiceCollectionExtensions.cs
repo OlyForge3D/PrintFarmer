@@ -25,6 +25,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Extensions;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
@@ -36,7 +37,6 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Web.Api.Services.Slicing.Abstractions;
 using Farm.Web.Api.Services.StorageManagement;
 using Farm.Web.Api.Services.Workers;
 using Microsoft.EntityFrameworkCore;
@@ -461,15 +461,11 @@ public static class ServiceCollectionExtensions
         // Core slicing services
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicersService, SlicersService>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.IProfilesService, ProfilesService>();
-        _ = services.AddScoped<Services.Slicing.IProfileParsingService, Services.Slicing.ProfileParsingService>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaBundleParsingService, Services.Slicing.OrcaBundleParsingService>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaPresetMappingService, Services.Slicing.OrcaPresetMappingService>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaBundleExportService, Services.Slicing.OrcaBundleExportService>();
 
         // Job queue and orchestration
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerJobQueue, Services.SlicerServices.DbSlicerJobQueue>();
         _ = services.AddSingleton<Farm.Slicer.Module.Services.ISlicerProgressNotifier, Services.SlicerServices.SignalRSlicerProgressNotifier>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerOrchestrator, Services.SlicerServices.SlicerOrchestrator>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISliceJobEventService, Services.Slicing.SliceJobEventService>();
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
