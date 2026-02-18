@@ -172,7 +172,6 @@ public static class ServiceCollectionExtensions
         RegisterHttpClients(services);
         RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients
         RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
-        RegisterArtifactServices(services, configuration, disableBackgroundServices);
         RegisterSetupAndSchemaServices(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
         RegisterSlicerModuleAdapters(services);
@@ -590,23 +589,6 @@ public static class ServiceCollectionExtensions
 
     #endregion
 
-    #region Artifact Services
-
-    private static void RegisterArtifactServices(IServiceCollection services, IConfiguration configuration, bool disableBackgroundServices)
-    {
-        _ = services.AddSingleton<Services.Artifacts.ArtifactsMetrics>();
-        _ = services.Configure<ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
-        _ = services.AddScoped<Farm.Slicer.Module.Services.IArtifactsService, Services.Artifacts.ArtifactsService>();
-        _ = services.AddScoped<Services.Artifacts.IArtifactCleanupService, Services.Artifacts.ArtifactCleanupService>();
-
-        if (!disableBackgroundServices)
-        {
-            _ = services.AddHostedService<Services.Artifacts.ArtifactCleanupHostedService>();
-        }
-    }
-
-    #endregion
-
     #region Slicer Module Adapters
 
     /// <summary>
@@ -621,7 +603,7 @@ public static class ServiceCollectionExtensions
         // Module adapters (bridge module interfaces → API implementations)
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerFileManagementService, Services.Adapters.ModuleFileManagementAdapter>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerStoredFileOpsService, Services.Adapters.ModuleStoredFileOpsAdapter>();
-        _ = services.AddSingleton<Farm.Slicer.Module.Services.ITempPathProvider, Services.Adapters.ModuleTempPathAdapter>();
+        _ = services.AddSingleton<Farm.Slicer.Module.Services.ISlicerTempPathProvider, Services.Adapters.ModuleTempPathAdapter>();
         _ = services.AddSingleton<Farm.Slicer.Module.Services.IRateLimitService, Services.Adapters.ModuleRateLimitAdapter>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.ICatalogServiceAdapter, Services.Adapters.ModuleCatalogServiceAdapter>();
     }

@@ -3,7 +3,7 @@
 /// <summary>
 /// Configuration options for local artifact storage. Cloud storage is intentionally out of scope.
 /// </summary>
-public sealed class ArtifactStorageSettings
+public sealed class SlicerArtifactStorageSettings
 {
     /// <summary>Configuration section name in appsettings.</summary>
     public const string SectionName = "ArtifactStorage";

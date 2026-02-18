@@ -147,8 +147,8 @@ public static class SlicerModuleExtensions
             configuration.GetSection(WorkerAuthSettings.SectionName));
         _ = services.Configure<StaleWorkerCleanupSettings>(
             configuration.GetSection(StaleWorkerCleanupSettings.SectionName));
-        _ = services.Configure<ArtifactStorageSettings>(
-            configuration.GetSection(ArtifactStorageSettings.SectionName));
+        _ = services.Configure<SlicerArtifactStorageSettings>(
+            configuration.GetSection(SlicerArtifactStorageSettings.SectionName));
     }
 
     /// <summary>

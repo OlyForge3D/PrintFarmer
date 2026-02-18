@@ -4,7 +4,7 @@
 /// Adapter interface for temporary file path management.
 /// The host application provides the implementation.
 /// </summary>
-public interface ITempPathProvider
+public interface ISlicerTempPathProvider
 {
     /// <summary>Gets the base path for temporary files.</summary>
     string TempPath { get; }

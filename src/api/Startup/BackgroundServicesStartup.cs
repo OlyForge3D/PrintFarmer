@@ -1,7 +1,6 @@
 ﻿using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Artifacts;
 
 namespace Farm.Web.Api.Startup;
 

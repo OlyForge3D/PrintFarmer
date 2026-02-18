@@ -11,11 +11,12 @@ using Farm.Infrastructure.Settings;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.Artifacts;
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// Local filesystem implementation of artifact persistence. Files are stored under a configured root path.

@@ -2,12 +2,13 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Settings;
+using Farm.Slicer.Module.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.Artifacts;
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// Background hosted service that periodically runs artifact cleanup.

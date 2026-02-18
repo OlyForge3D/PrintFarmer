@@ -1,10 +1,10 @@
 ﻿using ApiITempPath = Farm.Web.Api.Infrastructure.Temp.ITempPathProvider;
-using ModuleITempPath = Farm.Slicer.Module.Services.ITempPathProvider;
+using ModuleITempPath = Farm.Slicer.Module.Services.ISlicerTempPathProvider;
 
 namespace Farm.Web.Api.Services.Adapters;
 
 /// <summary>
-/// Bridges <see cref="Farm.Slicer.Module.Services.ITempPathProvider"/> (module) to the
+/// Bridges <see cref="Farm.Slicer.Module.Services.ISlicerTempPathProvider"/> (module) to the
 /// API's <see cref="Farm.Web.Api.Infrastructure.Temp.ITempPathProvider"/> for temp file path management.
 /// </summary>
 internal sealed class ModuleTempPathAdapter(ApiITempPath apiProvider) : ModuleITempPath

@@ -3,7 +3,8 @@ using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Api.Services.Artifacts;
+using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Xunit;
 
@@ -18,7 +19,7 @@ public class ArtifactsThresholdTests
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
-        StorageThresholdEventArgs? capturedEvent = null;
+        SlicerStorageThresholdEventArgs? capturedEvent = null;
         metrics.ThresholdExceeded += (sender, e) => capturedEvent = e;
 
         // Act - Upload enough to exceed warning
@@ -29,7 +30,7 @@ public class ArtifactsThresholdTests
 
         // Assert
         _ = capturedEvent.Should().NotBeNull();
-        _ = capturedEvent!.Level.Should().Be(StorageThresholdLevel.Warning);
+        _ = capturedEvent!.Level.Should().Be(SlicerStorageThresholdLevel.Warning);
         _ = capturedEvent.CurrentBytes.Should().Be(1200);
         _ = capturedEvent.WarningThreshold.Should().Be(1000);
     }
@@ -41,7 +42,7 @@ public class ArtifactsThresholdTests
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
-        List<StorageThresholdEventArgs> events = new List<StorageThresholdEventArgs>();
+        List<SlicerStorageThresholdEventArgs> events = new List<SlicerStorageThresholdEventArgs>();
         metrics.ThresholdExceeded += (sender, e) => events.Add(e);
 
         // Act - Upload enough to exceed critical
@@ -51,8 +52,8 @@ public class ArtifactsThresholdTests
         Thread.Sleep(50);
 
         // Assert
-        _ = events.Should().ContainSingle(e => e.Level == StorageThresholdLevel.Critical);
-        StorageThresholdEventArgs criticalEvent = events.First(e => e.Level == StorageThresholdLevel.Critical);
+        _ = events.Should().ContainSingle(e => e.Level == SlicerStorageThresholdLevel.Critical);
+        SlicerStorageThresholdEventArgs criticalEvent = events.First(e => e.Level == SlicerStorageThresholdLevel.Critical);
         _ = criticalEvent.CurrentBytes.Should().Be(5500);
         _ = criticalEvent.CriticalThreshold.Should().Be(5000);
     }

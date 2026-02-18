@@ -12,6 +12,7 @@ using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
+using Farm.Slicer.Module.Services.Metrics;
 using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
@@ -20,7 +21,6 @@ using Farm.Web.Api.Infrastructure.Database;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Startup;
 using FluentValidation;
@@ -246,8 +246,8 @@ try
             ILogger<Program>? logger = app.Services.GetService<ILogger<Program>>();
             string levelStr = e.Level switch
             {
-                Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Warning => "WARNING",
-                Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Critical => "CRITICAL",
+                Farm.Slicer.Module.Services.SlicerStorageThresholdLevel.Warning => "WARNING",
+                Farm.Slicer.Module.Services.SlicerStorageThresholdLevel.Critical => "CRITICAL",
                 _ => "UNKNOWN"
             };
 

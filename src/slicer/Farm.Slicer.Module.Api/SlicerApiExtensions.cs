@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Api.Hubs;
+﻿using Farm.Infrastructure.Settings;
+using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
@@ -47,6 +48,12 @@ public static class SlicerApiExtensions
         // Core slicing services
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
+
+        // Artifact services
+        _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
+        _ = services.AddScoped<IArtifactsService, ArtifactsService>();
+        _ = services.AddScoped<IArtifactCleanupService, ArtifactCleanupService>();
+        _ = services.AddHostedService<ArtifactCleanupHostedService>();
 
         // Job dispatch
         _ = services.AddScoped<ISlicerJobDispatcherService, JobDispatcherService>();

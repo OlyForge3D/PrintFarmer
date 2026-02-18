@@ -15,12 +15,12 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [Tags("Slicer Jobs")]
 public class SlicingJobsController(
     ILogger<SlicingJobsController> logger,
-    ITempPathProvider tempPathProvider,
+    ISlicerTempPathProvider tempPathProvider,
     ISlicerOrchestrator orchestrator,
     ISlicerFileManagementService fileManagementService,
     ISlicerStoredFileOpsService fileOperations) : ControllerBase
 {
-    private readonly ITempPathProvider _tempPathProvider = tempPathProvider;
+    private readonly ISlicerTempPathProvider _tempPathProvider = tempPathProvider;
     private readonly ISlicerOrchestrator _orchestrator = orchestrator;
 
     /// <summary>

@@ -19,11 +19,11 @@ namespace Farm.Slicer.Module.Api.Controllers;
 public class ArtifactsController(
     IArtifactsService service,
     ISliceJobRepository jobRepository,
-    IOptions<ArtifactStorageSettings> settings) : ControllerBase
+    IOptions<SlicerArtifactStorageSettings> settings) : ControllerBase
 {
     private readonly IArtifactsService _service = service;
     private readonly ISliceJobRepository _jobRepository = jobRepository;
-    private readonly ArtifactStorageSettings _settings = settings.Value;
+    private readonly SlicerArtifactStorageSettings _settings = settings.Value;
 
     /// <summary>
     /// Uploads an artifact for a slice job.

@@ -28,7 +28,7 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         // Arrange
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings());
+        IOptions<SlicerArtifactStorageSettings> settings = Options.Create(new SlicerArtifactStorageSettings());
         JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
 
         Guid jobId = Guid.NewGuid();
@@ -51,7 +51,7 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         // Arrange
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings());
+        IOptions<SlicerArtifactStorageSettings> settings = Options.Create(new SlicerArtifactStorageSettings());
         JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
@@ -70,7 +70,7 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         // Arrange
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings());
+        IOptions<SlicerArtifactStorageSettings> settings = Options.Create(new SlicerArtifactStorageSettings());
         JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 

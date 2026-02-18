@@ -16,7 +16,7 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 public class SlicingSubmissionController(
     ISlicingSubmissionService submissionService,
     IConfiguration cfg,
-    ITempPathProvider tempPathProvider,
+    ISlicerTempPathProvider tempPathProvider,
     IHostEnvironment env) : ControllerBase
 {
     private readonly ISlicingSubmissionService _submissionService = submissionService;

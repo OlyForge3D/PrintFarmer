@@ -7,11 +7,12 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Settings;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.Artifacts;
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// Background service for cleaning up old or excess artifacts based on retention policy.

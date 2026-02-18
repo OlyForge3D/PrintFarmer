@@ -23,7 +23,7 @@ namespace Farm.Slicer.Module.Tests.Artifacts
         {
             using IServiceScope scope = _factory.Services.CreateScope();
             IArtifactsService svc = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-            IOptions<ArtifactStorageSettings> opts = Options.Create(new ArtifactStorageSettings());
+            IOptions<SlicerArtifactStorageSettings> opts = Options.Create(new SlicerArtifactStorageSettings());
             JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
             ArtifactsController controller = new ArtifactsController(svc, jobRepo, opts);
             TestFormFile file = new TestFormFile(Array.Empty<byte>(), "a.txt", "text/plain");
@@ -36,7 +36,7 @@ namespace Farm.Slicer.Module.Tests.Artifacts
         {
             using IServiceScope scope = _factory.Services.CreateScope();
             IArtifactsService svc = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-            IOptions<ArtifactStorageSettings> opts = Options.Create(new ArtifactStorageSettings { MaxFileSizeBytes = 10 });
+            IOptions<SlicerArtifactStorageSettings> opts = Options.Create(new SlicerArtifactStorageSettings { MaxFileSizeBytes = 10 });
             JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
             ArtifactsController controller = new ArtifactsController(svc, jobRepo, opts);
             TestFormFile file = new TestFormFile(new byte[20], "large.gcode", "application/octet-stream");

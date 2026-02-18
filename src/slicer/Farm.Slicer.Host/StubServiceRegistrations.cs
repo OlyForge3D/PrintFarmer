@@ -36,7 +36,7 @@ public static class StubServiceRegistrations
         RegisterStub<ISlicerOrchestrator>(services);
         RegisterStub<ISlicerFileManagementService>(services);
         RegisterStub<ISlicerStoredFileOpsService>(services);
-        RegisterStub<ITempPathProvider>(services);
+        RegisterStub<ISlicerTempPathProvider>(services);
 
         // Model/file management (used by Model3DFilesController)
         RegisterStub<IModel3DFileService>(services);
