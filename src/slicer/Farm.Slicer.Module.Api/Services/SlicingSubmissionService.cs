@@ -2,20 +2,19 @@
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
-using Farm.Web.Api.Services.FileManagement;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Slicing;
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// Service for handling slicing job submissions
@@ -26,16 +25,16 @@ public class SlicingSubmissionService(
     ISlicerFileStorage fileStorage,
     ISlicerOrchestrator orchestrator,
     IHostEnvironment env,
-    IUnifiedLoggingService logger,
-    IStoredFileOperationsService fileOperations) : Farm.Slicer.Module.Services.ISlicingSubmissionService
+    ILogger<SlicingSubmissionService> logger,
+    ISlicerStoredFileOpsService fileOperations) : ISlicingSubmissionService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly IModel3DFileRepository _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
     private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
     private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
     private readonly IHostEnvironment _env = env ?? throw new ArgumentNullException(nameof(env));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
+    private readonly ILogger<SlicingSubmissionService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ISlicerStoredFileOpsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
 
     public async Task<SlicingSubmissionResult> SubmitSlicingJobAsync(
         IFormFile modelFile,

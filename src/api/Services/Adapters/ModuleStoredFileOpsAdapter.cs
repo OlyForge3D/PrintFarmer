@@ -38,4 +38,10 @@ internal sealed class ModuleStoredFileOpsAdapter(ISlicerFileStorage fileStorage)
 
         return await _fileStorage.DownloadFileAsync(key, ct);
     }
+
+    /// <inheritdoc />
+    public string BuildSlicerJobGcodeUrl(Guid jobId)
+    {
+        return $"/api/slicer/jobs/{jobId}/gcode";
+    }
 }

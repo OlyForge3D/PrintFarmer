@@ -34,7 +34,6 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
@@ -218,7 +217,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
 
         // File system abstraction (pure wrapper around static File/Directory APIs)
-        _ = services.AddSingleton<Services.IO.IFileSystem, Services.IO.SystemFileSystem>();
+        _ = services.AddSingleton<Farm.Infrastructure.IO.IFileSystem, Farm.Infrastructure.IO.SystemFileSystem>();
 
         // Startup status tracking
         _ = services.AddSingleton<IStartupStatus, StartupStatus>();
@@ -460,10 +459,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
 
-        // Submission and file storage
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicingSubmissionService, Services.Slicing.SlicingSubmissionService>();
-        _ = services.AddScoped<Services.SlicerServices.LocalSlicerFileStorage>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerFileStorage>(sp => sp.GetRequiredService<Services.SlicerServices.LocalSlicerFileStorage>());
+        // Submission and file storage — registered in SlicerApiExtensions.AddSlicerApiServices()
 
         // Slicer Library Registration (plugin discovery)
         _ = services

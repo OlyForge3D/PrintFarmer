@@ -39,6 +39,11 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<IOrcaPresetMappingService, OrcaPresetMappingService>();
         _ = services.AddScoped<IOrcaBundleExportService, OrcaBundleExportService>();
 
+        // File storage and submission
+        _ = services.AddScoped<LocalSlicerFileStorage>();
+        _ = services.AddScoped<ISlicerFileStorage>(sp => sp.GetRequiredService<LocalSlicerFileStorage>());
+        _ = services.AddScoped<ISlicingSubmissionService, SlicingSubmissionService>();
+
         // Job dispatch
         _ = services.AddScoped<ISlicerJobDispatcherService, JobDispatcherService>();
         _ = services.AddSingleton(sp =>

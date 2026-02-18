@@ -1,6 +1,6 @@
 ﻿using System.IO;
 
-namespace Farm.Web.Api.Services.IO
+namespace Farm.Infrastructure.IO
 {
     public class SystemFileSystem : IFileSystem
     {

@@ -45,7 +45,7 @@ namespace Farm.Web.Api.Services.Model
         private readonly IUnifiedLoggingService _logger;
         private readonly string _modelsPath;
         private readonly IModelAnalysisService? _analysisService;
-        private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
+        private readonly Farm.Infrastructure.IO.IFileSystem _fileSystem;
         private readonly IFileManagementService _fileManagementService;
         private readonly IStoredFileOperationsService _fileOperations;
         private readonly IThumbnailGenerationService? _thumbnailService;
@@ -58,7 +58,7 @@ namespace Farm.Web.Api.Services.Model
             ITagRepository tagRepository,
             IUnifiedLoggingService logger,
             IConfiguration configuration,
-            Farm.Web.Api.Services.IO.IFileSystem fileSystem,
+            Farm.Infrastructure.IO.IFileSystem fileSystem,
             IFileManagementService fileManagementService,
             IFolderManagementService folderManagementService,
             IStoragePathService storagePathService,

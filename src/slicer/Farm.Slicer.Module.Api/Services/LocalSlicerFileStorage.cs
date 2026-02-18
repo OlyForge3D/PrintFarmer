@@ -1,12 +1,11 @@
 ﻿using System.Text.Json;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Telemetry;
+using Farm.Infrastructure.IO;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
-using Farm.Web.Api.Services.IO;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.SlicerServices;
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// Local file system implementation of slicer file storage
@@ -14,11 +13,11 @@ namespace Farm.Web.Api.Services.SlicerServices;
 public class LocalSlicerFileStorage : ISlicerFileStorage
 {
     private readonly LocalFileStorageOptions _options;
-    private readonly IUnifiedLoggingService _logger;
-    private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
+    private readonly ILogger<LocalSlicerFileStorage> _logger;
+    private readonly IFileSystem _fileSystem;
 
     // Primary constructor for DI
-    public LocalSlicerFileStorage(IOptions<LocalFileStorageOptions> options, IUnifiedLoggingService logger, Farm.Web.Api.Services.IO.IFileSystem fileSystem)
+    public LocalSlicerFileStorage(IOptions<LocalFileStorageOptions> options, ILogger<LocalSlicerFileStorage> logger, IFileSystem fileSystem)
     {
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

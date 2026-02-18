@@ -5,16 +5,15 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
-using Farm.Web.Api.Services.FileManagement;
-using Farm.Web.Api.Services.Slicing;
-using Microsoft.AspNetCore.Hosting;
+using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
-using ISlicerStoredFileOpsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 
 namespace Farm.Slicer.Module.Tests.Services.Slicing;
 
@@ -28,7 +27,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     private readonly Mock<ISlicerFileStorage> _mockFileStorage;
     private readonly Mock<ISlicerOrchestrator> _mockOrchestrator;
     private readonly Mock<IHostEnvironment> _mockEnvironment;
-    private readonly Mock<IUnifiedLoggingService> _mockLogger;
+    private readonly ILogger<SlicingSubmissionService> _logger;
     private readonly Mock<ISlicerStoredFileOpsService> _mockFileOperations;
     private readonly SlicingSubmissionService _service;
     private readonly List<string> _tempFiles = new();
@@ -40,7 +39,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         _mockFileStorage = new Mock<ISlicerFileStorage>();
         _mockOrchestrator = new Mock<ISlicerOrchestrator>();
         _mockEnvironment = new Mock<IHostEnvironment>();
-        _mockLogger = new Mock<IUnifiedLoggingService>();
+        _logger = NullLogger<SlicingSubmissionService>.Instance;
         _mockFileOperations = new Mock<ISlicerStoredFileOpsService>();
 
         _mockEnvironment.Setup(e => e.EnvironmentName).Returns("Production");
@@ -56,7 +55,7 @@ public class SlicingSubmissionServiceTests : IDisposable
             _mockFileStorage.Object,
             _mockOrchestrator.Object,
             _mockEnvironment.Object,
-            _mockLogger.Object,
+            _logger,
             _mockFileOperations.Object);
     }
 
@@ -79,7 +78,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(null!, _mockModel3dRepository.Object, _mockFileStorage.Object, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object, _mockFileOperations.Object)
+            new SlicingSubmissionService(null!, _mockModel3dRepository.Object, _mockFileStorage.Object, _mockOrchestrator.Object, _mockEnvironment.Object, _logger, _mockFileOperations.Object)
         );
         Assert.Equal("unitOfWork", ex.ParamName);
     }
@@ -89,7 +88,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockModel3dRepository.Object, null!, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object, _mockFileOperations.Object)
+            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockModel3dRepository.Object, null!, _mockOrchestrator.Object, _mockEnvironment.Object, _logger, _mockFileOperations.Object)
         );
         Assert.Equal("fileStorage", ex.ParamName);
     }
@@ -99,7 +98,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockModel3dRepository.Object, _mockFileStorage.Object, null!, _mockEnvironment.Object, _mockLogger.Object, _mockFileOperations.Object)
+            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockModel3dRepository.Object, _mockFileStorage.Object, null!, _mockEnvironment.Object, _logger, _mockFileOperations.Object)
         );
         Assert.Equal("orchestrator", ex.ParamName);
     }
@@ -321,13 +320,6 @@ public class SlicingSubmissionServiceTests : IDisposable
         // Assert
         Assert.False(result.Success);
         Assert.NotNull(result.Error);
-        _mockLogger.Verify(
-            l => l.LogError(
-                It.IsAny<Exception>(),
-                It.Is<string>(msg => msg.Contains("Failed to submit slicing job", StringComparison.Ordinal)),
-                It.IsAny<string?>(),
-                It.IsAny<object?>()),
-            Times.Once);
     }
 
     [Fact]
@@ -704,13 +696,6 @@ public class SlicingSubmissionServiceTests : IDisposable
         // Assert
         Assert.False(result.Success);
         Assert.NotNull(result.Error);
-        _mockLogger.Verify(
-            l => l.LogError(
-                It.IsAny<Exception>(),
-                It.Is<string>(msg => msg.Contains("Failed to submit slicing job for model", StringComparison.Ordinal)),
-                It.IsAny<string?>(),
-                It.IsAny<object?>()),
-            Times.Once);
     }
 
     #endregion

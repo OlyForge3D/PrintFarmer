@@ -1,8 +1,10 @@
 ﻿using System.Text;
+using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Tests.Services;
 using Farm.Slicer.Module.Tests.TestUtils;
-using Farm.Web.Api.Services.SlicerServices;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 
@@ -13,7 +15,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices;
 /// </summary>
 public class LocalSlicerFileStorageTests : IDisposable
 {
-    private readonly TestLoggingService _testLogger;
+    private readonly ILogger<LocalSlicerFileStorage> _testLogger;
     private readonly LocalSlicerFileStorage _storage;
     private readonly string _tempBasePath;
     private readonly LocalFileStorageOptions _options;
@@ -21,7 +23,7 @@ public class LocalSlicerFileStorageTests : IDisposable
 
     public LocalSlicerFileStorageTests()
     {
-        _testLogger = new TestLoggingService();
+        _testLogger = NullLogger<LocalSlicerFileStorage>.Instance;
         _tempBasePath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-storage-tests");
 
         _options = new LocalFileStorageOptions
@@ -485,5 +487,5 @@ public class LocalSlicerFileStorageTests : IDisposable
 /// Configuration options for LocalSlicerFileStorage
 /// </summary>
 // NOTE: Removed duplicate LocalFileStorageOptions test shim.
-// The production options class (Farm.Web.Api.Services.SlicerServices.LocalFileStorageOptions)
+// The production options class (Farm.Slicer.Module.Services.Configuration.LocalFileStorageOptions)
 // is used directly via the using directive at the top of this file.

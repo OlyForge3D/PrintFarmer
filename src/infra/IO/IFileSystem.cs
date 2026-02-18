@@ -1,6 +1,6 @@
 ﻿using System.IO;
 
-namespace Farm.Web.Api.Services.IO
+namespace Farm.Infrastructure.IO
 {
     /// <summary>
     /// Abstraction for file system operations to enable testability and platform independence.

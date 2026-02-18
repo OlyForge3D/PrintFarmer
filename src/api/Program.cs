@@ -22,7 +22,6 @@ using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Startup;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;

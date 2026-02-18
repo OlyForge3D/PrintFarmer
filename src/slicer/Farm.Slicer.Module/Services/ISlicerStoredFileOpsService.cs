@@ -21,4 +21,11 @@ public interface ISlicerStoredFileOpsService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The file contents as a stream, or <c>null</c> if not found.</returns>
     Task<Stream?> ReadFileAsync(Guid fileId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Builds the URL path for downloading a slicer job's GCode output.
+    /// </summary>
+    /// <param name="jobId">The slice job identifier.</param>
+    /// <returns>A relative URL path to the GCode file.</returns>
+    string BuildSlicerJobGcodeUrl(Guid jobId);
 }
