@@ -11,28 +11,14 @@ namespace Farm.Web.Api.Startup;
 public static class BackgroundServicesStartup
 {
     /// <summary>
-    /// Adds PrintFarmer background services (workers, maintenance, history seeding, cleanup).
+    /// Adds PrintFarmer background services (maintenance, history seeding, cleanup).
+    /// Slicer-specific hosted services are now registered by <c>AddSlicerModule()</c>
+    /// in <c>Farm.Slicer.Module</c>.
     /// </summary>
     public static IServiceCollection AddPrintFarmerBackgroundServices(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Register background services for distributed slicing
-        services.AddHostedService<Farm.Web.Api.Services.Workers.WorkerHealthMonitorService>();
-        services.AddHostedService<Farm.Web.Api.Services.Workers.JobDispatchingService>();
-
-        // Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
-        services.Configure<Farm.Web.Api.Services.Workers.JobDispatchRetrySettings>(configuration.GetSection("JobDispatchRetry"));
-
-        // Circuit breaker for worker failure tracking
-        services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>(configuration.GetSection("CircuitBreaker"));
-        services.AddSingleton<Farm.Slicer.Module.Services.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
-        services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
-
-        // Stale worker cleanup service
-        services.Configure<Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings.SectionName));
-        services.AddHostedService<Farm.Web.Api.Services.Workers.StaleWorkerCleanupHostedService>();
-
         // Maintenance Module - Print Statistics Sync Service
         services.Configure<Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings>(configuration.GetSection(Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings.SectionName));
         services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSyncHostedService>();
@@ -68,6 +54,13 @@ public static class BackgroundServicesStartup
                 modelStoragePath,
                 gcodeStoragePath);
         });
+
+        // Circuit breaker for worker failure tracking (slicer service implementation).
+        // TODO: Move to Farm.Slicer.Module once WorkerCircuitBreakerService is extracted (bead PFarm1-2ni.1.2).
+        if (configuration.GetValue("Slicer:Enabled", true))
+        {
+            services.AddSingleton<Farm.Slicer.Module.Services.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
+        }
 
         return services;
     }

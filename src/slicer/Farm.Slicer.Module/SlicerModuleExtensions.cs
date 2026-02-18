@@ -1,5 +1,6 @@
 ﻿using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.HostedServices;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +16,9 @@ public static class SlicerModuleExtensions
 {
     /// <summary>
     /// Registers all slicer-module owned services: <see cref="SlicerDbContext"/>,
-    /// repositories, metrics, and configuration POCOs.
+    /// repositories, metrics, configuration POCOs, and hosted services.
+    /// When <c>Slicer:Enabled</c> is <c>false</c>, nothing is registered
+    /// (zero slicer footprint in the host process).
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
@@ -24,10 +27,17 @@ public static class SlicerModuleExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        bool enabled = configuration.GetValue("Slicer:Enabled", true);
+        if (!enabled)
+        {
+            return services;
+        }
+
         AddSlicerDatabase(services, configuration);
         AddSlicerRepositories(services);
         AddSlicerMetrics(services);
         AddSlicerConfiguration(services, configuration);
+        AddSlicerHostedServices(services, configuration);
 
         return services;
     }
@@ -122,5 +132,28 @@ public static class SlicerModuleExtensions
             configuration.GetSection(StaleWorkerCleanupSettings.SectionName));
         _ = services.Configure<ArtifactStorageSettings>(
             configuration.GetSection(ArtifactStorageSettings.SectionName));
+    }
+
+    /// <summary>
+    /// Registers slicer background/hosted services for worker monitoring,
+    /// job dispatching, timeout scanning, and stale worker cleanup.
+    /// </summary>
+    private static void AddSlicerHostedServices(IServiceCollection services, IConfiguration configuration)
+    {
+        _ = services.AddHostedService<WorkerHealthMonitorService>();
+        _ = services.AddHostedService<JobDispatchingService>();
+
+        // Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
+        _ = services.Configure<JobDispatchRetrySettings>(configuration.GetSection("JobDispatchRetry"));
+
+        // Circuit breaker for worker failure tracking
+        _ = services.Configure<CircuitBreakerSettings>(configuration.GetSection("CircuitBreaker"));
+
+        _ = services.AddHostedService<JobTimeoutScannerHostedService>();
+
+        // Stale worker cleanup service
+        _ = services.Configure<StaleWorkerCleanupSettings>(
+            configuration.GetSection(StaleWorkerCleanupSettings.SectionName));
+        _ = services.AddHostedService<StaleWorkerCleanupHostedService>();
     }
 }

@@ -706,16 +706,22 @@ public static class ServiceCollectionExtensions
         // Background service monitor - always register as it's used for status reporting
         _ = services.AddSingleton<Services.Background.IBackgroundServiceMonitor, Services.Background.BackgroundServiceMonitor>();
 
+        // Forward the module's IHostedServiceMonitor to the same BackgroundServiceMonitor singleton
+        // so that slicer module hosted services report to the unified monitor.
+        _ = services.AddSingleton<Farm.Slicer.Module.Services.IHostedServiceMonitor>(sp =>
+            (Farm.Slicer.Module.Services.IHostedServiceMonitor)sp.GetRequiredService<Services.Background.IBackgroundServiceMonitor>());
+
         if (!disableBackgroundServices)
         {
             // System log cleanup (common service, not plugin-specific)
             _ = services.AddHostedService<SystemLogCleanupService>();
 
-            // Stale worker cleanup service
-            _ = services.AddHostedService<Services.Workers.StaleWorkerCleanupHostedService>();
-
             // Profile task check service - creates tasks for printers without slicer profiles
             _ = services.AddHostedService<Services.ProfileTaskCheckService>();
+
+            // Slicer hosted services (WorkerHealthMonitor, JobDispatching,
+            // JobTimeoutScanner, StaleWorkerCleanup) are now registered by
+            // AddSlicerModule() in Farm.Slicer.Module.
 
             // Backend-specific background services are now registered by their respective plugins
             // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:
