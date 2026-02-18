@@ -10,17 +10,20 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Gcode;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Hubs;
+using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
-using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Slicing
+namespace Farm.Slicer.Module.Api.Services
 {
     /// <summary>
     /// Service for managing 3D printer slicer workers and their lifecycle, including registration,
@@ -54,7 +57,7 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly IHubContext<SlicerHub> _hub;
         private readonly SlicerServiceMetrics _metrics;
         private readonly HttpClient _httpClient;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<SlicersService> _logger;
 
         private readonly Microsoft.Extensions.Options.IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> _slicerSettings;
 
@@ -74,7 +77,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// <param name="hub">SignalR hub context for broadcasting worker state changes to connected clients</param>
         /// <param name="metrics">Metrics collection service for capacity and utilization tracking</param>
         /// <param name="httpClient">HTTP client for external service communication and health checks</param>
-        /// <param name="logger">Unified logging service for audit trails and debugging</param>
+        /// <param name="logger">Logger for diagnostic and error logs</param>
         /// <param name="slicerSettings">Configuration options for slicer service behavior and constraints</param>
         /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
         public SlicersService(
@@ -90,7 +93,7 @@ namespace Farm.Web.Api.Services.Slicing
             IHubContext<SlicerHub> hub,
             SlicerServiceMetrics metrics,
             HttpClient httpClient,
-            IUnifiedLoggingService logger,
+            ILogger<SlicersService> logger,
             Microsoft.Extensions.Options.IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> slicerSettings)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));

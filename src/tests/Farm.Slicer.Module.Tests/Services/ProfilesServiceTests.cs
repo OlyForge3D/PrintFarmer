@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
+using Farm.Infrastructure.Services.Catalog;
 using Farm.Slicer.Module.Api.Hubs;
-using Farm.Web.Api.Services.Catalog;
-using Farm.Web.Api.Services.Slicing;
+using Farm.Slicer.Module.Api.Services;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -16,7 +17,7 @@ namespace Farm.Slicer.Module.Tests.Services
 {
     public class ProfilesServiceTests
     {
-        private static ProfilesService CreateService(IProfilesRepository repo, IUnifiedLoggingService logger)
+        private static ProfilesService CreateService(IProfilesRepository repo, ILogger<ProfilesService> logger)
         {
             Mock<IProcessProfileRepository> processProfileRepo = new(MockBehavior.Loose);
             Mock<IMachineProfileRepository> machineProfileRepo = new(MockBehavior.Loose);
@@ -52,10 +53,10 @@ namespace Farm.Slicer.Module.Tests.Services
             ProcessProfile profile = new ProcessProfile { Id = id, Name = "p", Description = "d", RawJson = "{}" };
 
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            ILogger<ProfilesService> mockLogger = NullLogger<ProfilesService>.Instance;
             _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
 
-            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
 
             ProcessProfileResponseDto? dto = await svc.GetProfileAsync(id, CancellationToken.None);
             Assert.NotNull(dto);
@@ -68,10 +69,10 @@ namespace Farm.Slicer.Module.Tests.Services
         {
             Guid id = Guid.NewGuid();
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            ILogger<ProfilesService> mockLogger = NullLogger<ProfilesService>.Instance;
             _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((ProcessProfile?)null);
 
-            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
 
             ProcessProfileResponseDto? dto = await svc.GetProfileAsync(id, CancellationToken.None);
             Assert.Null(dto);
@@ -86,10 +87,10 @@ namespace Farm.Slicer.Module.Tests.Services
                 new() { Id = Guid.NewGuid(), Name = "B", RawJson = "{}" }
             };
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            ILogger<ProfilesService> mockLogger = NullLogger<ProfilesService>.Instance;
             _ = mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(list);
 
-            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
             IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(CancellationToken.None);
             Assert.Equal(2, result.Count);
         }
@@ -98,10 +99,10 @@ namespace Farm.Slicer.Module.Tests.Services
         public async Task GetProfilesAsync_ReturnsEmptyList_WhenNoProfiles()
         {
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            ILogger<ProfilesService> mockLogger = NullLogger<ProfilesService>.Instance;
             _ = mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<ProcessProfile>());
 
-            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
             IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(CancellationToken.None);
             Assert.Empty(result);
         }
@@ -112,11 +113,11 @@ namespace Farm.Slicer.Module.Tests.Services
             Guid id = Guid.NewGuid();
             ProcessProfile profile = new ProcessProfile { Id = id, Name = "test" };
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            ILogger<ProfilesService> mockLogger = NullLogger<ProfilesService>.Instance;
             _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
             _ = mockRepo.Setup(r => r.RemoveAsync(profile, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
             await svc.DeleteProfileAsync(id, CancellationToken.None);
 
             mockRepo.Verify(r => r.RemoveAsync(profile, It.IsAny<CancellationToken>()), Times.Once);
@@ -127,10 +128,10 @@ namespace Farm.Slicer.Module.Tests.Services
         {
             Guid id = Guid.NewGuid();
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            ILogger<ProfilesService> mockLogger = NullLogger<ProfilesService>.Instance;
             _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((ProcessProfile?)null);
 
-            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
 
             _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteProfileAsync(id, CancellationToken.None));
         }

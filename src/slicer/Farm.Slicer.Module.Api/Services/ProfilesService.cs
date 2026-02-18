@@ -10,16 +10,16 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
+using Farm.Infrastructure.Services.Catalog;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
-using Farm.Web.Api.DTOs;
-using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Slicing
+namespace Farm.Slicer.Module.Api.Services
 {
     /// <summary>
     /// Service for managing slicer profiles with consolidated mapping, validation, and orchestration logic.
@@ -59,7 +59,7 @@ namespace Farm.Web.Api.Services.Slicing
     /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
     public class ProfilesService(
         IProfilesRepository repo,
-        IUnifiedLoggingService logger,
+        ILogger<ProfilesService> logger,
         IProcessProfileRepository processProfileRepo,
         IMachineProfileRepository machineProfileRepo,
         IFilamentProfileRepository filamentProfileRepo,
@@ -67,10 +67,10 @@ namespace Farm.Web.Api.Services.Slicing
         ICatalogService catalogService,
         IProfileParsingService parsingService,
         IHubContext<SlicerHub> slicerHubContext,
-        Farm.Slicer.Module.Services.ISlicersService slicersService) : Farm.Slicer.Module.Services.IProfilesService
+        ISlicersService slicersService) : IProfilesService
     {
         private readonly IProfilesRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly ILogger<ProfilesService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         private readonly IHubContext<SlicerHub> _slicerHubContext = slicerHubContext ?? throw new ArgumentNullException(nameof(slicerHubContext));
 
         private readonly IProcessProfileRepository _processProfileRepo = processProfileRepo ?? throw new ArgumentNullException(nameof(processProfileRepo));
@@ -78,7 +78,7 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly IFilamentProfileRepository _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
         private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         private readonly ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
-        private readonly Farm.Slicer.Module.Services.ISlicersService _slicersService = slicersService ?? throw new ArgumentNullException(nameof(slicersService));
+        private readonly ISlicersService _slicersService = slicersService ?? throw new ArgumentNullException(nameof(slicersService));
         private readonly IProfileParsingService _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
 
         /// <summary>

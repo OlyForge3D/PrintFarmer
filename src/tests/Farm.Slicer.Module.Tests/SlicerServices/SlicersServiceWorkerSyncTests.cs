@@ -3,13 +3,14 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Gcode;
-using Farm.Infrastructure.Telemetry;
+using Farm.Infrastructure.Services.Catalog;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Services.Metrics;
-using Farm.Web.Api.Services.Catalog;
-using Farm.Web.Api.Services.Slicing;
+using Farm.Slicer.Module.Api.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -62,9 +63,9 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
             return mock;
         }
 
-        private static Mock<IUnifiedLoggingService> CreateMockLogger()
+        private static ILogger<SlicersService> CreateMockLogger()
         {
-            return new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            return NullLogger<SlicersService>.Instance;
         }
 
         private static Mock<IFilamentProfileRepository> CreateMockFilamentProfileRepository()
@@ -126,13 +127,13 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
-            Mock<IUnifiedLoggingService> logger = CreateMockLogger();
+            ILogger<SlicersService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
             Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
             Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
             Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -182,13 +183,13 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
-            Mock<IUnifiedLoggingService> logger = CreateMockLogger();
+            ILogger<SlicersService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
             Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
             Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
             Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -234,13 +235,13 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
-            Mock<IUnifiedLoggingService> logger = CreateMockLogger();
+            ILogger<SlicersService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
             Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
             Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
             Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {

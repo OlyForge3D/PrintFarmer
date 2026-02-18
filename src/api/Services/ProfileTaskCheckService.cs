@@ -4,7 +4,6 @@ using Farm.Infrastructure.Services.Tasks;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.Services.Slicing;
 
 namespace Farm.Web.Api.Services;
 

@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
-using Farm.Web.Api.Services.Slicing;
+using Farm.Slicer.Module.Api.Services;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;

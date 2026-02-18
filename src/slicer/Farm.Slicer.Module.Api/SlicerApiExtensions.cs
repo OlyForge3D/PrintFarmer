@@ -44,6 +44,10 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<ISlicerFileStorage>(sp => sp.GetRequiredService<LocalSlicerFileStorage>());
         _ = services.AddScoped<ISlicingSubmissionService, SlicingSubmissionService>();
 
+        // Core slicing services
+        _ = services.AddScoped<ISlicersService, SlicersService>();
+        _ = services.AddScoped<IProfilesService, ProfilesService>();
+
         // Job dispatch
         _ = services.AddScoped<ISlicerJobDispatcherService, JobDispatcherService>();
         _ = services.AddSingleton(sp =>

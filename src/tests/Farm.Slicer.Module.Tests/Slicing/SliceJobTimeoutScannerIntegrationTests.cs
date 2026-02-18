@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Farm.Slicer.Module.HostedServices;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
-using Farm.Web.Api.Services.Slicing;
+using Farm.Slicer.Module.Api.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 

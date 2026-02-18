@@ -34,7 +34,6 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -451,9 +450,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Slicer.Module.Services.IWorkerAuthService, Farm.Slicer.Module.Api.Services.WorkerAuthService>();
         _ = services.Configure<Farm.Slicer.Module.Settings.SlicerSettings>(configuration.GetSection(Farm.Slicer.Module.Settings.SlicerSettings.SectionName));
 
-        // Core slicing services
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicersService, SlicersService>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.IProfilesService, ProfilesService>();
+        // Core slicing services — registered in SlicerApiExtensions.AddSlicerApiServices()
 
         // Job queue and orchestration
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
