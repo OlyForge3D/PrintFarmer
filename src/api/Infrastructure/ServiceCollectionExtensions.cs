@@ -37,7 +37,6 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.StorageManagement;
-using Farm.Web.Api.Services.Workers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
@@ -449,8 +448,8 @@ public static class ServiceCollectionExtensions
     private static void RegisterSlicingServices(IServiceCollection services, IConfiguration configuration)
     {
         // Configuration
-        _ = services.Configure<Services.Workers.WorkerAuthSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.WorkerAuthSettings.SectionName));
-        _ = services.AddSingleton<Farm.Slicer.Module.Services.IWorkerAuthService, Services.Workers.WorkerAuthService>();
+        _ = services.Configure<Farm.Slicer.Module.Services.Configuration.WorkerAuthSettings>(configuration.GetSection(Farm.Slicer.Module.Services.Configuration.WorkerAuthSettings.SectionName));
+        _ = services.AddSingleton<Farm.Slicer.Module.Services.IWorkerAuthService, Farm.Slicer.Module.Api.Services.WorkerAuthService>();
         _ = services.Configure<Farm.Slicer.Module.Settings.SlicerSettings>(configuration.GetSection(Farm.Slicer.Module.Settings.SlicerSettings.SectionName));
 
         // Core slicing services

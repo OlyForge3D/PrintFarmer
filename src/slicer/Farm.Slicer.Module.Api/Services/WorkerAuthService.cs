@@ -1,9 +1,10 @@
 ﻿using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Primitives;
 
-namespace Farm.Web.Api.Services.Workers;
+namespace Farm.Slicer.Module.Api.Services;
 
 public sealed class WorkerAuthService(IConfiguration configuration, IHostEnvironment env) : IWorkerAuthService
 {
