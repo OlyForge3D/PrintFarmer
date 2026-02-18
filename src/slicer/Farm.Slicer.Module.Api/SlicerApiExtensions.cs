@@ -72,6 +72,9 @@ public static class SlicerApiExtensions
         // Host-independent adapters (bridge module interfaces → infrastructure services)
         _ = services.AddSingleton<IRateLimitService, ModuleRateLimitAdapter>();
         _ = services.AddScoped<ICatalogServiceAdapter, ModuleCatalogServiceAdapter>();
+        _ = services.AddScoped<ISlicerFileManagementService, ModuleFileManagementAdapter>();
+        _ = services.AddScoped<ISlicerStoredFileOpsService, ModuleStoredFileOpsAdapter>();
+        _ = services.AddSingleton<ISlicerTempPathProvider, DefaultSlicerTempPathProvider>();
 
         return services;
     }

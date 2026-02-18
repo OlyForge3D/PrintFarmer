@@ -1,7 +1,7 @@
 ﻿using Farm.Slicer.Module.Services;
 using ModuleIStoredFileOps = Farm.Slicer.Module.Services.ISlicerStoredFileOpsService;
 
-namespace Farm.Web.Api.Services.Adapters;
+namespace Farm.Slicer.Module.Api.Services.Adapters;
 
 /// <summary>
 /// Bridges <see cref="Farm.Slicer.Module.Services.ISlicerStoredFileOpsService"/> (module) to the
