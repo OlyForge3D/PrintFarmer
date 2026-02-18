@@ -7,21 +7,28 @@ This directory contains all Docker-related files for PrintFarmer, organized for 
 ```
 scripts/docker/
 ├── README.md                 # This file
-├── dockerfiles/             # All Dockerfile definitions  
+├── dockerfiles/             # All Dockerfile definitions
 │   ├── Dockerfile           # Main application
 │   ├── Dockerfile.api       # API service
-│   ├── Dockerfile.frontend* # Frontend variants
-│   ├── Dockerfile.orca*     # OrcaSlicer worker variants
-│   ├── Dockerfile.prusa*    # (PrusaSlicer worker variants removed)
-│   └── Dockerfile.slicer-base # Base slicer image
+│   ├── Dockerfile.base-*    # Base images (aspnet, nginx, node, sdk, ubuntu, etc.)
+│   ├── Dockerfile.frontend  # Frontend build
+│   ├── Dockerfile.multistage # Multi-stage consolidated build
+│   ├── Dockerfile.nginx-proxy # Nginx reverse proxy
+│   └── Dockerfile.printer-discovery # Printer discovery service
 ├── compose-templates/       # Docker Compose template files
-│   ├── docker-compose.yml                # Main template
-│   ├── docker-compose.override.yml       # Development overrides
-│   ├── docker-compose.databases.yml      # Database services
-│   ├── docker-compose.monitoring.yml     # Monitoring stack
-│   ├── docker-compose.telemetry.yml      # Telemetry/observability
+│   ├── docker-compose.yml                # Main template (base services)
+│   ├── docker-compose.common.yml         # Shared healthcheck anchors
+│   ├── docker-compose.database.postgres.yml  # PostgreSQL database config
+│   ├── docker-compose.database.sqlserver.yml  # SQL Server database config
+│   ├── docker-compose.discovery.yml      # Printer discovery service
+│   ├── docker-compose.monitoring.yml     # Monitoring stack (Prometheus + Grafana)
+│   ├── docker-compose.monitoring.lite.yml # Lightweight monitoring (no Grafana)
+│   ├── docker-compose.orcaslicer-worker.yml # OrcaSlicer worker service
+│   ├── docker-compose.pgadmin.yml        # pgAdmin web UI
+│   ├── docker-compose.registry.yml       # Local Docker registry
 │   ├── docker-compose.security.yml       # Security configurations
-│   └── docker-compose.registry.yml       # Local registry setup
+│   ├── docker-compose.slicer-host.yml    # Slicer host service
+│   └── docker-compose.telemetry.yml      # OpenTelemetry + Jaeger
 └── configs/                 # Configuration files
     ├── docker-entrypoint-config.sh       # Container initialization
     ├── otel-collector-config.yaml        # OpenTelemetry collector
@@ -53,8 +60,7 @@ The deployment script intelligently selects and combines:
 - **Base services**: API, frontend, nginx-proxy
 - **Database**: PostgreSQL (default) or SQL Server - always a separate container
 - **Observability**: Prometheus + Grafana (monitoring), OpenTelemetry + Jaeger (telemetry) - enabled by default
-- **Optional services**: Workers, security, registry, discovery
-- **Environment-specific**: Development overrides, production optimizations
+- **Optional services**: Workers, security, registry, discovery, pgAdmin
 
 **Note**: SQLite is NOT supported for Docker deployments. All Docker deployments require a proper database container (PostgreSQL or SQL Server) for production reliability.
 

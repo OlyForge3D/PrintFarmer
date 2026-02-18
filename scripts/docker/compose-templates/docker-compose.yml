@@ -31,7 +31,7 @@ services:
       - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/lib/postgresql/data  # Database persistence (maps to host directory or docker volume)
     restart: unless-stopped
     healthcheck:
-      test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printfarmer} -d ${POSTGRES_DB:-printfarmer}"]}
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printfarmer} -d ${POSTGRES_DB:-printfarmer}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -145,8 +145,6 @@ services:
     healthcheck: *nginx-healthcheck
     networks:
       - printfarmer-network
-
-volumes:
 
 networks:
   printfarmer-network: *printfarmer-network

@@ -4271,75 +4271,6 @@ EOF
 }
 
 # Generate docker-compose override if needed
-generate_compose_override() {
-    if [ "$ARCHITECTURE" = "microservices" ] && { [ "${INCLUDE_POSTGRES:-no}" = "yes" ] || [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; }; then
-        print_info "Creating docker-compose override for database services"
-        
-        cat > docker-compose.override.yml << EOF
-# Auto-generated database services
-
-services:
-EOF
-        
-        if [ "${INCLUDE_POSTGRES:-no}" = "yes" ]; then
-            cat >> docker-compose.override.yml << EOF
-    postgres:
-        image: postgres:15
-    environment:
-      - POSTGRES_DB=\${POSTGRES_DB}
-      - POSTGRES_USER=\${POSTGRES_USER}
-      - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
-    ports:
-    - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts/docker/init-postgres.sh:/docker-entrypoint-initdb.d/01-init-auth.sh:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER} -d \${POSTGRES_DB}"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-EOF
-        fi
-        
-        if [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; then
-            cat >> docker-compose.override.yml << EOF
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=\${MSSQL_SA_PASSWORD}
-      - MSSQL_PID=\${MSSQL_PID:-Developer}
-    ports:
-      - "\${SQLSERVER_PORT:-1433}:1433"
-    volumes:
-      - sqlserver_data:/var/opt/mssql
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"\${MSSQL_SA_PASSWORD}\" -C -Q 'SELECT 1' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-EOF
-        fi
-        
-        
-        cat >> docker-compose.override.yml << EOF
-
-volumes:
-EOF
-        
-        [ "${INCLUDE_POSTGRES:-no}" = "yes" ] && echo "  postgres_data:" >> docker-compose.override.yml
-        [ "${INCLUDE_SQLSERVER:-no}" = "yes" ] && echo "  sqlserver_data:" >> docker-compose.override.yml
-        
-        print_success "Docker Compose override file created: docker-compose.override.yml"
-        # Ensure no top-level `version:` key remains in generated override
-        remove_version_keys "docker-compose.override.yml"
-    else
-        print_info "No database services needed - skipping override file generation"
-    fi
-}
-
 # Build and deploy
 deploy_containers() {
     print_header "🚀 Building and Deploying Containers"
@@ -4364,11 +4295,6 @@ deploy_containers() {
     print_info "Build verbosity: $BUILD_VERBOSITY (set with --build-verbosity or --verbose-build)"
     # Always include selected compose file
     local compose_cmd=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
-
-    # Host network mode removed. Use standard compose override if present.
-    if [ -f docker-compose.override.yml ]; then
-        compose_cmd+=( -f docker-compose.override.yml )
-    fi
 
     # Registry deployment: pull pre-built images instead of building locally
     if [ "$USE_REGISTRY" = "true" ]; then
@@ -4456,6 +4382,18 @@ EOF
         ORCA_ASSET_IMAGE=${ORCA_ASSET_IMAGE:-}
         ORCA_ASSET_PATH=${ORCA_ASSET_PATH:-}
         ORCA_ASSET_URL=${ORCA_ASSET_URL:-}
+
+        # Clean directories with literal backslashes created by dotnet ef on WSL.
+        # These cannot be excluded by .dockerignore (backslash is an escape char in Go filepath.Match)
+        # and cause MSB3552 "Resource file **/*.resx cannot be found" during Docker builds.
+        local backslash_dirs
+        backslash_dirs=$(find ./src -type d -name '*\*' 2>/dev/null || true)
+        if [ -n "$backslash_dirs" ]; then
+            print_info "Cleaning dotnet ef backslash directories from build context..."
+            echo "$backslash_dirs" | while IFS= read -r dir; do
+                rm -rf "$dir"
+            done
+        fi
 
         # Prepare a temporary build_context folder that will be used by docker compose build
         BUILD_CTX_DIR="./.tmp_build_context"
@@ -4684,9 +4622,6 @@ EOF
             local seed_cmd=("")
             # Build a minimal compose command for core infra
             local infra_compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
-            if [ -f docker-compose.override.yml ]; then
-                infra_compose+=( -f docker-compose.override.yml )
-            fi
 
             # Decide which services to start
             local infra_services=(database)
@@ -4939,7 +4874,7 @@ wait_for_database() {
         print_error "- Verify SA_PASSWORD in .env is correct: grep MSSQL_SA_PASSWORD .env"
         print_error ""
         print_error "Try restarting with a new strong password:"
-        print_error "  rm .env docker-compose.override.yml 2>/dev/null"
+        print_error "  rm .env 2>/dev/null"
         print_error "  ./scripts/deploy-docker.sh  # Let script generate new password"
     fi
     
@@ -5979,9 +5914,6 @@ display_final_info() {
     echo -e "${GREEN}Configuration Files:${NC}"
     echo -e "${BLUE}  • Environment: $ENV_FILE${NC}"
     echo -e "${BLUE}  • Compose: $COMPOSE_FILE${NC}"
-    if [ -f "docker-compose.override.yml" ]; then
-        echo -e "${BLUE}  • Override: docker-compose.override.yml${NC}"
-    fi
     echo
     
     # Troubleshooting section
@@ -6073,9 +6005,12 @@ redeploy_existing() {
     generate_env_file
     generate_react_env_production
     
-    # Use existing compose override if it exists
+    # Remove stale legacy override file - the compose-generator produces a complete
+    # docker-compose.yml that already includes the database service configuration.
+    # A leftover docker-compose.override.yml would add a conflicting duplicate service.
     if [ -f "docker-compose.override.yml" ]; then
-        print_info "Using existing docker-compose.override.yml"
+        print_info "Removing stale docker-compose.override.yml (database already in generated compose file)"
+        rm -f docker-compose.override.yml
     fi
     
     # Pre-create external storage directories with proper ownership on the host
@@ -6447,12 +6382,20 @@ main() {
     # Determine output directory (CLI option or default to current directory)
     local output_dir="${CLI_OUTPUT_DIR:-$(pwd)}"
 
-    if generate_deployment_config "$ARCHITECTURE" "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "$INCLUDE_DISCOVERY" "$output_dir"; then
-        print_success "Using new compose generator"
-    else
-        print_warning "Falling back to legacy compose generation"
-        generate_compose_override
+    # Remove any stale docker-compose.override.yml left by previous deployments.
+    # The compose-generator produces a single complete docker-compose.yml with the
+    # database service already configured; an override would create a conflicting
+    # duplicate service on the same port.
+    if [ -f docker-compose.override.yml ]; then
+        print_info "Removing stale docker-compose.override.yml (database already in generated compose file)"
+        rm -f docker-compose.override.yml
     fi
+
+    if ! generate_deployment_config "$ARCHITECTURE" "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "$INCLUDE_DISCOVERY" "$output_dir"; then
+        print_error "Failed to generate deployment configuration. Cannot proceed."
+        exit 1
+    fi
+    print_success "Deployment configuration generated successfully"
 
     # Optional prepull for Apple Silicon or slow networks: pull common base images
     prepull_images() {

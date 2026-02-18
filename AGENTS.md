@@ -2,6 +2,20 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Installation
+
+If `bd` is not installed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+```
+
+Then ensure it's on your PATH (add to `~/.bashrc`):
+
+```bash
+export PATH="$PATH:$HOME/.local/bin"
+```
+
 ## Quick Reference
 
 ```bash
