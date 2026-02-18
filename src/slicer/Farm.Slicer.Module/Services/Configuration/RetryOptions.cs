@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services.JobDispatch;
+﻿namespace Farm.Slicer.Module.Services.Configuration;
 
 /// <summary>
 /// Configuration options for job dispatch retry behavior

@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Tests.Services;
 using Farm.Slicer.Module.Tests.TestUtils;
 using Farm.Web.Api.Services.SlicerServices;

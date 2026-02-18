@@ -2,6 +2,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Configuration;
 using Farm.Web.Api.Services.IO;
 using Microsoft.Extensions.Options;
 

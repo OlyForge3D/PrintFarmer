@@ -1,9 +1,11 @@
 ﻿using System.Text.RegularExpressions;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
+using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 
-namespace Farm.Web.Api.Services.Slicing;
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// Maps OrcaSlicer bundle presets to PrintFarmer catalog entities using fuzzy matching and confidence scoring.

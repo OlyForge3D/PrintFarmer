@@ -1,8 +1,10 @@
 ﻿using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Configuration;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Slicer.Module.Api;
@@ -25,12 +27,28 @@ public static class SlicerApiExtensions
     }
 
     /// <summary>
-    /// Registers slicer API-layer services (SignalR notifiers) into the DI container.
+    /// Registers slicer API-layer services (SignalR notifiers, job dispatch, profile mapping) into the DI container.
     /// </summary>
-    public static IServiceCollection AddSlicerApiServices(this IServiceCollection services)
+    public static IServiceCollection AddSlicerApiServices(this IServiceCollection services, IConfiguration configuration)
     {
+        // SignalR notifiers
         _ = services.AddSingleton<ISlicerProgressNotifier, SignalRSlicerProgressNotifier>();
         _ = services.AddScoped<ISliceJobEventService, SliceJobEventService>();
+
+        // Profile mapping and export
+        _ = services.AddScoped<IOrcaPresetMappingService, OrcaPresetMappingService>();
+        _ = services.AddScoped<IOrcaBundleExportService, OrcaBundleExportService>();
+
+        // Job dispatch
+        _ = services.AddScoped<ISlicerJobDispatcherService, JobDispatcherService>();
+        _ = services.AddSingleton(sp =>
+        {
+            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
+            RetryOptions opts = new RetryOptions();
+            cfg.GetSection("JobDispatchRetry").Bind(opts);
+            return opts;
+        });
+
         return services;
     }
 

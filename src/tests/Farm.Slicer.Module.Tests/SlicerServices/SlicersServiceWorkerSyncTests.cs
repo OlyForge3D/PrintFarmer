@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Hubs;
+using Farm.Slicer.Module.Services.Metrics;
 using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Slicing;
 using FluentAssertions;

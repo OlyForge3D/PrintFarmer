@@ -1,27 +1,27 @@
 ﻿using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
-using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
-using Farm.Web.Api.Services.Slicing;
+using Farm.Slicer.Module.Services.Configuration;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.JobDispatch;
+namespace Farm.Slicer.Module.Api.Services;
 
 public class JobDispatcherService(
     ISliceJobRepository jobRepository,
     IWorkerRepository workerRepository,
     ISliceJobEventService eventService,
-    IUnifiedLoggingService logger,
+    ILogger<JobDispatcherService> logger,
     IHttpClientFactory httpClientFactory,
-    RetryOptions retryOptions) : IJobDispatcherService, ISlicerJobDispatcherService
+    RetryOptions retryOptions) : ISlicerJobDispatcherService
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
     private readonly IWorkerRepository _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
     private readonly ISliceJobEventService _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<JobDispatcherService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
     private readonly RetryOptions _retryOptions = retryOptions ?? throw new ArgumentNullException(nameof(retryOptions));
 

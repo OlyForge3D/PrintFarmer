@@ -1,13 +1,14 @@
 ﻿using System.Linq;
 using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
-using Farm.Infrastructure.Repositories.Filament;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 
-namespace Farm.Web.Api.Services.Slicing;
+namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
 /// Exports PrintFarmer profiles to OrcaSlicer config bundle JSON format.

@@ -34,7 +34,6 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.StorageManagement;
@@ -449,10 +448,6 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterSlicingServices(IServiceCollection services, IConfiguration configuration)
     {
-        // Metrics
-        _ = services.AddSingleton<Services.Slicing.SliceJobMetrics>();
-        _ = services.AddSingleton<Services.Slicing.SlicerServiceMetrics>();
-
         // Configuration
         _ = services.Configure<Services.Workers.WorkerAuthSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.WorkerAuthSettings.SectionName));
         _ = services.AddSingleton<Farm.Slicer.Module.Services.IWorkerAuthService, Services.Workers.WorkerAuthService>();
@@ -461,23 +456,10 @@ public static class ServiceCollectionExtensions
         // Core slicing services
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicersService, SlicersService>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.IProfilesService, ProfilesService>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaPresetMappingService, Services.Slicing.OrcaPresetMappingService>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.IOrcaBundleExportService, Services.Slicing.OrcaBundleExportService>();
 
         // Job queue and orchestration
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
-        _ = services.AddScoped<IJobDispatcherService, JobDispatcherService>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerJobDispatcherService>(sp => sp.GetRequiredService<IJobDispatcherService>() as Farm.Slicer.Module.Services.ISlicerJobDispatcherService ?? throw new InvalidOperationException("JobDispatcherService must implement ISlicerJobDispatcherService"));
-
-        // Job dispatch retry options
-        _ = services.AddSingleton(sp =>
-        {
-            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
-            RetryOptions opts = new RetryOptions();
-            cfg.GetSection("JobDispatchRetry").Bind(opts);
-            return opts;
-        });
 
         // Submission and file storage
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicingSubmissionService, Services.Slicing.SlicingSubmissionService>();

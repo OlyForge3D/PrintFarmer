@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.JobDispatch;
-using Farm.Web.Api.Services.Slicing;
+using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.Services.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Slicing;
@@ -178,27 +179,13 @@ public class JobDispatcherServiceTests
         public Task NotifyJobCancelledAsync(SliceJob job, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
-    private class StubLogger : IUnifiedLoggingService
-    {
-        public void LogDebug(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-        public void LogInformation(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogWarning(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-        public void LogError(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-        public void LogCritical(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-        public void LogWithContext(Microsoft.Extensions.Logging.LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null) { }
-    }
-
     [Fact]
     public async Task FindBestWorkerForJobAsync_PrefersCapabilityMatch()
     {
         StubSliceJobRepository jobRepo = new StubSliceJobRepository();
         StubWorkerRepository workerRepo = new StubWorkerRepository();
         StubSliceJobEventService evtService = new StubSliceJobEventService();
-        StubLogger logger = new StubLogger();
+        ILogger<JobDispatcherService> logger = NullLogger<JobDispatcherService>.Instance;
         DefaultHttpClientFactory httpFactory = new DefaultHttpClientFactory();
         RetryOptions retryOptions = new RetryOptions();
         JobDispatcherService dispatcher = new JobDispatcherService(jobRepo, workerRepo, evtService, logger, httpFactory, retryOptions);

@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Services.Slicing;
+﻿using Farm.Slicer.Module.Services.Metrics;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Services.Slicing;

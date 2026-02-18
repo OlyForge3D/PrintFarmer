@@ -7,6 +7,7 @@ using Farm.Infrastructure.Settings;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Metrics;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
