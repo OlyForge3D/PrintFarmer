@@ -1,8 +1,10 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Catalog;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 
-namespace Farm.Web.Api.Services.Adapters;
+namespace Farm.Slicer.Module.Api.Services.Adapters;
 
 /// <summary>
 /// Adapter bridging the module's <see cref="ICatalogServiceAdapter"/> to

@@ -1,12 +1,15 @@
 ﻿using Farm.Infrastructure.Settings;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.Api.Services.Adapters;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
+using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api;
 
@@ -66,6 +69,10 @@ public static class SlicerApiExtensions
             return opts;
         });
 
+        // Host-independent adapters (bridge module interfaces → infrastructure services)
+        _ = services.AddSingleton<IRateLimitService, ModuleRateLimitAdapter>();
+        _ = services.AddScoped<ICatalogServiceAdapter, ModuleCatalogServiceAdapter>();
+
         return services;
     }
 
@@ -81,5 +88,48 @@ public static class SlicerApiExtensions
         _ = endpoints.MapHub<SlicerHub>("/hubs/slicer-registry");
         _ = endpoints.MapHub<SlicerProgressHub>("/hubs/slicers");
         return endpoints;
+    }
+
+    /// <summary>
+    /// Configures artifact storage metrics thresholds and alert subscriptions.
+    /// Call after the application is built (requires <see cref="IServiceProvider"/>).
+    /// </summary>
+    public static void ConfigureSlicerMetrics(this WebApplication app)
+    {
+        try
+        {
+            ArtifactStorageSettings settings = app.Services
+                .GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
+            ArtifactsMetrics metrics = app.Services.GetRequiredService<ArtifactsMetrics>();
+
+            if (!settings.EnableStorageAlerts)
+            {
+                return;
+            }
+
+            metrics.SetThresholds(settings.StorageWarningThresholdBytes, settings.StorageCriticalThresholdBytes);
+
+            metrics.ThresholdExceeded += (_, e) =>
+            {
+                ILogger? logger = app.Services.GetService<ILoggerFactory>()?.CreateLogger("Farm.Slicer.Module.Api");
+                string levelStr = e.Level switch
+                {
+                    SlicerStorageThresholdLevel.Warning => "WARNING",
+                    SlicerStorageThresholdLevel.Critical => "CRITICAL",
+                    _ => "UNKNOWN"
+                };
+
+                logger?.LogWarning(
+                    "[ArtifactStorage] {Level} threshold exceeded: {CurrentGB:F2} GB (Warning: {WarningGB:F2} GB, Critical: {CriticalGB:F2} GB)",
+                    levelStr,
+                    e.CurrentBytes / (1024.0 * 1024 * 1024),
+                    e.WarningThreshold / (1024.0 * 1024 * 1024),
+                    e.CriticalThreshold / (1024.0 * 1024 * 1024));
+            };
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "[Startup] Failed to configure artifact storage thresholds");
+        }
     }
 }

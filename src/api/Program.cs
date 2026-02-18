@@ -12,7 +12,6 @@ using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
-using Farm.Slicer.Module.Services.Metrics;
 using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
@@ -100,6 +99,7 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 // During transition both AppDbContext and SlicerDbContext coexist sharing the same underlying database.
 builder.Services.AddSlicerModule(builder.Configuration);
 builder.Services.AddSlicerApiServices(builder.Configuration);
+builder.Services.AddSlicerHostAdapters();
 
 // Register SystemLog logger provider to capture all application logs to the database
 builder.Logging.AddSystemLogProvider(LogLevel.Information);
@@ -231,39 +231,7 @@ catch
 }
 
 // Configure artifact storage metrics thresholds and alerts
-try
-{
-    ArtifactStorageSettings artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
-    ArtifactsMetrics artifactMetrics = app.Services.GetRequiredService<ArtifactsMetrics>();
-
-    if (artifactSettings.EnableStorageAlerts)
-    {
-        artifactMetrics.SetThresholds(artifactSettings.StorageWarningThresholdBytes, artifactSettings.StorageCriticalThresholdBytes);
-
-        // Subscribe to threshold events for logging
-        artifactMetrics.ThresholdExceeded += (sender, e) =>
-        {
-            ILogger<Program>? logger = app.Services.GetService<ILogger<Program>>();
-            string levelStr = e.Level switch
-            {
-                Farm.Slicer.Module.Services.SlicerStorageThresholdLevel.Warning => "WARNING",
-                Farm.Slicer.Module.Services.SlicerStorageThresholdLevel.Critical => "CRITICAL",
-                _ => "UNKNOWN"
-            };
-
-            logger?.LogWarning(
-                "[ArtifactStorage] {Level} threshold exceeded: {CurrentGB:F2} GB (Warning: {WarningGB:F2} GB, Critical: {CriticalGB:F2} GB)",
-                levelStr,
-                e.CurrentBytes / (1024.0 * 1024 * 1024),
-                e.WarningThreshold / (1024.0 * 1024 * 1024),
-                e.CriticalThreshold / (1024.0 * 1024 * 1024));
-        };
-    }
-}
-catch (Exception ex)
-{
-    app.Logger.LogWarning(ex, "[Startup] Failed to configure artifact storage thresholds");
-}
+app.ConfigureSlicerMetrics();
 
 // NOTE: Settings initialization from environment variables is performed
 // during database initialization in ProgramHelpers.InitializeDatabaseAsync

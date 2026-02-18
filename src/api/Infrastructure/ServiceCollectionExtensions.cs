@@ -22,10 +22,6 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
-using Farm.Slicer.Module.Contracts.Libraries;
-using Farm.Slicer.Module.Data.Repositories;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Extensions;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
@@ -166,7 +162,11 @@ public static class ServiceCollectionExtensions
         RegisterRateLimitingServices(services);
         RegisterImportingServices(services);
         RegisterCatalogServices(services);
-        RegisterSlicingServices(services, configuration);
+
+        // Print job queue services (API-owned, not slicer-module)
+        _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
+        _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
+
         _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
         RegisterBackendClientPlugins(services);  // Register backend client plugins FIRST - they register HTTP clients
         RegisterHttpClients(services);
@@ -174,7 +174,6 @@ public static class ServiceCollectionExtensions
         RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
         RegisterSetupAndSchemaServices(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
-        RegisterSlicerModuleAdapters(services);
 
         return services;
     }
@@ -275,14 +274,7 @@ public static class ServiceCollectionExtensions
         // Schema health repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Infrastructure.Repositories.SchemaHealth.SchemaHealthRepository>();
 
-        // Slicing repositories
-        _ = services.AddScoped<IProfilesRepository, EfProfilesRepository>();
-        _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
-        _ = services.AddScoped<IMachineModelProfileRepository, EfMachineModelProfileRepository>();
-        _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
-        _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
-        _ = services.AddScoped<ISlicersRepository, EfSlicersRepository>();
-        _ = services.AddScoped<ISliceJobRepository, EfSliceJobRepository>();
+        // Slicer repositories are registered by AddSlicerModule() in Farm.Slicer.Module
 
         // Task repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tasks.IUserTaskRepository, Farm.Infrastructure.Repositories.Tasks.EfUserTaskRepository>();
@@ -440,17 +432,6 @@ public static class ServiceCollectionExtensions
 
     #endregion
 
-    #region Slicing
-
-    private static void RegisterSlicingServices(IServiceCollection services, IConfiguration configuration)
-    {
-        // Print job queue services (API-owned, not slicer-module)
-        _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
-        _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
-    }
-
-    #endregion
-
     #region Printer Services
 
     private static void RegisterPrinterServices(IServiceCollection services)
@@ -545,7 +526,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IStoredFileOperationsService, StoredFileOperationsService>();
 
         // Model services
-        _ = services.AddScoped<Farm.Slicer.Module.Services.IModel3DFileService, Services.Model.Model3DFileService>();
         _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
         _ = services.AddSingleton<IVirusScanner, ClamAVVirusScanner>();
         _ = services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();
@@ -571,27 +551,6 @@ public static class ServiceCollectionExtensions
         // Gcode upload settings and quota - use persisted settings from ISettingsService
         _ = services.AddScoped<IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();
         _ = services.AddScoped<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
-    }
-
-    #endregion
-
-    #region Slicer Module Adapters
-
-    /// <summary>
-    /// Registers adapter implementations that bridge slicer module interfaces to API/infra services.
-    /// These replace the DispatchProxy stubs in <see cref="Farm.Web.Api.Startup.SlicerModuleStubRegistrations"/>.
-    /// </summary>
-    private static void RegisterSlicerModuleAdapters(IServiceCollection services)
-    {
-        // API temp-path provider (needed by the module adapter)
-        _ = services.AddSingleton<Infrastructure.Temp.ITempPathProvider, Infrastructure.Temp.DefaultTempPathProvider>();
-
-        // Module adapters (bridge module interfaces → API implementations)
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerFileManagementService, Services.Adapters.ModuleFileManagementAdapter>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerStoredFileOpsService, Services.Adapters.ModuleStoredFileOpsAdapter>();
-        _ = services.AddSingleton<Farm.Slicer.Module.Services.ISlicerTempPathProvider, Services.Adapters.ModuleTempPathAdapter>();
-        _ = services.AddSingleton<Farm.Slicer.Module.Services.IRateLimitService, Services.Adapters.ModuleRateLimitAdapter>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.ICatalogServiceAdapter, Services.Adapters.ModuleCatalogServiceAdapter>();
     }
 
     #endregion
@@ -641,11 +600,6 @@ public static class ServiceCollectionExtensions
     {
         // Background service monitor - always register as it's used for status reporting
         _ = services.AddSingleton<Services.Background.IBackgroundServiceMonitor, Services.Background.BackgroundServiceMonitor>();
-
-        // Forward the module's IHostedServiceMonitor to the same BackgroundServiceMonitor singleton
-        // so that slicer module hosted services report to the unified monitor.
-        _ = services.AddSingleton<Farm.Slicer.Module.Services.IHostedServiceMonitor>(sp =>
-            (Farm.Slicer.Module.Services.IHostedServiceMonitor)sp.GetRequiredService<Services.Background.IBackgroundServiceMonitor>());
 
         if (!disableBackgroundServices)
         {

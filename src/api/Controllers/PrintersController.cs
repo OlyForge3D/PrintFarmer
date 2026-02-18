@@ -46,7 +46,7 @@ public class PrintersController(
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
-    Farm.Slicer.Module.Services.ISlicersService slicersService,
+    Farm.Slicer.Module.Services.ISlicersService? slicersService,
     IPrinterVersionCache printerVersionCache)
     : ControllerBase
 {
@@ -57,7 +57,7 @@ public class PrintersController(
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly Farm.Slicer.Module.Services.ISlicersService _slicersService = slicersService;
+    private readonly Farm.Slicer.Module.Services.ISlicersService? _slicersService = slicersService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed
@@ -895,15 +895,18 @@ public class PrintersController(
         {
             try
             {
-                int imported = await _slicersService.ImportProfilesForModelAsync(
-                    modelId.Value,
-                    modelName,
-                    manufacturerName,
-                    ct);
-
-                if (imported > 0)
+                if (_slicersService is not null)
                 {
-                    _logger.LogInformation($"Imported {imported} slicer profiles for {modelName}");
+                    int imported = await _slicersService.ImportProfilesForModelAsync(
+                        modelId.Value,
+                        modelName,
+                        manufacturerName,
+                        ct);
+
+                    if (imported > 0)
+                    {
+                        _logger.LogInformation($"Imported {imported} slicer profiles for {modelName}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -1029,7 +1032,7 @@ public class PrintersController(
                 _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
 
                 // Import slicer profiles for this printer's model (pull-based, on-demand import)
-                if (createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
+                if (_slicersService is not null && createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
                 {
                     try
                     {

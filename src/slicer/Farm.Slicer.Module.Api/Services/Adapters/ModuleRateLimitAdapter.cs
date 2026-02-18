@@ -3,7 +3,7 @@ using InfraResult = Farm.Infrastructure.Services.RateLimiting.RateLimitResult;
 using ModuleIRateLimit = Farm.Slicer.Module.Services.IRateLimitService;
 using ModuleResult = Farm.Slicer.Module.Services.SlicerRateLimitResult;
 
-namespace Farm.Web.Api.Services.Adapters;
+namespace Farm.Slicer.Module.Api.Services.Adapters;
 
 /// <summary>
 /// Bridges <see cref="Farm.Slicer.Module.Services.IRateLimitService"/> (module) to the

@@ -8,7 +8,8 @@ global using Farm.Infrastructure.Contracts.SignalR;
 global using Farm.Infrastructure.Contracts.Workers;
 global using Farm.Settings;
 
-// Slicer module namespaces (types migrated from infra to module)
+// Slicer module domain types used by API service implementations (adapters, file services).
+// These remain as global usings until those implementations move to the slicer module (bead 1.5).
 // NOTE: Farm.Slicer.Module.Services is NOT global — too many adapter bridge collisions
 // (IRateLimitService, IStoredFileOperationsService, ITempPathProvider, etc.).
 // Import it per-file in slicer-related files only.
