@@ -125,7 +125,10 @@ public static class SlicerModuleExtensions
         _ = services.AddScoped<ISlicerProfileParsingService>(sp => sp.GetRequiredService<IProfileParsingService>() as ISlicerProfileParsingService
             ?? throw new InvalidOperationException("ProfileParsingService must implement ISlicerProfileParsingService"));
 
-        // Plugin discovery runs during startup via extension method DiscoverAndRegisterSlicerPlugins()
+        // Discover slicer engine plugins (OrcaSlicer, PrusaSlicer, etc.) and build registry
+        _ = services
+            .DiscoverAndRegisterSlicerPlugins()
+            .AddSlicerRegistry();
     }
 
     /// <summary>
@@ -149,6 +152,8 @@ public static class SlicerModuleExtensions
             configuration.GetSection(StaleWorkerCleanupSettings.SectionName));
         _ = services.Configure<SlicerArtifactStorageSettings>(
             configuration.GetSection(SlicerArtifactStorageSettings.SectionName));
+        _ = services.Configure<Farm.Slicer.Module.Settings.SlicerSettings>(
+            configuration.GetSection(Farm.Slicer.Module.Settings.SlicerSettings.SectionName));
     }
 
     /// <summary>
@@ -157,6 +162,9 @@ public static class SlicerModuleExtensions
     /// </summary>
     private static void AddSlicerHostedServices(IServiceCollection services, IConfiguration configuration)
     {
+        // Database initialization (one-shot, runs EnsureCreated on startup)
+        _ = services.AddHostedService<SlicerDbInitializationHostedService>();
+
         _ = services.AddHostedService<WorkerHealthMonitorService>();
         _ = services.AddHostedService<JobDispatchingService>();
 

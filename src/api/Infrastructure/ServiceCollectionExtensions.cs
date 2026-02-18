@@ -444,23 +444,9 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterSlicingServices(IServiceCollection services, IConfiguration configuration)
     {
-        // Configuration
-        _ = services.Configure<Farm.Slicer.Module.Services.Configuration.WorkerAuthSettings>(configuration.GetSection(Farm.Slicer.Module.Services.Configuration.WorkerAuthSettings.SectionName));
-        _ = services.AddSingleton<Farm.Slicer.Module.Services.IWorkerAuthService, Farm.Slicer.Module.Api.Services.WorkerAuthService>();
-        _ = services.Configure<Farm.Slicer.Module.Settings.SlicerSettings>(configuration.GetSection(Farm.Slicer.Module.Settings.SlicerSettings.SectionName));
-
-        // Core slicing services — registered in SlicerApiExtensions.AddSlicerApiServices()
-
-        // Job queue and orchestration
+        // Print job queue services (API-owned, not slicer-module)
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
-
-        // Submission and file storage — registered in SlicerApiExtensions.AddSlicerApiServices()
-
-        // Slicer Library Registration (plugin discovery)
-        _ = services
-            .DiscoverAndRegisterSlicerPlugins()
-            .AddSlicerRegistry();
     }
 
     #endregion

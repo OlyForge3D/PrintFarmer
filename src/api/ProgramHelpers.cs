@@ -332,22 +332,8 @@ namespace Farm.Web.Api
                 // SettingsService or SettingsInitializationService read/write operations that depend on DB tables.
                 await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
 
-                // Ensure SlicerDbContext schema exists alongside AppDbContext.
-                // Both DbContexts share the same database during the transition period.
-                // Only initialize when slicer module is enabled (AddSlicerModule registers SlicerDbContext).
-                if (app.Configuration.GetValue("Slicer:Enabled", true))
-                {
-                    try
-                    {
-                        Farm.Slicer.Module.Data.SlicerDbContext slicerDb = sp.GetRequiredService<Farm.Slicer.Module.Data.SlicerDbContext>();
-                        _ = await slicerDb.Database.EnsureCreatedAsync();
-                        logger.LogInformation("[Startup] SlicerDbContext schema ensured");
-                    }
-                    catch (Exception slicerEx)
-                    {
-                        app.Logger.LogWarning(slicerEx, "[Startup] SlicerDbContext schema initialization skipped (non-fatal)");
-                    }
-                }
+                // SlicerDbContext initialization is handled by SlicerDbInitializationHostedService
+                // registered in AddSlicerModule().
 
                 // After the DB schema exists and seeding has completed, apply environment-based settings initialization.
                 try
