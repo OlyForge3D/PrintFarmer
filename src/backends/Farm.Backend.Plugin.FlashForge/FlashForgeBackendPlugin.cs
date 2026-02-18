@@ -1,4 +1,4 @@
-using Farm.Backend.Plugin.Core;
+﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;

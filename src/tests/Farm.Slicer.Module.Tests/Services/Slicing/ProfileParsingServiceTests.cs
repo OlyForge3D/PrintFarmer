@@ -1,6 +1,6 @@
 ﻿using Farm.Web.Api.Services.Slicing;
-using ISlicerProfileParsingService = Farm.Web.Api.Services.Slicing.IProfileParsingService;
 using Xunit;
+using ISlicerProfileParsingService = Farm.Web.Api.Services.Slicing.IProfileParsingService;
 
 namespace Farm.Slicer.Module.Tests.Services.Slicing;
 

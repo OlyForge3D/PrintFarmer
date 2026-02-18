@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -98,16 +98,19 @@ namespace Farm.Slicer.Module.Tests
                 // FolderNode and other infra entities share the same in-memory DB.
                 ServiceDescriptor? appDbDescriptor = services.FirstOrDefault(d =>
                     d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-                if (appDbDescriptor != null) { services.Remove(appDbDescriptor); }
+                if (appDbDescriptor != null)
+                { services.Remove(appDbDescriptor); }
 
                 ServiceDescriptor? appFactoryDescriptor = services.FirstOrDefault(d =>
                     d.ServiceType == typeof(IDbContextFactory<AppDbContext>));
-                if (appFactoryDescriptor != null) { services.Remove(appFactoryDescriptor); }
+                if (appFactoryDescriptor != null)
+                { services.Remove(appFactoryDescriptor); }
 
                 ServiceDescriptor? appSingletonOpts = services.FirstOrDefault(d =>
                     d.ServiceType == typeof(DbContextOptions<AppDbContext>)
                     && d.Lifetime == ServiceLifetime.Singleton);
-                if (appSingletonOpts != null) { services.Remove(appSingletonOpts); }
+                if (appSingletonOpts != null)
+                { services.Remove(appSingletonOpts); }
 
                 services.AddDbContext<AppDbContext>(options =>
                 {
@@ -126,7 +129,9 @@ namespace Farm.Slicer.Module.Tests
                     AppDbContext appDb = scope2.ServiceProvider.GetRequiredService<AppDbContext>();
                     var appCreator = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)appDb).Instance
                         .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
-                    try { appCreator.CreateTables(); } catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
+                    try
+                    { appCreator.CreateTables(); }
+                    catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
                 }
             });
         }
@@ -233,7 +238,9 @@ namespace Farm.Slicer.Module.Tests
                 AppDbContext appContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var creator = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)appContext).Instance
                     .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
-                try { creator.CreateTables(); } catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
+                try
+                { creator.CreateTables(); }
+                catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
 
                 await SeedRootFoldersAsync(appContext);
             }

@@ -6,14 +6,14 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Api.Controllers.Slicing;
-using Farm.Web.Api.Services.FileManagement;
 using Farm.Slicer.Module.Services;
-using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
+using Farm.Web.Api.Services.FileManagement;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 
 namespace Farm.Web.Api.Services.Slicing;
 
@@ -29,7 +29,6 @@ public class SlicingSubmissionService(
     IUnifiedLoggingService logger,
     IStoredFileOperationsService fileOperations) : Farm.Slicer.Module.Services.ISlicingSubmissionService
 {
-    private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly IModel3DFileRepository _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
     private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
     private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));

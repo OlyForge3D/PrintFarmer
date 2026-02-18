@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
-using Farm.Slicer.Module.Services.Metrics;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
+using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

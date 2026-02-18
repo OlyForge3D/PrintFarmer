@@ -1,4 +1,4 @@
-namespace Farm.Settings;
+﻿namespace Farm.Settings;
 
 /// <summary>
 /// Specifies the type of input control to use for a settings property in the UI.

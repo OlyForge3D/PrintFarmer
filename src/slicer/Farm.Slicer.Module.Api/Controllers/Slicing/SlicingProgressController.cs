@@ -12,7 +12,6 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [Tags("Slicer Progress")]
 public class SlicingProgressController(ISlicerStoredFileOpsService fileOperations) : ControllerBase
 {
-
     /// <summary>
     /// Gets the current progress of all active slicing jobs.
     /// </summary>

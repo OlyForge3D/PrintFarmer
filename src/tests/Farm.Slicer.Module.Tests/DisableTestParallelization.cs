@@ -1,4 +1,4 @@
-using Xunit;
+﻿using Xunit;
 
 // Enable parallel test execution at the assembly level.
 // Unit tests will run in parallel for speed.

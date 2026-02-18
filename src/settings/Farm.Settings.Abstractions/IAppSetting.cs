@@ -1,4 +1,4 @@
-namespace Farm.Settings;
+﻿namespace Farm.Settings;
 
 /// <summary>
 /// Marker interface for AppSettings (runtime/configurable, persisted in DB).

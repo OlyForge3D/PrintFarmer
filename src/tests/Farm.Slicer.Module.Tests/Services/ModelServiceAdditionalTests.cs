@@ -1,29 +1,29 @@
 ﻿using System;
-using System.IO;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using System;
 using System.IO;
+using System.IO;
+using System.Security.Cryptography;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text;
+using System.Threading;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Repositories.UnitOfWork;
+using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.Tags;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
-using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
+using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 
 
 namespace Farm.Slicer.Module.Tests.Services

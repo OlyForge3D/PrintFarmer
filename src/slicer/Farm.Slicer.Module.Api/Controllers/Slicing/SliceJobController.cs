@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Slicer.Module.Contracts;

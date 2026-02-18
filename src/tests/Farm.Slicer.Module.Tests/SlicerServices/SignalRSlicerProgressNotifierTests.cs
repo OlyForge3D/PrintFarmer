@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Slicer.Module.Api.Hubs;
-using Farm.Web.Api.Services.SlicerServices;
 using Farm.Slicer.Module.Tests.TestUtils;
+using Farm.Web.Api.Services.SlicerServices;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 

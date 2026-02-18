@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -152,7 +152,9 @@ namespace Farm.Web.Api.Tests
                     Farm.Slicer.Module.Data.SlicerDbContext slicerDb = scope2.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Data.SlicerDbContext>();
                     var creator1 = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)slicerDb).Instance
                         .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
-                    try { creator1.CreateTables(); } catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
+                    try
+                    { creator1.CreateTables(); }
+                    catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
                 }
             });
         }
@@ -265,7 +267,9 @@ namespace Farm.Web.Api.Tests
                 Farm.Slicer.Module.Data.SlicerDbContext slicerContext = scope.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Data.SlicerDbContext>();
                 var creator2 = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)slicerContext).Instance
                     .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
-                try { creator2.CreateTables(); } catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
+                try
+                { creator2.CreateTables(); }
+                catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
 
                 // Seed root folders for gcode and models to match production behavior
                 await SeedRootFoldersAsync(context);

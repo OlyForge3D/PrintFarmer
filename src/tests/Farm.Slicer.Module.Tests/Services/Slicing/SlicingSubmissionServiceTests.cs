@@ -9,12 +9,12 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Slicing;
-using ISlicerStoredFileOpsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Moq;
 using Xunit;
+using ISlicerStoredFileOpsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 
 namespace Farm.Slicer.Module.Tests.Services.Slicing;
 

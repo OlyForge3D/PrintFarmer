@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Api.Hubs;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Api.Hubs;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.SignalR;

@@ -1,7 +1,7 @@
 ﻿using System.Text;
-using Farm.Web.Api.Services.SlicerServices;
 using Farm.Slicer.Module.Tests.Services;
 using Farm.Slicer.Module.Tests.TestUtils;
+using Farm.Web.Api.Services.SlicerServices;
 using Microsoft.Extensions.Options;
 using Moq;
 

@@ -1,4 +1,4 @@
-namespace Farm.Settings;
+﻿namespace Farm.Settings;
 
 /// <summary>
 /// Interface for settings classes that support validation.

@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Services;
+﻿using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 

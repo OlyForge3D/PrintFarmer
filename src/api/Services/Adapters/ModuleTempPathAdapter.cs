@@ -1,4 +1,4 @@
-using ApiITempPath = Farm.Web.Api.Infrastructure.Temp.ITempPathProvider;
+﻿using ApiITempPath = Farm.Web.Api.Infrastructure.Temp.ITempPathProvider;
 using ModuleITempPath = Farm.Slicer.Module.Services.ITempPathProvider;
 
 namespace Farm.Web.Api.Services.Adapters;
