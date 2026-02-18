@@ -1,14 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data;
-using Farm.Slicer.Module.Data.Repositories;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -16,11 +9,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
-using ISlicingSubmissionService = Farm.Slicer.Module.Services.ISlicingSubmissionService;
-using SlicingSubmissionResult = Farm.Slicer.Module.Services.SlicingSubmissionResult;
-using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
-using ProcessProfileDto = Farm.Slicer.Module.Dtos.ProcessProfileDto;
-using FilamentProfileDto = Farm.Slicer.Module.Dtos.FilamentProfileDto;
 
 namespace Farm.Slicer.Module.Tests.Integration;
 

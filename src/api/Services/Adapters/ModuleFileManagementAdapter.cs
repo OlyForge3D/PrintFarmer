@@ -1,10 +1,10 @@
-using ModuleIFileManagement = Farm.Slicer.Module.Services.IFileManagementService;
+using ModuleIFileManagement = Farm.Slicer.Module.Services.ISlicerFileManagementService;
 using Farm.Slicer.Module.Services;
 
 namespace Farm.Web.Api.Services.Adapters;
 
 /// <summary>
-/// Bridges <see cref="Farm.Slicer.Module.Services.IFileManagementService"/> (module) to the
+/// Bridges <see cref="Farm.Slicer.Module.Services.ISlicerFileManagementService"/> (module) to the
 /// API's <see cref="ISlicerFileStorage"/> for stream-based file storage and deletion.
 /// </summary>
 internal sealed class ModuleFileManagementAdapter(ISlicerFileStorage fileStorage) : ModuleIFileManagement

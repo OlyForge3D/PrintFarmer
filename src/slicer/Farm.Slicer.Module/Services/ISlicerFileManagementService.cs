@@ -4,7 +4,7 @@
 /// Adapter interface for general file management operations (upload, delete, move).
 /// The host application provides the implementation bridging to its storage infrastructure.
 /// </summary>
-public interface IFileManagementService
+public interface ISlicerFileManagementService
 {
     /// <summary>
     /// Stores a file from a stream.

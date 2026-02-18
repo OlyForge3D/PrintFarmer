@@ -4,27 +4,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Services;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Slicing;
-using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
-using ISlicerOrchestrator = Farm.Slicer.Module.Services.ISlicerOrchestrator;
-using SlicingJobRequest = Farm.Slicer.Module.Models.SlicingJobRequest;
-using SlicingJobResponse = Farm.Slicer.Module.Models.SlicingJobResponse;
-using SlicerEngineType = Farm.Slicer.Module.Models.SlicerEngineType;
-using SlicingJobStatus = Farm.Slicer.Module.Dtos.SlicingJobStatus;
-using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
-using SlicingSubmissionResult = Farm.Slicer.Module.Services.SlicingSubmissionResult;
-using MachineProfileDto = Farm.Slicer.Module.Dtos.MachineProfileDto;
-using ProcessProfileDto = Farm.Slicer.Module.Dtos.ProcessProfileDto;
-using FilamentProfileDto = Farm.Slicer.Module.Dtos.FilamentProfileDto;
+using ISlicerStoredFileOpsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
@@ -44,7 +29,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     private readonly Mock<ISlicerOrchestrator> _mockOrchestrator;
     private readonly Mock<IHostEnvironment> _mockEnvironment;
     private readonly Mock<IUnifiedLoggingService> _mockLogger;
-    private readonly Mock<IStoredFileOperationsService> _mockFileOperations;
+    private readonly Mock<ISlicerStoredFileOpsService> _mockFileOperations;
     private readonly SlicingSubmissionService _service;
     private readonly List<string> _tempFiles = new();
 
@@ -56,7 +41,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         _mockOrchestrator = new Mock<ISlicerOrchestrator>();
         _mockEnvironment = new Mock<IHostEnvironment>();
         _mockLogger = new Mock<IUnifiedLoggingService>();
-        _mockFileOperations = new Mock<IStoredFileOperationsService>();
+        _mockFileOperations = new Mock<ISlicerStoredFileOpsService>();
 
         _mockEnvironment.Setup(e => e.EnvironmentName).Returns("Production");
 

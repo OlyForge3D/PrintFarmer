@@ -13,7 +13,7 @@ public class IAppSettingTests
     [InlineData(typeof(GcodeUploadSettings))]
     [InlineData(typeof(SystemLogSettings))]
     [InlineData(typeof(SignalRSettings))]
-    [InlineData(typeof(SlicerSettings))]
+    [InlineData(typeof(Farm.Slicer.Module.Settings.SlicerSettings))]
     [InlineData(typeof(DatabaseSettings))]
     [InlineData(typeof(Farm.Web.Api.Services.OctoPrint.OctoPrintSettings))]
     public void CanSerializeAndDeserializeSettings(Type settingsType)

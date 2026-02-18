@@ -1,9 +1,5 @@
 ﻿using System;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 

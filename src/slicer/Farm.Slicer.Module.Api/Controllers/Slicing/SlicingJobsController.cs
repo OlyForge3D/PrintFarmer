@@ -17,8 +17,8 @@ public class SlicingJobsController(
     ILogger<SlicingJobsController> logger,
     ITempPathProvider tempPathProvider,
     ISlicerOrchestrator orchestrator,
-    IFileManagementService fileManagementService,
-    IStoredFileOperationsService fileOperations) : ControllerBase
+    ISlicerFileManagementService fileManagementService,
+    ISlicerStoredFileOpsService fileOperations) : ControllerBase
 {
     private readonly ITempPathProvider _tempPathProvider = tempPathProvider;
     private readonly ISlicerOrchestrator _orchestrator = orchestrator;

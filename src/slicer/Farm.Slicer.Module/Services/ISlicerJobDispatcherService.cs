@@ -5,7 +5,7 @@ namespace Farm.Slicer.Module.Services;
 /// <summary>
 /// Service for dispatching jobs to available workers based on capabilities and load balancing.
 /// </summary>
-public interface IJobDispatcherService
+public interface ISlicerJobDispatcherService
 {
     /// <summary>Attempt to dispatch the next queued job to an available worker.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>

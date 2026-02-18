@@ -3,7 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Contracts.Slicing.Libraries;
+using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicers.OrcaSlicer.v2_3_1;
 using FluentAssertions;
 using Xunit;

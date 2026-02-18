@@ -10,11 +10,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.Models;
@@ -22,6 +17,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
+using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
 using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
@@ -29,9 +25,6 @@ using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
 
-// Module DTO type aliases — service now returns module DTOs
-using Model3DUploadResultDto = Farm.Slicer.Module.Dtos.Model3DUploadResultDto;
-using Model3DValidationResultDto = Farm.Slicer.Module.Dtos.Model3DValidationResultDto;
 
 namespace Farm.Slicer.Module.Tests.Services
 {

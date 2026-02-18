@@ -16,7 +16,7 @@ public class JobDispatcherService(
     ISliceJobEventService eventService,
     IUnifiedLoggingService logger,
     IHttpClientFactory httpClientFactory,
-    RetryOptions retryOptions) : IJobDispatcherService
+    RetryOptions retryOptions) : IJobDispatcherService, ISlicerJobDispatcherService
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
     private readonly IWorkerRepository _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));

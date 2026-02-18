@@ -2,10 +2,6 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Hubs;
@@ -15,9 +11,6 @@ using Microsoft.AspNetCore.SignalR;
 using Moq;
 using Xunit;
 
-// Module DTO type aliases — service now returns module DTOs
-using ProcessProfileResponseDto = Farm.Slicer.Module.Dtos.ProcessProfileResponseDto;
-using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
 
 namespace Farm.Slicer.Module.Tests.Services
 {

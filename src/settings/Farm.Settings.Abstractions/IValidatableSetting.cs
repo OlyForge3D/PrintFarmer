@@ -1,6 +1,4 @@
-﻿using System.Threading.Tasks;
-
-namespace Farm.Infrastructure.Settings;
+namespace Farm.Settings;
 
 /// <summary>
 /// Interface for settings classes that support validation.
@@ -13,6 +11,4 @@ public interface IValidatableSetting
     /// </summary>
     /// <exception cref="System.ArgumentException">Thrown when validation fails.</exception>
     void Validate();
-
-    // Optionally: Task ValidateAsync();
 }

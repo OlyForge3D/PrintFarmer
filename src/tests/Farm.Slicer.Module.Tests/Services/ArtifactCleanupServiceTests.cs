@@ -2,14 +2,8 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data;
-using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Artifacts;
-using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;

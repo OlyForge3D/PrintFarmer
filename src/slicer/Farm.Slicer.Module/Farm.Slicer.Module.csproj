@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
+    <ProjectReference Include="../../settings/Farm.Settings.Abstractions/Farm.Settings.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

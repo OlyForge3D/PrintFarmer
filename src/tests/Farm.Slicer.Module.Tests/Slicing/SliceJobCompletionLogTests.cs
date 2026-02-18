@@ -1,16 +1,8 @@
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
-using Farm.Slicer.Module.Contracts;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data;
-using Farm.Slicer.Module.Data.Repositories;
-using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
-using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

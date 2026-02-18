@@ -1,6 +1,6 @@
-﻿using System;
+using System;
 
-namespace Farm.Infrastructure.Settings;
+namespace Farm.Settings;
 
 /// <summary>
 /// Attribute for defining settings group metadata. Apply to any settings class to define

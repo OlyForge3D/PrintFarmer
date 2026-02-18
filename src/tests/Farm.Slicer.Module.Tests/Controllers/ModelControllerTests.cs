@@ -4,9 +4,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Api.Controllers;
-using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -25,7 +23,7 @@ namespace Farm.Slicer.Module.Tests.Controllers
         {
             Mock<ILogger<Model3DFilesController>> mockLogger = new Mock<ILogger<Model3DFilesController>>();
             config ??= new Mock<IConfiguration>().Object;
-            Mock<IStoredFileOperationsService> mockFileOps = new Mock<IStoredFileOperationsService>();
+            Mock<ISlicerStoredFileOpsService> mockFileOps = new Mock<ISlicerStoredFileOpsService>();
             mockConverter ??= new Mock<I3MfToStlConversionService>();
 
             return new Model3DFilesController(

@@ -2,19 +2,11 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data;
-using Farm.Slicer.Module.Data.Repositories;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Slicing;
-using RegisterSlicerDto = Farm.Slicer.Module.Contracts.RegisterSlicerDto;
-using HeartbeatDto = Farm.Slicer.Module.Contracts.HeartbeatDto;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
@@ -45,14 +37,14 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
 
         private static SlicerServiceMetrics CreateMetrics() => new SlicerServiceMetrics();
 
-        private static IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> CreateMockSlicerSettings()
+        private static IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> CreateMockSlicerSettings()
         {
-            Farm.Infrastructure.Settings.SlicerSettings settings = new Farm.Infrastructure.Settings.SlicerSettings
+            Farm.Slicer.Module.Settings.SlicerSettings settings = new Farm.Slicer.Module.Settings.SlicerSettings
             {
                 MaxConcurrentJobs = 10, // High enough not to interfere with tests
                 MaxMemoryMb = 4096
             };
-            Mock<IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings>> mock = new Mock<IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings>>();
+            Mock<IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings>> mock = new Mock<IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings>>();
             _ = mock.Setup(m => m.CurrentValue).Returns(settings);
             return mock.Object;
         }
@@ -129,7 +121,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
             SlicerServiceMetrics metrics = CreateMetrics();
-            IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+            IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
@@ -185,7 +177,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
             SlicerServiceMetrics metrics = CreateMetrics();
-            IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+            IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
@@ -237,7 +229,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
             SlicerServiceMetrics metrics = CreateMetrics();
-            IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+            IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();

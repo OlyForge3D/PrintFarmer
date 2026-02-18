@@ -3,7 +3,7 @@
 /// <summary>
 /// Storage threshold severity levels.
 /// </summary>
-public enum StorageThresholdLevel
+public enum SlicerStorageThresholdLevel
 {
     /// <summary>Normal storage usage.</summary>
     Normal = 0,

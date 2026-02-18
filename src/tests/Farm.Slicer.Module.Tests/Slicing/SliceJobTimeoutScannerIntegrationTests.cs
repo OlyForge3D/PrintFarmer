@@ -2,13 +2,8 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Workers;
-using Farm.Slicer.Module.Tests.TestInfrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 

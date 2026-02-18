@@ -1,6 +1,6 @@
-﻿using System;
+using System;
 
-namespace Farm.Infrastructure.Settings;
+namespace Farm.Settings;
 
 /// <summary>
 /// Attribute for customizing the display and UI behavior of settings properties/classes in PrintFarmer.
@@ -62,11 +62,4 @@ public sealed class SettingDisplayAttribute : Attribute
     /// Indicates if the setting property is required in the UI.
     /// </summary>
     public bool Required { get; set; } = false;
-
-    /// <summary>
-    /// Creates a new instance of SettingDisplayAttribute.
-    /// </summary>
-    public SettingDisplayAttribute()
-    {
-    }
 }

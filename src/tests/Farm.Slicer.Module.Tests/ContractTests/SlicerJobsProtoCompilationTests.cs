@@ -1,5 +1,7 @@
 ﻿using Farm.Web.Api.Grpc;
 using Google.Protobuf; // For ToByteArray extension methods
+using SlicerEngineType = Farm.Web.Api.Grpc.SlicerEngineType;
+using WorkerStatus = Farm.Web.Api.Grpc.WorkerStatus;
 
 namespace Farm.Slicer.Module.Tests.ContractTests;
 

@@ -1,6 +1,6 @@
-﻿using System;
+using System;
 
-namespace Farm.Infrastructure.Settings;
+namespace Farm.Settings;
 
 /// <summary>
 /// Attribute to mark a class as an application setting (runtime, persisted in DB).

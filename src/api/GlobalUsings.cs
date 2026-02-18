@@ -6,6 +6,7 @@ global using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 global using Farm.Infrastructure.Contracts.Setup;
 global using Farm.Infrastructure.Contracts.SignalR;
 global using Farm.Infrastructure.Contracts.Workers;
+global using Farm.Settings;
 
 // Slicer module namespaces (types migrated from infra to module)
 // NOTE: Farm.Slicer.Module.Services is NOT global — too many adapter bridge collisions

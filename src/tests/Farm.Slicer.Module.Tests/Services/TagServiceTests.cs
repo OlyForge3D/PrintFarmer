@@ -1,10 +1,7 @@
 ﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
-using TagDto = Farm.Slicer.Module.Dtos.TagDto;
 using Farm.Web.Api.Services.Tags;
 using Moq;
 using Xunit;

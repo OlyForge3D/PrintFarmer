@@ -1,7 +1,7 @@
 using InfraIRateLimit = Farm.Infrastructure.Services.RateLimiting.IRateLimitService;
 using InfraResult = Farm.Infrastructure.Services.RateLimiting.RateLimitResult;
 using ModuleIRateLimit = Farm.Slicer.Module.Services.IRateLimitService;
-using ModuleResult = Farm.Slicer.Module.Services.RateLimitResult;
+using ModuleResult = Farm.Slicer.Module.Services.SlicerRateLimitResult;
 
 namespace Farm.Web.Api.Services.Adapters;
 

@@ -4,7 +4,7 @@
 /// Parses imported slicer profile JSON, extracts core metadata and produces a sanitized
 /// deterministic JSON string plus a stable SHA256 hash for deduplication.
 /// </summary>
-public interface IProfileParsingService
+public interface ISlicerProfileParsingService
 {
     /// <summary>
     /// Parses raw profile JSON, extracts all settings as flat key-value pairs,

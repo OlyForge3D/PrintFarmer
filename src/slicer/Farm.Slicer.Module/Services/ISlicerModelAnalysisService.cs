@@ -14,7 +14,7 @@ public record ModelAnalysisResult(double? DimensionX, double? DimensionY, double
 /// <summary>
 /// Service for analyzing 3D model files to extract metadata such as dimensions and triangle count.
 /// </summary>
-public interface IModelAnalysisService
+public interface ISlicerModelAnalysisService
 {
     /// <summary>
     /// Analyze model file to extract basic metadata such as dimensions and triangle count.

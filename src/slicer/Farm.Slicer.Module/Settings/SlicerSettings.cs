@@ -1,6 +1,7 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
+using Farm.Settings;
 
-namespace Farm.Infrastructure.Settings;
+namespace Farm.Slicer.Module.Settings;
 
 [AppSetting(SectionName)]
 [SettingGroup("Slicing", DisplayName = "Slicing", Description = "Slicer and G-code generation settings", Icon = "pf-icon-slicer", Order = 3)]
@@ -39,5 +40,3 @@ public class SlicerSettings : IAppSetting
     [JsonPropertyName("maxMemoryMb")]
     public int MaxMemoryMb { get; set; } = 1024;
 }
-
-// Use TempTargets from AppSettings.cs (sealed class)

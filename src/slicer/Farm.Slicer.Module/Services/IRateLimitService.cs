@@ -12,7 +12,7 @@ public interface IRateLimitService
     /// <param name="key">Rate limit key (e.g., user ID, IP address).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Result indicating whether the request is allowed.</returns>
-    Task<RateLimitResult> CheckAsync(string key, CancellationToken ct = default);
+    Task<SlicerRateLimitResult> CheckAsync(string key, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -20,4 +20,4 @@ public interface IRateLimitService
 /// </summary>
 /// <param name="IsAllowed">Whether the request is allowed.</param>
 /// <param name="RetryAfterSeconds">Seconds until the next allowed request, if rate limited.</param>
-public record RateLimitResult(bool IsAllowed, int? RetryAfterSeconds = null);
+public record SlicerRateLimitResult(bool IsAllowed, int? RetryAfterSeconds = null);

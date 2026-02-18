@@ -18,7 +18,7 @@ public class Model3DFilesController(
     ILogger<Model3DFilesController> logger,
     IModel3DFileService modelService,
     IConfiguration configuration,
-    IStoredFileOperationsService fileOperations,
+    ISlicerStoredFileOpsService fileOperations,
     I3MfToStlConversionService threeMfConverter) : ControllerBase
 {
     private readonly ILogger<Model3DFilesController> _logger = logger;

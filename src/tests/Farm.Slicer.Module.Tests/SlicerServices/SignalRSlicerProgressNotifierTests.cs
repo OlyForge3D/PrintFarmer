@@ -5,13 +5,6 @@ using Farm.Slicer.Module.Tests.TestUtils;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 
-using DistributedSlicingJob = Farm.Slicer.Module.Models.DistributedSlicingJob;
-using SlicingProgressUpdate = Farm.Slicer.Module.Models.SlicingProgressUpdate;
-using SlicingResult = Farm.Slicer.Module.Models.SlicingResult;
-using SlicingJobStatus = Farm.Slicer.Module.Dtos.SlicingJobStatus;
-using SlicerEngineType = Farm.Slicer.Module.Models.SlicerEngineType;
-using SlicerProfileDto = Farm.Slicer.Module.Dtos.SlicerProfileDto;
-using SlicingJobPriority = Farm.Slicer.Module.Models.SlicingJobPriority;
 
 namespace Farm.Slicer.Module.Tests.SlicerServices;
 

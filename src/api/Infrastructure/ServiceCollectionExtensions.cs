@@ -3,7 +3,7 @@ using System.Diagnostics;
 using AutoMapper;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Slicing.Libraries;
+using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain;
@@ -456,7 +456,7 @@ public static class ServiceCollectionExtensions
         // Configuration
         _ = services.Configure<Services.Workers.WorkerAuthSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.WorkerAuthSettings.SectionName));
         _ = services.AddSingleton<Farm.Slicer.Module.Services.IWorkerAuthService, Services.Workers.WorkerAuthService>();
-        _ = services.Configure<Farm.Infrastructure.Settings.SlicerSettings>(configuration.GetSection(Farm.Infrastructure.Settings.SlicerSettings.SectionName));
+        _ = services.Configure<Farm.Slicer.Module.Settings.SlicerSettings>(configuration.GetSection(Farm.Slicer.Module.Settings.SlicerSettings.SectionName));
 
         // Core slicing services
         _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicersService, SlicersService>();
@@ -474,6 +474,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
         _ = services.AddScoped<IJobDispatcherService, JobDispatcherService>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerJobDispatcherService>(sp => sp.GetRequiredService<IJobDispatcherService>() as Farm.Slicer.Module.Services.ISlicerJobDispatcherService ?? throw new InvalidOperationException("JobDispatcherService must implement ISlicerJobDispatcherService"));
 
         // Job dispatch retry options
         _ = services.AddSingleton(sp =>
@@ -650,8 +651,8 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Infrastructure.Temp.ITempPathProvider, Infrastructure.Temp.DefaultTempPathProvider>();
 
         // Module adapters (bridge module interfaces → API implementations)
-        _ = services.AddScoped<Farm.Slicer.Module.Services.IFileManagementService, Services.Adapters.ModuleFileManagementAdapter>();
-        _ = services.AddScoped<Farm.Slicer.Module.Services.IStoredFileOperationsService, Services.Adapters.ModuleStoredFileOpsAdapter>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerFileManagementService, Services.Adapters.ModuleFileManagementAdapter>();
+        _ = services.AddScoped<Farm.Slicer.Module.Services.ISlicerStoredFileOpsService, Services.Adapters.ModuleStoredFileOpsAdapter>();
         _ = services.AddSingleton<Farm.Slicer.Module.Services.ITempPathProvider, Services.Adapters.ModuleTempPathAdapter>();
         _ = services.AddSingleton<Farm.Slicer.Module.Services.IRateLimitService, Services.Adapters.ModuleRateLimitAdapter>();
         _ = services.AddScoped<Farm.Slicer.Module.Services.ICatalogServiceAdapter, Services.Adapters.ModuleCatalogServiceAdapter>();

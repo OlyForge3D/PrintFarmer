@@ -1,20 +1,10 @@
 ﻿using System;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Slicing;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-using ISlicersService = Farm.Slicer.Module.Services.ISlicersService;
-using RegisterSlicerDto = Farm.Slicer.Module.Contracts.RegisterSlicerDto;
-using HeartbeatDto = Farm.Slicer.Module.Contracts.HeartbeatDto;
 
 namespace Farm.Slicer.Module.Tests.Integration;
 

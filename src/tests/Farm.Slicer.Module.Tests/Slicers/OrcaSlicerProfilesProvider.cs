@@ -1,5 +1,5 @@
 ﻿using System.Text.Json;
-using Farm.Infrastructure.Contracts.Slicing.Libraries;
+using Farm.Slicer.Module.Contracts.Libraries;
 
 namespace Farm.Slicer.Module.Tests.Slicers;
 

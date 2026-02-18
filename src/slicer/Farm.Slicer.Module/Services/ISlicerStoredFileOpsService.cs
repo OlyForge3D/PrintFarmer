@@ -4,7 +4,7 @@
 /// Adapter interface for stored file operations (reading, path resolution).
 /// The host application provides the implementation bridging to its storage infrastructure.
 /// </summary>
-public interface IStoredFileOperationsService
+public interface ISlicerStoredFileOpsService
 {
     /// <summary>
     /// Gets the physical file path for a stored file by its ID.

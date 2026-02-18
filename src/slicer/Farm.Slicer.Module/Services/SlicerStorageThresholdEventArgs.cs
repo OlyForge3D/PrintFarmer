@@ -7,14 +7,14 @@
 /// <param name="currentBytes">Current total storage in bytes.</param>
 /// <param name="warningThreshold">Configured warning threshold in bytes.</param>
 /// <param name="criticalThreshold">Configured critical threshold in bytes.</param>
-public sealed class StorageThresholdEventArgs(
-    StorageThresholdLevel level,
+public sealed class SlicerStorageThresholdEventArgs(
+    SlicerStorageThresholdLevel level,
     long currentBytes,
     long warningThreshold,
     long criticalThreshold) : EventArgs
 {
     /// <summary>Gets the threshold severity level.</summary>
-    public StorageThresholdLevel Level { get; } = level;
+    public SlicerStorageThresholdLevel Level { get; } = level;
 
     /// <summary>Gets the current total storage in bytes.</summary>
     public long CurrentBytes { get; } = currentBytes;

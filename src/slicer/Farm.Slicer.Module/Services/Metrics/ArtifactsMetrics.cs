@@ -47,7 +47,7 @@ public sealed class ArtifactsMetrics : IDisposable
     public ObservableGauge<int> StorageThresholdState => s_storageThresholdState;
 
     /// <summary>Event raised when storage thresholds are crossed.</summary>
-    public event EventHandler<StorageThresholdEventArgs>? ThresholdExceeded;
+    public event EventHandler<SlicerStorageThresholdEventArgs>? ThresholdExceeded;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ArtifactsMetrics"/> class.
@@ -111,23 +111,23 @@ public sealed class ArtifactsMetrics : IDisposable
         }
 
         int newState = 0;
-        StorageThresholdLevel level = StorageThresholdLevel.Normal;
+        SlicerStorageThresholdLevel level = SlicerStorageThresholdLevel.Normal;
 
         if (critical > 0 && currentBytes >= critical)
         {
             newState = 2;
-            level = StorageThresholdLevel.Critical;
+            level = SlicerStorageThresholdLevel.Critical;
         }
         else if (warning > 0 && currentBytes >= warning)
         {
             newState = 1;
-            level = StorageThresholdLevel.Warning;
+            level = SlicerStorageThresholdLevel.Warning;
         }
 
         int oldState = Interlocked.Exchange(ref s_currentState, newState);
         if (newState > oldState && newState > 0)
         {
-            ThresholdExceeded?.Invoke(this, new StorageThresholdEventArgs(level, currentBytes, warning, critical));
+            ThresholdExceeded?.Invoke(this, new SlicerStorageThresholdEventArgs(level, currentBytes, warning, critical));
         }
     }
 }

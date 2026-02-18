@@ -10,7 +10,7 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Progress")]
-public class SlicingProgressController(IStoredFileOperationsService fileOperations) : ControllerBase
+public class SlicingProgressController(ISlicerStoredFileOpsService fileOperations) : ControllerBase
 {
 
     /// <summary>

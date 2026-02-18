@@ -1,10 +1,10 @@
-using ModuleIStoredFileOps = Farm.Slicer.Module.Services.IStoredFileOperationsService;
+using ModuleIStoredFileOps = Farm.Slicer.Module.Services.ISlicerStoredFileOpsService;
 using Farm.Slicer.Module.Services;
 
 namespace Farm.Web.Api.Services.Adapters;
 
 /// <summary>
-/// Bridges <see cref="Farm.Slicer.Module.Services.IStoredFileOperationsService"/> (module) to the
+/// Bridges <see cref="Farm.Slicer.Module.Services.ISlicerStoredFileOpsService"/> (module) to the
 /// API's <see cref="ISlicerFileStorage"/> for GUID-based file path resolution and stream reading.
 /// </summary>
 internal sealed class ModuleStoredFileOpsAdapter(ISlicerFileStorage fileStorage) : ModuleIStoredFileOps

@@ -53,7 +53,7 @@ public class SliceJobController(
         string userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
 
         // Rate limiting
-        RateLimitResult rateLimitResult = await _rateLimitService.CheckAsync($"slice-job:{userId}", ct);
+        SlicerRateLimitResult rateLimitResult = await _rateLimitService.CheckAsync($"slice-job:{userId}", ct);
         if (!rateLimitResult.IsAllowed)
         {
             return StatusCode(429, new { error = "Rate limit exceeded.", retryAfterSeconds = rateLimitResult.RetryAfterSeconds });

@@ -34,8 +34,8 @@ public static class StubServiceRegistrations
 
         // Slicing orchestration (used by SlicingJobsController)
         RegisterStub<ISlicerOrchestrator>(services);
-        RegisterStub<IFileManagementService>(services);
-        RegisterStub<IStoredFileOperationsService>(services);
+        RegisterStub<ISlicerFileManagementService>(services);
+        RegisterStub<ISlicerStoredFileOpsService>(services);
         RegisterStub<ITempPathProvider>(services);
 
         // Model/file management (used by Model3DFilesController)
@@ -55,10 +55,10 @@ public static class StubServiceRegistrations
         RegisterStub<IOrcaPresetMappingService>(services);
 
         // Background/infrastructure services (not controller-injected but may be resolved)
-        RegisterStub<IJobDispatcherService>(services);
+        RegisterStub<ISlicerJobDispatcherService>(services);
         RegisterStub<IArtifactCleanupService>(services);
-        RegisterStub<IModelAnalysisService>(services);
-        RegisterStub<IProfileParsingService>(services);
+        RegisterStub<ISlicerModelAnalysisService>(services);
+        RegisterStub<ISlicerProfileParsingService>(services);
         RegisterStub<ISlicerJobQueue>(services);
         RegisterStub<ISlicerFileStorage>(services);
         RegisterStub<ISlicerProgressNotifier>(services);

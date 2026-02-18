@@ -2,10 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Slicer.Module.Contracts;
-using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Api.Controllers;
-using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Moq;

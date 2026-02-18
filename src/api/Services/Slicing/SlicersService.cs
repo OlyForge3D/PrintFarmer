@@ -55,7 +55,7 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly HttpClient _httpClient;
         private readonly IUnifiedLoggingService _logger;
 
-        private readonly Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> _slicerSettings;
+        private readonly Microsoft.Extensions.Options.IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> _slicerSettings;
 
         /// <summary>
         /// Initializes a new instance of the SlicersService with required dependencies.
@@ -90,7 +90,7 @@ namespace Farm.Web.Api.Services.Slicing
             SlicerServiceMetrics metrics,
             HttpClient httpClient,
             IUnifiedLoggingService logger,
-            Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> slicerSettings)
+            Microsoft.Extensions.Options.IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> slicerSettings)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _workerRepo = workerRepo ?? throw new ArgumentNullException(nameof(workerRepo));

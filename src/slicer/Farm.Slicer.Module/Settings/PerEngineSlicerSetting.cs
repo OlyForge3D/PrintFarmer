@@ -1,6 +1,6 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
-namespace Farm.Infrastructure.Settings;
+namespace Farm.Slicer.Module.Settings;
 
 public sealed class PerEngineSlicerSetting
 {
