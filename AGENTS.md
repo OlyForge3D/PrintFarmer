@@ -37,10 +37,12 @@ bd sync               # Sync with git
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
-   git pull --rebase
-   bd sync
+   bd sync                  # writes bead closures to .beads/issues.jsonl
+   git add .beads/issues.jsonl
+   git commit -m "chore: sync beads" --allow-empty  # if no code changes pending
+   git pull --rebase        # incorporate any remote changes
    git push
-   git status  # MUST show "up to date with origin"
+   git status               # MUST show "up to date with origin"
    ```
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed
@@ -51,4 +53,5 @@ bd sync               # Sync with git
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+- **Bead closure and code changes MUST land in the same commit.** Always close the bead (`bd close <id>`), run `bd sync`, then stage both the changed code files AND `.beads/issues.jsonl` together before committing. Commit message must reference the bead ID (e.g. `[closes PFarm1-xxx]`). Never commit code changes without including the updated `.beads/issues.jsonl`.
 
