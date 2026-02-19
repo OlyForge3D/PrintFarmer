@@ -17,15 +17,22 @@ builder.Configuration.AddEnvironmentVariables("PFARM__");
 // SlicerDbContext (module-owned; multi-provider: SQLite, PostgreSQL, SQL Server)
 builder.Services.AddSlicerModule(builder.Configuration);
 
+// ── Slicer API-layer services (real implementations from Farm.Slicer.Module.Api) ──
+// Registers controllers' service dependencies: SlicersService, SlicingSubmissionService,
+// ArtifactsService, ProfilesService, WorkerAuthService, file storage, job dispatch, etc.
+builder.Services.AddSlicerApiServices(builder.Configuration);
+
 // ── Cross-domain lookup services (HTTP → main API) ───────────────────────────
 // Resolves printers, catalog models, and manufacturer names from the main API
-// via REST calls with in-memory caching.
+// via REST calls with in-memory caching. Must come AFTER AddSlicerApiServices so
+// that HttpCatalogServiceAdapter and HttpPrinterLookupService take precedence over
+// the module-local adapters registered above.
 builder.Services.AddCrossDomainLookupServices(builder.Configuration);
 
-// ── Slicer services (stub implementations — transitional) ─────────────────────
-// Once real implementations are migrated into Farm.Slicer.Module, this call
-// will be replaced by AddSlicerServices().
-builder.Services.AddSlicerStubServices();
+// ── Minimal stubs for services not yet implemented in the module ───────────────
+// Only IModel3DFileService and I3MfToStlConversionService remain unimplemented.
+// All other interfaces are now provided by AddSlicerApiServices above.
+builder.Services.AddUnimplementedSlicerServiceStubs();
 
 // ── Authentication (transitional — allow all for standalone mode) ──────────────
 // When the host is deployed behind an API gateway, this will be replaced with
@@ -71,6 +78,9 @@ builder.WebHost.UseUrls("http://0.0.0.0:5246");
 #pragma warning restore S1075
 
 WebApplication app = builder.Build();
+
+// Configure artifact storage metrics thresholds and alert subscriptions.
+app.ConfigureSlicerMetrics();
 
 // Ensure slicer database schema exists on startup
 using (IServiceScope scope = app.Services.CreateScope())

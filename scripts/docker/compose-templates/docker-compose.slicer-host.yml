@@ -34,7 +34,9 @@ services:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:5246
       - ConnectionStrings__Default=${SLICER_DB_CONNECTION:-Data Source=/data/slicer.db}
-      - MainApi__BaseUrl=http://api:5245
+      # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
+      - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
+      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
     volumes:
