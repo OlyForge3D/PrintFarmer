@@ -46,8 +46,8 @@ public class PrintersController(
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
-    Farm.Slicer.Module.Services.ISlicersService? slicersService,
-    IPrinterVersionCache printerVersionCache)
+    Farm.Slicer.Module.Services.ISlicersService? slicersService = null,
+    IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;

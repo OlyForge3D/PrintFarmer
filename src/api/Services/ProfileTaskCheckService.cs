@@ -86,8 +86,14 @@ public sealed class ProfileTaskCheckService : BackgroundService
 
         using IServiceScope scope = _scopeFactory.CreateScope();
 
-        // First check if slicing is available - if no slicer workers, skip task creation entirely
-        Farm.Slicer.Module.Services.ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Services.ISlicersService>();
+        // First check if slicing is available - if the slicer module isn't registered or no workers exist, skip
+        Farm.Slicer.Module.Services.ISlicersService? slicersService = scope.ServiceProvider.GetService<Farm.Slicer.Module.Services.ISlicersService>();
+        if (slicersService is null)
+        {
+            _logger.LogInformation("[ProfileTaskCheck] Slicer module not registered - skipping profile import task creation");
+            return;
+        }
+
         IReadOnlyList<SlicerService> slicerWorkers = await slicersService.ListAsync(ct);
 
         if (slicerWorkers.Count == 0)

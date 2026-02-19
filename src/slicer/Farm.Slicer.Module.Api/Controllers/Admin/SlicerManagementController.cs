@@ -18,7 +18,7 @@ public class SlicerManagementController(
     ISlicersService service,
     ILogger<SlicerManagementController> logger) : ControllerBase
 {
-    private readonly ISlicersService _service = service;
+    private readonly ISlicersService _service = service ?? throw new ArgumentNullException(nameof(service));
     private readonly ILogger<SlicerManagementController> _logger = logger;
 
     /// <summary>

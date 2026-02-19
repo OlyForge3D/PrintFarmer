@@ -126,9 +126,8 @@ RUN cat > /app/entrypoint.sh << 'EOF'
 set -e
 # Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them
 # The appuser may not own these directories if they're bind mounts from the host
-chmod -R g+rwx /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
-mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
-chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
+mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
+chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
 # Drop to appuser and run application
 exec gosu appuser dotnet Farm.Web.Api.dll
 EOF

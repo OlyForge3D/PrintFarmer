@@ -15,22 +15,22 @@ namespace Farm.Infrastructure.Repositories.FileConsistency;
 /// Entity Framework implementation for file consistency statistics and health issue queries.
 /// Uses AppDbContext for GcodeFile/FileHealthAudit and SlicerDbContext for Model3D.
 /// </summary>
-public class EfFileConsistencyRepository(AppDbContext db, SlicerDbContext slicerDb) : IFileConsistencyRepository
+public class EfFileConsistencyRepository(AppDbContext db, SlicerDbContext? slicerDb = null) : IFileConsistencyRepository
 {
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
-    private readonly SlicerDbContext _slicerDb = slicerDb ?? throw new ArgumentNullException(nameof(slicerDb));
+    private readonly SlicerDbContext? _slicerDb = slicerDb;
 
     public async Task<int> CountModel3DFilesAsync(CancellationToken ct)
-        => await _slicerDb.Set<Model3D>().CountAsync(ct);
+        => _slicerDb is null ? 0 : await _slicerDb.Set<Model3D>().CountAsync(ct);
 
     public async Task<int> CountHealthyModel3DFilesAsync(CancellationToken ct)
-        => await _slicerDb.Set<Model3D>().CountAsync(m => m.HealthStatus == FileHealthStatus.Healthy, ct);
+        => _slicerDb is null ? 0 : await _slicerDb.Set<Model3D>().CountAsync(m => m.HealthStatus == FileHealthStatus.Healthy, ct);
 
     public async Task<int> CountMissingModel3DFilesAsync(CancellationToken ct)
-        => await _slicerDb.Set<Model3D>().CountAsync(m => m.HealthStatus == FileHealthStatus.Missing, ct);
+        => _slicerDb is null ? 0 : await _slicerDb.Set<Model3D>().CountAsync(m => m.HealthStatus == FileHealthStatus.Missing, ct);
 
     public async Task<int> CountCorruptedModel3DFilesAsync(CancellationToken ct)
-        => await _slicerDb.Set<Model3D>().CountAsync(m => m.HealthStatus == FileHealthStatus.Corrupted, ct);
+        => _slicerDb is null ? 0 : await _slicerDb.Set<Model3D>().CountAsync(m => m.HealthStatus == FileHealthStatus.Corrupted, ct);
 
     public async Task<int> CountGcodeFilesAsync(CancellationToken ct)
         => await _db.GcodeFiles.CountAsync(ct);
@@ -45,7 +45,7 @@ public class EfFileConsistencyRepository(AppDbContext db, SlicerDbContext slicer
         => await _db.GcodeFiles.CountAsync(g => g.HealthStatus == FileHealthStatus.Corrupted, ct);
 
     public async Task<IReadOnlyList<Model3D>> GetModel3DFilesWithIssueAsync(FileHealthStatus status, CancellationToken ct)
-        => await _slicerDb.Set<Model3D>()
+        => _slicerDb is null ? [] : await _slicerDb.Set<Model3D>()
             .Where(m => m.HealthStatus == status)
             .ToListAsync(ct);
 
@@ -67,7 +67,7 @@ public class EfFileConsistencyRepository(AppDbContext db, SlicerDbContext slicer
             .FirstOrDefaultAsync(ct);
 
     public async Task<Model3D?> GetModel3DWithHealthDetailsAsync(Guid modelId, CancellationToken ct)
-        => await _slicerDb.Set<Model3D>()
+        => _slicerDb is null ? null : await _slicerDb.Set<Model3D>()
             .Where(m => m.Id == modelId)
             .FirstOrDefaultAsync(ct);
 

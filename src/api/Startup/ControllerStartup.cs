@@ -14,10 +14,10 @@ public static class ControllerStartup
     /// <summary>
     /// Adds PrintFarmer Controllers with JSON options and filters.
     /// </summary>
-    public static IServiceCollection AddPrintFarmerControllers(this IServiceCollection services)
+    public static IServiceCollection AddPrintFarmerControllers(this IServiceCollection services, bool slicerEnabled = true)
     {
         // Add API services
-        services.AddControllers(options =>
+        var mvcBuilder = services.AddControllers(options =>
             {
                 _ = options.Filters.Add<DuplicateConflictExceptionFilter>();
             })
@@ -32,8 +32,28 @@ public static class ControllerStartup
 
                 // Default string enum converter for all other enums
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-            })
-            .AddSlicerControllers();
+            });
+
+        // Only discover slicer controllers when the module is enabled.
+        // ASP.NET Core auto-discovers controllers from referenced assemblies,
+        // so we must explicitly remove the slicer assembly when disabled to
+        // prevent DI activation errors for unregistered slicer services.
+        if (slicerEnabled)
+        {
+            mvcBuilder.AddSlicerControllers();
+        }
+        else
+        {
+            mvcBuilder.ConfigureApplicationPartManager(manager =>
+            {
+                var slicerPart = manager.ApplicationParts
+                    .FirstOrDefault(p => p.Name == "Farm.Slicer.Module.Api");
+                if (slicerPart is not null)
+                {
+                    manager.ApplicationParts.Remove(slicerPart);
+                }
+            });
+        }
 
         return services;
     }

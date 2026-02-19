@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Services;
+﻿using Farm.Slicer.Module.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;

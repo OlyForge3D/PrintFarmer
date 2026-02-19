@@ -19,13 +19,21 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork;
 /// Unit of Work implementation providing coordinated access to all repositories.
 /// Ensures all repositories share a single DbContext instance for atomic transactions.
 /// </summary>
-public class AppUnitOfWork(AppDbContext db, SlicerDbContext slicerDb, ISensitiveDataProtector sensitiveDataProtector) : IUnitOfWork
+public class AppUnitOfWork : IUnitOfWork
 {
 #pragma warning disable CA2213 // DbContext is injected and managed by DI container lifetime
-    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
-    private readonly SlicerDbContext _slicerDb = slicerDb ?? throw new ArgumentNullException(nameof(slicerDb));
-    private readonly ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
+    private readonly AppDbContext _db;
+    private readonly SlicerDbContext? _slicerDb;
+    private readonly ISensitiveDataProtector _sensitiveDataProtector;
 #pragma warning restore CA2213
+
+    public AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector, SlicerDbContext? slicerDb = null)
+    {
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
+        _slicerDb = slicerDb; // null when slicer module is disabled
+    }
+
     private ICameraRepository? _cameraRepository;
     private IGcodeRepository? _gcodeRepository;
     private IHarvestRepository? _harvestRepository;

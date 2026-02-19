@@ -4,6 +4,7 @@ using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 
 namespace Farm.Slicer.Module.Services;
+
 /// <summary>
 /// Database-backed implementation of ISlicerJobQueue which delegates to ISliceJobRepository/EfSliceJobRepository
 /// This provides equivalent semantics for the HTTP-based worker claim/renew/complete flow used by HttpJobPollerService.

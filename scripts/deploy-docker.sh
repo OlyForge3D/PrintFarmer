@@ -3228,9 +3228,16 @@ configure_external_storage() {
         
         # Apply defaults for any missing paths when external storage is enabled
         if [ "$USE_EXTERNAL_STORAGE" = "yes" ] || [ "$USE_EXTERNAL_STORAGE" = "true" ]; then
-            EXTERNAL_MODELS_PATH="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
+            # G-code storage is always needed (manual uploads, slicer uploads)
             EXTERNAL_GCODE_PATH="${EXTERNAL_GCODE_PATH:-$HOME/.printfarmer/gcode}"
-            EXTERNAL_PROFILES_PATH="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
+            # Slicer-only storage: models and profiles only when distributed slicing is enabled
+            if [ "${ENABLE_DISTRIBUTED_SLICING:-false}" = "true" ]; then
+                EXTERNAL_MODELS_PATH="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
+                EXTERNAL_PROFILES_PATH="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
+            else
+                EXTERNAL_MODELS_PATH=""
+                EXTERNAL_PROFILES_PATH=""
+            fi
             EXTERNAL_DATAPROTECTION_PATH="${EXTERNAL_DATAPROTECTION_PATH:-$HOME/.printfarmer/dataprotection-keys}"
             EXTERNAL_DATABASE_PATH="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
             EXTERNAL_PGADMIN_PATH="${EXTERNAL_PGADMIN_PATH:-$HOME/.printfarmer/pgadmin}"
@@ -3267,21 +3274,9 @@ configure_external_storage() {
         print_success "External storage enabled - data will persist on host filesystem"
         echo
         
-        # Model storage directory (defaults to user's home directory - no sudo needed)
-        local default_models_path="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
-        prompt_with_default "Host directory for 3D model storage (all uploaded models):" "$default_models_path" "EXTERNAL_MODELS_PATH"
-        
-        # Ensure directory exists
-        if ! mkdir -p "$EXTERNAL_MODELS_PATH" 2>/dev/null; then
-            print_error "Failed to create models directory: $EXTERNAL_MODELS_PATH"
-            print_info "Please ensure the directory path is writable or change the path above"
-            return 1
-        fi
-        print_success "Models directory ready: $EXTERNAL_MODELS_PATH"
-        
-        # G-code storage directory (defaults to user's home directory)
+        # G-code storage directory (always needed - manual uploads, slicer uploads)
         local default_gcode_path="${EXTERNAL_GCODE_PATH:-$HOME/.printfarmer/gcode}"
-        prompt_with_default "Host directory for generated G-code:" "$default_gcode_path" "EXTERNAL_GCODE_PATH"
+        prompt_with_default "Host directory for G-code files:" "$default_gcode_path" "EXTERNAL_GCODE_PATH"
         
         # Ensure directory exists
         if ! mkdir -p "$EXTERNAL_GCODE_PATH" 2>/dev/null; then
@@ -3291,17 +3286,36 @@ configure_external_storage() {
         fi
         print_success "G-code directory ready: $EXTERNAL_GCODE_PATH"
         
-        # Slicer profiles directory (defaults to user's home directory, optional)
-        local default_profiles_path="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
-        prompt_with_default "Host directory for slicer profiles (optional):" "$default_profiles_path" "EXTERNAL_PROFILES_PATH"
-        
-        # Ensure directory exists
-        if ! mkdir -p "$EXTERNAL_PROFILES_PATH" 2>/dev/null; then
-            print_error "Failed to create slicer profiles directory: $EXTERNAL_PROFILES_PATH"
-            print_info "Please ensure the directory path is writable or change the path above"
-            return 1
+        # Slicer-only storage: models and profiles only when distributed slicing is enabled
+        if [ "${ENABLE_DISTRIBUTED_SLICING:-false}" = "true" ]; then
+            # Model storage directory (defaults to user's home directory - no sudo needed)
+            local default_models_path="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
+            prompt_with_default "Host directory for 3D model storage (all uploaded models):" "$default_models_path" "EXTERNAL_MODELS_PATH"
+            
+            # Ensure directory exists
+            if ! mkdir -p "$EXTERNAL_MODELS_PATH" 2>/dev/null; then
+                print_error "Failed to create models directory: $EXTERNAL_MODELS_PATH"
+                print_info "Please ensure the directory path is writable or change the path above"
+                return 1
+            fi
+            print_success "Models directory ready: $EXTERNAL_MODELS_PATH"
+            
+            # Slicer profiles directory (defaults to user's home directory, optional)
+            local default_profiles_path="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
+            prompt_with_default "Host directory for slicer profiles (optional):" "$default_profiles_path" "EXTERNAL_PROFILES_PATH"
+            
+            # Ensure directory exists
+            if ! mkdir -p "$EXTERNAL_PROFILES_PATH" 2>/dev/null; then
+                print_error "Failed to create slicer profiles directory: $EXTERNAL_PROFILES_PATH"
+                print_info "Please ensure the directory path is writable or change the path above"
+                return 1
+            fi
+            print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
+        else
+            print_info "Distributed slicing disabled - skipping model/profile storage directories"
+            EXTERNAL_MODELS_PATH=""
+            EXTERNAL_PROFILES_PATH=""
         fi
-        print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
         
         # Data Protection keys storage (ASP.NET Core encryption keys - persists across container restarts)
         local default_dataprotection_path="${EXTERNAL_DATAPROTECTION_PATH:-$HOME/.printfarmer/dataprotection-keys}"
@@ -3340,9 +3354,9 @@ configure_external_storage() {
         print_success "pgAdmin directory ready: $EXTERNAL_PGADMIN_PATH"
         
         print_success "External storage directories configured:"
-        echo "  • Models:       $EXTERNAL_MODELS_PATH"
-        echo "  • G-code:       $EXTERNAL_GCODE_PATH"
-        echo "  • Profiles:     $EXTERNAL_PROFILES_PATH"
+        [ -n "$EXTERNAL_MODELS_PATH" ] && echo "  • Models:       $EXTERNAL_MODELS_PATH"
+        [ -n "$EXTERNAL_GCODE_PATH" ] && echo "  • G-code:       $EXTERNAL_GCODE_PATH"
+        [ -n "$EXTERNAL_PROFILES_PATH" ] && echo "  • Profiles:     $EXTERNAL_PROFILES_PATH"
         echo "  • Keys:         $EXTERNAL_DATAPROTECTION_PATH (Encryption keys)"
         echo "  • Database:     $EXTERNAL_DATABASE_PATH (PostgreSQL/SQL Server)"
         echo "  • pgAdmin:      $EXTERNAL_PGADMIN_PATH (pgAdmin configuration)"
@@ -5492,6 +5506,9 @@ validate_external_storage_permissions() {
     if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
         paths_to_validate+=("${EXTERNAL_DATABASE_PATH}:Database")
     fi
+    if [ -n "${EXTERNAL_DATAPROTECTION_PATH:-}" ]; then
+        paths_to_validate+=("${EXTERNAL_DATAPROTECTION_PATH}:Data Protection Keys")
+    fi
     
     if [ ${#paths_to_validate[@]} -eq 0 ]; then
         return 0
@@ -5523,7 +5540,18 @@ validate_external_storage_permissions() {
             continue
         fi
         
-        # Check if directory is readable and writable by current user
+        # Container-mounted directories (G-code, Models, Profiles, Data Protection Keys)
+        # are chown'd by the container entrypoint at startup. The deploy user doesn't
+        # need write access — only verify the directory exists and is readable.
+        case "$desc" in
+            "G-code Files"|"3D Models"|"Slicer Profiles"|"Data Protection Keys")
+                print_success "✓ [$desc] $path (exists - container manages permissions)"
+                ((valid_dirs++))
+                continue
+                ;;
+        esac
+        
+        # For remaining directories, check if readable and writable by current user
         if [ ! -r "$path" ]; then
             print_error "✗ [$desc] Directory not readable: $path"
             ((invalid_dirs++))
@@ -6092,101 +6120,22 @@ configure_pgadmin_servers() {
         return 0
     fi
     
-    print_info "Configuring pgAdmin servers..."
+    # Server configuration is handled via servers.json pre-seeding (generated by
+    # generate_pgadmin_servers_config) and mounted into the container at
+    # /pgadmin4/servers.json. This is the officially supported approach per
+    # https://www.pgadmin.org/docs/pgadmin4/latest/import_export_servers.html
+    # The REST API endpoint (/api/v1/servers) was removed in newer pgAdmin versions.
     
-    # Check if pgAdmin is running
-    if ! docker ps --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
-        print_warning "pgAdmin container is not running - skipping server configuration"
-        return 0
-    fi
-    
-    # Wait a bit for pgAdmin to fully initialize
-    sleep 3
-    
-    # Use curl to configure PostgreSQL server via REST API
     local PGADMIN_URL="http://localhost:5050/pgadmin"
-    local PGADMIN_USER="${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}"
-    local PGADMIN_PASS="${AUTO_ADMIN_PASSWORD:-adminpass}"
-    
-    # Create a temporary file for curl cookies
-    local COOKIE_JAR=$(mktemp)
-    trap "rm -f '$COOKIE_JAR'" EXIT
-    
-    # Step 1: Get login page to establish session
-    print_info "Establishing pgAdmin session..."
-    
-    curl -s -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-        -X GET "${PGADMIN_URL}/login" \
-        -H "Content-Type: text/html" \
-        >/dev/null 2>&1
-    
-    # Step 2: Authenticate with pgAdmin
-    print_info "Authenticating with pgAdmin..."
-    
-    local LOGIN_RESPONSE=$(curl -s -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-        -X POST "${PGADMIN_URL}/login" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "email=${PGADMIN_USER}&password=${PGADMIN_PASS}" \
-        2>&1)
-    
-    # Check if authentication was successful by checking if we can access the API
-    local AUTH_CHECK=$(curl -s -b "$COOKIE_JAR" \
-        -X GET "${PGADMIN_URL}/api/v1/preferences" \
-        -H "Content-Type: application/json" \
-        2>&1)
-    
-    if echo "$AUTH_CHECK" | grep -q "errors\|Unauthorized\|401"; then
-        print_warning "Failed to authenticate with pgAdmin - servers may need manual configuration"
-        print_info "You can add servers manually in pgAdmin at ${PGADMIN_URL}"
-        return 0
-    fi
-    
-    # Step 2: Configure PostgreSQL server
-    print_info "Adding PostgreSQL server to pgAdmin..."
-    
-    # Get the database service name and credentials
     local DB_HOST="${POSTGRES_HOST:-database}"
     local DB_PORT="${POSTGRES_PORT:-5432}"
     local DB_USER="${POSTGRES_USER:-postgres}"
-    local DB_NAME="postgres"
-    local DB_PASS="${POSTGRES_PASSWORD:-}"
     
-    # Create the server configuration JSON
-    local SERVER_CONFIG="{
-        \"name\": \"PrintFarmer PostgreSQL\",
-        \"group_id\": 1,
-        \"host\": \"${DB_HOST}\",
-        \"port\": ${DB_PORT},
-        \"username\": \"${DB_USER}\",
-        \"password\": \"${DB_PASS}\",
-        \"db\": \"${DB_NAME}\",
-        \"ssl_mode\": \"prefer\",
-        \"maintenance_db\": \"postgres\",
-        \"comment\": \"PrintFarmer database server - auto configured\"
-    }"
+    print_success "PostgreSQL server pre-configured in pgAdmin via servers.json"
+    print_info "Server: ${DB_HOST}:${DB_PORT}, User: ${DB_USER}"
+    print_info "Access pgAdmin at ${PGADMIN_URL}"
+    print_info "Note: Password must be entered on first connection"
     
-    # Add the server via REST API
-    local ADD_SERVER=$(curl -s -b "$COOKIE_JAR" \
-        -X POST "${PGADMIN_URL}/api/v1/servers" \
-        -H "Content-Type: application/json" \
-        -d "$SERVER_CONFIG" \
-        2>&1)
-    
-    # Check if server was added successfully
-    if echo "$ADD_SERVER" | grep -q "\"name\": \"PrintFarmer PostgreSQL\"" || echo "$ADD_SERVER" | grep -q "\"id\""; then
-        print_success "PostgreSQL server configured in pgAdmin successfully"
-        print_info "Server: ${DB_HOST}:${DB_PORT}"
-        print_info "You can access it at ${PGADMIN_URL}"
-    elif echo "$ADD_SERVER" | grep -q "already exists"; then
-        print_info "PostgreSQL server already configured in pgAdmin"
-    else
-        # Log the response for debugging
-        print_warning "Server configuration response: $ADD_SERVER"
-        print_info "You can add the server manually in pgAdmin at ${PGADMIN_URL}"
-        print_info "Use database host: ${DB_HOST}, port: ${DB_PORT}, user: ${DB_USER}"
-    fi
-    
-    rm -f "$COOKIE_JAR"
     return 0
 }
 

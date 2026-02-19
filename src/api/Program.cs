@@ -97,9 +97,17 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 
 // Register slicer module (SlicerDbContext, module repositories, metrics, and configuration).
 // During transition both AppDbContext and SlicerDbContext coexist sharing the same underlying database.
+// All slicer registrations gated by Slicer:Enabled (default false).
+bool slicerEnabled = builder.Configuration.GetValue("Slicer:Enabled", true);
 builder.Services.AddSlicerModule(builder.Configuration);
-builder.Services.AddSlicerApiServices(builder.Configuration);
-builder.Services.AddSlicerHostAdapters();
+if (slicerEnabled)
+{
+    builder.Services.AddSlicerApiServices(builder.Configuration);
+    builder.Services.AddSlicerHostAdapters();
+}
+
+// When slicer is disabled, cross-module consumers use = null default parameter values.
+// .NET DI's ActivatorUtilities skips unregistered services that have default values.
 
 // Register SystemLog logger provider to capture all application logs to the database
 builder.Logging.AddSystemLogProvider(LogLevel.Information);
@@ -124,7 +132,7 @@ catch
 }
 
 // Add API services
-builder.Services.AddPrintFarmerControllers();
+builder.Services.AddPrintFarmerControllers(slicerEnabled);
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -231,7 +239,10 @@ catch
 }
 
 // Configure artifact storage metrics thresholds and alerts
-app.ConfigureSlicerMetrics();
+if (slicerEnabled)
+{
+    app.ConfigureSlicerMetrics();
+}
 
 // NOTE: Settings initialization from environment variables is performed
 // during database initialization in ProgramHelpers.InitializeDatabaseAsync
@@ -311,7 +322,22 @@ app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
 // Slicer hubs (registry + progress) from slicer module
-app.MapSlicerHubs();
+if (slicerEnabled)
+{
+    app.MapSlicerHubs();
+}
+else
+{
+    // When slicer is disabled, the slicer controllers are not loaded.
+    // Map stub endpoints for routes the frontend expects so it gets empty
+    // results instead of 404s.
+    app.MapGet("/api/3d-models", () => Results.Ok(Array.Empty<object>()))
+        .RequireAuthorization();
+    app.MapGet("/api/3d-models/folders", () => Results.Ok(Array.Empty<object>()))
+        .RequireAuthorization();
+    app.MapPost("/api/3d-models/query", () => Results.Ok(Array.Empty<object>()))
+        .RequireAuthorization();
+}
 
 // Prometheus metrics endpoint (guarded so tests without MeterProvider don't throw)
 try

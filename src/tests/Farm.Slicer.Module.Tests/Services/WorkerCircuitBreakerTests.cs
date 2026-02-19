@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
-using Farm.Slicer.Module.Data.Repositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;

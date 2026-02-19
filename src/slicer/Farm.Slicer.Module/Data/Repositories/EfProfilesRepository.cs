@@ -8,7 +8,7 @@ namespace Farm.Slicer.Module.Data.Repositories;
 /// </summary>
 public class EfProfilesRepository(SlicerDbContext db) : IProfilesRepository
 {
-    private readonly SlicerDbContext _db = db;
+    private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <inheritdoc/>
     public async Task<List<ProcessProfile>> GetAllAsync(CancellationToken ct) =>

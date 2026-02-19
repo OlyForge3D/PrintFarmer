@@ -110,7 +110,12 @@ public class FileConsistencyAuditService(
         {
             IFileManagementService fileManagementService = scope.ServiceProvider.GetRequiredService<IFileManagementService>();
             IFileIntegrityService fileIntegrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
-            IFileAuditRepository auditRepo = scope.ServiceProvider.GetRequiredService<IFileAuditRepository>();
+            IFileAuditRepository? auditRepo = scope.ServiceProvider.GetService<IFileAuditRepository>();
+            if (auditRepo is null)
+            {
+                _logger.LogInformation("File audit repository not available - skipping audit");
+                return;
+            }
 
             // Collect results from all audit passes
             AuditResults model3dResults = await AuditModel3DFilesAsync(auditRepo, fileManagementService, fileIntegrityService, ct);

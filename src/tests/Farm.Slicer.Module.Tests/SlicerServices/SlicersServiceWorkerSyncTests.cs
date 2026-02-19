@@ -2,11 +2,11 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Catalog;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Hubs;
-using Farm.Slicer.Module.Services.Metrics;
 using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
