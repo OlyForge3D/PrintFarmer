@@ -1,8 +1,8 @@
 ﻿using System.IO.Compression;
 using System.Text.Json;
 using System.Xml;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Telemetry;
-using Farm.Slicer.Module.Services;
 
 namespace Farm.Infrastructure.Services.Models;
 

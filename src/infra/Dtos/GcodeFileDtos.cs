@@ -1,4 +1,4 @@
-﻿using TagDto = Farm.Slicer.Module.Dtos.TagDto;
+﻿using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure;
 

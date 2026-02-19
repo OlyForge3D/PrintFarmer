@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Data.Repositories;
+﻿using Farm.Infrastructure.Services;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;

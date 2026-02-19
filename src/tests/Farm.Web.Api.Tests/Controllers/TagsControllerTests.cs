@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
-using TagDto = Farm.Slicer.Module.Dtos.TagDto;
+using Farm.Infrastructure.Dtos;
 
 namespace Farm.Web.Api.Tests.Controllers;
 

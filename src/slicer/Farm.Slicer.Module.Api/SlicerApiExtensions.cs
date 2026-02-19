@@ -1,5 +1,7 @@
-﻿using Farm.Infrastructure.Settings;
+﻿using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Settings;
 using Farm.Slicer.Module.Api.Hubs;
+using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Api.Services.Adapters;
 using Farm.Slicer.Module.Services;
@@ -75,6 +77,17 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<ISlicerFileManagementService, ModuleFileManagementAdapter>();
         _ = services.AddScoped<ISlicerStoredFileOpsService, ModuleStoredFileOpsAdapter>();
         _ = services.AddSingleton<ISlicerTempPathProvider, DefaultSlicerTempPathProvider>();
+
+        // Repositories migrated from Farm.Infrastructure (use SlicerDbContext for Model3D)
+        _ = services.AddScoped<IFileConsistencyRepository, EfFileConsistencyRepository>();
+        _ = services.AddScoped<IFileAuditRepository, EfFileAuditRepository>();
+
+        // Infrastructure abstractions for cross-module queries
+        _ = services.AddScoped<IModel3DQueryProvider, SlicerModel3DQueryProvider>();
+        _ = services.AddScoped<IProfileImportService, SlicerProfileImportService>();
+
+        // Background services
+        _ = services.AddHostedService<ProfileTaskCheckService>();
 
         return services;
     }

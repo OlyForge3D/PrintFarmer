@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Slicer.Module.Domain;
 

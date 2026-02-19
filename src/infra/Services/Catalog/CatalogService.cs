@@ -1,12 +1,12 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
-using SlicerModelAliasDto = Farm.Slicer.Module.Dtos.SlicerModelAliasDto;
 
 namespace Farm.Infrastructure.Services.Catalog;
 

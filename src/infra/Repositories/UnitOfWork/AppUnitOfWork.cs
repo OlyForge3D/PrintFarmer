@@ -11,7 +11,6 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.Security;
-using Farm.Slicer.Module.Data;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork;
 
@@ -23,15 +22,13 @@ public class AppUnitOfWork : IUnitOfWork
 {
 #pragma warning disable CA2213 // DbContext is injected and managed by DI container lifetime
     private readonly AppDbContext _db;
-    private readonly SlicerDbContext? _slicerDb;
     private readonly ISensitiveDataProtector _sensitiveDataProtector;
 #pragma warning restore CA2213
 
-    public AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector, SlicerDbContext? slicerDb = null)
+    public AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
-        _slicerDb = slicerDb; // null when slicer module is disabled
     }
 
     private ICameraRepository? _cameraRepository;
@@ -93,7 +90,7 @@ public class AppUnitOfWork : IUnitOfWork
     /// Coordinated with tag operations for generic tagging support.
     /// Tag mappings are now managed via EF Core skip-navigation on StoredFile.Tags.
     /// </summary>
-    public ITagRepository Tags => _tagRepository ??= new EfTagRepository(_db, _slicerDb);
+    public ITagRepository Tags => _tagRepository ??= new EfTagRepository(_db);
 
     /// <summary>
     /// Persists all pending changes from both repositories in a single atomic transaction.

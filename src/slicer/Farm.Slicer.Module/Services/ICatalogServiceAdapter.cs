@@ -1,4 +1,4 @@
-﻿using Farm.Slicer.Module.Dtos;
+﻿using Farm.Infrastructure.Dtos;
 
 namespace Farm.Slicer.Module.Services;
 

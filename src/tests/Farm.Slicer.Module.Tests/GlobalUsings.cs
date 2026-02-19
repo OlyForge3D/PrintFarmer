@@ -3,6 +3,8 @@
 global using Farm.Infrastructure;
 global using Farm.Infrastructure.Data;
 global using Farm.Infrastructure.Domain;
+global using Farm.Infrastructure.Dtos;
+global using Farm.Infrastructure.Services;
 // Settings abstractions
 global using Farm.Settings;
 global using Farm.Slicer.Module.Contracts;

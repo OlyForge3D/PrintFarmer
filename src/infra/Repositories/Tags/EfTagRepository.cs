@@ -5,8 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Data;
-using Farm.Slicer.Module.Domain;
+using Farm.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Tags;
@@ -18,10 +17,10 @@ namespace Farm.Infrastructure.Repositories.Tags;
 /// has been migrated to <c>Farm.Slicer.Module</c> and no longer carries a Tags
 /// navigation property).
 /// </summary>
-public class EfTagRepository(AppDbContext dbContext, SlicerDbContext? slicerDbContext = null) : ITagRepository
+public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? model3DQuery = null) : ITagRepository
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-    private readonly SlicerDbContext? _slicerDbContext = slicerDbContext;
+    private readonly IModel3DQueryProvider? _model3DQuery = model3DQuery;
 
     // Helper accessor for the join table
     private DbSet<Model3DTagMapping> Model3DTags => _dbContext.Set<Model3DTagMapping>();
@@ -126,11 +125,11 @@ public class EfTagRepository(AppDbContext dbContext, SlicerDbContext? slicerDbCo
         }
 
         // Try Model3D via join table (skip when slicer module is disabled)
-        if (_slicerDbContext is not null
+        if (_model3DQuery is not null
             && !await Model3DTags.AnyAsync(x => x.Model3DId == objectId && x.TagsId == tagId, ct))
         {
             // Verify Model3D exists
-            bool exists = await _slicerDbContext.Set<Model3D>().AnyAsync(m => m.Id == objectId, ct);
+            bool exists = await _model3DQuery.ExistsAsync(objectId, ct);
             if (exists)
             {
                 Model3DTags.Add(new Model3DTagMapping { Model3DId = objectId, TagsId = tagId });
@@ -346,10 +345,10 @@ public class EfTagRepository(AppDbContext dbContext, SlicerDbContext? slicerDbCo
                 break;
 
             case "Model3D":
-                if (_slicerDbContext is not null
+                if (_model3DQuery is not null
                     && !await Model3DTags.AnyAsync(x => x.Model3DId == objectId && x.TagsId == tagId, ct))
                 {
-                    bool model3dExists = await _slicerDbContext.Set<Model3D>().AnyAsync(m => m.Id == objectId, ct);
+                    bool model3dExists = await _model3DQuery.ExistsAsync(objectId, ct);
                     if (model3dExists)
                     {
                         Model3DTags.Add(new Model3DTagMapping { Model3DId = objectId, TagsId = tagId });
@@ -519,10 +518,8 @@ public class EfTagRepository(AppDbContext dbContext, SlicerDbContext? slicerDbCo
             .Select(x => x.Model3DId)
             .ToListAsync(ct);
 
-        DateTime? model3dLastUsed = model3dIdsWithTag.Count > 0 && _slicerDbContext is not null
-            ? await _slicerDbContext.Set<Model3D>()
-                .Where(m => model3dIdsWithTag.Contains(m.Id))
-                .MaxAsync(m => (DateTime?)m.UpdatedAt, ct)
+        DateTime? model3dLastUsed = model3dIdsWithTag.Count > 0 && _model3DQuery is not null
+            ? await _model3DQuery.GetLatestUpdatedAtAsync(model3dIdsWithTag, ct)
             : null;
 
         // Return the most recent
@@ -543,10 +540,8 @@ public class EfTagRepository(AppDbContext dbContext, SlicerDbContext? slicerDbCo
             "GcodeFile" => await _dbContext.GcodeFiles
                 .Select(g => g.Id)
                 .ToListAsync(ct),
-            "Model3D" => _slicerDbContext is not null
-                ? await _slicerDbContext.Set<Model3D>()
-                    .Select(m => m.Id)
-                    .ToListAsync(ct)
+            "Model3D" => _model3DQuery is not null
+                ? await _model3DQuery.GetAllIdsAsync(ct)
                 : [],
             _ => []
         };

@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Catalog;
-using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 
 namespace Farm.Slicer.Module.Api.Services.Adapters;

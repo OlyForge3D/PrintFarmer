@@ -65,9 +65,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\import\Farm.Importing.csproj" />
-    <!-- Slicer module (DbContext, repos, metrics, config) -->
-    <ProjectReference Include="..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
-    <!-- Slicer module API (controllers, hubs, filters) -->
+    <!-- Slicer module API (controllers, hubs, filters) — transitively pulls Farm.Slicer.Module -->
     <ProjectReference Include="..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj" />
     <!-- Slicer libraries -->
     <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />

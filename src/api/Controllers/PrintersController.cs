@@ -46,7 +46,7 @@ public class PrintersController(
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
-    Farm.Slicer.Module.Services.ISlicersService? slicersService = null,
+    Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
 {
@@ -57,7 +57,7 @@ public class PrintersController(
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly Farm.Slicer.Module.Services.ISlicersService? _slicersService = slicersService;
+    private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed
@@ -895,9 +895,9 @@ public class PrintersController(
         {
             try
             {
-                if (_slicersService is not null)
+                if (_profileImportService is not null)
                 {
-                    int imported = await _slicersService.ImportProfilesForModelAsync(
+                    int imported = await _profileImportService.ImportProfilesForModelAsync(
                         modelId.Value,
                         modelName,
                         manufacturerName,
@@ -1032,11 +1032,11 @@ public class PrintersController(
                 _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
 
                 // Import slicer profiles for this printer's model (pull-based, on-demand import)
-                if (_slicersService is not null && createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
+                if (_profileImportService is not null && createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
                 {
                     try
                     {
-                        int imported = await _slicersService.ImportProfilesForModelAsync(
+                        int imported = await _profileImportService.ImportProfilesForModelAsync(
                             createDto.ModelId.Value,
                             createDto.NewModelName ?? created.ModelName ?? "Unknown",
                             createDto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown",

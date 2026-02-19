@@ -1,11 +1,13 @@
-﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Tasks;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Slicer.Module.Api;
 
 /// <summary>
 /// Background service that checks for printers without slicer profiles and creates user tasks.
@@ -83,7 +85,6 @@ public sealed class ProfileTaskCheckService : BackgroundService
     public async Task CheckPrintersForMissingProfilesAsync(CancellationToken ct)
     {
         _logger.LogInformation("[ProfileTaskCheck] Starting check for printers without profiles...");
-
         using IServiceScope scope = _scopeFactory.CreateScope();
 
         // First check if slicing is available - if the slicer module isn't registered or no workers exist, skip
@@ -106,7 +107,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
         IMachineModelProfileRepository machineModelProfileRepo = scope.ServiceProvider.GetRequiredService<IMachineModelProfileRepository>();
         IMachineProfileRepository machineProfileRepo = scope.ServiceProvider.GetRequiredService<IMachineProfileRepository>();
         IUserTaskService taskService = scope.ServiceProvider.GetRequiredService<IUserTaskService>();
-        Catalog.ICatalogService catalogService = scope.ServiceProvider.GetRequiredService<Catalog.ICatalogService>();
+        ICatalogService catalogService = scope.ServiceProvider.GetRequiredService<ICatalogService>();
 
         try
         {
@@ -134,9 +135,6 @@ public sealed class ProfileTaskCheckService : BackgroundService
                 var modelPrinters = group.ToList();
 
                 // Check if this model has imported slicer profiles (either MachineModelProfile OR MachineProfile)
-                // MachineModelProfile = base printer model profile (e.g., "Sovol SV08")
-                // MachineProfile = nozzle variant profiles (e.g., "Sovol SV08 0.4 nozzle")
-                // The wizard imports MachineProfile entries, so we need to check both
                 MachineModelProfile? modelProfile = await machineModelProfileRepo.GetByPrinterModelIdAsync(modelId, ct);
                 bool hasMachineProfiles = await machineProfileRepo.HasAnyForPrinterModelAsync(modelId, ct);
 

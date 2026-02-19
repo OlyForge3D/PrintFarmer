@@ -3,7 +3,6 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Diagnostics.CodeAnalysis;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Annotations;
-using Farm.Slicer.Module.Domain;
 
 namespace Farm.Infrastructure.Domain;
 

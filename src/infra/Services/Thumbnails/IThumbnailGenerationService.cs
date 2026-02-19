@@ -1,5 +1,4 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
 
 namespace Farm.Infrastructure.Services.Thumbnails;
 

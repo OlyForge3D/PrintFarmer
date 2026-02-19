@@ -6,6 +6,7 @@ global using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 global using Farm.Infrastructure.Contracts.Setup;
 global using Farm.Infrastructure.Contracts.SignalR;
 global using Farm.Infrastructure.Contracts.Workers;
+global using Farm.Infrastructure.Dtos;
 global using Farm.Settings;
 
 // Slicer module domain types used by API service implementations (adapters, file services).

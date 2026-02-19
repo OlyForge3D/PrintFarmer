@@ -1,6 +1,6 @@
 ﻿using System.Net.Http.Json;
 using System.Text.Json;
-using Farm.Slicer.Module.Dtos;
+using Farm.Infrastructure.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;

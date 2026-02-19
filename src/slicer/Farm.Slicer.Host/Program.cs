@@ -30,7 +30,7 @@ builder.Services.AddSlicerApiServices(builder.Configuration);
 builder.Services.AddCrossDomainLookupServices(builder.Configuration);
 
 // ── Minimal stubs for services not yet implemented in the module ───────────────
-// Only IModel3DFileService and I3MfToStlConversionService remain unimplemented.
+// IModel3DFileService and I3MfToStlConversionService remain unimplemented.
 // All other interfaces are now provided by AddSlicerApiServices above.
 builder.Services.AddUnimplementedSlicerServiceStubs();
 

@@ -1,4 +1,4 @@
-﻿namespace Farm.Slicer.Module.Dtos;
+namespace Farm.Infrastructure.Dtos;
 
 /// <summary>
 /// Tag data transfer object for organizing and categorizing items.

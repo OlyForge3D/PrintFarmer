@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Services;
+﻿using Farm.Infrastructure.Services;
+using Farm.Slicer.Module.Services;
 
 namespace Farm.Web.Api.Startup;
 
@@ -22,11 +23,10 @@ public static class SlicerHostAdapterRegistrations
         // Model file service (API implementation of module interface)
         _ = services.AddScoped<IModel3DFileService, Services.Model.Model3DFileService>();
 
-        // 3MF to STL conversion (infrastructure implementation of module interface)
+        // 3MF to STL conversion (infrastructure implementation)
         _ = services.AddScoped<I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
 
-        // Forward the module's IHostedServiceMonitor to the same BackgroundServiceMonitor singleton
-        // so that slicer module hosted services report to the unified monitor.
+        // IHostedServiceMonitor — forward to the same BackgroundServiceMonitor singleton
         _ = services.AddSingleton<IHostedServiceMonitor>(sp =>
             (IHostedServiceMonitor)sp.GetRequiredService<Services.Background.IBackgroundServiceMonitor>());
 

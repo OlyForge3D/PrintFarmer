@@ -180,10 +180,10 @@ public interface IBackgroundServiceMonitor
 /// <summary>
 /// In-memory implementation of background service monitoring.
 /// Implements both the API-local <see cref="IBackgroundServiceMonitor"/> and the
-/// slicer module's <see cref="Farm.Slicer.Module.Services.IHostedServiceMonitor"/>
+/// infrastructure <see cref="Farm.Infrastructure.Services.IHostedServiceMonitor"/>
 /// so that module-hosted services report to the same monitor.
 /// </summary>
-public class BackgroundServiceMonitor : IBackgroundServiceMonitor, Farm.Slicer.Module.Services.IHostedServiceMonitor
+public class BackgroundServiceMonitor : IBackgroundServiceMonitor, Farm.Infrastructure.Services.IHostedServiceMonitor
 {
     private readonly ConcurrentDictionary<string, BackgroundServiceState> _services = new();
 

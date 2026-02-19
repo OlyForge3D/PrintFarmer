@@ -1,4 +1,6 @@
-﻿namespace Farm.Slicer.Module.Domain;
+﻿using Farm.Infrastructure.Domain;
+
+namespace Farm.Slicer.Module.Domain;
 
 /// <summary>
 /// 3D model file metadata. Extends StoredFileBase with model-specific dimensions and validation.
