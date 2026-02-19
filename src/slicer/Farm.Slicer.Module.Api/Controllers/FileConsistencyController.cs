@@ -7,11 +7,10 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Slicer.Module.Api.Controllers;
 
 /// <summary>
 /// Admin endpoints for file consistency management, health status, and orphan remediation.

@@ -43,13 +43,6 @@ public enum FileAuditType
 
 #endregion
 
-#region Slicing and Profiles
-
-// NOTE: FileHealthStatus and ModelFileFormat now live in
-// Farm.Infrastructure.Domain.StoredFileEnums.
-// SlicerType and ProfileQuality remain in Farm.Slicer.Module.Domain.SlicerEnums.
-#endregion
-
 #region Error Handling
 
 /// <summary>

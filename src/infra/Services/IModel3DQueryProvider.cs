@@ -15,5 +15,6 @@ public interface IModel3DQueryProvider
     Task<IReadOnlyList<Guid>> GetAllIdsAsync(CancellationToken ct);
 
     /// <summary>Returns the latest <c>UpdatedAt</c> across the given ids.</summary>
+    /// <returns>The latest <c>UpdatedAt</c> value, or <c>null</c> if none of the ids match any Model3D.</returns>
     Task<DateTime?> GetLatestUpdatedAtAsync(IEnumerable<Guid> ids, CancellationToken ct);
 }

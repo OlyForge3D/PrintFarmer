@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Settings;
+using Farm.Slicer.Module.Api.HostedServices;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Api.Services;

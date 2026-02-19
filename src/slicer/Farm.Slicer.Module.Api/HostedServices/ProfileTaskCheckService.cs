@@ -7,7 +7,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 
-namespace Farm.Slicer.Module.Api;
+namespace Farm.Slicer.Module.Api.HostedServices;
 
 /// <summary>
 /// Background service that checks for printers without slicer profiles and creates user tasks.
@@ -51,7 +51,18 @@ public sealed class ProfileTaskCheckService : BackgroundService
         await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
 
         // Run initial check
-        await CheckPrintersForMissingProfilesAsync(stoppingToken);
+        try
+        {
+            await CheckPrintersForMissingProfilesAsync(stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[ProfileTaskCheck] Error during initial check");
+        }
 
         // Periodic check loop
         while (!stoppingToken.IsCancellationRequested && _enablePeriodicCheck)
@@ -82,7 +93,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
     /// Groups printers by model to create one task per model (not per printer).
     /// Skips task creation entirely if no slicer workers are available (slicing disabled).
     /// </summary>
-    public async Task CheckPrintersForMissingProfilesAsync(CancellationToken ct)
+    internal async Task CheckPrintersForMissingProfilesAsync(CancellationToken ct)
     {
         _logger.LogInformation("[ProfileTaskCheck] Starting check for printers without profiles...");
         using IServiceScope scope = _scopeFactory.CreateScope();

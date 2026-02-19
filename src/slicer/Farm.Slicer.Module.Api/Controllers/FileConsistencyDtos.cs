@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.DTOs;
+﻿namespace Farm.Slicer.Module.Api.Controllers;
 
 /// <summary>
 /// Overall file health summary for dashboard display.

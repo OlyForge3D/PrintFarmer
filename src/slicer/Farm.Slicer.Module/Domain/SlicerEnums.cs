@@ -3,9 +3,9 @@
 // ===========================================================================
 // Slicer Module Enumerations
 // ===========================================================================
-// NOTE: FileHealthStatus and ModelFileFormat have been moved to
-// Farm.Infrastructure.Domain.StoredFileEnums.  Consumer files import them
-// via 'using Farm.Infrastructure.Domain;'.
+// <see cref="Farm.Infrastructure.Domain.FileHealthStatus"/> and
+// <see cref="Farm.Infrastructure.Domain.ModelFileFormat"/> have been moved
+// to Farm.Infrastructure.Domain.StoredFileEnums.
 // ===========================================================================
 #region Slicing and Profiles
 

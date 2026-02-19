@@ -10,9 +10,7 @@ namespace Farm.Slicer.Module.Api.Services;
 /// </summary>
 public class SlicerProfileImportService(ISlicersService slicersService) : IProfileImportService
 {
-    private readonly ISlicersService _slicersService = slicersService;
-
     /// <inheritdoc/>
     public Task<int> ImportProfilesForModelAsync(Guid modelId, string modelName, string manufacturerName, CancellationToken ct)
-        => _slicersService.ImportProfilesForModelAsync(modelId, modelName, manufacturerName, ct);
+        => slicersService.ImportProfilesForModelAsync(modelId, modelName, manufacturerName, ct);
 }

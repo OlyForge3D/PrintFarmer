@@ -10,6 +10,7 @@ using Farm.Infrastructure.Repositories.Locations;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Security;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork;
@@ -23,12 +24,14 @@ public class AppUnitOfWork : IUnitOfWork
 #pragma warning disable CA2213 // DbContext is injected and managed by DI container lifetime
     private readonly AppDbContext _db;
     private readonly ISensitiveDataProtector _sensitiveDataProtector;
+    private readonly IModel3DQueryProvider? _model3DQuery;
 #pragma warning restore CA2213
 
-    public AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector)
+    public AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector, IModel3DQueryProvider? model3DQuery = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
+        _model3DQuery = model3DQuery;
     }
 
     private ICameraRepository? _cameraRepository;
@@ -90,7 +93,7 @@ public class AppUnitOfWork : IUnitOfWork
     /// Coordinated with tag operations for generic tagging support.
     /// Tag mappings are now managed via EF Core skip-navigation on StoredFile.Tags.
     /// </summary>
-    public ITagRepository Tags => _tagRepository ??= new EfTagRepository(_db);
+    public ITagRepository Tags => _tagRepository ??= new EfTagRepository(_db, _model3DQuery);
 
     /// <summary>
     /// Persists all pending changes from both repositories in a single atomic transaction.
