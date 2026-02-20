@@ -7,11 +7,11 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
-using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -37,8 +37,8 @@ public class GcodeFilesController(
     IGcodeUploadSettings uploadSettings,
     IGcodeUploadQuotaService quotaService,
     Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService,
-    Farm.Web.Api.Services.FileManagement.IChunkedUploadService chunkedUploadService,
-    Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService,
+    Farm.Infrastructure.Services.FileManagement.IChunkedUploadService chunkedUploadService,
+    Farm.Infrastructure.Services.FileManagement.IFileManagementService fileManagementService,
     IStoragePathService storagePathService,
     IStoredFileOperationsService storedFileOperationsService) : ControllerBase
 {

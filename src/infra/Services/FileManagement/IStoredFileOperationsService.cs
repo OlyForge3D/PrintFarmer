@@ -1,7 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
 
-namespace Farm.Web.Api.Services.FileManagement;
+namespace Farm.Infrastructure.Services.FileManagement;
 
 /// <summary>
 /// Unified operations service for stored files (GCode and 3D Models).

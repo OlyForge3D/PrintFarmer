@@ -48,7 +48,7 @@ public static class BackgroundServicesStartup
             IConfiguration config = sp.GetRequiredService<IConfiguration>();
             string modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
             string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
-            return new Farm.Web.Api.Services.FileManagement.FileConsistencyAuditService(
+            return new Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService(
                 scopeFactory,
                 logger,
                 modelStoragePath,

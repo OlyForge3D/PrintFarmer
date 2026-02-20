@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services.FileManagement;
+﻿namespace Farm.Infrastructure.Services.FileManagement;
 
 /// <summary>
 /// Represents the result of a file integrity check.

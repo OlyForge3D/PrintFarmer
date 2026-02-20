@@ -12,7 +12,7 @@ using Farm.Slicer.Module.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace Farm.Web.Api.Services.FileManagement;
+namespace Farm.Infrastructure.Services.FileManagement;
 
 /// <summary>
 /// Periodic background service that audits file consistency between database records and disk.

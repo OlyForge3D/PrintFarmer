@@ -13,6 +13,8 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
 using Farm.Infrastructure.Services.Email;
+using Farm.Infrastructure.Services.FileManagement;
+using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Printers;
@@ -27,8 +29,6 @@ using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.FileManagement;
-using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
@@ -191,10 +191,10 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.StorageManagement.IStoragePathService, Farm.Infrastructure.Services.StorageManagement.StoragePathService>();
 
         // File Management Services
-        _ = services.AddScoped<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
-        _ = services.AddScoped<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
-        _ = services.AddScoped<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
-        _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
+        _ = services.AddScoped<IFileManagementService, FileManagementService>();
+        _ = services.AddScoped<IFileIntegrityService, FileIntegrityService>();
+        _ = services.AddScoped<IChunkedUploadService, ChunkedUploadService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IGcodeThumbnailExtractorService, GcodeThumbnailExtractorService>();
 
         // File system abstraction (pure wrapper around static File/Directory APIs)
         _ = services.AddSingleton<Farm.Infrastructure.IO.IFileSystem, Farm.Infrastructure.IO.SystemFileSystem>();

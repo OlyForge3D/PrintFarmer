@@ -37,8 +37,8 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectTemplateService, Farm.Web.Api.Services.Projects.PrintProjectTemplateService>();
 
         // File Management Services
-        services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
-        services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService, Farm.Web.Api.Services.FileManagement.StoredFileOperationsService>();
+        services.AddScoped<Farm.Infrastructure.Services.FileManagement.IFileManagementService, Farm.Infrastructure.Services.FileManagement.FileManagementService>();
+        services.AddScoped<Farm.Infrastructure.Services.FileManagement.IStoredFileOperationsService, Farm.Infrastructure.Services.FileManagement.StoredFileOperationsService>();
 
         // Print Job Management Service (renamed from PrintQueueService)
         services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobManagementRepository>();

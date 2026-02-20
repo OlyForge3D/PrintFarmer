@@ -3,8 +3,9 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Web.Api.Services;
 
-namespace Farm.Web.Api.Services.FileManagement;
+namespace Farm.Infrastructure.Services.FileManagement;
 
 /// <summary>
 /// Manages chunked file upload state and lifecycle.

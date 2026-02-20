@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.FileManagement;
+namespace Farm.Infrastructure.Services.FileManagement;
 
 public class GcodeThumbnailExtractorService(
     IGcodeMetadataExtractorService metadataExtractor,

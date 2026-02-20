@@ -2,8 +2,8 @@
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.FileManagement;
 using FluentAssertions;
 using Moq;
 using Xunit;

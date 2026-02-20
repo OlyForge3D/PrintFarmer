@@ -7,7 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.FolderManagement
+namespace Farm.Infrastructure.Services.FolderManagement
 {
     /// <summary>
     /// Service for managing folder hierarchies and directory structures for 3D model files and GCode files.

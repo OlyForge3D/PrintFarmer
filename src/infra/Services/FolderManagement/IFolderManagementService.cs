@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.FolderManagement
+namespace Farm.Infrastructure.Services.FolderManagement
 {
     /// <summary>
     /// Service for managing folder entities in the database.

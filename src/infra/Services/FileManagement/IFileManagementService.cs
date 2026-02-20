@@ -1,8 +1,7 @@
 ﻿using System.Security.Cryptography;
 using Farm.Infrastructure.Domain;
-using Farm.Slicer.Module.Domain;
 
-namespace Farm.Web.Api.Services.FileManagement;
+namespace Farm.Infrastructure.Services.FileManagement;
 
 /// <summary>
 /// Unified file management operations service for path resolution, sanitization, hashing, and utility operations.
