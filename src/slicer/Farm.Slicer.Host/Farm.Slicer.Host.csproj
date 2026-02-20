@@ -10,6 +10,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../Farm.Slicer.Module.Api/Farm.Slicer.Module.Api.csproj" />
+    <ProjectReference Include="../../migrations/Farm.Slicer.Migrations.PostgreSQL/Farm.Slicer.Migrations.PostgreSQL.csproj" />
+    <ProjectReference Include="../../migrations/Farm.Slicer.Migrations.SqlServer/Farm.Slicer.Migrations.SqlServer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -46,15 +46,13 @@ The main user-facing deployment script that handles interactive setup, validatio
 Dynamically generates `docker-compose.yml` from reusable YAML templates based on deployment options.
 
 **Key Responsibilities:**
-- Validates architecture selection (monolithic/microservices)
 - Reads common YAML anchors from `common.yml`
-- Assembles base compose file from architecture-specific templates
+- Assembles base compose file from microservices template
 - Injects optional service configurations (monitoring, telemetry, discovery)
 - Validates final YAML structure
 - Copies required Dockerfiles to output directory
 
 **Input Options:**
-- `--architecture` - monolithic | microservices
 - `--db-provider` - postgres | sqlserver | mysql | sqlite
 - `--enable-orca-worker` - yes | no (enable distributed slicing)
 - `--include-monitoring`, `--include-telemetry`, `--include-discovery` - optional services
@@ -134,7 +132,6 @@ x-health-check-api: &health-check-api
                ▼
 ┌─────────────────────────────────────┐
 │ Call compose-generator.sh with:     │
-│ • --architecture <arch>             │
 │ • --db-provider <provider>          │
 │ • --enable-orca-worker <yes/no>     │
 └──────────────┬──────────────────────┘

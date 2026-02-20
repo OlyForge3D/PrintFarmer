@@ -53,7 +53,7 @@ run_deployment_test() {
         cp "$original_dir/$config_name" "$REPO_ROOT/"
         
         # Generate files by calling compose generator directly (silently)
-        "$REPO_ROOT/scripts/docker/compose-generator.sh" --architecture "$arch_value" --output-dir "$REPO_ROOT" >/dev/null 2>&1 || true
+        "$REPO_ROOT/scripts/docker/compose-generator.sh" --output-dir "$REPO_ROOT" >/dev/null 2>&1 || true
         
         # Run deploy script in dry-run to get output for validation
         # Capture output directly instead of using test framework function
@@ -94,9 +94,9 @@ run_deployment_test() {
     echo "$output"
 }
 
-# Test complete monolithic deployment pipeline
+# Test complete standard deployment pipeline
 test_monolithic_deployment_pipeline() {
-    start_test "complete monolithic deployment pipeline"
+    start_test "complete standard deployment pipeline"
     
     # Deploy script must be run from PrintFarmer root directory
     # But we need to set up config in a temp space first
@@ -104,7 +104,7 @@ test_monolithic_deployment_pipeline() {
     
     # Create basic config to avoid prompts
     cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 NETWORK_MODE=bridge
 API_PORT=5245
@@ -123,11 +123,10 @@ EOF
     assert_contains "$output" "Setup completed successfully" "Pipeline should complete successfully"
     
     # Validate that the process mentions key components
-    assert_contains "$output" "monolithic" "Should mention monolithic architecture"
     assert_contains "$output" "compose" "Should mention compose generation"
     
     # Generate files separately for content validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml" "Should generate docker-compose.yml via compose generator"
     
     # Check compose file content
@@ -166,7 +165,7 @@ EOF
     assert_contains "$output" "Setup completed successfully" "Microservices pipeline should complete"
     
     # Generate files separately for content validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml" "Should generate docker-compose.yml via compose generator"
     local compose_content=$(cat "docker-compose.yml")
     assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
@@ -182,7 +181,7 @@ test_configuration_consistency() {
     start_test "configuration consistency between scripts"
     
     # Generate config with compose-generator
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker yes --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --output-dir $TEST_TEMP_DIR"
     
     local compose_from_generator=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -199,7 +198,7 @@ EOF
     local output=$(run_deployment_test ".deploy-config" 60 false)
     
     # Generate files separately for validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml" "Deploy script should also generate compose file"
     local compose_from_deploy=$(cat "docker-compose.yml")
     
@@ -218,7 +217,7 @@ test_cleanup_and_regeneration() {
     
     # Create initial deployment
     cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 ENABLE_ORCA_WORKER=yes
 ORCA_WORKER_COUNT=1
@@ -227,7 +226,7 @@ EOF
     local output=$(run_deployment_test ".deploy-config" 60 false)
     
     # Generate files separately for validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml" "Should create initial files"
     
     # Modify config and regenerate
@@ -241,7 +240,7 @@ EOF
     local output2=$(run_deployment_test ".deploy-config" 60 false)
     
     # Generate files separately for validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     local compose_content=$(cat "docker-compose.yml")
     
     # Should reflect new configuration
@@ -257,7 +256,7 @@ test_environment_file_generation() {
     cd "$TEST_TEMP_DIR"
     
     cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 API_PORT=5555
 WEB_PORT=3333
@@ -281,20 +280,20 @@ test_multistage_dockerfile_presence() {
     cd "$TEST_TEMP_DIR"
     
     # Both scripts should ensure Dockerfile.multistage is available
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     assert_file_exists "$TEST_TEMP_DIR/Dockerfile.multistage" "Compose generator should copy Dockerfile.multistage"
     
     rm -f "$TEST_TEMP_DIR/Dockerfile.multistage"
     
     cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 EOF
     
     local output=$(run_deployment_test ".deploy-config" 60 false)
     
     # Generate files separately for validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     assert_file_exists "Dockerfile.multistage" "Deploy script should also copy Dockerfile.multistage"
     
     pass_test
@@ -337,7 +336,7 @@ EOF
     local deploy_output=$(run_deployment_test ".deploy-config" 60 false)
     
     # Generate files separately for validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml" "Should generate compose file"
     local compose_content=$(cat "docker-compose.yml")
     
@@ -357,30 +356,22 @@ test_network_mode_combinations() {
     
     cd "$TEST_TEMP_DIR"
     
-    local architectures=("monolithic" "microservices" "microservices")
+    # Generate compose file
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
-    for arch in "${architectures[@]}"; do
-        
-        # Generate compose file with explicit arguments
-        assert_command_success "$COMPOSE_GENERATOR --architecture $arch --output-dir $TEST_TEMP_DIR"
-        
-        assert_file_exists "docker-compose.yml" "Should create compose file for $arch"
-        
-        # Test deployment from repo root with explicit architecture
-        capture_output "cd '$REPO_ROOT' && timeout 40 $DEPLOY_SCRIPT --architecture $arch --dry-run --batch 2>&1 || true"
-        local output=$(get_output)
-        
-        assert_contains "$output" "Setup completed successfully" "Should deploy $arch successfully"
-        
-        # Validate network configuration in compose file
-        # Bridge/overlay networking is the supported configuration; ensure no host-mode assertion
-        if [[ "$arch" == "microservices" ]]; then
-            local compose_content=$(cat "docker-compose.yml")
-            assert_not_contains "$compose_content" "network_mode: host" "Compose should not configure host network"
-        fi
-        
-        rm -f docker-compose.yml Dockerfile.multistage
-    done
+    assert_file_exists "docker-compose.yml" "Should create compose file"
+    
+    # Test deployment from repo root
+    capture_output "cd '$REPO_ROOT' && timeout 40 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
+    local output=$(get_output)
+    
+    assert_contains "$output" "Setup completed successfully" "Should deploy successfully"
+    
+    # Validate network configuration in compose file
+    local compose_content=$(cat "docker-compose.yml")
+    assert_not_contains "$compose_content" "network_mode: host" "Compose should not configure host network"
+    
+    rm -f docker-compose.yml Dockerfile.multistage
     
     pass_test
 }
@@ -392,13 +383,13 @@ test_security_combinations() {
     cd "$TEST_TEMP_DIR"
     
     # Test with security enabled using helper function
-    capture_output "$(get_deploy_script_command --architecture microservices --include-security --dry-run --batch)"
+    capture_output "$(get_deploy_script_command --include-security --dry-run --batch)"
     local output=$(get_output)
     
     assert_contains "$output" "Setup completed successfully" "Should deploy with security"
     
     # Test without security  
-    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch)"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output2=$(get_output)
 
     assert_contains "$output2" "Setup completed successfully" "Should deploy without security"
@@ -413,13 +404,13 @@ test_comprehensive_addon_combinations() {
     cd "$TEST_TEMP_DIR"
     
     # Test all addons enabled using deploy script with addon flags
-    capture_output "$(get_deploy_script_command --architecture microservices --include-monitoring --include-telemetry --include-security --dry-run --batch)"
+    capture_output "$(get_deploy_script_command --include-monitoring --include-telemetry --include-security --dry-run --batch)"
     local output=$(get_output)
     
     assert_contains "$output" "Setup completed successfully" "Should deploy all addons successfully"
     
     # Test minimal configuration  
-    capture_output "$(get_deploy_script_command --architecture monolithic --dry-run --batch)"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output2=$(get_output)
     
     assert_contains "$output2" "Setup completed successfully" "Should deploy minimal configuration successfully"

@@ -796,19 +796,18 @@ generate_jwt_key() {
 }
 
 generate_deployment_config() {
-    local architecture="$1"
-    local include_monitoring="${2:-true}"  # Default to true
-    local include_telemetry="${3:-true}"   # Default to true
-    local include_security="${4:-false}"
-    local include_registry="${5:-false}"
-    local include_discovery="${6:-false}"
-    local output_dir="${7:-$(pwd)}"
+    local include_monitoring="${1:-true}"  # Default to true
+    local include_telemetry="${2:-true}"   # Default to true
+    local include_security="${3:-false}"
+    local include_registry="${4:-false}"
+    local include_discovery="${5:-false}"
+    local output_dir="${6:-$(pwd)}"
     
-    print_info "Generating deployment configuration for $architecture architecture..."
+    print_info "Generating deployment configuration..."
     
     # Use the compose generator
     local generator_cmd="$SCRIPT_DIR/docker/compose-generator.sh"
-    local generator_args=("--architecture" "$architecture")
+    local generator_args=()
     
     # Monitoring and telemetry: pass exclude flags if disabled, include flags if enabled
     # Generator defaults to enabled, so we only need to pass exclude when false
@@ -2282,7 +2281,6 @@ MANUAL IMAGE MANAGEMENT OPTIONS (Advanced):
     --load-cached-orcaslicer     Show cached OrcaSlicer AppImage info
 
 COMPOSE GENERATOR OPTIONS:
-        --architecture ARCH Architecture flag (deprecated, standard deployment always used)
         --exclude-monitoring Disable monitoring stack (Prometheus, Grafana) - enabled by default
         --exclude-telemetry Disable telemetry/observability (OpenTelemetry, Jaeger) - enabled by default
         --include-monitoring Legacy flag - monitoring now included by default
@@ -2917,25 +2915,13 @@ install_dotnet_sdk() {
     fi
 }
 
-# Set deployment architecture (simplified - only microservices mode)
+# Set standard deployment constants
 choose_architecture() {
-    # Architecture is now always microservices (monolithic was identical and confusing)
-    # The --architecture CLI flag is accepted for backwards compatibility but ignored
-    if [ -n "${CLI_ARCHITECTURE:-}" ]; then
-        # Accept for backwards compatibility, but always use microservices
-        if [ "$CLI_ARCHITECTURE" = "monolithic" ] || [ "$CLI_ARCHITECTURE" = "mono" ]; then
-            print_info "Note: Monolithic mode deprecated - using standard deployment (identical behavior)"
-        fi
-    fi
-    
-    # Always use microservices architecture
     ARCHITECTURE="microservices"
     ENV_FILE=".env"
     COMPOSE_FILE="docker-compose.yml"
     
-    # In non-interactive mode, just confirm
     if [ "$NON_INTERACTIVE" = "true" ]; then
-        print_info "Using standard deployment architecture"
         return 0
     fi
     
@@ -3219,6 +3205,51 @@ adjust_connection_strings_for_network_mode() {
 }
 
  
+
+# Configure distributed slicing and worker settings
+# Must run BEFORE configure_external_storage so storage prompts can
+# conditionally show model/profile paths when slicing is enabled.
+configure_slicing() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENABLE_DISTRIBUTED_SLICING:-}" ]; then
+        print_info "Using configured distributed slicing: $ENABLE_DISTRIBUTED_SLICING"
+        return 0
+    fi
+
+    print_header "🔪 Distributed Slicing Configuration"
+
+    prompt_yes_no "Enable distributed slicing (uses external slicer workers)?" "yes" "ENABLE_DIST_SLICING_CHOICE"
+    if [ "$ENABLE_DIST_SLICING_CHOICE" = "yes" ]; then
+        ENABLE_DISTRIBUTED_SLICING=true
+    else
+        ENABLE_DISTRIBUTED_SLICING=false
+    fi
+
+    # Worker enablement & scaling (only meaningful if distributed slicing enabled)
+    if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
+        echo
+        echo -e "${BLUE}Configure slicer workers. You can enable OrcaSlicer workers and specify replica counts.${NC}"
+        # Default to 'no' to avoid accidental enabling when slicer work is paused
+        prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.1}" "ORCASLICER_VERSION"
+            prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
+        else
+            ORCA_WORKER_COUNT=0
+        fi
+
+        # Allow endpoint override (advanced)
+        prompt_yes_no "Override default worker service endpoints?" "no" "OVERRIDE_WORKER_ENDPOINTS"
+        if [ "$OVERRIDE_WORKER_ENDPOINTS" = "yes" ]; then
+            if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+                prompt_with_default "OrcaSlicer worker endpoint (API reachable URL):" "http://orcaslicer-worker:8080" "ORCA_WORKER_ENDPOINT"
+            fi
+        fi
+    else
+        ENABLE_ORCA_WORKER=no
+        ORCA_WORKER_COUNT=0
+    fi
+}
 
 # Configure additional settings
 configure_external_storage() {
@@ -3636,41 +3667,6 @@ configure_additional() {
         ENABLE_DISCOVERY="false"
     fi
     
-
-
-    echo
-    echo -e "${BLUE}Distributed Slicing Configuration${NC}"
-    prompt_yes_no "Enable distributed slicing (uses external slicer workers)?" "yes" "ENABLE_DIST_SLICING_CHOICE"
-    if [ "$ENABLE_DIST_SLICING_CHOICE" = "yes" ]; then
-        ENABLE_DISTRIBUTED_SLICING=true
-    else
-        ENABLE_DISTRIBUTED_SLICING=false
-    fi
-
-    # Worker enablement & scaling (only meaningful if distributed slicing enabled)
-    if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
-        echo
-        echo -e "${BLUE}Configure slicer workers. You can enable OrcaSlicer workers and specify replica counts.${NC}"
-    # Default to 'no' to avoid accidental enabling when slicer work is paused
-    prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
-        if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.1}" "ORCASLICER_VERSION"
-            prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
-        else
-            ORCA_WORKER_COUNT=0
-        fi
-
-        # Allow endpoint override (advanced)
-        prompt_yes_no "Override default worker service endpoints?" "no" "OVERRIDE_WORKER_ENDPOINTS"
-        if [ "$OVERRIDE_WORKER_ENDPOINTS" = "yes" ]; then
-            if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-                prompt_with_default "OrcaSlicer worker endpoint (API reachable URL):" "http://orcaslicer-worker:8080" "ORCA_WORKER_ENDPOINT"
-            fi
-        fi
-    else
-        ENABLE_ORCA_WORKER=no
-        ORCA_WORKER_COUNT=0
-    fi
 
     echo
     echo -e "${BLUE}Spoolman Integration${NC}"
@@ -5751,6 +5747,21 @@ verify_deployment() {
             print_info "  (Worker may still be starting. Check 'docker-compose -f $COMPOSE_FILE ps' and logs for details)"
             health_check_failed=true
         fi
+
+        # Slicer-host always accompanies orca-worker
+        print_info "Testing slicer-host..."
+        local slicer_host_checked=false
+
+        if dc exec -T slicer-host curl -sf "http://localhost:5246/healthz" >/dev/null 2>&1; then
+            print_success "✓ Slicer host: Healthy"
+            slicer_host_checked=true
+        fi
+
+        if [ "$slicer_host_checked" = false ]; then
+            print_warning "✗ Slicer host: Not responding"
+            print_info "  (Slicer host may still be starting. Check 'docker-compose -f $COMPOSE_FILE ps' and logs for details)"
+            health_check_failed=true
+        fi
     fi
     
     # Test pgAdmin health if enabled
@@ -6178,7 +6189,7 @@ main() {
         
         # Determine output directory
         local output_dir="$(pwd)"
-        if generate_deployment_config "$ARCHITECTURE" "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "${INCLUDE_DISCOVERY:-false}" "$output_dir"; then
+        if generate_deployment_config "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "${INCLUDE_DISCOVERY:-false}" "$output_dir"; then
             print_success "Configuration regenerated successfully"
             print_info "Updated files:"
             print_info "  - .env"
@@ -6300,6 +6311,7 @@ main() {
     configure_database
     configure_networking
     adjust_connection_strings_for_network_mode
+    configure_slicing
     configure_external_storage
     configure_additional
     validate_configuration
@@ -6340,7 +6352,7 @@ main() {
         rm -f docker-compose.override.yml
     fi
 
-    if ! generate_deployment_config "$ARCHITECTURE" "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "$INCLUDE_DISCOVERY" "$output_dir"; then
+    if ! generate_deployment_config "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "$INCLUDE_DISCOVERY" "$output_dir"; then
         print_error "Failed to generate deployment configuration. Cannot proceed."
         exit 1
     fi
@@ -6496,15 +6508,15 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --architecture)
+            # Accepted for backwards compatibility, ignored
             if [ -n "${2:-}" ]; then
-                CLI_ARCHITECTURE="$2"
                 shift 2
             else
-                echo "Missing value for --architecture" >&2; exit 2
+                shift
             fi
             ;;
         --architecture=*)
-            CLI_ARCHITECTURE="${1#--architecture=}"
+            # Accepted for backwards compatibility, ignored
             shift
             ;;
         --include-monitoring)

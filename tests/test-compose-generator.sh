@@ -34,26 +34,16 @@ test_help_output() {
     local output=$(get_output)
     
     assert_contains "$output" "Usage:" "Help should contain usage information"
-    assert_contains "$output" "--architecture" "Help should mention architecture option"
-    assert_contains "$output" "monolithic|microservices" "Help should list architecture options"
+    assert_not_contains "$output" "--architecture" "Help should not mention removed architecture option"
     
     pass_test
 }
 
-# Test invalid architecture handling
-test_invalid_architecture() {
-    start_test "invalid architecture handling"
+# Test standard generation (single architecture)
+test_standard_generation() {
+    start_test "standard generation"
     
-    assert_exit_code 1 "$COMPOSE_GENERATOR --architecture invalid --output-dir $TEST_TEMP_DIR"
-    
-    pass_test
-}
-
-# Test monolithic architecture generation
-test_monolithic_generation() {
-    start_test "monolithic architecture generation"
-    
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     # Check required files were created
     assert_file_exists "$TEST_TEMP_DIR/docker-compose.yml"
@@ -75,7 +65,7 @@ test_monolithic_generation() {
     
     # Validate environment variables
     assert_contains "$compose_content" "ASPNETCORE_ENVIRONMENT" "Should have ASP.NET environment config"
-    assert_contains "$compose_content" "DEPLOYMENT_MODE=monolithic" "Should set monolithic deployment mode"
+    assert_contains "$compose_content" "DEPLOYMENT_MODE=microservices" "Should set microservices deployment mode"
     
     # Validate no Redis references
     assert_not_contains "$compose_content" "redis:" "Should not contain Redis service"
@@ -89,7 +79,7 @@ test_monolithic_generation() {
 test_microservices_generation() {
     start_test "microservices architecture generation"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     # Check required files were created
     assert_file_exists "$TEST_TEMP_DIR/docker-compose.yml"
@@ -132,7 +122,7 @@ test_discovery_network_consistency() {
     mkdir -p "$outdir"
 
     # Generate microservices compose with discovery included
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-discovery --output-dir $outdir"
+    assert_command_success "$COMPOSE_GENERATOR --include-discovery --output-dir $outdir"
 
     local compose_file="$outdir/docker-compose.yml"
     assert_file_exists "$compose_file"
@@ -176,7 +166,7 @@ test_discovery_network_consistency() {
 test_orcaslicer_worker_config() {
     start_test "OrcaSlicer worker configuration"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker yes --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --output-dir $TEST_TEMP_DIR"
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -225,7 +215,7 @@ test_orcaslicer_worker_variations() {
         local temp_count_dir="$TEST_TEMP_DIR/test-worker-$count"
         mkdir -p "$temp_count_dir"
         
-        assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker $count --output-dir $temp_count_dir"
+        assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker $count --output-dir $temp_count_dir"
         assert_file_exists "$temp_count_dir/docker-compose.yml" "Should create compose file with $count workers"
         
         local compose_content=$(cat "$temp_count_dir/docker-compose.yml")
@@ -252,7 +242,7 @@ test_orcaslicer_worker_variations() {
     # Test with no workers
     local temp_no_workers_dir="$TEST_TEMP_DIR/test-no-workers"
     mkdir -p "$temp_no_workers_dir"
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker no --output-dir $temp_no_workers_dir"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker no --output-dir $temp_no_workers_dir"
     assert_file_exists "$temp_no_workers_dir/docker-compose.yml" "Should create compose file with no workers"
     
     local no_workers_content=$(cat "$temp_no_workers_dir/docker-compose.yml")
@@ -276,7 +266,7 @@ test_prusaslicer_worker_disabled() {
     start_test "PrusaSlicer worker disabled"
     
     # PrusaSlicer should be disabled/ignored
-    capture_output "$COMPOSE_GENERATOR --architecture microservices --enable-prusa-worker yes --output-dir $TEST_TEMP_DIR 2>&1"
+    capture_output "$COMPOSE_GENERATOR --enable-prusa-worker yes --output-dir $TEST_TEMP_DIR 2>&1"
     local output=$(get_output)
     
     # Should either ignore or warn about PrusaSlicer
@@ -290,18 +280,14 @@ test_prusaslicer_worker_disabled() {
 test_database_provider_config() {
     start_test "database provider configuration"
     
-    # Test SQLite for monolithic (PostgreSQL option ignored for monolithic)
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --db-provider postgres --output-dir $TEST_TEMP_DIR"
+    # Test PostgreSQL provider configuration
+    assert_command_success "$COMPOSE_GENERATOR --db-provider postgres --output-dir $TEST_TEMP_DIR"
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
-    # Validate SQLite configuration (monolithic always uses SQLite)
-    assert_contains "$compose_content" "DB_PROVIDER=Sqlite" "Should use SQLite for monolithic architecture"
-    assert_contains "$compose_content" "Data Source=/data/farm.db" "Should use SQLite connection string"
-    
-    # Validate no external database service (monolithic uses embedded SQLite)
-    assert_not_contains "$compose_content" "postgres:" "Should not include PostgreSQL service in monolithic"
-    assert_not_contains "$compose_content" "image: postgres:" "Should not use PostgreSQL image in monolithic"
+    # Validate PostgreSQL database configuration
+    assert_contains "$compose_content" "DB_PROVIDER=" "Should have database provider configuration"
+    assert_contains "$compose_content" "database:" "Should include database service for postgres"
     
     # Validate multistage build
     assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
@@ -326,7 +312,7 @@ test_all_database_providers() {
         local temp_provider_dir="$TEST_TEMP_DIR/test-$provider"
         mkdir -p "$temp_provider_dir"
         
-        assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider $provider --output-dir $temp_provider_dir"
+        assert_command_success "$COMPOSE_GENERATOR --db-provider $provider --output-dir $temp_provider_dir"
         assert_file_exists "$temp_provider_dir/docker-compose.yml" "Should create compose file for $provider"
         
         local compose_content=$(cat "$temp_provider_dir/docker-compose.yml")
@@ -406,7 +392,7 @@ test_provider_only_env_sqlserver() {
     local temp_dir="$TEST_TEMP_DIR/test-sqlserver-env"
     mkdir -p "$temp_dir"
 
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider sqlserver --output-dir $temp_dir"
+    assert_command_success "$COMPOSE_GENERATOR --db-provider sqlserver --output-dir $temp_dir"
     assert_file_exists "$temp_dir/docker-compose.yml"
 
     # The composer writes variable references into the compose file; ensure only MSSQL/SQLSERVER vars are present
@@ -430,7 +416,7 @@ test_provider_only_env_sqlserver() {
 test_monitoring_inclusion() {
     start_test "monitoring stack inclusion"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --output-dir $TEST_TEMP_DIR"
     
     # Check if monitoring files or references are included
     assert_file_exists "$TEST_TEMP_DIR/docker-compose.yml"
@@ -476,7 +462,7 @@ test_all_addon_stacks() {
         local temp_addon_dir="$TEST_TEMP_DIR/test-$addon"
         mkdir -p "$temp_addon_dir"
         
-        assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-$addon --output-dir $temp_addon_dir"
+        assert_command_success "$COMPOSE_GENERATOR --include-$addon --output-dir $temp_addon_dir"
         assert_file_exists "$temp_addon_dir/docker-compose.yml" "Should create compose file with $addon addon"
         
         local compose_content=$(cat "$temp_addon_dir/docker-compose.yml")
@@ -513,7 +499,7 @@ test_combined_addon_stacks() {
     start_test "combined addon stacks"
     
     # Test multiple addons combined
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --include-telemetry --include-security --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --include-telemetry --include-security --output-dir $TEST_TEMP_DIR"
     assert_file_exists "$TEST_TEMP_DIR/docker-compose.yml" "Should create compose file with multiple addons"
     
     local multi_compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
@@ -529,7 +515,7 @@ test_combined_addon_stacks() {
     # Test all addons combined
     local temp_all_dir="$TEST_TEMP_DIR/test-all-addons"
     mkdir -p "$temp_all_dir"
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --include-telemetry --include-security --include-registry --output-dir $temp_all_dir"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --include-telemetry --include-security --include-registry --output-dir $temp_all_dir"
     assert_file_exists "$temp_all_dir/docker-compose.yml" "Should create compose file with all addons"
     
     local all_compose_content=$(cat "$temp_all_dir/docker-compose.yml")
@@ -568,7 +554,7 @@ test_dry_run_mode() {
     # Clean any existing files from previous tests
     rm -f "$TEST_TEMP_DIR/docker-compose.yml" "$TEST_TEMP_DIR/Dockerfile.multistage"
     
-    capture_output "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR --dry-run"
+    capture_output "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR --dry-run"
     local output=$(get_output)
     
     assert_contains "$output" "Would generate" "Dry-run should indicate what would be generated"
@@ -585,7 +571,7 @@ test_output_directory_creation() {
     
     local nested_dir="$TEST_TEMP_DIR/nested/deep/path"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $nested_dir"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $nested_dir"
     
     assert_dir_exists "$nested_dir" "Should create nested output directory"
     assert_file_exists "$nested_dir/docker-compose.yml" "Should create files in nested directory"
@@ -597,7 +583,7 @@ test_output_directory_creation() {
 test_multistage_targets() {
     start_test "multistage dockerfile targets"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker yes --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --output-dir $TEST_TEMP_DIR"
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -616,7 +602,7 @@ test_multistage_targets() {
 test_no_redis_references() {
     start_test "no Redis references in output"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -632,7 +618,7 @@ test_no_redis_references() {
 test_no_prusaslicer_references() {
     start_test "no PrusaSlicer references in output"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -644,54 +630,43 @@ test_no_prusaslicer_references() {
     pass_test
 }
 
-# Test comprehensive architecture and database combinations
-test_architecture_database_combinations() {
-    start_test "all architecture and database combinations"
+# Test all database provider combinations
+test_database_combinations() {
+    start_test "all database provider combinations"
     
-    local architectures=("monolithic" "microservices" "microservices")
     local databases=("postgres" "sqlserver" "mysql")
     
-    for arch in "${architectures[@]}"; do
-        for db in "${databases[@]}"; do
-            local temp_combo_dir="$TEST_TEMP_DIR/test-$arch-$db"
-            mkdir -p "$temp_combo_dir"
-            
-            assert_command_success "$COMPOSE_GENERATOR --architecture $arch --db-provider $db --output-dir $temp_combo_dir"
-            assert_file_exists "$temp_combo_dir/docker-compose.yml" "Should create compose file for $arch + $db"
-            assert_file_exists "$temp_combo_dir/Dockerfile.multistage" "Should copy multistage dockerfile for $arch + $db"
-            
-            local compose_content=$(cat "$temp_combo_dir/docker-compose.yml")
-            assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for $arch + $db"
-            
-            # Architecture-specific checks
-            if [ "$arch" = "microservices" ]; then
-                assert_contains "$compose_content" "services:" "Microservices should have services defined for $db"
-            fi
-        done
+    for db in "${databases[@]}"; do
+        local temp_combo_dir="$TEST_TEMP_DIR/test-$db"
+        mkdir -p "$temp_combo_dir"
+        
+        assert_command_success "$COMPOSE_GENERATOR --db-provider $db --output-dir $temp_combo_dir"
+        assert_file_exists "$temp_combo_dir/docker-compose.yml" "Should create compose file for $db"
+        assert_file_exists "$temp_combo_dir/Dockerfile.multistage" "Should copy multistage dockerfile for $db"
+        
+        local compose_content=$(cat "$temp_combo_dir/docker-compose.yml")
+        assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for $db"
+        assert_contains "$compose_content" "services:" "Should have services defined for $db"
     done
     
     pass_test
 }
 
-# Test architecture with all addons combinations
-test_architecture_addon_combinations() {
-    start_test "architecture with all addons combinations"
+# Test all addons combinations
+test_addon_combinations() {
+    start_test "all addons combinations"
     
-    local architectures=("monolithic" "microservices" "microservices")
+    local temp_full_dir="$TEST_TEMP_DIR/test-full"
+    mkdir -p "$temp_full_dir"
     
-    for arch in "${architectures[@]}"; do
-        local temp_full_dir="$TEST_TEMP_DIR/test-$arch-full"
-        mkdir -p "$temp_full_dir"
-        
-        # Test with all addons enabled
-        assert_command_success "$COMPOSE_GENERATOR --architecture $arch --include-monitoring --include-telemetry --include-security --include-registry --enable-orca-worker yes --db-provider postgres --output-dir $temp_full_dir"
-        assert_file_exists "$temp_full_dir/docker-compose.yml" "Should create full-featured compose file for $arch"
-        
-        local compose_content=$(cat "$temp_full_dir/docker-compose.yml")
-        assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for full $arch"
-        assert_not_contains "$compose_content" "redis:" "Should not contain Redis services for full $arch"
-        assert_not_contains "$compose_content" "prusaslicer" "Should not contain PrusaSlicer references for full $arch"
-    done
+    # Test with all addons enabled
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --include-telemetry --include-security --include-registry --enable-orca-worker yes --db-provider postgres --output-dir $temp_full_dir"
+    assert_file_exists "$temp_full_dir/docker-compose.yml" "Should create full-featured compose file"
+    
+    local compose_content=$(cat "$temp_full_dir/docker-compose.yml")
+    assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for full config"
+    assert_not_contains "$compose_content" "redis:" "Should not contain Redis services"
+    assert_not_contains "$compose_content" "prusaslicer" "Should not contain PrusaSlicer references"
     
     pass_test
 }
@@ -735,32 +710,21 @@ test_generated_compose_file_is_valid_yaml() {
         return 0
     fi
     
-    # Generate for all architectures AND all database providers
+    # Generate for all database providers
     # This ensures database service YAML is properly formatted for all combinations
-    local architectures=("monolithic" "microservices" "microservices")
     local providers=("postgres" "sqlserver" "mysql")
     
-    for arch in "${architectures[@]}"; do
-        # Monolithic uses SQLite, skip database providers
-        if [[ "$arch" == "monolithic" ]]; then
-            assert_command_success "$COMPOSE_GENERATOR --architecture $arch --output-dir $TEST_TEMP_DIR/test-$arch"
-            assert_file_exists "$TEST_TEMP_DIR/test-$arch/docker-compose.yml" "Should create compose file for $arch"
-            assert_command_success "docker compose --file $TEST_TEMP_DIR/test-$arch/docker-compose.yml config --quiet" "Compose file for $arch should pass validation"
-        else
-            # Microservices and microservices need database provider validation
-            for provider in "${providers[@]}"; do
-                local test_subdir="$TEST_TEMP_DIR/test-${arch}-${provider}"
-                assert_command_success "$COMPOSE_GENERATOR --architecture $arch --db-provider $provider --output-dir $test_subdir" "Should generate $arch architecture with $provider database"
-                
-                # Verify compose file exists
-                assert_file_exists "$test_subdir/docker-compose.yml" "Should create compose file for $arch with $provider"
-                
-                # CRITICAL: Verify compose file is valid YAML using docker compose config
-                # This catches syntax errors, duplicate keys, malformed YAML structure, etc.
-                # This validation is especially important for database service YAML which is generated from templates
-                assert_command_success "docker compose --file $test_subdir/docker-compose.yml config --quiet" "Compose file for $arch with $provider should pass Docker Compose validation (detects YAML structure errors)"
-            done
-        fi
+    for provider in "${providers[@]}"; do
+        local test_subdir="$TEST_TEMP_DIR/test-${provider}"
+        assert_command_success "$COMPOSE_GENERATOR --db-provider $provider --output-dir $test_subdir" "Should generate compose with $provider database"
+        
+        # Verify compose file exists
+        assert_file_exists "$test_subdir/docker-compose.yml" "Should create compose file for $provider"
+        
+        # CRITICAL: Verify compose file is valid YAML using docker compose config
+        # This catches syntax errors, duplicate keys, malformed YAML structure, etc.
+        # This validation is especially important for database service YAML which is generated from templates
+        assert_command_success "docker compose --file $test_subdir/docker-compose.yml config --quiet" "Compose file for $provider should pass Docker Compose validation (detects YAML structure errors)"
     done
     
     pass_test
@@ -775,10 +739,9 @@ test_database_initialization_order() {
     cd "$TEST_TEMP_DIR"
     
     # Test for microservices architecture
-    local arch="microservices"
-    local test_dir="$TEST_TEMP_DIR/test-init-order-$arch"
+    local test_dir="$TEST_TEMP_DIR/test-init-order"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture $arch --output-dir $test_dir" "Should generate $arch architecture"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $test_dir" "Should generate compose"
     
     local compose_file="$test_dir/docker-compose.yml"
     assert_file_exists "$compose_file" "Should create compose file"
@@ -786,7 +749,7 @@ test_database_initialization_order() {
     local yaml_content=$(cat "$compose_file")
     
     # Verify the compose file is valid
-    assert_command_success "docker compose --file $compose_file config --quiet" "Microservices compose should be valid"
+    assert_command_success "docker compose --file $compose_file config --quiet" "Compose file should be valid"
     
     # Check for database service with healthcheck (if present)
     if echo "$yaml_content" | grep -q "healthcheck:"; then
@@ -794,15 +757,6 @@ test_database_initialization_order() {
     else
         test_info "ℹ No explicit healthcheck found (may be acceptable)"
     fi
-    
-    # For monolithic architecture, just verify it's valid YAML
-    arch="monolithic"
-    test_dir="$TEST_TEMP_DIR/test-init-order-$arch"
-    
-    assert_command_success "$COMPOSE_GENERATOR --architecture $arch --output-dir $test_dir" "Should generate $arch architecture"
-    
-    compose_file="$test_dir/docker-compose.yml"
-    assert_command_success "docker compose --file $compose_file config --quiet" "Monolithic compose should be valid"
     
     pass_test
 }
@@ -818,7 +772,7 @@ test_database_volume_mount_correctness() {
     local arch="microservices"
     local test_dir="$TEST_TEMP_DIR/test-volumes-$arch"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture $arch --output-dir $test_dir" "Should generate $arch architecture"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $test_dir" "Should generate compose"
     
     local compose_file="$test_dir/docker-compose.yml"
     local yaml_content=$(cat "$compose_file")
@@ -862,25 +816,23 @@ test_database_volume_mount_correctness() {
             test_info "ℹ Database service may use default volumes (not explicitly configured)"
         fi
     else
-        test_info "ℹ Database service not found in microservices mode (may be expected for monolithic)"
+        test_info "ℹ Database service not found (default provider may differ)"
     fi
     
     pass_test
 }
 
 # Test: missing_required_architecture_argument (PHASE 2)
-# Note: compose-generator defaults to 'monolithic', so this test verifies that behavior
+# Note: compose-generator defaults to microservices, so this test verifies that behavior
 test_missing_required_architecture_argument() {
     start_test "missing required architecture argument"
     
     cd "$TEST_TEMP_DIR"
     
-    # When architecture is not provided, should use default (monolithic) or fail
-    # If it succeeds, that's acceptable (defaults to monolithic)
-    # If it fails, that's also acceptable (requires explicit architecture)
+    # When architecture is not provided, should use default (microservices)
     local result=$("$COMPOSE_GENERATOR" --output-dir "$TEST_TEMP_DIR" 2>&1)
-    # Either outcome is acceptable - just verify it doesn't crash
-    test_info "✓ Script handles missing architecture argument (uses default or fails gracefully)"
+    # Verify it doesn't crash
+    test_info "✓ Script handles missing architecture argument (uses default)"
     
     pass_test
 }
@@ -892,7 +844,7 @@ test_invalid_database_provider() {
     cd "$TEST_TEMP_DIR"
     
     # Should reject unknown database providers
-    assert_exit_code 1 "$COMPOSE_GENERATOR --architecture microservices --db-provider nosuchdb --output-dir $TEST_TEMP_DIR"
+    assert_exit_code 1 "$COMPOSE_GENERATOR --db-provider nosuchdb --output-dir $TEST_TEMP_DIR"
     
     pass_test
 }
@@ -905,7 +857,7 @@ test_output_directory_nonexistent_path() {
     local nested_dir="$TEST_TEMP_DIR/deeply/nested/dir/path"
     
     # Should create parent directories
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $nested_dir"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $nested_dir"
     assert_file_exists "$nested_dir/docker-compose.yml" "Should create nested directories and compose file"
     
     pass_test
@@ -918,7 +870,7 @@ test_addon_services_no_duplicates() {
     cd "$TEST_TEMP_DIR"
     
     # Generate with all addons combined - this is a valid use case
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --include-telemetry --include-security --include-registry --output-dir $TEST_TEMP_DIR/test-addons"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --include-telemetry --include-security --include-registry --output-dir $TEST_TEMP_DIR/test-addons"
     
     local compose_file="$TEST_TEMP_DIR/test-addons/docker-compose.yml"
     # Verify compose file is valid (docker compose config will catch duplicate service names, bad YAML, etc.)
@@ -933,7 +885,7 @@ test_environment_variable_references_resolved() {
     
     cd "$TEST_TEMP_DIR"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR/test-env"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR/test-env"
     
     local compose_file="$TEST_TEMP_DIR/test-env/docker-compose.yml"
     local yaml_content=$(cat "$compose_file")
@@ -956,7 +908,7 @@ test_orcaslicer_worker_count_validation() {
     
     # Test various valid formats
     for format in "yes" "no" "true" "false" "1" "2" "5"; do
-        assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker $format --output-dir $TEST_TEMP_DIR/test-worker-$format"
+        assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker $format --output-dir $TEST_TEMP_DIR/test-worker-$format"
     done
     
     test_info "✓ All valid worker count formats accepted"
@@ -969,7 +921,7 @@ test_compose_file_service_names_valid() {
     
     cd "$TEST_TEMP_DIR"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR/test-names"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR/test-names"
     
     local compose_file="$TEST_TEMP_DIR/test-names/docker-compose.yml"
     local yaml_content=$(cat "$compose_file")
@@ -994,7 +946,7 @@ test_overwrite_existing_compose_file() {
     echo "existing: content" > "$TEST_TEMP_DIR/test-overwrite/docker-compose.yml"
     
     # Generate again - should overwrite
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR/test-overwrite"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR/test-overwrite"
     
     # Verify it's now a valid compose file (not the old content)
     local compose_file="$TEST_TEMP_DIR/test-overwrite/docker-compose.yml"
@@ -1012,7 +964,7 @@ test_no_unresolved_environment_variables() {
     
     # Test with all database providers
     for provider in postgres sqlserver mysql; do
-        assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider $provider --output-dir $TEST_TEMP_DIR/test-vars-$provider"
+        assert_command_success "$COMPOSE_GENERATOR --db-provider $provider --output-dir $TEST_TEMP_DIR/test-vars-$provider"
         
         local compose_file="$TEST_TEMP_DIR/test-vars-$provider/docker-compose.yml"
         local yaml_content=$(cat "$compose_file")
@@ -1034,7 +986,7 @@ test_monitoring_stack_environment_variables() {
     
     cd "$TEST_TEMP_DIR"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --output-dir $TEST_TEMP_DIR/test-monitoring"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --output-dir $TEST_TEMP_DIR/test-monitoring"
     
     # Verify monitoring config files are generated
     assert_file_exists "$TEST_TEMP_DIR/test-monitoring/docker-compose.yml" "Should generate compose"
@@ -1049,7 +1001,7 @@ test_security_stack_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-security --output-dir $TEST_TEMP_DIR/test-security"
+    assert_command_success "$COMPOSE_GENERATOR --include-security --output-dir $TEST_TEMP_DIR/test-security"
     
     local compose_file="$TEST_TEMP_DIR/test-security/docker-compose.yml"
     assert_command_success "docker compose --file $compose_file config --quiet" "Security stack should produce valid compose"
@@ -1069,7 +1021,7 @@ test_registry_stack_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-registry --output-dir $TEST_TEMP_DIR/test-registry"
+    assert_command_success "$COMPOSE_GENERATOR --include-registry --output-dir $TEST_TEMP_DIR/test-registry"
     
     local compose_file="$TEST_TEMP_DIR/test-registry/docker-compose.yml"
     assert_command_success "docker compose --file $compose_file config --quiet" "Registry stack should produce valid compose"
@@ -1084,7 +1036,7 @@ test_telemetry_stack_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-telemetry --output-dir $TEST_TEMP_DIR/test-telemetry"
+    assert_command_success "$COMPOSE_GENERATOR --include-telemetry --output-dir $TEST_TEMP_DIR/test-telemetry"
     
     local compose_file="$TEST_TEMP_DIR/test-telemetry/docker-compose.yml"
     assert_command_success "docker compose --file $compose_file config --quiet" "Telemetry stack should produce valid compose"
@@ -1108,24 +1060,11 @@ test_invalid_port_number() {
     cd "$TEST_TEMP_DIR"
     
     # Test with port out of valid range
-    assert_command_failure "$COMPOSE_GENERATOR --architecture microservices --api-port 99999 --output-dir $TEST_TEMP_DIR/test-badport" "Should reject port > 65535"
-    assert_command_failure "$COMPOSE_GENERATOR --architecture microservices --api-port 0 --output-dir $TEST_TEMP_DIR/test-badport" "Should reject port 0"
-    assert_command_failure "$COMPOSE_GENERATOR --architecture microservices --api-port -1 --output-dir $TEST_TEMP_DIR/test-badport" "Should reject negative port"
+    assert_command_failure "$COMPOSE_GENERATOR --api-port 99999 --output-dir $TEST_TEMP_DIR/test-badport" "Should reject port > 65535"
+    assert_command_failure "$COMPOSE_GENERATOR --api-port 0 --output-dir $TEST_TEMP_DIR/test-badport" "Should reject port 0"
+    assert_command_failure "$COMPOSE_GENERATOR --api-port -1 --output-dir $TEST_TEMP_DIR/test-badport" "Should reject negative port"
     
     test_info "✓ Invalid port numbers properly rejected"
-    pass_test
-}
-
-# Test: missing_required_arguments (PHASE 3)
-test_missing_architecture_argument() {
-    start_test "invalid architecture rejection"
-    
-    cd "$TEST_TEMP_DIR"
-    
-    # Invalid architecture should fail (defaults to microservices if omitted, but explicitly invalid should fail)
-    assert_command_failure "$COMPOSE_GENERATOR --architecture invalid-arch --output-dir $TEST_TEMP_DIR/test-badarch" "Should reject invalid architecture"
-    
-    test_info "✓ Invalid architecture properly rejected"
     pass_test
 }
 
@@ -1136,7 +1075,7 @@ test_invalid_environment_syntax() {
     cd "$TEST_TEMP_DIR"
     
     # Test with very long and potentially problematic variable values
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR/test-badenv"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR/test-badenv"
     
     local compose_file="$TEST_TEMP_DIR/test-badenv/docker-compose.yml"
     
@@ -1159,7 +1098,7 @@ test_read_only_output_directory() {
     chmod 444 "$readonly_dir"
     
     # Should fail due to write permission
-    assert_command_failure "$COMPOSE_GENERATOR --architecture microservices --output-dir $readonly_dir/subdir" "Should fail with read-only parent directory"
+    assert_command_failure "$COMPOSE_GENERATOR --output-dir $readonly_dir/subdir" "Should fail with read-only parent directory"
     
     # Restore permissions for cleanup
     chmod 755 "$readonly_dir"
@@ -1175,7 +1114,7 @@ test_duplicate_service_names() {
     cd "$TEST_TEMP_DIR"
     
     # Generate with all addons - should NOT have duplicate service names
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --include-telemetry --include-security --include-registry --output-dir $TEST_TEMP_DIR/test-dupes"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --include-telemetry --include-security --include-registry --output-dir $TEST_TEMP_DIR/test-dupes"
     
     local compose_file="$TEST_TEMP_DIR/test-dupes/docker-compose.yml"
     local service_count=$(grep -c "^  [a-z-]*:$" "$compose_file" 2>/dev/null || echo 0)
@@ -1196,7 +1135,7 @@ test_port_conflict_detection() {
     cd "$TEST_TEMP_DIR"
     
     # Generate with multiple addons
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --include-telemetry --output-dir $TEST_TEMP_DIR/test-ports"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --include-telemetry --output-dir $TEST_TEMP_DIR/test-ports"
     
     local compose_file="$TEST_TEMP_DIR/test-ports/docker-compose.yml"
     local ports=$(grep -oP '"\K\d+(?=:)' "$compose_file" 2>/dev/null || true)
@@ -1228,7 +1167,7 @@ test_invalid_connection_string() {
     cd "$TEST_TEMP_DIR"
     
     # Test with primary database provider (postgres) to ensure valid config generation
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider postgres --output-dir $TEST_TEMP_DIR/test-db-postgres"
+    assert_command_success "$COMPOSE_GENERATOR --db-provider postgres --output-dir $TEST_TEMP_DIR/test-db-postgres"
     
     local compose_file="$TEST_TEMP_DIR/test-db-postgres/docker-compose.yml"
     assert_command_success "docker compose --file $compose_file config --quiet" "Generated compose should be valid for postgres"
@@ -1244,7 +1183,7 @@ test_missing_config_files() {
     cd "$TEST_TEMP_DIR"
     
     # Generate with telemetry to ensure config files are created
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-telemetry --output-dir $TEST_TEMP_DIR/test-configs"
+    assert_command_success "$COMPOSE_GENERATOR --include-telemetry --output-dir $TEST_TEMP_DIR/test-configs"
     
     # Verify config files were generated
     if [[ -f "$TEST_TEMP_DIR/test-configs/otel-collector-config.yaml" ]]; then
@@ -1265,12 +1204,12 @@ test_concurrent_generation_safety() {
     
     # Run sequential generations with delay to simulate potential concurrency issues
     # (true concurrent testing is complex in bash; this tests that overwriting is safe)
-    "$COMPOSE_GENERATOR" --architecture microservices --output-dir "$output_dir" 2>/dev/null &
+    "$COMPOSE_GENERATOR" --output-dir "$output_dir" 2>/dev/null &
     local pid1=$!
     
     sleep 0.5  # Brief delay before second generation
     
-    "$COMPOSE_GENERATOR" --architecture monolithic --output-dir "$output_dir" 2>/dev/null &
+    "$COMPOSE_GENERATOR" --output-dir "$output_dir" 2>/dev/null &
     local pid2=$!
     
     # Wait for both to complete
@@ -1307,12 +1246,12 @@ test_cleanup_on_partial_failure() {
     mkdir -p "$partial_dir"
     
     # Generate successfully first
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $partial_dir"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $partial_dir"
     
     local file_count_before=$(find "$partial_dir" -type f | wc -l)
     
     # Try to generate to invalid location (but output dir exists)
-    "$COMPOSE_GENERATOR" --architecture microservices --output-dir "$partial_dir" 2>/dev/null || true
+    "$COMPOSE_GENERATOR" --output-dir "$partial_dir" 2>/dev/null || true
     
     local file_count_after=$(find "$partial_dir" -type f | wc -l)
     
@@ -1333,7 +1272,7 @@ test_large_yaml_handling() {
     cd "$TEST_TEMP_DIR"
     
     # Generate with all addons (creates larger YAML)
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --include-telemetry --include-security --include-registry --output-dir $TEST_TEMP_DIR/test-large"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --include-telemetry --include-security --include-registry --output-dir $TEST_TEMP_DIR/test-large"
     
     local compose_file="$TEST_TEMP_DIR/test-large/docker-compose.yml"
     local file_size=$(stat -f%z "$compose_file" 2>/dev/null || stat -c%s "$compose_file" 2>/dev/null || echo 0)
@@ -1355,7 +1294,7 @@ test_special_characters_in_values() {
     
     # Generate with special characters that might break YAML
     # Note: Most special chars in values should be quoted/escaped by generator
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --compose-project 'test-project_123' --output-dir $TEST_TEMP_DIR/test-special"
+    assert_command_success "$COMPOSE_GENERATOR --compose-project 'test-project_123' --output-dir $TEST_TEMP_DIR/test-special"
     
     local compose_file="$TEST_TEMP_DIR/test-special/docker-compose.yml"
     assert_command_success "docker compose --file $compose_file config --quiet" "Generated compose should handle special chars"
@@ -1378,7 +1317,7 @@ test_rollback_on_validation_failure() {
     echo "original" > "$marker"
     
     # Try to generate with invalid provider (should fail)
-    "$COMPOSE_GENERATOR" --architecture microservices --database-provider invalidprovider --output-dir "$rollback_dir" 2>/dev/null || true
+    "$COMPOSE_GENERATOR" --database-provider invalidprovider --output-dir "$rollback_dir" 2>/dev/null || true
     
     # Marker file should still exist unchanged
     if [[ -f "$marker" ]] && grep -q "original" "$marker"; then
@@ -1396,7 +1335,7 @@ test_output_file_permissions() {
     
     cd "$TEST_TEMP_DIR"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR/test-perms"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR/test-perms"
     
     local compose_file="$TEST_TEMP_DIR/test-perms/docker-compose.yml"
     
@@ -1420,7 +1359,7 @@ test_host_network_sqlserver_configuration() {
     cd "$TEST_TEMP_DIR"
     
     # Generate configuration with the exact combination that triggered the bug
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider sqlserver --output-dir $TEST_TEMP_DIR/test-host-net-ss"
+    assert_command_success "$COMPOSE_GENERATOR --db-provider sqlserver --output-dir $TEST_TEMP_DIR/test-host-net-ss"
     
     local compose_file="$TEST_TEMP_DIR/test-host-net-ss/docker-compose.yml"
     
@@ -1509,7 +1448,7 @@ test_complete_user_scenario() {
     # Generate compose file
     test_info "Generating compose file with exact user configuration..."
     assert_command_success "$COMPOSE_GENERATOR \
-        --architecture microservices \
+        \
         --db-provider sqlserver \
         --addon-stacks orcaslicer,spoolman \
         --output-dir $test_dir"
@@ -1712,8 +1651,7 @@ run_all_tests() {
     test_ruamel_yaml_dependency_check
     
     test_help_output
-    test_invalid_architecture
-    test_monolithic_generation
+    test_standard_generation
     test_microservices_generation
     test_generated_compose_file_is_valid_yaml
     test_database_initialization_order
@@ -1725,7 +1663,7 @@ run_all_tests() {
     
     # Anchor Injection Tests
     test_common_yml_exists
-    test_anchor_injection_monolithic
+    test_anchor_injection_standard
     test_anchor_injection_microservices
     test_anchor_references
     test_healthcheck_properties
@@ -1755,12 +1693,11 @@ run_all_tests() {
     test_multistage_targets
     test_no_redis_references
     test_no_prusaslicer_references
-    test_architecture_database_combinations
-    test_architecture_addon_combinations
+    test_database_combinations
+    test_addon_combinations
     
     # Phase 3 Error Handling Tests
     test_invalid_port_number
-    test_missing_architecture_argument
     test_invalid_environment_syntax
     test_read_only_output_directory
     test_duplicate_service_names
@@ -1784,10 +1721,10 @@ run_all_tests() {
 }
 
 # Test: Anchor injection from common.yml
-test_anchor_injection_monolithic() {
-    start_test "anchor injection into monolithic compose"
+test_anchor_injection_standard() {
+    start_test "anchor injection into standard compose"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -1856,7 +1793,7 @@ test_anchor_injection_monolithic() {
 test_anchor_injection_microservices() {
     start_test "anchor injection into microservices compose"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -1879,7 +1816,7 @@ test_anchor_injection_microservices() {
 test_anchor_references() {
     start_test "anchor references are used correctly in services"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -1990,8 +1927,8 @@ test_healthcheck_properties() {
 test_generated_compose_validates() {
     start_test "generated compose files validate with docker compose config"
     
-    # Test monolithic
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    # Test standard output
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     if command -v docker-compose >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
         local compose_cmd="docker-compose"
@@ -2020,28 +1957,23 @@ test_generated_compose_validates() {
     pass_test
 }
 
-# Test: Anchor templates match across architectures
+# Test: Anchor definitions are present in generated output
 test_anchor_consistency_across_architectures() {
-    start_test "anchors are consistent across all architectures"
+    start_test "anchors are present in generated compose"
     
-    local temp_mono="$TEST_TEMP_DIR/mono"
-    local temp_micro="$TEST_TEMP_DIR/micro"
-    mkdir -p "$temp_mono" "$temp_micro"
+    local temp_dir="$TEST_TEMP_DIR/anchor-check"
+    mkdir -p "$temp_dir"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $temp_mono"
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $temp_micro"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $temp_dir"
     
-    # Extract anchor definitions from both
-    local mono_anchors=$(grep "^x-" "$temp_mono/docker-compose.yml" | sort)
-    local micro_anchors=$(grep "^x-" "$temp_micro/docker-compose.yml" | sort)
+    # Extract anchor definitions
+    local anchors=$(grep "^x-" "$temp_dir/docker-compose.yml" | sort)
     
-    # They should be identical
-    if [ "$mono_anchors" = "$micro_anchors" ]; then
-        test_info "✓ Anchors are consistent between monolithic and microservices"
+    # Verify anchors exist
+    if [ -n "$anchors" ]; then
+        test_info "✓ Anchors present in generated compose output"
     else
-        print_fail "Anchors differ between architectures"
-        test_info "Monolithic anchors: $mono_anchors"
-        test_info "Microservices anchors: $micro_anchors"
+        print_fail "No anchors found in generated compose"
         fail_test
         return 1
     fi
@@ -2178,7 +2110,7 @@ test_pgadmin_compose_generation() {
     mkdir -p "$outdir"
     
     # Generate with pgAdmin enabled
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-pgadmin --output-dir $outdir"
+    assert_command_success "$COMPOSE_GENERATOR --enable-pgadmin --output-dir $outdir"
     
     local compose_file="$outdir/docker-compose.yml"
     assert_file_exists "$compose_file"
@@ -2203,7 +2135,7 @@ test_pgadmin_postgres_only() {
     
     # Try to generate with pgAdmin but non-PostgreSQL database (should skip)
     # For now, just validate that --enable-pgadmin flag is accepted
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-pgadmin --output-dir $outdir 2>/dev/null || true"
+    assert_command_success "$COMPOSE_GENERATOR --enable-pgadmin --output-dir $outdir 2>/dev/null || true"
     
     # Flag should be parsed without error
     test_info "✓ pgAdmin flag parsing works correctly"

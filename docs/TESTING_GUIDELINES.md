@@ -235,7 +235,7 @@ get_output                       # Get captured output
    # Reproduce test conditions outside test harness
    mkdir /tmp/debug-test
    cd /tmp/debug-test
-   /Users/jpapiez/s/PFarm1/scripts/docker/compose-generator.sh --architecture microservices
+   /Users/jpapiez/s/PFarm1/scripts/docker/compose-generator.sh
    cat docker-compose.yml
    ```
 

@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
@@ -29,10 +30,13 @@ builder.Services.AddSlicerApiServices(builder.Configuration);
 // the module-local adapters registered above.
 builder.Services.AddCrossDomainLookupServices(builder.Configuration);
 
-// ── Minimal stubs for services not yet implemented in the module ───────────────
-// IModel3DFileService and I3MfToStlConversionService remain unimplemented.
-// All other interfaces are now provided by AddSlicerApiServices above.
+// ── Remaining stubs + real implementations for standalone host ─────────────────
+// IModel3DFileService is stubbed (implementation lives in API with deep dependencies).
+// I3MfToStlConversionService uses real implementation from Farm.Infrastructure.
 builder.Services.AddUnimplementedSlicerServiceStubs();
+
+// ── Infrastructure services shared with the main API ──────────────────────────
+builder.Services.AddSingleton<IUnifiedLoggingService, UnifiedLoggingService>();
 
 // ── Authentication (transitional — allow all for standalone mode) ──────────────
 // When the host is deployed behind an API gateway, this will be replaced with

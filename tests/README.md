@@ -144,12 +144,11 @@ assert_not_contains "$compose_content" "prusaslicer-worker"
 assert_not_contains "$compose_content" "PrusaSlicerPath"
 ```
 
-### Architecture Validation
+### Deployment Execution
 ```bash
-# Ensures only valid architectures accepted
-assert_exit_code 1 "$DEPLOY_SCRIPT --architecture invalid"
-assert_contains "$help_output" "monolithic|microservices"
-assert_not_contains "$help_output" "multistage"
+# Ensures deploy script completes in dry-run mode
+assert_contains "$output" "Setup completed successfully"
+assert_contains "$output" "To deploy:"
 ```
 
 ## Running Individual Tests

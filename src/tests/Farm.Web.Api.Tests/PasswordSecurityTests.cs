@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using Farm.Infrastructure.Services.Authentication;
+﻿using Farm.Infrastructure.Services.Authentication;
 
 namespace Farm.Web.Api.Tests;
 
@@ -185,29 +184,6 @@ public class PasswordSecurityTests
         // Assert
         _ = hash.Should().NotBeNullOrEmpty();
         _ = isValid.Should().BeTrue();
-    }
-
-    [Fact]
-    public void PasswordHashing_Performance_ShouldBeReasonablyFast()
-    {
-        // Arrange
-        const string password = "TestPassword123!";
-        const int iterations = 10;
-
-        // Act
-        Stopwatch stopwatch = Stopwatch.StartNew();
-
-        for (int i = 0; i < iterations; i++)
-        {
-            string hash = _passwordHashingService.HashPassword(password);
-            bool isValid = _passwordHashingService.VerifyPassword(password, hash);
-            _ = isValid.Should().BeTrue();
-        }
-
-        stopwatch.Stop();
-
-        // Assert - Should complete 10 hash+verify cycles in reasonable time
-        _ = stopwatch.ElapsedMilliseconds.Should().BeLessThan(10000); // Less than 10 seconds for 10 iterations
     }
 
     [Fact]

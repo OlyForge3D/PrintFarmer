@@ -29,7 +29,7 @@ setup() {
 
     # Create a mock .deploy-config in the repo root to avoid interactive prompts
     cat > "$REPO_ROOT/.deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 NETWORK_MODE=bridge
 API_PORT=5245
@@ -63,25 +63,19 @@ test_help_output() {
     
     assert_contains "$output" "PrintFarmer Docker Deployment Script" "Help should contain script title"
     assert_contains "$output" "USAGE:" "Help should contain usage section"
-    assert_contains "$output" "--architecture" "Help should mention architecture option"
-    assert_contains "$output" "monolithic|microservices" "Help should list architecture options"
-    assert_not_contains "$output" "host-network" "Help should not mention host-network architecture"
-    assert_not_contains "$output" "multistage" "Help should not contain multistage as architecture option"
+    assert_not_contains "$output" "--architecture" "Help should not mention removed architecture option"
     
     pass_test
 }
 
-# Test architecture validation
-test_architecture_validation() {
-    start_test "architecture validation"
+# Test basic deploy script execution
+test_basic_execution() {
+    start_test "basic deploy script execution"
     
-    # Valid architectures should not fail immediately
-    capture_output "$DEPLOY_SCRIPT --architecture monolithic --dry-run --batch --output-dir $TEST_TEMP_DIR 2>&1 || true"
+    # Deploy script should run successfully in dry-run mode
+    capture_output "$DEPLOY_SCRIPT --dry-run --batch --output-dir $TEST_TEMP_DIR 2>&1 || true"
     local output=$(get_output)
-    assert_not_contains "$output" "Invalid architecture" "Valid architecture should not show error"
-    
-    # Invalid architecture should fail
-    assert_exit_code 1 "$DEPLOY_SCRIPT --architecture invalid --dry-run --batch --output-dir $TEST_TEMP_DIR 2>/dev/null"
+    assert_contains "$output" "Setup completed successfully" "Deploy script should complete in dry-run mode"
     
     pass_test
 }
@@ -94,7 +88,7 @@ test_dry_run_mode() {
     local original_dir=$(pwd)
     cd "$REPO_ROOT"
     
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
     local output=$(get_output)
     
     # Return to original directory
@@ -114,7 +108,7 @@ test_batch_mode() {
     local original_dir=$(pwd)
     cd "$REPO_ROOT"
     
-    capture_output "timeout 120 $DEPLOY_SCRIPT --batch --dry-run --architecture monolithic 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --batch --dry-run 2>&1 || true"
     local output=$(get_output)
     
     # Return to original directory
@@ -135,7 +129,7 @@ test_config_file_generation() {
     local original_dir=$(pwd)
     cd "$REPO_ROOT"
     
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
     local output=$(get_output)
     
     # Return to original directory
@@ -151,11 +145,11 @@ test_config_file_generation() {
 test_environment_variables() {
     start_test "environment variable configuration"
     
-    # Test with command line architecture specification using helper function
-    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch)"
+    # Test basic deploy script execution using helper function
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
-    assert_contains "$output" "microservices" "Should use specified architecture"
+    assert_contains "$output" "microservices" "Should show microservices architecture"
     
     pass_test
 }
@@ -166,7 +160,7 @@ test_no_redis_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
     local output=$(get_output)
     
     # Should not contain Redis-related prompts or configuration
@@ -182,7 +176,7 @@ test_no_prusaslicer_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
     local output=$(get_output)
     
     # Should not contain PrusaSlicer-related prompts or configuration
@@ -202,7 +196,7 @@ test_port_validation() {
     export API_PORT="5555"
     export WEB_PORT="3333"
     
-    capture_output "$(get_deploy_script_command --dry-run --batch --architecture monolithic)"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
     # Should complete without port conflicts (assuming ports are free)
@@ -213,23 +207,18 @@ test_port_validation() {
     pass_test
 }
 
-# Test architecture-specific configuration
-test_architecture_specific_config() {
-    start_test "architecture-specific configuration"
+# Test deployment configuration output
+test_deployment_config_output() {
+    start_test "deployment configuration output"
     
     cd "$TEST_TEMP_DIR"
     
-    # Test monolithic architecture using helper function
-    capture_output "$(get_deploy_script_command --dry-run --batch --architecture monolithic)"
-    local monolithic_output=$(get_output)
+    # Deploy script should always use microservices architecture
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    local output=$(get_output)
     
-    assert_contains "$monolithic_output" "Monolithic" "Should indicate monolithic deployment"
-    
-    # Test microservices architecture using helper function
-    capture_output "$(get_deploy_script_command --dry-run --batch --architecture microservices)"
-    local microservices_output=$(get_output)
-    
-    assert_contains "$microservices_output" "microservices" "Should indicate microservices deployment"
+    assert_contains "$output" "microservices" "Should indicate microservices deployment"
+    assert_contains "$output" "Setup completed successfully" "Should complete successfully"
     
     pass_test
 }
@@ -268,7 +257,7 @@ test_network_configuration() {
     
     # Create configuration file for deploy script
     cat > "$REPO_ROOT/.deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 NETWORK_MODE=bridge
 DISCOVERY_RANGES=192.168.1.0/24,10.0.0.0/8
     DB_PROVIDER=postgres
@@ -291,7 +280,7 @@ test_database_configuration() {
     
     # Test PostgreSQL
     cat > "$REPO_ROOT/.deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 EOF
     capture_output "$(get_deploy_script_command --dry-run --batch)"
@@ -302,7 +291,7 @@ EOF
     
     # Test SQL Server
     cat > "$REPO_ROOT/.deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 DB_PROVIDER=sqlserver
 EOF
     capture_output "$(get_deploy_script_command --dry-run --batch)"
@@ -321,7 +310,7 @@ test_generated_db_password_propagation() {
     cd "$TEST_TEMP_DIR"
 
     # Run deploy script in dry-run batch mode to generate env file
-    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch)"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     # Determine expected env file
@@ -357,7 +346,7 @@ test_generated_sqlserver_password_propagation() {
     cd "$TEST_TEMP_DIR"
 
     # Run deploy script in dry-run batch mode selecting sqlserver
-    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch --env DB_PROVIDER=sqlserver)"
+    capture_output "$(get_deploy_script_command --dry-run --batch --env DB_PROVIDER=sqlserver)"
     local output=$(get_output)
 
     local env_file="$TEST_TEMP_DIR/.env"
@@ -394,7 +383,7 @@ test_generated_mysql_password_propagation() {
     cd "$TEST_TEMP_DIR"
 
     # Run deploy script in dry-run batch mode selecting mysql
-    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch --env DB_PROVIDER=mysql)"
+    capture_output "$(get_deploy_script_command --dry-run --batch --env DB_PROVIDER=mysql)"
     local output=$(get_output)
 
     local env_file="$TEST_TEMP_DIR/.env"
@@ -419,32 +408,29 @@ test_generated_mysql_password_propagation() {
     fi
 }
 
-# Test all database providers with all architectures
-test_all_database_architecture_combinations() {
-    start_test "all database and architecture combinations"
+# Test all database providers
+test_all_database_combinations() {
+    start_test "all database provider combinations"
     
     cd "$TEST_TEMP_DIR"
     
-    local architectures=("monolithic" "microservices")
     local databases=("postgres" "sqlserver" "mysql")
     
-    for arch in "${architectures[@]}"; do
-        for db in "${databases[@]}"; do
-            # Create config file for this combination
-            cat > "$REPO_ROOT/.deploy-config" << EOF
-ARCHITECTURE=$arch
+    for db in "${databases[@]}"; do
+        # Create config file for this combination
+        cat > "$REPO_ROOT/.deploy-config" << EOF
+ARCHITECTURE=microservices
 DB_PROVIDER=$db
 EOF
-            
-            capture_output "$(get_deploy_script_command --dry-run --batch)"
-            local output=$(get_output)
-            
-            # Clean up config file
-            rm -f "$REPO_ROOT/.deploy-config"
-            
-            assert_contains "$output" "$db" "Should configure $db for $arch architecture"
-            assert_contains "$output" "$arch" "Should show $arch architecture with $db database"
-        done
+        
+        capture_output "$(get_deploy_script_command --dry-run --batch)"
+        local output=$(get_output)
+        
+        # Clean up config file
+        rm -f "$REPO_ROOT/.deploy-config"
+        
+        assert_contains "$output" "$db" "Should configure $db database"
+        assert_contains "$output" "microservices" "Should show microservices architecture with $db database"
     done
     
     pass_test
@@ -457,7 +443,7 @@ test_addon_configurations() {
     cd "$TEST_TEMP_DIR"
     
     # Test using command line arguments instead of environment variables
-    capture_output "$(get_deploy_script_command --architecture microservices --include-monitoring --dry-run --batch)"
+    capture_output "$(get_deploy_script_command --include-monitoring --dry-run --batch)"
     local output=$(get_output)
     
     assert_contains "$output" "Setup completed successfully" "Should complete with addon enabled"
@@ -480,7 +466,7 @@ ORCA_WORKER_COUNT=2
 ENABLE_SPOOLMAN=yes
 EOF
     
-    capture_output "$(get_deploy_script_command --architecture microservices --include-monitoring --dry-run --batch)"
+    capture_output "$(get_deploy_script_command --include-monitoring --dry-run --batch)"
     local output=$(get_output)
     
     rm -f "$REPO_ROOT/.deploy-config"
@@ -491,7 +477,7 @@ EOF
     
     # Test minimal configuration using config file
     cat > "$REPO_ROOT/.deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
     DB_PROVIDER=postgres
 ENABLE_ORCA_WORKER=no
 ENABLE_SPOOLMAN=no
@@ -502,7 +488,7 @@ EOF
     
     rm -f "$REPO_ROOT/.deploy-config"
     
-    assert_contains "$output" "monolithic" "Should configure monolithic architecture"
+    assert_contains "$output" "microservices" "Should configure microservices architecture"
     assert_contains "$output" "Setup completed successfully" "Should complete minimal configuration"
     
     unset ARCHITECTURE DB_PROVIDER ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ENABLE_SPOOLMAN
@@ -516,7 +502,7 @@ test_configuration_persistence() {
     
     cd "$TEST_TEMP_DIR"
     
-    capture_output "$(get_deploy_script_command --dry-run --batch --architecture microservices)"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
     assert_contains "$output" "Setup completed successfully" "Should save configuration"
@@ -531,7 +517,7 @@ test_validation_logic() {
     cd "$TEST_TEMP_DIR"
     
     # Test basic validation by running deploy script
-    capture_output "$(get_deploy_script_command --dry-run --batch --architecture microservices)"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
     assert_contains "$output" "Setup completed successfully" "Should perform validation and complete"
@@ -545,7 +531,7 @@ test_multistage_build_integration() {
     
     cd "$TEST_TEMP_DIR"
     
-    capture_output "$(get_deploy_script_command --dry-run --batch --architecture monolithic)"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
     # Should complete successfully (multistage builds are internal implementation)
@@ -568,7 +554,7 @@ EOF
 
     # Run deploy in dry-run, batch mode so it generates files but doesn't start containers
     # Use --config-file to explicitly point to the temp directory's config
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     # The script should mention environment file creation
@@ -614,7 +600,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     assert_file_exists ".env" "Should have created .env for postgres"
@@ -646,7 +632,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=mysql
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     assert_file_exists ".env" "Should have created .env for mysql"
@@ -667,20 +653,20 @@ EOF
     pass_test
 }
 
-# End-to-end: monolithic provider-only env generation for providers
-test_env_provider_monolithic_providers() {
-    start_test "deploy script (monolithic) provider-only env generation"
+# End-to-end: standard provider-only env generation for all providers
+test_env_provider_standard_providers() {
+    start_test "deploy script provider-only env generation (standard)"
 
     cd "$TEST_TEMP_DIR"
 
     local providers=("postgres" "sqlserver" "mysql")
     for provider in "${providers[@]}"; do
         cat > .deploy-config << EOF
-ARCHITECTURE=monolithic
+ARCHITECTURE=microservices
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic --config-file .deploy-config 2>&1 || true"
+        capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
         local output=$(get_output)
 
         # Expect .env
@@ -690,18 +676,18 @@ EOF
 
         case "$provider" in
             postgres)
-                assert_contains "$env_content" "POSTGRES_PASSWORD" "Env should include POSTGRES_PASSWORD for monolithic+postgres"
-                assert_not_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should not include MSSQL_SA_PASSWORD for monolithic+postgres"
+                assert_contains "$env_content" "POSTGRES_PASSWORD" "Env should include POSTGRES_PASSWORD for postgres"
+                assert_not_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should not include MSSQL_SA_PASSWORD for postgres"
                 assert_contains "$output" "PostgreSQL credentials included (masked):" "Output should include masked Postgres header"
                 ;;
             sqlserver)
-                assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should include MSSQL_SA_PASSWORD for monolithic+sqlserver"
-                assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for monolithic+sqlserver"
+                assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should include MSSQL_SA_PASSWORD for sqlserver"
+                assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for sqlserver"
                 assert_contains "$output" "SQL Server credentials included (masked):" "Output should include masked SQL Server header"
                 ;;
             mysql)
-                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for monolithic+mysql"
-                assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for monolithic+mysql"
+                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for mysql"
+                assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for mysql"
                 assert_contains "$output" "MySQL credentials included (masked):" "Output should include masked MySQL header"
                 ;;
         esac
@@ -725,7 +711,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true"
+        capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file ./.deploy-config 2>&1 || true"
         local output=$(get_output)
 
         # Microservices uses .env
@@ -768,7 +754,7 @@ EOF
     
     # Run deployment script and capture stdout
     local output
-    output=$(timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true)
+    output=$(timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file ./.deploy-config 2>&1 || true)
     
     # Check that env file was created
     assert_file_exists ".env" "Should create .env"
@@ -855,7 +841,7 @@ SPOOLMAN_BASE_URL=http://spoolman.local:7912
 EOF
 
     # Run deploy script in dry-run, batch mode
-    capture_output "timeout 90 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 90 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     # Check output for errors or completion
@@ -912,7 +898,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1074,7 +1060,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.1.0/24,10.0.0.0/8,172.16.0.0/12
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1112,7 +1098,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1156,7 +1142,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1212,7 +1198,7 @@ ORCA_WORKER_COUNT=2
 ENABLE_DISTRIBUTED_SLICING=true
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1260,7 +1246,7 @@ ORCA_WORKER_COUNT=1
 ENABLE_DISTRIBUTED_SLICING=true
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1303,7 +1289,7 @@ test_postgres_password_authentication_integration() {
     cd "$TEST_TEMP_DIR"
     
     # Run deploy script to generate compose and env files
-    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch)"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
     # Find the generated compose file
@@ -1343,7 +1329,7 @@ run_all_tests() {
     setup
     
     test_help_output
-    test_architecture_validation
+    test_basic_execution
     test_dry_run_mode
     test_batch_mode
     test_config_file_generation
@@ -1352,11 +1338,11 @@ run_all_tests() {
     test_no_redis_configuration
     test_no_prusaslicer_configuration
     test_port_validation
-    test_architecture_specific_config
+    test_deployment_config_output
     test_worker_configuration
     test_network_configuration  
     test_database_configuration
-    test_all_database_architecture_combinations
+    test_all_database_combinations
     test_addon_configurations
     test_comprehensive_deployment_combinations
     test_configuration_persistence
@@ -1365,7 +1351,7 @@ run_all_tests() {
     test_env_provider_only_end_to_end
     test_env_provider_only_end_to_end_postgres
     test_env_provider_only_end_to_end_mysql
-    test_env_provider_monolithic_providers
+    test_env_provider_standard_providers
     test_env_file_sourcing_with_connection_strings
     test_connection_string_sync_resolves_stale_export
     test_connection_string_sync_noop_when_values_match

@@ -1,5 +1,5 @@
 # Standalone Slicer Host Addon Service
-# This service is conditionally included via compose-generator.sh when ENABLE_SLICER_HOST is set
+# Automatically included by compose-generator.sh whenever OrcaSlicer workers are enabled.
 # Provides an independent slicer microservice with its own database, calling back to the
 # main API for cross-domain data (printers, catalog models, manufacturers).
 
@@ -33,7 +33,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:5246
-      - ConnectionStrings__Default=${SLICER_DB_CONNECTION:-Data Source=/data/slicer.db}
+      - DB_PROVIDER=${DB_PROVIDER:-Postgres}
+      - ConnectionStrings__Default=${ConnectionStrings__Default}
       # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
       - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
       - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
