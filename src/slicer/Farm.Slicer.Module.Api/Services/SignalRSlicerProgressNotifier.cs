@@ -31,7 +31,7 @@ public class SignalRSlicerProgressNotifier(
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("slicingprogress", update, cancellationToken);
-                _logger.LogDebug($"Sent progress update for job {update.JobId} to {connectionIds.Count} subscribers: {update.Progress}%");
+                _logger.LogDebug("Sent progress update for job {UpdateJobId} to {ConnectionIdsCount} subscribers: {UpdateProgress}%", update.JobId, connectionIds.Count, update.Progress);
             }
 
             // Also send to a general group for monitoring dashboards
@@ -39,7 +39,7 @@ public class SignalRSlicerProgressNotifier(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to notify progress for job {update.JobId}: {ex.Message}");
+            _logger.LogError("Failed to notify progress for job {UpdateJobId}: {ExMessage}", update.JobId, ex.Message);
             throw;
         }
     }
@@ -77,7 +77,7 @@ public class SignalRSlicerProgressNotifier(
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("slicingcompleted", completionNotification, cancellationToken);
-                _logger.LogInformation($"Sent completion notification for job {job.Id} to {connectionIds.Count} subscribers");
+                _logger.LogInformation("Sent completion notification for job {JobId} to {ConnectionIdsCount} subscribers", job.Id, connectionIds.Count);
             }
 
             // Send to user's personal group
@@ -91,7 +91,7 @@ public class SignalRSlicerProgressNotifier(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to notify completion for job {job.Id}: {ex.Message}");
+            _logger.LogError("Failed to notify completion for job {JobId}: {ExMessage}", job.Id, ex.Message);
             throw;
         }
     }
@@ -124,7 +124,7 @@ public class SignalRSlicerProgressNotifier(
             {
                 // Send to specific subscribers
                 await _hubContext.Clients.Clients(connectionIds).SendAsync("slicingfailed", failureNotification, cancellationToken);
-                _logger.LogInformation($"Sent failure notification for job {job.Id} to {connectionIds.Count} subscribers");
+                _logger.LogInformation("Sent failure notification for job {JobId} to {ConnectionIdsCount} subscribers", job.Id, connectionIds.Count);
             }
 
             // Send to user's personal group
@@ -141,7 +141,7 @@ public class SignalRSlicerProgressNotifier(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to notify failure for job {job.Id}: {ex.Message}");
+            _logger.LogError("Failed to notify failure for job {JobId}: {ExMessage}", job.Id, ex.Message);
             throw;
         }
     }
@@ -159,7 +159,7 @@ public class SignalRSlicerProgressNotifier(
             _ = set.Add(connectionId);
         }
 
-        _logger.LogDebug($"Added subscription for job {jobId} from connection {connectionId}");
+        _logger.LogDebug("Added subscription for job {JobId} from connection {ConnectionId}", jobId, connectionId);
         return Task.CompletedTask;
     }
 
@@ -177,7 +177,7 @@ public class SignalRSlicerProgressNotifier(
             }
         }
 
-        _logger.LogDebug($"Removed subscription for job {jobId} from connection {connectionId}");
+        _logger.LogDebug("Removed subscription for job {JobId} from connection {ConnectionId}", jobId, connectionId);
         return Task.CompletedTask;
     }
 

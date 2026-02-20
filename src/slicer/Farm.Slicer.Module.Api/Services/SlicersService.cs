@@ -249,7 +249,7 @@ namespace Farm.Slicer.Module.Api.Services
             catch (Exception ex)
             {
                 // Log but don't fail registration if Worker sync fails
-                _logger.LogWarning($"[RegisterAsync] Failed to sync Worker entity: {ex.Message}");
+                _logger.LogWarning("[RegisterAsync] Failed to sync Worker entity: {ExMessage}", ex.Message);
             }
 
             // Seed profiles from the worker (OrcaSlicer only) - only if explicitly enabled
@@ -258,19 +258,19 @@ namespace Farm.Slicer.Module.Api.Services
             {
                 try
                 {
-                    _logger.LogInformation($"OrcaSlicer service registered with push seeding enabled, seeding profiles from {svc.Host}");
+                    _logger.LogInformation("OrcaSlicer service registered with push seeding enabled, seeding profiles from {SvcHost}", svc.Host);
                     await SeedProfilesFromWorkerAsync(svc.Host ?? string.Empty, ct);
                     _logger.LogInformation("Profile seeding completed");
                 }
                 catch (Exception ex)
                 {
                     // Log but don't fail registration if profile seeding fails
-                    _logger.LogWarning($"Failed to seed profiles from worker: {ex.Message}");
+                    _logger.LogWarning("Failed to seed profiles from worker: {ExMessage}", ex.Message);
                 }
             }
             else if (svc.SlicerType == 1)
             {
-                _logger.LogInformation($"OrcaSlicer service registered (pull-based seeding - profiles imported on-demand when printers are added)");
+                _logger.LogInformation("OrcaSlicer service registered (pull-based seeding - profiles imported on-demand when printers are added)");
             }
 
             // Record metrics
@@ -391,7 +391,7 @@ namespace Farm.Slicer.Module.Api.Services
             catch (Exception ex)
             {
                 // Log but don't fail heartbeat if Worker sync fails
-                _logger.LogWarning($"[HeartbeatAsync] Failed to sync Worker heartbeat: {ex.Message}");
+                _logger.LogWarning("[HeartbeatAsync] Failed to sync Worker heartbeat: {ExMessage}", ex.Message);
             }
 
             // Record heartbeat metrics
@@ -484,7 +484,7 @@ namespace Farm.Slicer.Module.Api.Services
             catch (Exception ex)
             {
                 // Log but don't fail deregistration if Worker sync fails
-                _logger.LogWarning($"[DeregisterAsync] Failed to sync Worker deregistration: {ex.Message}");
+                _logger.LogWarning("[DeregisterAsync] Failed to sync Worker deregistration: {ExMessage}", ex.Message);
             }
 
             // Record metrics
@@ -554,7 +554,7 @@ namespace Farm.Slicer.Module.Api.Services
             catch (Exception ex)
             {
                 // Log but don't fail rotation if Worker sync fails
-                _logger.LogWarning($"[RotateApiKeyAsync] Failed to sync Worker API key rotation: {ex.Message}");
+                _logger.LogWarning("[RotateApiKeyAsync] Failed to sync Worker API key rotation: {ExMessage}", ex.Message);
             }
 
             // Record metrics
@@ -583,7 +583,7 @@ namespace Farm.Slicer.Module.Api.Services
         {
             if (printerModelId == Guid.Empty || string.IsNullOrWhiteSpace(printerModelName) || string.IsNullOrWhiteSpace(manufacturerName))
             {
-                _logger.LogDebug($"[ImportProfilesForModel] Skipping import - invalid parameters: modelId={printerModelId}, modelName={printerModelName}, manufacturer={manufacturerName}");
+                _logger.LogDebug("[ImportProfilesForModel] Skipping import - invalid parameters: modelId={PrinterModelId}, modelName={PrinterModelName}, manufacturer={ManufacturerName}", printerModelId, printerModelName, manufacturerName);
                 return 0;
             }
 
@@ -592,7 +592,7 @@ namespace Farm.Slicer.Module.Api.Services
             MachineModelProfile? existingProfile = await _machineModelProfileRepo.GetByPrinterModelIdAsync(printerModelId, ct);
             if (existingProfile != null)
             {
-                _logger.LogDebug($"[ImportProfilesForModel] Profiles already exist for {printerModelName} (has machine model profile), skipping import");
+                _logger.LogDebug("[ImportProfilesForModel] Profiles already exist for {PrinterModelName} (has machine model profile), skipping import", printerModelName);
                 return 0;
             }
 
@@ -602,11 +602,11 @@ namespace Farm.Slicer.Module.Api.Services
 
             if (orcaWorker == null)
             {
-                _logger.LogDebug($"[ImportProfilesForModel] No OrcaSlicer worker available for profile import for {printerModelName}");
+                _logger.LogDebug("[ImportProfilesForModel] No OrcaSlicer worker available for profile import for {PrinterModelName}", printerModelName);
                 return 0;
             }
 
-            _logger.LogInformation($"[ImportProfilesForModel] Importing slicer profiles for {manufacturerName} {printerModelName} from worker {orcaWorker.Host}");
+            _logger.LogInformation("[ImportProfilesForModel] Importing slicer profiles for {ManufacturerName} {PrinterModelName} from worker {OrcaWorkerHost}", manufacturerName, printerModelName, orcaWorker.Host);
 
             try
             {
@@ -617,7 +617,7 @@ namespace Farm.Slicer.Module.Api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     string errorContent = await response.Content.ReadAsStringAsync(ct);
-                    _logger.LogWarning($"[ImportProfilesForModel] Worker /api/profiles returned {response.StatusCode}: {errorContent}");
+                    _logger.LogWarning("[ImportProfilesForModel] Worker /api/profiles returned {ResponseStatusCode}: {ErrorContent}", response.StatusCode, errorContent);
                     return 0;
                 }
 
@@ -626,7 +626,7 @@ namespace Farm.Slicer.Module.Api.Services
 
                 if (allProfiles == null || allProfiles.ByHierarchy == null)
                 {
-                    _logger.LogWarning($"[ImportProfilesForModel] No profiles available from worker for {printerModelName}");
+                    _logger.LogWarning("[ImportProfilesForModel] No profiles available from worker for {PrinterModelName}", printerModelName);
                     return 0;
                 }
 
@@ -680,7 +680,7 @@ namespace Farm.Slicer.Module.Api.Services
 
                         await _machineModelProfileRepo.AddAsync(systemProfile, ct);
                         imported++;
-                        _logger.LogDebug($"[ImportProfilesForModel] Imported machine model profile: {modelProfile.Name}");
+                        _logger.LogDebug("[ImportProfilesForModel] Imported machine model profile: {ModelProfileName}", modelProfile.Name);
                     }
                 }
 
@@ -855,18 +855,18 @@ namespace Farm.Slicer.Module.Api.Services
                 if (imported > 0)
                 {
                     await _repo.SaveChangesAsync(ct);
-                    _logger.LogInformation($"[ImportProfilesForModel] Successfully imported {imported} slicer profiles for {manufacturerName} {printerModelName}");
+                    _logger.LogInformation("[ImportProfilesForModel] Successfully imported {Imported} slicer profiles for {ManufacturerName} {PrinterModelName}", imported, manufacturerName, printerModelName);
                 }
                 else
                 {
-                    _logger.LogDebug($"[ImportProfilesForModel] No new profiles to import for {manufacturerName} {printerModelName}");
+                    _logger.LogDebug("[ImportProfilesForModel] No new profiles to import for {ManufacturerName} {PrinterModelName}", manufacturerName, printerModelName);
                 }
 
                 return imported;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[ImportProfilesForModel] Error importing profiles for {printerModelName}: {ex.Message}");
+                _logger.LogWarning("[ImportProfilesForModel] Error importing profiles for {PrinterModelName}: {ExMessage}", printerModelName, ex.Message);
                 return 0;
             }
         }
@@ -905,13 +905,13 @@ namespace Farm.Slicer.Module.Api.Services
 
                 // Call the worker's /api/profiles endpoint which now returns AllProfilesResponseDto with all three profile types
                 string workerUrl = workerHost.TrimEnd('/');
-                _logger.LogInformation($"[SeedProfilesFromWorker] Fetching profiles from worker at: {workerUrl}/api/profiles");
+                _logger.LogInformation("[SeedProfilesFromWorker] Fetching profiles from worker at: {WorkerUrl}/api/profiles", workerUrl);
                 HttpResponseMessage response = await _httpClient.GetAsync($"{workerUrl}/api/profiles", ct);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     string errorContent = await response.Content.ReadAsStringAsync(ct);
-                    _logger.LogWarning($"[SeedProfilesFromWorker] Worker /api/profiles returned {response.StatusCode}: {errorContent}");
+                    _logger.LogWarning("[SeedProfilesFromWorker] Worker /api/profiles returned {ResponseStatusCode}: {ErrorContent}", response.StatusCode, errorContent);
 
                     // Clear lock on error so retry can happen
                     await _settingsService.ClearLockAsync(SEED_LOCK_KEY, ct);
@@ -919,12 +919,16 @@ namespace Farm.Slicer.Module.Api.Services
                 }
 
                 string json = await response.Content.ReadAsStringAsync(ct);
-                _logger.LogInformation($"[SeedProfilesFromWorker] Received {json.Length} bytes from worker");
+                _logger.LogInformation("[SeedProfilesFromWorker] Received {JsonLength} bytes from worker", json.Length);
                 AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
                 {
-                    _logger.LogWarning($"[SeedProfilesFromWorker] No profiles available from worker (parsed null: {allProfiles == null}, process groups: {allProfiles?.ProcessProfiles?.Count ?? 0}, filament groups: {allProfiles?.FilamentProfiles?.Count ?? 0}, machine groups: {allProfiles?.MachineProfiles?.Count ?? 0})");
+                    bool parsedNull = allProfiles == null;
+                    int processCount = allProfiles?.ProcessProfiles?.Count ?? 0;
+                    int filamentCount = allProfiles?.FilamentProfiles?.Count ?? 0;
+                    int machineCount = allProfiles?.MachineProfiles?.Count ?? 0;
+                    _logger.LogWarning("[SeedProfilesFromWorker] No profiles available from worker (parsed null: {ParsedNull}, process groups: {ProcessCount}, filament groups: {FilamentCount}, machine groups: {MachineCount})", parsedNull, processCount, filamentCount, machineCount);
 
                     // Clear lock on empty response so retry can happen
                     await _settingsService.ClearLockAsync(SEED_LOCK_KEY, ct);
@@ -938,7 +942,7 @@ namespace Farm.Slicer.Module.Api.Services
                 HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
                 HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
 
-                _logger.LogInformation($"[SeedProfilesFromWorker] Filtering profiles for {catalogManufacturerNames.Count} manufacturers and {catalogModels.Count} models in catalog (using alias service for PrinterModel linking)");
+                _logger.LogInformation("[SeedProfilesFromWorker] Filtering profiles for {CatalogManufacturerNamesCount} manufacturers and {CatalogModelsCount} models in catalog (using alias service for PrinterModel linking)", catalogManufacturerNames.Count, catalogModels.Count);
 
                 int imported = 0;
 
@@ -953,7 +957,7 @@ namespace Farm.Slicer.Module.Api.Services
                 // These are NOT directly selectable by users - they define base printer models like "Sovol SV08"
                 if (allProfiles?.MachineModelProfiles != null && allProfiles.MachineModelProfiles.Count > 0)
                 {
-                    _logger.LogInformation($"[SeedProfilesFromWorker] Processing {allProfiles.MachineModelProfiles.Count} manufacturers for machine MODEL profiles (base templates)");
+                    _logger.LogInformation("[SeedProfilesFromWorker] Processing {MachineModelProfilesCount} manufacturers for machine MODEL profiles (base templates)", allProfiles.MachineModelProfiles.Count);
                     foreach (KeyValuePair<string, IList<MachineModelProfileDto>> manufacturerEntry in allProfiles.MachineModelProfiles)
                     {
                         string manufacturerName = manufacturerEntry.Key;
@@ -962,7 +966,7 @@ namespace Farm.Slicer.Module.Api.Services
                         // Check if manufacturer is in catalog
                         if (!catalogManufacturerNames.Contains(manufacturerName))
                         {
-                            _logger.LogDebug($"[SeedProfilesFromWorker] Skipping machine model profiles for manufacturer '{manufacturerName}' - not in catalog");
+                            _logger.LogDebug("[SeedProfilesFromWorker] Skipping machine model profiles for manufacturer '{ManufacturerName}' - not in catalog", manufacturerName);
                             continue;
                         }
 
@@ -1010,11 +1014,11 @@ namespace Farm.Slicer.Module.Api.Services
 
                                 await _machineModelProfileRepo.AddAsync(systemProfile, ct);
                                 imported++;
-                                _logger.LogDebug($"[SeedProfilesFromWorker] Imported machine MODEL profile '{modelProfile.Name}' for {manufacturerName} (PrinterModelId: {printerModelId})");
+                                _logger.LogDebug("[SeedProfilesFromWorker] Imported machine MODEL profile '{ModelProfileName}' for {ManufacturerName} (PrinterModelId: {PrinterModelId})", modelProfile.Name, manufacturerName, printerModelId);
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import machine MODEL profile '{modelProfile.Name}' for {manufacturerName}: {ex.Message}");
+                                _logger.LogWarning("[SeedProfilesFromWorker] Failed to import machine MODEL profile '{ModelProfileName}' for {ManufacturerName}: {ExMessage}", modelProfile.Name, manufacturerName, ex.Message);
                             }
                         }
                     }
@@ -1023,7 +1027,7 @@ namespace Farm.Slicer.Module.Api.Services
                 // Use the hierarchical structure from the worker: Manufacturer -> Model -> Profiles
                 if (allProfiles?.ByHierarchy != null && allProfiles.ByHierarchy.Count > 0)
                 {
-                    _logger.LogInformation($"[SeedProfilesFromWorker] Processing {allProfiles.ByHierarchy.Count} manufacturers from worker hierarchy");
+                    _logger.LogInformation("[SeedProfilesFromWorker] Processing {ByHierarchyCount} manufacturers from worker hierarchy", allProfiles.ByHierarchy.Count);
                     foreach (KeyValuePair<string, ManufacturerProfilesDto> manufacturerEntry in allProfiles.ByHierarchy)
                     {
                         string manufacturerName = manufacturerEntry.Key;
@@ -1032,16 +1036,18 @@ namespace Farm.Slicer.Module.Api.Services
                         // Check if manufacturer is in catalog
                         if (!catalogManufacturerNames.Contains(manufacturerName))
                         {
-                            _logger.LogDebug($"[SeedProfilesFromWorker] Skipping manufacturer '{manufacturerName}' - not in catalog (catalog has: {string.Join(", ", catalogManufacturerNames.Where(m => m.StartsWith(manufacturerName.Substring(0, Math.Min(3, manufacturerName.Length)), StringComparison.OrdinalIgnoreCase)))})");
+                            string similarNames = string.Join(", ", catalogManufacturerNames.Where(m => m.StartsWith(manufacturerName.Substring(0, Math.Min(3, manufacturerName.Length)), StringComparison.OrdinalIgnoreCase)));
+                            _logger.LogDebug("[SeedProfilesFromWorker] Skipping manufacturer '{ManufacturerName}' - not in catalog (catalog has: {SimilarNames})", manufacturerName, similarNames);
                             continue;
                         }
 
-                        _logger.LogInformation($"[SeedProfilesFromWorker] Processing manufacturer '{manufacturerName}' with {manufacturerProfiles.Models?.Count ?? 0} models");
+                        int modelCount = manufacturerProfiles.Models?.Count ?? 0;
+                        _logger.LogInformation("[SeedProfilesFromWorker] Processing manufacturer '{ManufacturerName}' with {ModelCount} models", manufacturerName, modelCount);
 
                         // Process each model for this manufacturer
                         if (manufacturerProfiles.Models == null || manufacturerProfiles.Models.Count == 0)
                         {
-                            _logger.LogWarning($"[SeedProfilesFromWorker] Manufacturer '{manufacturerName}' has no models!");
+                            _logger.LogWarning("[SeedProfilesFromWorker] Manufacturer '{ManufacturerName}' has no models!", manufacturerName);
                             continue;
                         }
 
@@ -1054,7 +1060,7 @@ namespace Farm.Slicer.Module.Api.Services
                             // Check if this model is in the catalog
                             if (!catalogModelNames.Contains(displayName))
                             {
-                                _logger.LogDebug($"[SeedProfilesFromWorker] Skipping model '{displayName}' - not in catalog");
+                                _logger.LogDebug("[SeedProfilesFromWorker] Skipping model '{DisplayName}' - not in catalog", displayName);
                                 continue;
                             }
 
@@ -1063,7 +1069,7 @@ namespace Farm.Slicer.Module.Api.Services
                             if (modelProfiles.MachineProfiles != null && modelProfiles.MachineProfiles.Count > 0)
                             {
                                 var instantiableMachineProfiles = modelProfiles.MachineProfiles.Where(p => p.Instantiation).ToList();
-                                _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableMachineProfiles.Count} instantiable machine profiles (out of {modelProfiles.MachineProfiles.Count} total) for {displayName}");
+                                _logger.LogDebug("[SeedProfilesFromWorker] Importing {InstantiableMachineProfilesCount} instantiable machine profiles (out of {MachineProfilesCount} total) for {DisplayName}", instantiableMachineProfiles.Count, modelProfiles.MachineProfiles.Count, displayName);
 
                                 foreach (MachineProfileDto? machineProfile in instantiableMachineProfiles)
                                 {
@@ -1117,7 +1123,7 @@ namespace Farm.Slicer.Module.Api.Services
                                     }
                                     catch (Exception ex)
                                     {
-                                        _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import machine profile {machineProfile.Name} for {displayName}: {ex.Message}");
+                                        _logger.LogWarning("[SeedProfilesFromWorker] Failed to import machine profile {MachineProfileName} for {DisplayName}: {ExMessage}", machineProfile.Name, displayName, ex.Message);
                                     }
                                 }
                             }
@@ -1127,7 +1133,7 @@ namespace Farm.Slicer.Module.Api.Services
                             if (modelProfiles.FilamentProfiles != null && modelProfiles.FilamentProfiles.Count > 0)
                             {
                                 var instantiableFilamentProfiles = modelProfiles.FilamentProfiles.Where(p => p.Instantiation).ToList();
-                                _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableFilamentProfiles.Count} instantiable filament profiles (out of {modelProfiles.FilamentProfiles.Count} total) for {displayName}");
+                                _logger.LogDebug("[SeedProfilesFromWorker] Importing {InstantiableFilamentProfilesCount} instantiable filament profiles (out of {FilamentProfilesCount} total) for {DisplayName}", instantiableFilamentProfiles.Count, modelProfiles.FilamentProfiles.Count, displayName);
 
                                 foreach (FilamentProfileDto? filamentProfile in instantiableFilamentProfiles)
                                 {
@@ -1178,7 +1184,7 @@ namespace Farm.Slicer.Module.Api.Services
                                     }
                                     catch (Exception ex)
                                     {
-                                        _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import filament profile for {displayName}: {ex.Message}");
+                                        _logger.LogWarning("[SeedProfilesFromWorker] Failed to import filament profile for {DisplayName}: {ExMessage}", displayName, ex.Message);
                                     }
                                 }
                             }
@@ -1189,7 +1195,7 @@ namespace Farm.Slicer.Module.Api.Services
                             if (modelProfiles.ProcessProfiles != null && modelProfiles.ProcessProfiles.Count > 0)
                             {
                                 var instantiableProcessProfiles = modelProfiles.ProcessProfiles.Where(p => p.Instantiation).ToList();
-                                _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableProcessProfiles.Count} instantiable process profiles (out of {modelProfiles.ProcessProfiles.Count} total) for {displayName}");
+                                _logger.LogDebug("[SeedProfilesFromWorker] Importing {InstantiableProcessProfilesCount} instantiable process profiles (out of {ProcessProfilesCount} total) for {DisplayName}", instantiableProcessProfiles.Count, modelProfiles.ProcessProfiles.Count, displayName);
 
                                 foreach (ProcessProfileDto? processProfile in instantiableProcessProfiles)
                                 {
@@ -1245,7 +1251,7 @@ namespace Farm.Slicer.Module.Api.Services
                                     }
                                     catch (Exception ex)
                                     {
-                                        _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import process profile for {displayName}: {ex.Message}");
+                                        _logger.LogWarning("[SeedProfilesFromWorker] Failed to import process profile for {DisplayName}: {ExMessage}", displayName, ex.Message);
                                     }
                                 }
                             }
@@ -1260,7 +1266,7 @@ namespace Farm.Slicer.Module.Api.Services
 
                 if (imported > 0)
                 {
-                    _logger.LogInformation($"[SeedProfilesFromWorker] Seeded {imported} system OrcaSlicer profiles (machine, filament, and process) on worker registration (filtered to catalog manufacturers and models)");
+                    _logger.LogInformation("[SeedProfilesFromWorker] Seeded {Imported} system OrcaSlicer profiles (machine, filament, and process) on worker registration (filtered to catalog manufacturers and models)", imported);
                     await _repo.SaveChangesAsync(ct);
                 }
 
@@ -1277,10 +1283,10 @@ namespace Farm.Slicer.Module.Api.Services
                 }
                 catch (Exception lockEx)
                 {
-                    _logger.LogWarning($"[SeedProfilesFromWorker] Failed to clear lock on error: {lockEx.Message}");
+                    _logger.LogWarning("[SeedProfilesFromWorker] Failed to clear lock on error: {LockExMessage}", lockEx.Message);
                 }
 
-                _logger.LogError($"[SeedProfilesFromWorker] Error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                _logger.LogError("[SeedProfilesFromWorker] Error: {ExceptionType}: {ExMessage}\n{ExStackTrace}", ex.GetType().Name, ex.Message, ex.StackTrace);
 
                 // Don't throw - profile seeding is best-effort
             }

@@ -111,7 +111,7 @@ public class SlicingSubmissionService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to submit slicing job: {ex.Message}");
+            _logger.LogError(ex, "Failed to submit slicing job: {ErrorMessage}", ex.Message);
             return new SlicingSubmissionResult(false, Error: "Failed to start slicing job");
         }
     }
@@ -136,7 +136,7 @@ public class SlicingSubmissionService(
             // Validate that the model file exists on disk
             if (!File.Exists(model.FilePath))
             {
-                _logger.LogError($"Model file not found on disk: {model.FilePath} for model {modelId}");
+                _logger.LogError("Model file not found on disk: {ModelFilePath} for model {ModelId}", model.FilePath, modelId);
                 return new SlicingSubmissionResult(false, Error: "Model file not found on disk");
             }
 
@@ -204,13 +204,13 @@ public class SlicingSubmissionService(
                 SlicingJobStore.AddOrUpdate(response.JobId, storeJob);
             }
 
-            _logger.LogInformation($"Slicing job submitted for uploaded model {modelId} ({model.FileName})");
+            _logger.LogInformation("Slicing job submitted for uploaded model {ModelId} ({ModelFileName})", modelId, model.FileName);
 
             return new SlicingSubmissionResult(true, Result: sliceResult);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to submit slicing job for model {modelId}: {ex.Message}");
+            _logger.LogError(ex, "Failed to submit slicing job for model {ModelId}: {ErrorMessage}", modelId, ex.Message);
             return new SlicingSubmissionResult(false, Error: "Failed to start slicing job");
         }
     }

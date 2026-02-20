@@ -53,13 +53,13 @@ public class JobDispatcherService(
             SliceJob? job = await _jobRepository.GetByIdAsync(jobId);
             if (job == null)
             {
-                _logger.LogWarning($"Cannot dispatch job {jobId}: job not found");
+                _logger.LogWarning("Cannot dispatch job {JobId}: job not found", jobId);
                 return false;
             }
 
             if (job.Status != SliceJobStatus.Queued)
             {
-                _logger.LogWarning($"Cannot dispatch job {jobId}: job is not in Queued status (current: {job.Status})");
+                _logger.LogWarning("Cannot dispatch job {JobId}: job is not in Queued status (current: {JobStatus})", jobId, job.Status);
                 return false;
             }
 
@@ -67,7 +67,7 @@ public class JobDispatcherService(
             Worker? worker = await FindBestWorkerForJobAsync(job, cancellationToken);
             if (worker == null)
             {
-                _logger.LogDebug($"No suitable worker found for job {jobId}");
+                _logger.LogDebug("No suitable worker found for job {JobId}", jobId);
                 TagList noWorkerTags = new TagList { { "outcome", "failed" } };
                 _dispatchDurationMs.Record(sw.ElapsedMilliseconds, noWorkerTags);
                 TagList noWorkerReasonTags = new TagList { { "reason", "no_worker" } };
@@ -79,7 +79,7 @@ public class JobDispatcherService(
             bool success = await SendJobToWorkerAsync(worker, job, cancellationToken);
             if (!success)
             {
-                _logger.LogWarning($"Failed to send job {jobId} to worker {worker.Id}");
+                _logger.LogWarning("Failed to send job {JobId} to worker {WorkerId}", jobId, worker.Id);
                 TagList sendFailedTags = new TagList { { "outcome", "failed" } };
                 _dispatchDurationMs.Record(sw.ElapsedMilliseconds, sendFailedTags);
                 TagList sendFailedReasonTags = new TagList { { "reason", "send_failed" } };
@@ -102,7 +102,7 @@ public class JobDispatcherService(
                 await _eventService.NotifyJobStartedAsync(updatedJob, cancellationToken);
             }
 
-            _logger.LogInformation($"Job {jobId} dispatched to worker {worker.Id} ({worker.Name})");
+            _logger.LogInformation("Job {JobId} dispatched to worker {WorkerId} ({WorkerName})", jobId, worker.Id, worker.Name);
             TagList successTags = new TagList { { "outcome", "success" } };
             _dispatchDurationMs.Record(sw.ElapsedMilliseconds, successTags);
             _jobsDispatched.Add(1);
@@ -110,7 +110,7 @@ public class JobDispatcherService(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error dispatching job {jobId}: {ex.Message}");
+            _logger.LogError("Error dispatching job {JobId}: {ExMessage}", jobId, ex.Message);
             TagList errorTags = new TagList { { "outcome", "error" } };
             _dispatchDurationMs.Record(sw.ElapsedMilliseconds, errorTags);
             TagList exceptionReasonTags = new TagList { { "reason", "exception" } };
@@ -134,7 +134,7 @@ public class JobDispatcherService(
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning($"Failed to parse capabilities for job {job.Id}: {ex.Message}");
+            _logger.LogWarning("Failed to parse capabilities for job {JobId}: {ExMessage}", job.Id, ex.Message);
         }
 
         // Get workers with matching capabilities
@@ -294,14 +294,14 @@ public class JobDispatcherService(
 
                 if (response.IsSuccessStatusCode)
                 {
-                    _logger.LogDebug($"Successfully sent job {job.Id} to worker {worker.Id} at {endpoint} (attempt {attempt})");
+                    _logger.LogDebug("Successfully sent job {JobId} to worker {WorkerId} at {Endpoint} (attempt {Attempt})", job.Id, worker.Id, endpoint, attempt);
                     return true;
                 }
                 else if ((int)response.StatusCode >= 500 || response.StatusCode == HttpStatusCode.RequestTimeout)
                 {
                     // Transient error - retry
                     string error = await response.Content.ReadAsStringAsync(cancellationToken);
-                    _logger.LogWarning($"Transient error from worker {worker.Id} for job {job.Id} (attempt {attempt}/{maxAttempts}): {response.StatusCode} - {error}");
+                    _logger.LogWarning("Transient error from worker {WorkerId} for job {JobId} (attempt {Attempt}/{MaxAttempts}): {ResponseStatusCode} - {Error}", worker.Id, job.Id, attempt, maxAttempts, response.StatusCode, error);
 
                     if (attempt < maxAttempts)
                     {
@@ -316,13 +316,13 @@ public class JobDispatcherService(
                 {
                     // Non-transient error - don't retry
                     string error = await response.Content.ReadAsStringAsync(cancellationToken);
-                    _logger.LogWarning($"Worker {worker.Id} rejected job {job.Id}: {response.StatusCode} - {error}");
+                    _logger.LogWarning("Worker {WorkerId} rejected job {JobId}: {ResponseStatusCode} - {Error}", worker.Id, job.Id, response.StatusCode, error);
                     return false;
                 }
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogWarning($"HTTP error sending job {job.Id} to worker {worker.Id} (attempt {attempt}/{maxAttempts}): {ex.Message}");
+                _logger.LogWarning("HTTP error sending job {JobId} to worker {WorkerId} (attempt {Attempt}/{MaxAttempts}): {ExMessage}", job.Id, worker.Id, attempt, maxAttempts, ex.Message);
                 if (attempt < maxAttempts)
                 {
                     int delayMs = (int)(baseDelayMs * Math.Pow(multiplier, attempt - 1));
@@ -334,12 +334,12 @@ public class JobDispatcherService(
             }
             catch (TaskCanceledException)
             {
-                _logger.LogWarning($"Timeout sending job {job.Id} to worker {worker.Id}");
+                _logger.LogWarning("Timeout sending job {JobId} to worker {WorkerId}", job.Id, worker.Id);
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Unexpected error sending job {job.Id} to worker {worker.Id}: {ex.Message}");
+                _logger.LogError("Unexpected error sending job {JobId} to worker {WorkerId}: {ExMessage}", job.Id, worker.Id, ex.Message);
                 return false;
             }
         }

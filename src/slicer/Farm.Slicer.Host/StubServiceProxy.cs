@@ -21,7 +21,9 @@ public class StubServiceProxy<T> : DispatchProxy
     /// <summary>
     /// Creates a new proxy instance for the specified service interface.
     /// </summary>
+#pragma warning disable CA1000 // Do not declare static members on generic types — factory method pattern
     public static T CreateInstance() => Create<T, StubServiceProxy<T>>();
+#pragma warning restore CA1000
 
     /// <inheritdoc />
     protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)

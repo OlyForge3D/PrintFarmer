@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -18,19 +17,14 @@ namespace Farm.Slicer.Module.Tests.Controllers
     {
         private static Model3DFilesController CreateController(
             Mock<IModel3DFileService> mockService,
-            IConfiguration? config = null,
             Mock<I3MfToStlConversionService>? mockConverter = null)
         {
             Mock<ILogger<Model3DFilesController>> mockLogger = new Mock<ILogger<Model3DFilesController>>();
-            config ??= new Mock<IConfiguration>().Object;
-            Mock<ISlicerStoredFileOpsService> mockFileOps = new Mock<ISlicerStoredFileOpsService>();
             mockConverter ??= new Mock<I3MfToStlConversionService>();
 
             return new Model3DFilesController(
                 mockLogger.Object,
                 mockService.Object,
-                config,
-                mockFileOps.Object,
                 mockConverter.Object);
         }
 

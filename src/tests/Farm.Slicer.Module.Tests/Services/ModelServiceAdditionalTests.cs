@@ -1,14 +1,8 @@
 ﻿using System;
-using System;
-using System.IO;
 using System.IO;
 using System.Security.Cryptography;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text;
 using System.Threading;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;

@@ -110,13 +110,13 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             // Persist minimal metadata (e.g., content type) alongside the file
             TryWriteSidecarMetadata(filePath, contentType);
 
-            _logger.LogDebug($"Uploaded file {key} to {filePath}");
+            _logger.LogDebug("Uploaded file {Key} to {FilePath}", key, filePath);
 
             return GetFileUrl(key);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to upload file {key}: {ex.Message}");
+            _logger.LogError("Failed to upload file {Key}: {ExMessage}", key, ex.Message);
             throw;
         }
     }
@@ -143,13 +143,13 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             // Persist minimal metadata (e.g., content type) alongside the file
             TryWriteSidecarMetadata(filePath, contentType);
 
-            _logger.LogDebug($"Uploaded file {key} to {filePath}");
+            _logger.LogDebug("Uploaded file {Key} to {FilePath}", key, filePath);
 
             return GetFileUrl(key);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to upload file {key}: {ex.Message}");
+            _logger.LogError("Failed to upload file {Key}: {ExMessage}", key, ex.Message);
             throw;
         }
     }
@@ -167,12 +167,12 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             }
 
             Stream fileStream = _fileSystem.OpenRead(filePath);
-            _logger.LogDebug($"Downloaded file {keyOrUrl} from {filePath}");
+            _logger.LogDebug("Downloaded file {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
             return Task.FromResult(fileStream);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to download file {keyOrUrl}: {ex.Message}");
+            _logger.LogError("Failed to download file {KeyOrUrl}: {ExMessage}", keyOrUrl, ex.Message);
             throw;
         }
     }
@@ -190,12 +190,12 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             }
 
             byte[] fileBytes = await _fileSystem.ReadAllBytesAsync(filePath, cancellationToken);
-            _logger.LogDebug($"Downloaded file bytes {keyOrUrl} from {filePath}");
+            _logger.LogDebug("Downloaded file bytes {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
             return fileBytes;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to download file bytes {keyOrUrl}: {ex.Message}");
+            _logger.LogError("Failed to download file bytes {KeyOrUrl}: {ExMessage}", keyOrUrl, ex.Message);
             throw;
         }
     }
@@ -210,7 +210,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to check if file exists {keyOrUrl}: {ex.Message}");
+            _logger.LogError("Failed to check if file exists {KeyOrUrl}: {ExMessage}", keyOrUrl, ex.Message);
             return Task.FromResult(false);
         }
     }
@@ -225,14 +225,14 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             if (_fileSystem.FileExists(filePath))
             {
                 _fileSystem.DeleteFile(filePath);
-                _logger.LogDebug($"Deleted file {keyOrUrl} from {filePath}");
+                _logger.LogDebug("Deleted file {KeyOrUrl} from {FilePath}", keyOrUrl, filePath);
             }
 
             return Task.CompletedTask;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to delete file {keyOrUrl}: {ex.Message}");
+            _logger.LogError("Failed to delete file {KeyOrUrl}: {ExMessage}", keyOrUrl, ex.Message);
             throw;
         }
     }
@@ -269,7 +269,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get file metadata {keyOrUrl}: {ex.Message}");
+            _logger.LogError("Failed to get file metadata {KeyOrUrl}: {ExMessage}", keyOrUrl, ex.Message);
             throw;
         }
     }
@@ -310,7 +310,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to delete temp file {file}: {ex.Message}");
+                    _logger.LogWarning("Failed to delete temp file {File}: {ExMessage}", file, ex.Message);
                 }
             }
 
@@ -342,15 +342,15 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to delete empty temp directory {dir}: {ex.Message}");
+                    _logger.LogWarning("Failed to delete empty temp directory {Dir}: {ExMessage}", dir, ex.Message);
                 }
             }
 
-            _logger.LogInformation($"Cleaned up {deletedCount} temp files older than {maxAge}");
+            _logger.LogInformation("Cleaned up {DeletedCount} temp files older than {MaxAge}", deletedCount, maxAge);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to cleanup temp files: {ex.Message}");
+            _logger.LogError("Failed to cleanup temp files: {ExMessage}", ex.Message);
             throw;
         }
     }
@@ -431,7 +431,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to write sidecar metadata for {filePath}: {ex.Message}");
+            _logger.LogWarning("Failed to write sidecar metadata for {FilePath}: {ExMessage}", filePath, ex.Message);
         }
     }
 
@@ -454,7 +454,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to read sidecar metadata for {filePath}: {ex.Message}");
+            _logger.LogWarning("Failed to read sidecar metadata for {FilePath}: {ExMessage}", filePath, ex.Message);
         }
 
         return null;

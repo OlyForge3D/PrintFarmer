@@ -1845,9 +1845,9 @@ public sealed class MoonrakerSubscriptionService(
 
     private PrinterConnectionHealth GetOrCreateHealth(Guid printerId, string printerName)
     {
-        return _connectionHealth.GetOrAdd(printerId, _ => new PrinterConnectionHealth
+        return _connectionHealth.GetOrAdd(printerId, id => new PrinterConnectionHealth
         {
-            PrinterId = printerId,
+            PrinterId = id,
             PrinterName = printerName,
             Backend = PrinterBackend.Moonraker
         });

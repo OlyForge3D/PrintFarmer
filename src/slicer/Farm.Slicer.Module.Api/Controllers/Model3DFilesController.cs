@@ -3,7 +3,6 @@ using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Controllers;
@@ -18,8 +17,6 @@ namespace Farm.Slicer.Module.Api.Controllers;
 public class Model3DFilesController(
     ILogger<Model3DFilesController> logger,
     IModel3DFileService modelService,
-    IConfiguration configuration,
-    ISlicerStoredFileOpsService fileOperations,
     I3MfToStlConversionService threeMfConverter) : ControllerBase
 {
     private readonly ILogger<Model3DFilesController> _logger = logger;
@@ -133,6 +130,7 @@ public class Model3DFilesController(
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+#pragma warning disable CA3003 // File path from DB lookup by Guid — no injection risk
     public async Task<IActionResult> GetModelFileAsync(Guid id, [FromQuery] bool forceStl = false)
     {
         try
@@ -173,6 +171,7 @@ public class Model3DFilesController(
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get model file");
         }
     }
+#pragma warning restore CA3003
 
     /// <summary>
     /// Downloads the model's thumbnail image by ID.
@@ -182,6 +181,7 @@ public class Model3DFilesController(
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+#pragma warning disable CA3003 // File path from DB lookup by Guid — no injection risk
     public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
     {
         try
@@ -201,6 +201,7 @@ public class Model3DFilesController(
             return NotFound("Thumbnail not found");
         }
     }
+#pragma warning restore CA3003
 
     /// <summary>
     /// Downloads a file by relative path for the 3D model viewer.

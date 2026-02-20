@@ -12,7 +12,9 @@ public static class SlicingJobStore
     private static readonly ConcurrentDictionary<Guid, SlicingJobDto> _jobs = new();
 
     /// <summary>Gets all stored jobs.</summary>
+#pragma warning disable CA1024 // Use properties where appropriate — method is more expressive for collection access
     public static IEnumerable<SlicingJobDto> GetAll() => _jobs.Values;
+#pragma warning restore CA1024
 
     /// <summary>Gets a job by ID.</summary>
     public static SlicingJobDto? Get(Guid id) =>

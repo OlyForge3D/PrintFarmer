@@ -20,7 +20,9 @@ public static class SlicerModuleExtensions
     /// Marker service used to detect whether <see cref="AddSlicerModule"/> has already been called,
     /// preventing duplicate registrations when called more than once.
     /// </summary>
+#pragma warning disable S2094 // Classes should not be empty — intentional DI marker type
     private sealed class SlicerModuleMarker;
+#pragma warning restore S2094
 
     /// <summary>
     /// Registers all slicer-module owned services: <see cref="SlicerDbContext"/>,

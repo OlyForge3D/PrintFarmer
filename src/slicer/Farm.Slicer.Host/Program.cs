@@ -110,6 +110,8 @@ app.MapGet("/", () => Results.Ok(new { service = "Farm.Slicer.Host", status = "r
 await app.RunAsync();
 
 /// <summary>Marker type so integration tests can reference the host assembly.</summary>
+#pragma warning disable S1118 // Utility classes should not have public constructors — marker type for WebApplicationFactory
 public partial class Program
 {
 }
+#pragma warning restore S1118

@@ -34,15 +34,13 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         ISliceJobEventService evtSvc = scope.ServiceProvider.GetRequiredService<ISliceJobEventService>();
         ILoggerFactory loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
         ILogger<SliceJobController> logger = loggerFactory.CreateLogger<SliceJobController>();
-        IHostEnvironment hostEnv = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
-        IProcessProfileRepository profileRepo = scope.ServiceProvider.GetRequiredService<IProcessProfileRepository>();
         IRateLimitService rateLimit = scope.ServiceProvider.GetRequiredService<IRateLimitService>();
         SliceJobMetrics metrics = new SliceJobMetrics();
         IWorkerAuthService workerAuth = scope.ServiceProvider.GetRequiredService<IWorkerAuthService>();
         IWorkerRepository workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
         DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
-        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics, workerAuth, workerRepository)
+        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, artifactsService, rateLimit, metrics, workerAuth, workerRepository)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

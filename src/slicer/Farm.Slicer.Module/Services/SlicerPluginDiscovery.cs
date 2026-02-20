@@ -22,7 +22,6 @@ namespace Farm.Slicer.Module.Services;
 /// <c>*.dll</c> files that carry <see cref="SlicerPluginAttribute"/>.
 /// </para>
 /// </remarks>
-/// </summary>
 public static class SlicerPluginDiscovery
 {
     private static readonly List<ISlicerLibrary> RegisteredLibraries = [];

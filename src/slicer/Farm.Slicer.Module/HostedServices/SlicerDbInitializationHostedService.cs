@@ -8,8 +8,8 @@ namespace Farm.Slicer.Module.HostedServices;
 
 /// <summary>
 /// One-shot hosted service that ensures the slicer database schema exists on startup.
-/// Uses <see cref="DatabaseFacade.EnsureCreatedAsync"/> for SQLite (development)
-/// and <see cref="RelationalDatabaseFacadeExtensions.MigrateAsync"/> for providers
+/// Uses <c>EnsureCreatedAsync</c> for SQLite (development)
+/// and <c>MigrateAsync</c> for providers
 /// with migration assemblies (PostgreSQL, SQL Server).
 /// </summary>
 public sealed class SlicerDbInitializationHostedService(

@@ -22,8 +22,6 @@ public class SliceJobController(
     ISliceJobRepository jobRepository,
     ISliceJobEventService eventService,
     ILogger<SliceJobController> logger,
-    IHostEnvironment env,
-    IProcessProfileRepository profileRepository,
     IArtifactsService artifactsService,
     IRateLimitService rateLimitService,
     SliceJobMetrics metrics,

@@ -36,7 +36,7 @@ public class SlicerOrchestrator(
             DistributedSlicingJob? existingJob = await _jobQueue.FindExistingJobAsync(envelope.CorrelationId, envelope.Checksum, cancellationToken);
             if (existingJob != null)
             {
-                _logger.LogInformation($"Found existing job {existingJob.Id} for correlation {envelope.CorrelationId}, returning existing response");
+                _logger.LogInformation("Found existing job {ExistingJobId} for correlation {EnvelopeCorrelationId}, returning existing response", existingJob.Id, envelope.CorrelationId);
 
                 // Return existing job response
                 SlicerQueueStats infraStats = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)request.SlicerEngine, cancellationToken);
@@ -100,7 +100,7 @@ public class SlicerOrchestrator(
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"Could not get file metadata for {request.ModelFileUrl}");
+                _logger.LogWarning(ex, "Could not get file metadata for {ModelFileUrl}", request.ModelFileUrl);
             }
 
             // Enqueue the job
@@ -110,7 +110,7 @@ public class SlicerOrchestrator(
             SlicerQueueStats infraStatsForNew = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)request.SlicerEngine, cancellationToken);
             DateTime estimatedCompletion = DateTime.UtcNow.Add(infraStatsForNew.EstimatedWaitTime ?? TimeSpan.Zero);
 
-            _logger.LogInformation($"Submitted new slicing job {job.Id} (correlation {envelope.CorrelationId}) for user {request.UserId} with engine {request.SlicerEngine}");
+            _logger.LogInformation("Submitted new slicing job {JobId} (correlation {EnvelopeCorrelationId}) for user {RequestUserId} with engine {RequestSlicerEngine}", job.Id, envelope.CorrelationId, request.UserId, request.SlicerEngine);
 
             return new SlicingJobResponse
             {
@@ -123,7 +123,7 @@ public class SlicerOrchestrator(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to submit slicing job for user {userIdForLog}");
+            _logger.LogError(ex, "Failed to submit slicing job for user {UserIdForLog}", userIdForLog);
             throw;
         }
     }
@@ -165,7 +165,7 @@ public class SlicerOrchestrator(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to get job status for {jobId}");
+            _logger.LogError(ex, "Failed to get job status for {JobId}", jobId);
             throw;
         }
     }
@@ -177,13 +177,13 @@ public class SlicerOrchestrator(
             DistributedSlicingJob? job = await _jobQueue.GetJobAsync(jobId, cancellationToken);
             if (job == null)
             {
-                _logger.LogWarning($"Cannot cancel job {jobId} - job not found");
+                _logger.LogWarning("Cannot cancel job {JobId} - job not found", jobId);
                 return false;
             }
 
             if (job.Status == SlicingJobStatus.Completed || job.Status == SlicingJobStatus.Error || job.Status == SlicingJobStatus.Cancelled)
             {
-                _logger.LogWarning($"Cannot cancel job {jobId} - job is already in final state: {job.Status}");
+                _logger.LogWarning("Cannot cancel job {JobId} - job is already in final state: {JobStatus}", jobId, job.Status);
                 return false;
             }
 
@@ -205,12 +205,12 @@ public class SlicerOrchestrator(
 
             await _progressNotifier.NotifyFailureAsync(moduleJob, "Job cancelled by user", cancellationToken);
 
-            _logger.LogInformation($"Cancelled slicing job {jobId}");
+            _logger.LogInformation("Cancelled slicing job {JobId}", jobId);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to cancel job {jobId}");
+            _logger.LogError(ex, "Failed to cancel job {JobId}", jobId);
             throw;
         }
     }
@@ -240,7 +240,7 @@ public class SlicerOrchestrator(
             catch (Exception ex)
             {
                 failures++;
-                _logger.LogWarning(ex, $"Queue stats retrieval failed for engine {meta.EngineType}");
+                _logger.LogWarning(ex, "Queue stats retrieval failed for engine {EngineType}", meta.EngineType);
 
                 // Return an unhealthy placeholder so the UI can still show engine availability and degraded status
                 engineInfos.Add(new SlicerEngineInfo
@@ -335,7 +335,7 @@ public class SlicerOrchestrator(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to get user jobs for {userId}");
+            _logger.LogError(ex, "Failed to get user jobs for {UserId}", userId);
             throw;
         }
     }
@@ -373,7 +373,7 @@ public class SlicerOrchestrator(
             catch (Exception ex)
             {
                 engineFailures++;
-                _logger.LogWarning(ex, $"Health check failed for engine {meta.EngineType}");
+                _logger.LogWarning(ex, "Health check failed for engine {EngineType}", meta.EngineType);
                 health.Engines[meta.EngineType] = new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,

@@ -107,7 +107,7 @@ namespace Farm.Slicer.Module.Api.Services
         /// <exception cref="ArgumentException">Thrown if rawJson is missing or slicerType is invalid</exception>
         public async Task<(ProcessProfileExtendedDto Dto, bool Created)> ImportProfileAsync(ImportProcessProfileDto req, CancellationToken ct)
         {
-            _logger.LogInformation($"[ImportProfileAsync] Starting profile import with name: {req.Name}, slicerType: {req.SlicerType}, allowSystemOverride: {req.AllowSystemOverride}");
+            _logger.LogInformation("[ImportProfileAsync] Starting profile import with name: {ReqName}, slicerType: {ReqSlicerType}, allowSystemOverride: {ReqAllowSystemOverride}", req.Name, req.SlicerType, req.AllowSystemOverride);
 
             ArgumentNullException.ThrowIfNull(req);
             if (string.IsNullOrWhiteSpace(req.RawJson))
@@ -118,12 +118,13 @@ namespace Farm.Slicer.Module.Api.Services
 
             if (string.IsNullOrWhiteSpace(req.SlicerType) || !Enum.TryParse(req.SlicerType, true, out SlicerType slicerType))
             {
-                _logger.LogError($"[ImportProfileAsync] Failed: Invalid slicerType '{req.SlicerType}'");
+                _logger.LogError("[ImportProfileAsync] Failed: Invalid slicerType '{ReqSlicerType}'", req.SlicerType);
                 throw new ArgumentException("Invalid slicerType", nameof(req));
             }
 
             (string? sanitizedRaw, string? settingsJson, string? hash) = _parsingService.ParseAndPrepare(req.RawJson);
-            _logger.LogDebug($"[ImportProfileAsync] Profile parsed successfully. Hash: {hash}, SettingsJson length: {settingsJson?.Length ?? 0}");
+            int settingsLength = settingsJson?.Length ?? 0;
+            _logger.LogDebug("[ImportProfileAsync] Profile parsed successfully. Hash: {Hash}, SettingsJson length: {SettingsLength}", hash, settingsLength);
 
             // Attempt to derive basic fields from metadata
             double layerHeight = 0.2;
@@ -154,11 +155,11 @@ namespace Farm.Slicer.Module.Api.Services
                     quality = q.GetString() ?? quality;
                 }
 
-                _logger.LogDebug($"[ImportProfileAsync] Metadata extracted: layerHeight={layerHeight}, infillPct={infillPct}, material={material}, quality={quality}");
+                _logger.LogDebug("[ImportProfileAsync] Metadata extracted: layerHeight={LayerHeight}, infillPct={InfillPct}, material={Material}, quality={Quality}", layerHeight, infillPct, material, quality);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[ImportProfileAsync] Failed to extract metadata: {ex.Message}. Using defaults.");
+                _logger.LogWarning("[ImportProfileAsync] Failed to extract metadata: {ExMessage}. Using defaults.", ex.Message);
             }
 
             // Map quality
@@ -180,17 +181,17 @@ namespace Farm.Slicer.Module.Api.Services
                 UpdatedAt = DateTime.UtcNow
             };
 
-            _logger.LogDebug($"[ImportProfileAsync] Attempting to persist profile: {imported.Name} (ID: {imported.Id})");
+            _logger.LogDebug("[ImportProfileAsync] Attempting to persist profile: {ImportedName} (ID: {ImportedId})", imported.Name, imported.Id);
             ProcessProfile saved = await _processProfileRepo.AddOrUpdateFromImportAsync(imported, allowSystemOverride: req.AllowSystemOverride, ct);
             bool created = saved.Id == imported.Id;
 
             if (created)
             {
-                _logger.LogInformation($"[ImportProfileAsync] New profile created successfully: {saved.Name} (ID: {saved.Id})");
+                _logger.LogInformation("[ImportProfileAsync] New profile created successfully: {SavedName} (ID: {SavedId})", saved.Name, saved.Id);
             }
             else
             {
-                _logger.LogInformation($"[ImportProfileAsync] Existing profile updated: {saved.Name} (ID: {saved.Id})");
+                _logger.LogInformation("[ImportProfileAsync] Existing profile updated: {SavedName} (ID: {SavedId})", saved.Name, saved.Id);
             }
 
             Dictionary<string, object?> metadata = new(StringComparer.OrdinalIgnoreCase);
@@ -256,15 +257,15 @@ namespace Farm.Slicer.Module.Api.Services
         /// </remarks>
         public async Task<ProcessProfileExportDto?> ExportProfileAsync(Guid id, CancellationToken ct)
         {
-            _logger.LogInformation($"[ExportProfileAsync] Exporting profile with ID: {id}");
+            _logger.LogInformation("[ExportProfileAsync] Exporting profile with ID: {Id}", id);
             ProcessProfile? profile = await _processProfileRepo.GetByIdAsync(id, ct);
             if (profile is null)
             {
-                _logger.LogWarning($"[ExportProfileAsync] Profile not found for export with ID: {id}");
+                _logger.LogWarning("[ExportProfileAsync] Profile not found for export with ID: {Id}", id);
                 return null;
             }
 
-            _logger.LogDebug($"[ExportProfileAsync] Found profile: {profile.Name}, parsing settings...");
+            _logger.LogDebug("[ExportProfileAsync] Found profile: {ProfileName}, parsing settings...", profile.Name);
             Dictionary<string, object?> settingsDict = new(StringComparer.OrdinalIgnoreCase);
             try
             {
@@ -281,14 +282,15 @@ namespace Farm.Slicer.Module.Api.Services
                     };
                 }
 
-                _logger.LogDebug($"[ExportProfileAsync] Settings parsed successfully. Keys: {string.Join(", ", settingsDict.Keys)}");
+                string keysJoined = string.Join(", ", settingsDict.Keys);
+                _logger.LogDebug("[ExportProfileAsync] Settings parsed successfully. Keys: {Keys}", keysJoined);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[ExportProfileAsync] Failed to parse metadata: {ex.Message}");
+                _logger.LogWarning("[ExportProfileAsync] Failed to parse metadata: {ExMessage}", ex.Message);
             }
 
-            _logger.LogInformation($"[ExportProfileAsync] Successfully exported profile: {profile.Name}");
+            _logger.LogInformation("[ExportProfileAsync] Successfully exported profile: {ProfileName}", profile.Name);
             return new ProcessProfileExportDto
             {
                 Id = profile.Id,
@@ -316,17 +318,17 @@ namespace Farm.Slicer.Module.Api.Services
         /// </remarks>
         public async Task<bool> SetDefaultProfileAsync(Guid id, CancellationToken ct)
         {
-            _logger.LogInformation($"[SetDefaultProfileAsync] Setting default profile with ID: {id}");
+            _logger.LogInformation("[SetDefaultProfileAsync] Setting default profile with ID: {Id}", id);
             ProcessProfile? profile = await _processProfileRepo.GetByIdAsync(id, ct);
             if (profile is null)
             {
-                _logger.LogError($"[SetDefaultProfileAsync] Profile not found with ID: {id}");
+                _logger.LogError("[SetDefaultProfileAsync] Profile not found with ID: {Id}", id);
                 return false;
             }
 
-            _logger.LogDebug($"[SetDefaultProfileAsync] Found profile: {profile.Name}, SlicerType: {profile.SlicerType}");
+            _logger.LogDebug("[SetDefaultProfileAsync] Found profile: {ProfileName}, SlicerType: {ProfileSlicerType}", profile.Name, profile.SlicerType);
             await _processProfileRepo.SetDefaultAsync(profile, profile.CreatedByUserId, ct);
-            _logger.LogInformation($"[SetDefaultProfileAsync] Successfully set default profile: {profile.Name}");
+            _logger.LogInformation("[SetDefaultProfileAsync] Successfully set default profile: {ProfileName}", profile.Name);
             return true;
         }
 
@@ -355,7 +357,7 @@ namespace Farm.Slicer.Module.Api.Services
             List<MachineProfileListItemDto> machineProfiles = new();
 
             IReadOnlyList<ProcessProfile> processProfileEntities = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-            _logger.LogDebug($"[ListExtendedAsync] Found {processProfileEntities.Count} process profiles for OrcaSlicer");
+            _logger.LogDebug("[ListExtendedAsync] Found {ProcessProfileEntitiesCount} process profiles for OrcaSlicer", processProfileEntities.Count);
             foreach (ProcessProfile p in processProfileEntities)
             {
                 processProfiles.Add(new ProcessProfileListItemDto
@@ -733,7 +735,7 @@ namespace Farm.Slicer.Module.Api.Services
         {
             _logger.LogInformation("[ListSystemOrcaProfilesAsync] Listing all system OrcaSlicer profiles");
             IReadOnlyList<ProcessProfile> profiles = await _processProfileRepo.GetSystemOrcaProfilesAsync(ct);
-            _logger.LogDebug($"[ListSystemOrcaProfilesAsync] Found {profiles.Count} system OrcaSlicer profiles");
+            _logger.LogDebug("[ListSystemOrcaProfilesAsync] Found {ProfilesCount} system OrcaSlicer profiles", profiles.Count);
             var result = profiles.Select(p => new SlicerProfileListItemDto
             {
                 Id = p.Id,
@@ -741,7 +743,7 @@ namespace Farm.Slicer.Module.Api.Services
                 SlicerType = p.SlicerType.ToString(),
                 Quality = p.Quality.ToString()
             }).ToList();
-            _logger.LogInformation($"[ListSystemOrcaProfilesAsync] Returning {result.Count} system profiles");
+            _logger.LogInformation("[ListSystemOrcaProfilesAsync] Returning {ResultCount} system profiles", result.Count);
             return result;
         }
 
@@ -800,7 +802,7 @@ namespace Farm.Slicer.Module.Api.Services
                         existingProfile.PrinterModelId = printerModelId;
                         existingProfile.UpdatedAt = DateTime.UtcNow;
                         await _machineProfileRepo.UpdateAsync(existingProfile, ct);
-                        _logger.LogDebug($"Updated existing machine profile '{existingProfile.Name}' with PrinterModelId {printerModelId}");
+                        _logger.LogDebug("Updated existing machine profile '{ExistingProfileName}' with PrinterModelId {PrinterModelId}", existingProfile.Name, printerModelId);
                         return true; // Treated as imported since we updated the link
                     }
 
@@ -935,8 +937,8 @@ namespace Farm.Slicer.Module.Api.Services
             SelectiveProfileImportRequest request,
             CancellationToken ct)
         {
-            _logger.LogInformation($"[ImportSelectedProfilesForModel] Importing selected profiles for model {printerModelId}");
-            _logger.LogDebug($"[ImportSelectedProfilesForModel] Selected: {request.SelectedMachineProfiles.Count} machines, {request.SelectedProcessProfiles.Count} processes, {request.SelectedFilamentProfiles.Count} filaments");
+            _logger.LogInformation("[ImportSelectedProfilesForModel] Importing selected profiles for model {PrinterModelId}", printerModelId);
+            _logger.LogDebug("[ImportSelectedProfilesForModel] Selected: {SelectedMachineProfilesCount} machines, {SelectedProcessProfilesCount} processes, {SelectedFilamentProfilesCount} filaments", request.SelectedMachineProfiles.Count, request.SelectedProcessProfiles.Count, request.SelectedFilamentProfiles.Count);
 
             SelectiveProfileImportResultDto result = new()
             {
@@ -1019,7 +1021,7 @@ namespace Farm.Slicer.Module.Api.Services
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning($"[ImportSelectedProfilesForModel] Failed to import machine profile '{machineProfile.Name}': {ex.Message}");
+                                _logger.LogWarning("[ImportSelectedProfilesForModel] Failed to import machine profile '{MachineProfileName}': {ExMessage}", machineProfile.Name, ex.Message);
                                 result.Skipped++;
                             }
                         }
@@ -1052,7 +1054,7 @@ namespace Farm.Slicer.Module.Api.Services
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning($"[ImportSelectedProfilesForModel] Failed to import filament profile '{filamentProfile.Name}': {ex.Message}");
+                                _logger.LogWarning("[ImportSelectedProfilesForModel] Failed to import filament profile '{FilamentProfileName}': {ExMessage}", filamentProfile.Name, ex.Message);
                                 result.Skipped++;
                             }
                         }
@@ -1085,14 +1087,14 @@ namespace Farm.Slicer.Module.Api.Services
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning($"[ImportSelectedProfilesForModel] Failed to import process profile '{processProfile.Name}': {ex.Message}");
+                                _logger.LogWarning("[ImportSelectedProfilesForModel] Failed to import process profile '{ProcessProfileName}': {ExMessage}", processProfile.Name, ex.Message);
                                 result.Skipped++;
                             }
                         }
                     }
                 }
 
-                _logger.LogInformation($"[ImportSelectedProfilesForModel] Completed: imported {result.TotalImported} profiles ({result.MachineProfilesImported} machine, {result.ProcessProfilesImported} process, {result.FilamentProfilesImported} filament), skipped {result.Skipped}");
+                _logger.LogInformation("[ImportSelectedProfilesForModel] Completed: imported {ResultTotalImported} profiles ({ResultMachineProfilesImported} machine, {ResultProcessProfilesImported} process, {ResultFilamentProfilesImported} filament), skipped {ResultSkipped}", result.TotalImported, result.MachineProfilesImported, result.ProcessProfilesImported, result.FilamentProfilesImported, result.Skipped);
 
                 return result;
             }
@@ -1635,7 +1637,7 @@ namespace Farm.Slicer.Module.Api.Services
             int totalDeleted = deletedMachineCount + deletedProcessCount + deletedFilamentCount;
 
             _logger.LogInformation(
-                $"[Phase3Cleanup] Completed deletion: {deletedMachineCount} machine, {deletedProcessCount} process, {deletedFilamentCount} filament profiles (total: {totalDeleted})");
+                "[Phase3Cleanup] Completed deletion: {DeletedMachineCount} machine, {DeletedProcessCount} process, {DeletedFilamentCount} filament profiles (total: {TotalDeleted})", deletedMachineCount, deletedProcessCount, deletedFilamentCount, totalDeleted);
 
             return new
             {
@@ -1728,7 +1730,7 @@ namespace Farm.Slicer.Module.Api.Services
             }
 
             string url = $"{workerUrl}/api/profiles/machine/{Uri.EscapeDataString(manufacturer)}/{Uri.EscapeDataString(model)}";
-            _logger.LogInformation($"Fetching machine profiles from worker: {url}");
+            _logger.LogInformation("Fetching machine profiles from worker: {Url}", url);
 
             HttpResponseMessage response = await httpClient.GetAsync(url, ct);
             if (!response.IsSuccessStatusCode)
@@ -1758,7 +1760,7 @@ namespace Farm.Slicer.Module.Api.Services
             }
 
             string url = $"{workerUrl}/api/profiles/machine/{Uri.EscapeDataString(printerModel)}";
-            _logger.LogInformation($"Fetching machine profiles by alias from worker: {url}");
+            _logger.LogInformation("Fetching machine profiles by alias from worker: {Url}", url);
 
             HttpResponseMessage response = await httpClient.GetAsync(url, ct);
             if (!response.IsSuccessStatusCode)
@@ -1787,7 +1789,7 @@ namespace Farm.Slicer.Module.Api.Services
             }
 
             string url = $"{workerUrl}/api/profiles/process/for-machines";
-            _logger.LogInformation($"Fetching process profiles for machines from worker: {url}");
+            _logger.LogInformation("Fetching process profiles for machines from worker: {Url}", url);
 
             var request = new { machineNames = machineNames.ToList() };
             string requestJson = JsonSerializer.Serialize(request);
@@ -1820,7 +1822,7 @@ namespace Farm.Slicer.Module.Api.Services
             }
 
             string url = $"{workerUrl}/api/profiles/filament/for-machines";
-            _logger.LogInformation($"Fetching filament profiles for machines from worker: {url}");
+            _logger.LogInformation("Fetching filament profiles for machines from worker: {Url}", url);
 
             var request = new { machineNames = machineNames.ToList() };
             string requestJson = JsonSerializer.Serialize(request);
@@ -1852,7 +1854,7 @@ namespace Farm.Slicer.Module.Api.Services
             }
 
             string url = $"{workerUrl}/api/profiles/filament/templates";
-            _logger.LogInformation($"Fetching filament templates from worker: {url}");
+            _logger.LogInformation("Fetching filament templates from worker: {Url}", url);
 
             HttpResponseMessage response = await httpClient.GetAsync(url, ct);
             if (!response.IsSuccessStatusCode)
@@ -1871,7 +1873,7 @@ namespace Farm.Slicer.Module.Api.Services
             Guid printerModelId,
             CancellationToken ct)
         {
-            _logger.LogInformation($"[GetImportedProfileNamesForModel] Getting imported profile names for model: {printerModelId}");
+            _logger.LogInformation("[GetImportedProfileNamesForModel] Getting imported profile names for model: {PrinterModelId}", printerModelId);
 
             // Get all OrcaSlicer machine profiles for this model
             IReadOnlyList<MachineProfile> machineProfiles = await _machineProfileRepo.GetByEngineAsync(
@@ -1901,7 +1903,7 @@ namespace Farm.Slicer.Module.Api.Services
                 .Select(p => p.Name!)
                 .ToList();
 
-            _logger.LogDebug($"[GetImportedProfileNamesForModel] Found {machineNames.Count} machines, {processNames.Count} processes, {filamentNames.Count} filaments for model {printerModelId}");
+            _logger.LogDebug("[GetImportedProfileNamesForModel] Found {MachineNamesCount} machines, {ProcessNamesCount} processes, {FilamentNamesCount} filaments for model {PrinterModelId}", machineNames.Count, processNames.Count, filamentNames.Count, printerModelId);
 
             return new ImportedProfileNamesDto
             {
@@ -1931,15 +1933,15 @@ namespace Farm.Slicer.Module.Api.Services
         /// <exception cref="KeyNotFoundException">Thrown if the printer with the specified ID is not found</exception>
         public async Task<IReadOnlyList<SlicerProfileListItemDto>> GetAvailableProfilesForPrinterAsync(Guid printerId, CancellationToken ct)
         {
-            _logger.LogInformation($"[GetAvailableProfilesForPrinterAsync] Getting available profiles for printer: {printerId}");
+            _logger.LogInformation("[GetAvailableProfilesForPrinterAsync] Getting available profiles for printer: {PrinterId}", printerId);
             Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
             if (printer is null)
             {
-                _logger.LogError($"[GetAvailableProfilesForPrinterAsync] Printer not found with ID: {printerId}");
+                _logger.LogError("[GetAvailableProfilesForPrinterAsync] Printer not found with ID: {PrinterId}", printerId);
                 throw new KeyNotFoundException($"Printer with ID {printerId} not found");
             }
 
-            _logger.LogDebug($"[GetAvailableProfilesForPrinterAsync] Found printer: {printer.Name}, retrieving OrcaSlicer system profiles");
+            _logger.LogDebug("[GetAvailableProfilesForPrinterAsync] Found printer: {PrinterName}, retrieving OrcaSlicer system profiles", printer.Name);
             return await ListSystemOrcaProfilesAsync(ct);
         }
 
@@ -1972,7 +1974,8 @@ namespace Farm.Slicer.Module.Api.Services
         /// <exception cref="KeyNotFoundException">Thrown if the printer is not found</exception>
         public async Task<BulkProfileImportResultDto> BulkImportProfilesForPrinterAsync(Guid printerId, BulkProfileImportRequest request, CancellationToken ct)
         {
-            _logger.LogInformation($"[BulkImportProfilesForPrinterAsync] Bulk importing {request.ProfileIds?.Count ?? 0} profiles for printer: {printerId}");
+            int profileCount = request.ProfileIds?.Count ?? 0;
+            _logger.LogInformation("[BulkImportProfilesForPrinterAsync] Bulk importing {ProfileCount} profiles for printer: {PrinterId}", profileCount, printerId);
             ArgumentNullException.ThrowIfNull(request);
             if (request.ProfileIds == null || request.ProfileIds.Count == 0)
             {
@@ -1983,11 +1986,11 @@ namespace Farm.Slicer.Module.Api.Services
             Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
             if (printer is null)
             {
-                _logger.LogError($"[BulkImportProfilesForPrinterAsync] Printer not found with ID: {printerId}");
+                _logger.LogError("[BulkImportProfilesForPrinterAsync] Printer not found with ID: {PrinterId}", printerId);
                 throw new KeyNotFoundException($"Printer with ID {printerId} not found");
             }
 
-            _logger.LogDebug($"[BulkImportProfilesForPrinterAsync] Found printer: {printer.Name}, retrieving system profiles");
+            _logger.LogDebug("[BulkImportProfilesForPrinterAsync] Found printer: {PrinterName}, retrieving system profiles", printer.Name);
             IReadOnlyList<ProcessProfile> allSystemProfiles = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
             List<ProcessProfile> profilesToImport = allSystemProfiles
                 .Where(p => p.IsSystem && request.ProfileIds.Contains(p.Id))
@@ -2272,7 +2275,7 @@ namespace Farm.Slicer.Module.Api.Services
         /// <exception cref="ArgumentNullException">Thrown if request is null</exception>
         public async Task<ProcessProfileResponseDto> CreateProfileAsync(CreateProcessProfileDto req, CancellationToken ct)
         {
-            _logger.LogInformation($"[CreateProfileAsync] Creating new profile: {req.Name}, slicerType: {req.SlicerType}, quality: {req.Quality}");
+            _logger.LogInformation("[CreateProfileAsync] Creating new profile: {ReqName}, slicerType: {ReqSlicerType}, quality: {ReqQuality}", req.Name, req.SlicerType, req.Quality);
             ArgumentNullException.ThrowIfNull(req);
 
             (SlicerType slicerType, ProfileQuality quality) = ValidateAndParseEnums(req.SlicerType, req.Quality);
@@ -2297,7 +2300,7 @@ namespace Farm.Slicer.Module.Api.Services
 
             await _repo.AddAsync(profile, ct);
 
-            _logger.LogInformation($"Profile created: {profile.Id} - {profile.Name} ({profile.SlicerType})");
+            _logger.LogInformation("Profile created: {ProfileId} - {ProfileName} ({ProfileSlicerType})", profile.Id, profile.Name, profile.SlicerType);
 
             return ToResponseDto(profile);
         }
@@ -2323,15 +2326,15 @@ namespace Farm.Slicer.Module.Api.Services
         /// </remarks>
         public async Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct)
         {
-            _logger.LogInformation($"[GetProfileAsync] Retrieving profile with ID: {id}");
+            _logger.LogInformation("[GetProfileAsync] Retrieving profile with ID: {Id}", id);
             ProcessProfile? profile = await _repo.FindByIdAsync(id, ct);
             if (profile is null)
             {
-                _logger.LogWarning($"[GetProfileAsync] Profile not found with ID: {id}");
+                _logger.LogWarning("[GetProfileAsync] Profile not found with ID: {Id}", id);
                 return null;
             }
 
-            _logger.LogDebug($"[GetProfileAsync] Retrieved profile: {profile.Name}");
+            _logger.LogDebug("[GetProfileAsync] Retrieved profile: {ProfileName}", profile.Name);
             return ToResponseDto(profile);
         }
 
@@ -2361,9 +2364,9 @@ namespace Farm.Slicer.Module.Api.Services
         {
             _logger.LogInformation("[GetProfilesAsync] Retrieving all slicer profiles");
             List<ProcessProfile> profiles = await _repo.GetAllAsync(ct);
-            _logger.LogDebug($"[GetProfilesAsync] Retrieved {profiles.Count} profiles, sorting by name");
+            _logger.LogDebug("[GetProfilesAsync] Retrieved {ProfilesCount} profiles, sorting by name", profiles.Count);
             var result = profiles.OrderBy(p => p.Name).Select(ToSummaryDto).ToList();
-            _logger.LogDebug($"[GetProfilesAsync] Returning {result.Count} profiles");
+            _logger.LogDebug("[GetProfilesAsync] Returning {ResultCount} profiles", result.Count);
             return result;
         }
 
@@ -2389,19 +2392,19 @@ namespace Farm.Slicer.Module.Api.Services
         /// <exception cref="KeyNotFoundException">Thrown if the profile with the specified ID is not found</exception>
         public async Task DeleteProfileAsync(Guid id, CancellationToken ct)
         {
-            _logger.LogInformation($"[DeleteProfileAsync] Deleting profile with ID: {id}");
+            _logger.LogInformation("[DeleteProfileAsync] Deleting profile with ID: {Id}", id);
             ProcessProfile? profile = await _repo.FindByIdAsync(id, ct);
             if (profile is null)
             {
-                _logger.LogError($"[DeleteProfileAsync] Profile not found with ID: {id}");
+                _logger.LogError("[DeleteProfileAsync] Profile not found with ID: {Id}", id);
                 throw new KeyNotFoundException($"Profile with ID {id} not found");
             }
 
-            _logger.LogDebug($"[DeleteProfileAsync] Found profile: {profile.Name}, removing from repository");
+            _logger.LogDebug("[DeleteProfileAsync] Found profile: {ProfileName}, removing from repository", profile.Name);
             await _repo.RemoveAsync(profile, ct);
-            _logger.LogInformation($"[DeleteProfileAsync] Successfully deleted profile: {profile.Name}");
+            _logger.LogInformation("[DeleteProfileAsync] Successfully deleted profile: {ProfileName}", profile.Name);
 
-            _logger.LogInformation($"Profile deleted: {id} - {profile.Name}");
+            _logger.LogInformation("Profile deleted: {Id} - {ProfileName}", id, profile.Name);
         }
 
         /// <summary>
@@ -2419,7 +2422,7 @@ namespace Farm.Slicer.Module.Api.Services
         {
             var result = new BulkDeleteResultDto();
             var idList = profileIds.ToList();
-            _logger.LogInformation($"[BulkDeleteProfilesAsync] Deleting {idList.Count} profiles");
+            _logger.LogInformation("[BulkDeleteProfilesAsync] Deleting {IdListCount} profiles", idList.Count);
 
             foreach (var id in idList)
             {
@@ -2429,7 +2432,7 @@ namespace Farm.Slicer.Module.Api.Services
                 {
                     await _machineProfileRepo.DeleteAsync(machineProfile, ct);
                     result.MachineProfilesDeleted++;
-                    _logger.LogDebug($"[BulkDeleteProfilesAsync] Deleted machine profile: {machineProfile.Name}");
+                    _logger.LogDebug("[BulkDeleteProfilesAsync] Deleted machine profile: {MachineProfileName}", machineProfile.Name);
                     continue;
                 }
 
@@ -2439,7 +2442,7 @@ namespace Farm.Slicer.Module.Api.Services
                 {
                     await _repo.RemoveAsync(processProfile, ct);
                     result.ProcessProfilesDeleted++;
-                    _logger.LogDebug($"[BulkDeleteProfilesAsync] Deleted process profile: {processProfile.Name}");
+                    _logger.LogDebug("[BulkDeleteProfilesAsync] Deleted process profile: {ProcessProfileName}", processProfile.Name);
                     continue;
                 }
 
@@ -2449,16 +2452,16 @@ namespace Farm.Slicer.Module.Api.Services
                 {
                     await _filamentProfileRepo.DeleteAsync(filamentProfile, ct);
                     result.FilamentProfilesDeleted++;
-                    _logger.LogDebug($"[BulkDeleteProfilesAsync] Deleted filament profile: {filamentProfile.Name}");
+                    _logger.LogDebug("[BulkDeleteProfilesAsync] Deleted filament profile: {FilamentProfileName}", filamentProfile.Name);
                     continue;
                 }
 
                 // Not found in any table
                 result.NotFound++;
-                _logger.LogWarning($"[BulkDeleteProfilesAsync] Profile not found: {id}");
+                _logger.LogWarning("[BulkDeleteProfilesAsync] Profile not found: {Id}", id);
             }
 
-            _logger.LogInformation($"[BulkDeleteProfilesAsync] Deleted {result.TotalDeleted} profiles (machine: {result.MachineProfilesDeleted}, process: {result.ProcessProfilesDeleted}, filament: {result.FilamentProfilesDeleted}, not found: {result.NotFound})");
+            _logger.LogInformation("[BulkDeleteProfilesAsync] Deleted {ResultTotalDeleted} profiles (machine: {ResultMachineProfilesDeleted}, process: {ResultProcessProfilesDeleted}, filament: {ResultFilamentProfilesDeleted}, not found: {ResultNotFound})", result.TotalDeleted, result.MachineProfilesDeleted, result.ProcessProfilesDeleted, result.FilamentProfilesDeleted, result.NotFound);
             return result;
         }
 
@@ -2552,7 +2555,7 @@ namespace Farm.Slicer.Module.Api.Services
 
                 if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
                 {
-                    _logger.LogInformation($"Using OrcaSlicer worker from registry: {orcaWorker.Name} at {orcaWorker.Host}");
+                    _logger.LogInformation("Using OrcaSlicer worker from registry: {OrcaWorkerName} at {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
                     return orcaWorker.Host;
                 }
 
@@ -2563,7 +2566,7 @@ namespace Farm.Slicer.Module.Api.Services
 
                 if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
                 {
-                    _logger.LogWarning($"OrcaSlicer worker '{orcaWorker.Name}' is not online, but using endpoint anyway: {orcaWorker.Host}");
+                    _logger.LogWarning("OrcaSlicer worker '{OrcaWorkerName}' is not online, but using endpoint anyway: {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
                     return orcaWorker.Host;
                 }
 
@@ -2572,7 +2575,7 @@ namespace Farm.Slicer.Module.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to query slicer registry: {ex.Message}");
+                _logger.LogError("Failed to query slicer registry: {ExMessage}", ex.Message);
                 return null;
             }
         }
@@ -2658,7 +2661,7 @@ namespace Farm.Slicer.Module.Api.Services
             };
 
             await _processProfileRepo.AddAsync(clone, ct);
-            _logger.LogInformation($"Cloned process profile '{source.Name}' to '{newName}' for user {userId}");
+            _logger.LogInformation("Cloned process profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, newName, userId);
 
             return new CloneSingleProfileResponseDto
             {
@@ -2703,7 +2706,7 @@ namespace Farm.Slicer.Module.Api.Services
             };
 
             await _filamentProfileRepo.AddAsync(clone, ct);
-            _logger.LogInformation($"Cloned filament profile '{source.Name}' to '{newName}' for user {userId}");
+            _logger.LogInformation("Cloned filament profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, newName, userId);
 
             return new CloneSingleProfileResponseDto
             {
@@ -2745,7 +2748,7 @@ namespace Farm.Slicer.Module.Api.Services
             };
 
             await _machineProfileRepo.AddAsync(clone, ct);
-            _logger.LogInformation($"Cloned machine profile '{source.Name}' to '{newName}' for user {userId}");
+            _logger.LogInformation("Cloned machine profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, newName, userId);
 
             return new CloneSingleProfileResponseDto
             {
@@ -2809,7 +2812,7 @@ namespace Farm.Slicer.Module.Api.Services
             };
 
             await _processProfileRepo.AddAsync(profile, ct);
-            _logger.LogInformation($"Uploaded process profile '{name}' for user {userId}");
+            _logger.LogInformation("Uploaded process profile '{Name}' for user {UserId}", name, userId);
 
             return new CustomProfileDto
             {
@@ -2854,7 +2857,7 @@ namespace Farm.Slicer.Module.Api.Services
             };
 
             await _filamentProfileRepo.AddAsync(profile, ct);
-            _logger.LogInformation($"Uploaded filament profile '{name}' for user {userId}");
+            _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId}", name, userId);
 
             return new CustomProfileDto
             {
@@ -2899,7 +2902,7 @@ namespace Farm.Slicer.Module.Api.Services
             };
 
             await _machineProfileRepo.AddAsync(profile, ct);
-            _logger.LogInformation($"Uploaded machine profile '{name}' for user {userId}");
+            _logger.LogInformation("Uploaded machine profile '{Name}' for user {UserId}", name, userId);
 
             return new CustomProfileDto
             {
@@ -3026,7 +3029,7 @@ namespace Farm.Slicer.Module.Api.Services
 
             profile.UpdatedAt = DateTime.UtcNow;
             await _processProfileRepo.UpdateAsync(profile, ct);
-            _logger.LogInformation($"Updated process profile '{profile.Name}' for user {userId}");
+            _logger.LogInformation("Updated process profile '{ProfileName}' for user {UserId}", profile.Name, userId);
 
             return new CustomProfileDto
             {
@@ -3065,7 +3068,7 @@ namespace Farm.Slicer.Module.Api.Services
 
             profile.UpdatedAt = DateTime.UtcNow;
             await _filamentProfileRepo.UpdateAsync(profile, ct);
-            _logger.LogInformation($"Updated filament profile '{profile.Name}' for user {userId}");
+            _logger.LogInformation("Updated filament profile '{ProfileName}' for user {UserId}", profile.Name, userId);
 
             return new CustomProfileDto
             {
@@ -3104,7 +3107,7 @@ namespace Farm.Slicer.Module.Api.Services
 
             profile.UpdatedAt = DateTime.UtcNow;
             await _machineProfileRepo.UpdateAsync(profile, ct);
-            _logger.LogInformation($"Updated machine profile '{profile.Name}' for user {userId}");
+            _logger.LogInformation("Updated machine profile '{ProfileName}' for user {UserId}", profile.Name, userId);
 
             return new CustomProfileDto
             {

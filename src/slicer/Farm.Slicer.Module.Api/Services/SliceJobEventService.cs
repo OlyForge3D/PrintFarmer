@@ -30,7 +30,7 @@ public class SliceJobEventService(
         };
 
         await BroadcastEventAsync(evt, job.UserId, cancellationToken);
-        _logger.LogDebug($"Broadcasted JobQueued event for job {job.Id}");
+        _logger.LogDebug("Broadcasted JobQueued event for job {JobId}", job.Id);
     }
 
     public async Task NotifyJobStartedAsync(SliceJob job, CancellationToken cancellationToken = default)
@@ -51,7 +51,7 @@ public class SliceJobEventService(
         };
 
         await BroadcastEventAsync(evt, job.UserId, cancellationToken);
-        _logger.LogDebug($"Broadcasted JobStarted event for job {job.Id}");
+        _logger.LogDebug("Broadcasted JobStarted event for job {JobId}", job.Id);
     }
 
     public async Task NotifyJobProgressAsync(SliceJob job, CancellationToken cancellationToken = default)
@@ -97,7 +97,7 @@ public class SliceJobEventService(
         };
 
         await BroadcastEventAsync(evt, job.UserId, cancellationToken);
-        _logger.LogInformation($"Broadcasted JobCompleted event for job {job.Id}");
+        _logger.LogInformation("Broadcasted JobCompleted event for job {JobId}", job.Id);
     }
 
     public async Task NotifyJobFailedAsync(SliceJob job, CancellationToken cancellationToken = default)
@@ -120,7 +120,7 @@ public class SliceJobEventService(
         };
 
         await BroadcastEventAsync(evt, job.UserId, cancellationToken);
-        _logger.LogWarning($"Broadcasted JobFailed event for job {job.Id}: {job.ErrorMessage}");
+        _logger.LogWarning("Broadcasted JobFailed event for job {JobId}: {JobErrorMessage}", job.Id, job.ErrorMessage);
     }
 
     public async Task NotifyJobCancelledAsync(SliceJob job, CancellationToken cancellationToken = default)
@@ -141,7 +141,7 @@ public class SliceJobEventService(
         };
 
         await BroadcastEventAsync(evt, job.UserId, cancellationToken);
-        _logger.LogInformation($"Broadcasted JobCancelled event for job {job.Id}");
+        _logger.LogInformation("Broadcasted JobCancelled event for job {JobId}", job.Id);
     }
 
     private async Task BroadcastEventAsync(SliceJobEvent evt, Guid userId, CancellationToken cancellationToken)

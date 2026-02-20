@@ -2,7 +2,6 @@
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 
@@ -14,11 +13,8 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [Route("api/slicer")]
 [Tags("Slicer Jobs")]
 public class SlicingJobsController(
-    ILogger<SlicingJobsController> logger,
     ISlicerTempPathProvider tempPathProvider,
-    ISlicerOrchestrator orchestrator,
-    ISlicerFileManagementService fileManagementService,
-    ISlicerStoredFileOpsService fileOperations) : ControllerBase
+    ISlicerOrchestrator orchestrator) : ControllerBase
 {
     private readonly ISlicerTempPathProvider _tempPathProvider = tempPathProvider;
     private readonly ISlicerOrchestrator _orchestrator = orchestrator;

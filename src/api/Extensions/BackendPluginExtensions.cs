@@ -49,7 +49,7 @@ public static class BackendPluginExtensions
     /// <param name="services">The service collection for dependency injection setup.</param>
     /// <param name="pluginsPath">Optional: directory to scan for additional runtime-loaded plugin DLLs
     /// (e.g. <c>BackendPlugins:PluginsPath</c>). Relative paths are resolved against
-    /// <see cref="AppDomain.CurrentDomain.BaseDirectory"/>.</param>
+    /// <see cref="AppDomain.BaseDirectory"/>.</param>
     /// <param name="assembliesToSearch">Optional: specific assemblies to search. If null, searches all loaded assemblies.</param>
     private static void DiscoverAndLoadPlugins(
         BackendPluginRegistry registry,

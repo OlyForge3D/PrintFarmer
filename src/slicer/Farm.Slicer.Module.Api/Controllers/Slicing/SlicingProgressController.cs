@@ -1,5 +1,4 @@
 ﻿using Farm.Slicer.Module.Dtos;
-using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
@@ -10,7 +9,7 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Progress")]
-public class SlicingProgressController(ISlicerStoredFileOpsService fileOperations) : ControllerBase
+public class SlicingProgressController : ControllerBase
 {
     /// <summary>
     /// Gets the current progress of all active slicing jobs.

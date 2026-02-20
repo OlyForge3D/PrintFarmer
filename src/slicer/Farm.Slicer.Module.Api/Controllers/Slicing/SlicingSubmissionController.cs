@@ -3,7 +3,6 @@ using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 
@@ -14,10 +13,7 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [Route("api/slicer")]
 [Tags("Slicer Submission")]
 public class SlicingSubmissionController(
-    ISlicingSubmissionService submissionService,
-    IConfiguration cfg,
-    ISlicerTempPathProvider tempPathProvider,
-    IHostEnvironment env) : ControllerBase
+    ISlicingSubmissionService submissionService) : ControllerBase
 {
     private readonly ISlicingSubmissionService _submissionService = submissionService;
 
