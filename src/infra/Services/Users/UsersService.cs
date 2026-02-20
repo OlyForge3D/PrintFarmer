@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Authentication;
 
-namespace Farm.Web.Api.Services.Users
+namespace Farm.Infrastructure.Services.Users
 {
     /// <summary>
     /// Service for managing user accounts, authentication, and user-related operations.

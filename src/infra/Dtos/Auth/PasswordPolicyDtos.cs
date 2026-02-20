@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.DTOs.Auth;
+﻿namespace Farm.Infrastructure.Dtos.Auth;
 
 /// <summary>
 /// DTO for password policy configuration

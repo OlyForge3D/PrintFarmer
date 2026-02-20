@@ -324,12 +324,12 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IPasswordHashingService, Farm.Infrastructure.Services.Authentication.PasswordHashingService>();
         _ = services.AddScoped<IAuthenticationService, Farm.Infrastructure.Services.Authentication.AuthenticationService>();
-        _ = services.AddScoped<Services.PasswordPolicy.IPasswordPolicyService, Services.PasswordPolicy.PasswordPolicyService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.PasswordPolicy.IPasswordPolicyService, Farm.Infrastructure.Services.PasswordPolicy.PasswordPolicyService>();
         _ = services.AddScoped<IAccountLockoutService, Farm.Infrastructure.Services.Authentication.AccountLockoutService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IAuthAuditService, Farm.Infrastructure.Services.Authentication.AuthAuditService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ITokenRevocationService, Farm.Infrastructure.Services.Authentication.TokenRevocationService>();
         _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
-        _ = services.AddScoped<Services.Users.IUsersService, Services.Users.UsersService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Users.IUsersService, Farm.Infrastructure.Services.Users.UsersService>();
     }
 
     #endregion

@@ -1,8 +1,8 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Api.DTOs.Auth;
+using Farm.Infrastructure.Dtos.Auth;
 
-namespace Farm.Web.Api.Services.PasswordPolicy;
+namespace Farm.Infrastructure.Services.PasswordPolicy;
 
 /// <summary>
 /// Service for managing password policy configuration.

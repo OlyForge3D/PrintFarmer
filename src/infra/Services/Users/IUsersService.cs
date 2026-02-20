@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Auth;
 
-namespace Farm.Web.Api.Services.Users
+namespace Farm.Infrastructure.Services.Users
 {
     /// <summary>
     /// Service for user account management operations.

@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.DTOs.Auth;
+using Farm.Infrastructure.Dtos.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +10,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/settings/security/password-policy")]
 [Authorize(Roles = "farm_admin")]
-public class PasswordPolicyController(Services.PasswordPolicy.IPasswordPolicyService svc) : ControllerBase
+public class PasswordPolicyController(Farm.Infrastructure.Services.PasswordPolicy.IPasswordPolicyService svc) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PasswordPolicyDto>> GetAsync(CancellationToken ct)

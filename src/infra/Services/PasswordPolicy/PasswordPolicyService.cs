@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.Auth;
 using Farm.Infrastructure.Repositories.PasswordPolicy;
-using Farm.Web.Api.DTOs.Auth;
 
-namespace Farm.Web.Api.Services.PasswordPolicy;
+namespace Farm.Infrastructure.Services.PasswordPolicy;
 
 public class PasswordPolicyService(IPasswordPolicyRepository repo) : IPasswordPolicyService
 {
