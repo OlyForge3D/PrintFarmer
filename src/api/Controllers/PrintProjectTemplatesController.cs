@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.DTOs.Projects;
-using Farm.Web.Api.Services.Projects;
+﻿using Farm.Infrastructure.Dtos.Projects;
+using Farm.Infrastructure.Services.Projects;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

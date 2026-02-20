@@ -2,11 +2,11 @@
 using System.IO;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Filters;
 using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.OctoPrint;
-using Farm.Web.Api.Services.Queue;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

@@ -3,8 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.PrintJobs;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Web.Api.Data.Repositories;
-using Farm.Web.Api.Services.Queue;
 
 namespace Farm.Web.Api.Services.PrintJobs
 {

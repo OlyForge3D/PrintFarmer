@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 
-namespace Farm.Web.Api.Services.Queue
+namespace Farm.Infrastructure.Services.Queue
 {
     /// <summary>
     /// Service for managing print job queues and job operations.

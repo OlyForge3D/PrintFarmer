@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Threading.Tasks;
 
-namespace Farm.Web.Api.Services.PrintJobs
+namespace Farm.Infrastructure.Services.PrintJobs
 {
     /// <summary>
     /// Service for managing print job approvals in controlled print workflows.

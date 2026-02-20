@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Health;

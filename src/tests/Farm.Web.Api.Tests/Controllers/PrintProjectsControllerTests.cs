@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.Projects;
+using Farm.Infrastructure.Services.Projects;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
-using Farm.Web.Api.DTOs.Projects;
-using Farm.Web.Api.Services.Projects;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;

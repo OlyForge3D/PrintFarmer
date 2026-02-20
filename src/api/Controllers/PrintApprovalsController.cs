@@ -2,7 +2,7 @@
 using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Services.PrintJobs;
+using Farm.Infrastructure.Services.PrintJobs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

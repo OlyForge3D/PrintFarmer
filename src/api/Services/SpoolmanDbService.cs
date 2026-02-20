@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;

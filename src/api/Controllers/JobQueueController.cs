@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs.PrintQueue;
 using Microsoft.AspNetCore.Authorization;
@@ -20,7 +21,7 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Print Job Queue")]
 [Authorize]
 public class JobQueueController(
-    Services.Queue.IJobQueueService queueService,
+    IJobQueueService queueService,
     IPrintJobManagementService printJobManagementService,
     IPrintJobCompletionService printJobCompletionService,
     IPrinterStatusCacheReader printerStatusCache,

@@ -8,7 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.Queue
+namespace Farm.Infrastructure.Services.Queue
 {
     /// <summary>
     /// Service for managing the print job queue and queue operations across printers.

@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.DTOs.Projects;
+namespace Farm.Infrastructure.Dtos.Projects;
 
 /// <summary>
 /// Summary information for a project template.

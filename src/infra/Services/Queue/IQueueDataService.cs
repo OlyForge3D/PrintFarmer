@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.Queue;
+namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
 /// Service that provides domain-specific query methods for print job queue management.

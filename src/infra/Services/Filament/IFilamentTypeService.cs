@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Farm.Web.Api.Services.Filament
+namespace Farm.Infrastructure.Services.Filament
 {
     /// <summary>
     /// Service for managing filament types and material presets.

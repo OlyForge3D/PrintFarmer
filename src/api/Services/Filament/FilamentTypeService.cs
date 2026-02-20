@@ -10,8 +10,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Filament;
+using Farm.Infrastructure.Services.Filament;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services.Filament

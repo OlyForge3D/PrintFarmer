@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Services.Filament;
+using Farm.Infrastructure.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;

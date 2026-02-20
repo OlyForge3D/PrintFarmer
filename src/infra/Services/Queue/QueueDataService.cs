@@ -6,7 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.Queue;
+namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
 /// Implementation of IQueueDataService using IUnitOfWork for repository access.

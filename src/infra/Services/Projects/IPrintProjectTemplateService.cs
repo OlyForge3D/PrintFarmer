@@ -1,6 +1,6 @@
-﻿using Farm.Web.Api.DTOs.Projects;
+﻿using Farm.Infrastructure.Dtos.Projects;
 
-namespace Farm.Web.Api.Services.Projects;
+namespace Farm.Infrastructure.Services.Projects;
 
 /// <summary>
 /// Service interface for managing print project templates.

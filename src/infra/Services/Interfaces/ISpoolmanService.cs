@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure;
 
-namespace Farm.Web.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Services.Interfaces;
 
 /// <summary>
 /// Interface for Spoolman service providing filament spool management functionality.

@@ -17,6 +17,7 @@ using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Quota;
@@ -149,8 +150,8 @@ public static class ServiceCollectionExtensions
         RegisterCatalogServices(services);
 
         // Print job queue services (API-owned, not slicer-module)
-        _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
-        _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueDataService, Farm.Infrastructure.Services.Queue.QueueDataService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IJobQueueService, Farm.Infrastructure.Services.Queue.JobQueueService>();
 
         _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
         RegisterBackendClientPlugins(services, configuration);  // Register backend client plugins FIRST - they register HTTP clients
@@ -407,7 +408,7 @@ public static class ServiceCollectionExtensions
         // Register API adapter that wraps Infrastructure service to work with request DTOs
         _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogServiceAdapter>();
 
-        _ = services.AddScoped<Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
 
         // SpoolmanDB community database service (GitHub Pages primary for temp ranges, Spoolman external fallback)
         _ = services.AddHttpClient<Services.ISpoolmanDbService, Services.SpoolmanDbService>();

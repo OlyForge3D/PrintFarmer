@@ -4,9 +4,9 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Farm.Web.Api.Health;
 
-public class SpoolmanHealthCheck(Services.Interfaces.ISpoolmanService spoolmanService, IHttpClientFactory httpClientFactory) : IHealthCheck
+public class SpoolmanHealthCheck(Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService, IHttpClientFactory httpClientFactory) : IHealthCheck
 {
-    private readonly Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService;
+    private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
 
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
