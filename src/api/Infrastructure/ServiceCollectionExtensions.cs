@@ -584,12 +584,12 @@ public static class ServiceCollectionExtensions
     private static void RegisterBackgroundServices(IServiceCollection services, bool disableBackgroundServices)
     {
         // Background service monitor - always register as it's used for status reporting
-        _ = services.AddSingleton<Services.Background.IBackgroundServiceMonitor, Services.Background.BackgroundServiceMonitor>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Background.IBackgroundServiceMonitor, Farm.Infrastructure.Services.Background.BackgroundServiceMonitor>();
 
         if (!disableBackgroundServices)
         {
             // System log cleanup (common service, not plugin-specific)
-            _ = services.AddHostedService<SystemLogCleanupService>();
+            _ = services.AddHostedService<Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService>();
 
             // Slicer hosted services (WorkerHealthMonitor, JobDispatching,
             // JobTimeoutScanner, StaleWorkerCleanup) are now registered by

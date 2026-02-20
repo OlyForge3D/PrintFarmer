@@ -23,8 +23,8 @@ public static class BackgroundServicesStartup
         services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSyncHostedService>();
 
         // Maintenance Module - Maintenance Alert Engine
-        services.Configure<Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings>(configuration.GetSection(Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings.SectionName));
-        services.AddHostedService<Farm.Web.Api.Services.Maintenance.MaintenanceAlertHostedService>();
+        services.Configure<Farm.Infrastructure.Settings.MaintenanceAlertSettings>(configuration.GetSection(Farm.Infrastructure.Settings.MaintenanceAlertSettings.SectionName));
+        services.AddHostedService<Farm.Infrastructure.Services.Maintenance.MaintenanceAlertHostedService>();
 
         // Orphaned Job Sync - Runs once on startup to sync jobs stuck in "Printing" status
         // This handles cases where the API restarts while a print completes

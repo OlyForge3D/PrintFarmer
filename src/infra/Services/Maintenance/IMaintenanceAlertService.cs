@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.Maintenance;
+namespace Farm.Infrastructure.Services.Maintenance;
 
 /// <summary>
 /// Service interface for maintenance alert management and generation.

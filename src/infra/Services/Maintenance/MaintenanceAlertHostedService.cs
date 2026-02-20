@@ -1,10 +1,13 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
-using Farm.Web.Api.Services.Background;
+using Farm.Infrastructure.Services.Background;
+using Farm.Infrastructure.Settings;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.Maintenance;
+namespace Farm.Infrastructure.Services.Maintenance;
 
 /// <summary>
 /// Background service that periodically evaluates maintenance schedules

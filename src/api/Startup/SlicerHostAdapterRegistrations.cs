@@ -28,7 +28,7 @@ public static class SlicerHostAdapterRegistrations
 
         // IHostedServiceMonitor — forward to the same BackgroundServiceMonitor singleton
         _ = services.AddSingleton<IHostedServiceMonitor>(sp =>
-            (IHostedServiceMonitor)sp.GetRequiredService<Services.Background.IBackgroundServiceMonitor>());
+            (IHostedServiceMonitor)sp.GetRequiredService<Farm.Infrastructure.Services.Background.IBackgroundServiceMonitor>());
 
         return services;
     }

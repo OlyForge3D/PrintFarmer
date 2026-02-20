@@ -1,6 +1,6 @@
 ﻿using System.Collections.Concurrent;
 
-namespace Farm.Web.Api.Services.Background;
+namespace Farm.Infrastructure.Services.Background;
 
 /// <summary>
 /// Status information for a background service
@@ -183,7 +183,7 @@ public interface IBackgroundServiceMonitor
 /// infrastructure <see cref="Farm.Infrastructure.Services.IHostedServiceMonitor"/>
 /// so that module-hosted services report to the same monitor.
 /// </summary>
-public class BackgroundServiceMonitor : IBackgroundServiceMonitor, Farm.Infrastructure.Services.IHostedServiceMonitor
+public class BackgroundServiceMonitor : IBackgroundServiceMonitor, IHostedServiceMonitor
 {
     private readonly ConcurrentDictionary<string, BackgroundServiceState> _services = new();
 

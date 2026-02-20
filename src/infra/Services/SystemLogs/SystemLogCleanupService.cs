@@ -6,7 +6,7 @@ using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.SystemLogs;
 
 public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, IUnifiedLoggingService logger) : BackgroundService
 {

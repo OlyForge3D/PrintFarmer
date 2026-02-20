@@ -1,7 +1,7 @@
 ﻿using System.Text.Json.Serialization;
 using Farm.Infrastructure.Settings;
 
-namespace Farm.Web.Api.Services.Maintenance;
+namespace Farm.Infrastructure.Settings;
 
 /// <summary>
 /// Configuration settings for the maintenance alert engine.
