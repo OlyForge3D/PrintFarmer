@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure;
 
-namespace Farm.Web.Api.Models.Admin;
+namespace Farm.Infrastructure.Dtos.DataManagement;
 
 /// <summary>
 /// Catalog export data containing manufacturers, printer models, and component models

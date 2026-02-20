@@ -2,13 +2,13 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Infrastructure.Normalization;
-using Farm.Web.Api.Models.Admin;
-using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.DataManagement;
 
 /// <summary>
 /// Service for importing database data from JSON format for backup/restore functionality

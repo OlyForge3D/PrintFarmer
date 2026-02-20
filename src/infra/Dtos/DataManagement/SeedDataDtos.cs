@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Farm.Web.Api.Models.SeedData;
+namespace Farm.Infrastructure.Dtos.DataManagement;
 
 /// <summary>
 /// DTO for manufacturer seed data from YAML

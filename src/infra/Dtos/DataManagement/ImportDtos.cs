@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Farm.Web.Api.Models.Admin;
+namespace Farm.Infrastructure.Dtos.DataManagement;
 
 /// <summary>
 /// Import mode for catalog and full backup imports

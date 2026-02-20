@@ -1,6 +1,6 @@
-﻿using Farm.Web.Api.Models.Admin;
+﻿using Farm.Infrastructure.Dtos.DataManagement;
 
-namespace Farm.Web.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Services.DataManagement;
 
 /// <summary>
 /// Service for importing database data from JSON format

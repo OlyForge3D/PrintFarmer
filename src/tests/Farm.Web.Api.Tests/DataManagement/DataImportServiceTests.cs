@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Models.Admin;
-using Farm.Web.Api.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Moq;

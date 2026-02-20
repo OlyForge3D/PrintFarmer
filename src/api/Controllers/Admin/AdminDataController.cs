@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Models.Admin;
-using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Services.DataManagement;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Admin;

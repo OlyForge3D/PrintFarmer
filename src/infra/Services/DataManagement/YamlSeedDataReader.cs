@@ -1,10 +1,11 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Models.SeedData;
-using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Services.DataManagement;
+using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Configuration;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.DataManagement;
 
 /// <summary>
 /// Service for reading and parsing YAML seed data files

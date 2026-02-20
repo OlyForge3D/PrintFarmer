@@ -1,7 +1,7 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Models.Admin;
+using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
