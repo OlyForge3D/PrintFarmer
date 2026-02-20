@@ -2,6 +2,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Repositories;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Slicer.Module.Api.Repositories;

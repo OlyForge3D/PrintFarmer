@@ -28,6 +28,7 @@ public class SlicingSubmissionService(
     ILogger<SlicingSubmissionService> logger,
     ISlicerStoredFileOpsService fileOperations) : ISlicingSubmissionService
 {
+    private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly IModel3DFileRepository _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
     private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
     private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));

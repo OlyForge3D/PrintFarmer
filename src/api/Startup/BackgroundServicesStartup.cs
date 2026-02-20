@@ -40,6 +40,7 @@ public static class BackgroundServicesStartup
 
         // Register file consistency audit background service
         // Runs hourly to detect orphaned/missing/corrupted files
+        // Uses IFileAuditRepository from Farm.Slicer.Module.Repositories (registered by slicer integration)
         services.AddHostedService(sp =>
         {
             IServiceScopeFactory scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();

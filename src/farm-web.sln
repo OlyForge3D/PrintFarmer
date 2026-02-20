@@ -81,6 +81,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Settings.Abstractions"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Plugin.Core", "slicer\Farm.Slicer.Plugin.Core\Farm.Slicer.Plugin.Core.csproj", "{96A8212A-850B-4FAD-A2E5-DF49F7D18663}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Integration", "slicer\Farm.Slicer.Integration\Farm.Slicer.Integration.csproj", "{5F27049A-D020-47FE-9F57-661B67DAAAA0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -427,6 +429,18 @@ Global
 		{96A8212A-850B-4FAD-A2E5-DF49F7D18663}.Release|x64.Build.0 = Release|Any CPU
 		{96A8212A-850B-4FAD-A2E5-DF49F7D18663}.Release|x86.ActiveCfg = Release|Any CPU
 		{96A8212A-850B-4FAD-A2E5-DF49F7D18663}.Release|x86.Build.0 = Release|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Debug|x64.Build.0 = Debug|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Debug|x86.Build.0 = Debug|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|x64.ActiveCfg = Release|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|x64.Build.0 = Release|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|x86.ActiveCfg = Release|Any CPU
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -452,5 +466,6 @@ Global
 		{E7F8AE82-4066-4C00-9874-49000025E403} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 		{943F47FD-5BA8-4676-8270-9AD6F04A680B} = {19CDB172-2F96-3C8E-CBBA-98A8BA357849}
 		{96A8212A-850B-4FAD-A2E5-DF49F7D18663} = {E34191D6-EE5B-7B1D-025F-EDB47609777D}
+		{5F27049A-D020-47FE-9F57-661B67DAAAA0} = {E34191D6-EE5B-7B1D-025F-EDB47609777D}
 	EndGlobalSection
 EndGlobal

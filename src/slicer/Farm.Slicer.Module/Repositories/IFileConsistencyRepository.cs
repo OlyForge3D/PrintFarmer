@@ -1,7 +1,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Domain;
 
-namespace Farm.Slicer.Module.Api.Repositories;
+namespace Farm.Slicer.Module.Repositories;
 
 /// <summary>
 /// Repository for file consistency statistics and health issue queries.

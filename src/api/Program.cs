@@ -10,8 +10,7 @@ using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
-using Farm.Slicer.Module;
-using Farm.Slicer.Module.Api;
+using Farm.Slicer.Integration;
 using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
@@ -95,16 +94,10 @@ builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Envir
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
 
-// Register slicer module (SlicerDbContext, module repositories, metrics, and configuration).
-// During transition both AppDbContext and SlicerDbContext coexist sharing the same underlying database.
-// All slicer registrations gated by Slicer:Enabled (default true).
+// Slicer integration shim: loads Farm.Slicer.Module + Farm.Slicer.Module.Api DLLs at runtime
+// from Slicer:PluginsPath. No compile-time reference to EF Core, SignalR hubs, or OrcaSlicer.
+// All slicer registrations delegated to runtime-discovered ISlicerModule implementations.
 bool slicerEnabled = builder.Configuration.GetValue("Slicer:Enabled", true);
-builder.Services.AddSlicerModule(builder.Configuration);
-if (slicerEnabled)
-{
-    builder.Services.AddSlicerApiServices(builder.Configuration);
-    builder.Services.AddSlicerHostAdapters();
-}
 
 // When slicer is disabled, cross-module consumers use = null default parameter values.
 // .NET DI's ActivatorUtilities skips unregistered services that have default values.
@@ -131,8 +124,14 @@ catch
 { /* non-fatal */
 }
 
-// Add API services
-builder.Services.AddPrintFarmerControllers(slicerEnabled);
+// Add API services (returns mvcBuilder so the slicer integration shim can add ApplicationParts)
+IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
+if (slicerEnabled)
+{
+    // Load slicer DLLs, register their services, and add their controllers as ApplicationParts.
+    builder.Services.AddSlicerIntegration(mvcBuilder, builder.Configuration);
+    builder.Services.AddSlicerHostAdapters();
+}
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -238,10 +237,10 @@ catch
     // If capture fails, leave captured variables null and fall back to app-level resolution later.
 }
 
-// Configure artifact storage metrics thresholds and alerts
+// Post-build slicer module configuration (metrics thresholds, alert subscriptions, etc.)
 if (slicerEnabled)
 {
-    app.ConfigureSlicerMetrics();
+    app.UseSlicerIntegration();
 }
 
 // NOTE: Settings initialization from environment variables is performed
@@ -321,10 +320,10 @@ app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
-// Slicer hubs (registry + progress) from slicer module
+// Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
 if (slicerEnabled)
 {
-    app.MapSlicerHubs();
+    app.MapSlicerIntegrationHubs();
 }
 else
 {

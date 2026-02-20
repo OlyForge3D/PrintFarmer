@@ -9,4 +9,9 @@
 Slicer engine implementations (e.g., OrcaSlicer) reference only this assembly.</Description>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Required for IEndpointRouteBuilder, WebApplication (ISlicerHubRegistrar, ISlicerModule) -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>

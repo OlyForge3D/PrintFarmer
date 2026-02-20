@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Api.Controllers;
-using Farm.Slicer.Module.Api.Repositories;
+using Farm.Slicer.Module.Repositories;
 using Farm.Slicer.Module.Domain;
 using Microsoft.AspNetCore.Mvc;
 using Moq;

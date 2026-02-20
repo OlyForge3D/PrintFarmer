@@ -5,6 +5,7 @@ using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Api.Services.Adapters;
+using Farm.Slicer.Module.Repositories;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
