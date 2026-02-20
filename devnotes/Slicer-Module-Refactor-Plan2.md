@@ -136,12 +136,42 @@ Committed as `3373ae96` on `feat/modularization`.
 - `SlicerDisabledWebApplicationFactory` — env-var-based test factory for disabled-mode tests
 - `SlicerPluginDiscovery.LoadPluginAssemblies()` — loads DLLs from `Slicer:PluginsPath` at startup
 
-### Phase 5: Clean Up API (FUTURE)
+### Phase 5: Slicer Integration Shim — BEAD PFarm1-2ni.5 (P1)
 
-- Remove `Farm.Slicers.OrcaSlicer.v2_3_1` ProjectReference from `Farm.Web.Api.csproj`
-- Configure `Slicer:PluginsPath` in production Docker to point to `/app/plugins/`
-- Add post-build copy step for slicer engine DLLs to plugins directory
-- Verify API works with zero plugins (already covered by disabled tests)
+**Strategy: minimal compile-time shim, runtime everything else.**
+
+```
+API (compile-time) → Farm.Slicer.Integration (thin shim, no EF/SignalR/controllers)
+                         ↓ (compile-time)
+                     Farm.Slicer.Plugin.Core (contracts only)
+                         ↓ (runtime DLL load from Slicer:PluginsPath)
+                     Farm.Slicer.Module.dll
+                     Farm.Slicer.Module.Api.dll
+                     Farm.Slicers.OrcaSlicer.v2_3_1.dll
+                     Farm.Slicer.Migrations.PostgreSQL.dll
+                     Farm.Slicer.Migrations.SqlServer.dll
+```
+
+**Sub-beads:**
+
+| Bead | Work |
+|------|------|
+| PFarm1-2ni.5.1 | Add `ISlicerModule` + `ISlicerHubRegistrar` interfaces to `Farm.Slicer.Plugin.Core` |
+| PFarm1-2ni.5.2 | Implement both interfaces in `Farm.Slicer.Module` and `Farm.Slicer.Module.Api` |
+| PFarm1-2ni.5.3 | Create `Farm.Slicer.Integration` shim (load DLLs → ApplicationParts → call contracts) |
+| PFarm1-2ni.5.4 | Remove 4 slicer ProjectReferences from `Farm.Web.Api.csproj`; wire shim in `Program.cs` |
+| PFarm1-2ni.5.5 | Add `Slicer:PluginsPath` to appsettings + MSBuild AfterBuild copy step for plugin DLLs |
+| PFarm1-2ni.5.6 | Update `CustomWebApplicationFactory` + verify all tests pass |
+
+**Key contracts (all in `Farm.Slicer.Plugin.Core`):**
+- `ISlicerModule` — `void RegisterServices(IServiceCollection, IConfiguration)` — called by shim after DLL load
+- `ISlicerHubRegistrar` — `void MapHubs(IEndpointRouteBuilder)` — called by shim's `MapSlicerIntegrationHubs()`
+- SignalR hubs: `ApplicationPart` auto-discovers controllers; hubs require the `ISlicerHubRegistrar` interface call
+
+**Related: Backend Plugin Runtime Loading — BEAD PFarm1-e4i (P2)**
+Same pattern for the 5 concrete backend plugins (Moonraker, PrusaLink, Sdcp, OctoPrint, FlashForge).
+`BackendPluginLoader` infrastructure already exists; just needs wiring + ProjectReference removal.
+Sub-beads: PFarm1-e4i.1 (wire loader), PFarm1-e4i.2 (remove refs), PFarm1-e4i.3 (MSBuild copy), PFarm1-e4i.4 (tests).
 
 ### Phase 6: File Library Decision — ✅ DOCUMENTED
 
