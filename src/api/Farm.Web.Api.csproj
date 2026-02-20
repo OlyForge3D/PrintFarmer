@@ -73,8 +73,24 @@
     <ProjectReference Include="..\slicer\Farm.Slicer.Integration\Farm.Slicer.Integration.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
-    <ProjectReference Include="..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />
-  </ItemGroup>
+    <ProjectReference Include="..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />    <!-- Slicer plugin projects: build before the API project but do not link their assemblies
+         directly — they are loaded at runtime from the plugins/slicer directory. -->
+    <ProjectReference Include="..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.PostgreSQL\Farm.Slicer.Migrations.PostgreSQL.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.SqlServer\Farm.Slicer.Migrations.SqlServer.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>  </ItemGroup>
 
 
   <ItemGroup>
@@ -108,5 +124,20 @@
   <ItemGroup>
     <Protobuf Include="..\..\proto\slicer_jobs.proto" GrpcServices="Server" />
   </ItemGroup>
+
+  <!-- Copy slicer plugin DLLs into the build output so they are available at runtime. -->
+  <Target Name="CopySlicerPlugins" AfterTargets="Build">
+    <PropertyGroup>
+      <_SlicerPluginsOutputDir>$(OutputPath)plugins/slicer/</_SlicerPluginsOutputDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_SlicerPluginsOutputDir)" />
+    <ItemGroup>
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\slicer\Farm.Slicer.Module.Api\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.PostgreSQL\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.SqlServer\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SlicerPluginDll)" DestinationFolder="$(_SlicerPluginsOutputDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

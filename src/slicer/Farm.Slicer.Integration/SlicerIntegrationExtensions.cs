@@ -118,6 +118,14 @@ public static class SlicerIntegrationExtensions
     {
         List<Assembly> result = [];
 
+        // Resolve relative paths against the application's base directory so the config value
+        // "./plugins/slicer" works correctly regardless of the process working directory.
+        if (!string.IsNullOrWhiteSpace(pluginsPath) && !Path.IsPathRooted(pluginsPath))
+        {
+            pluginsPath = Path.GetFullPath(
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pluginsPath));
+        }
+
         if (string.IsNullOrWhiteSpace(pluginsPath) || !Directory.Exists(pluginsPath))
         {
             // No plugins directory configured (e.g. test environments where slicer assemblies
