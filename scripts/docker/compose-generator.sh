@@ -185,6 +185,7 @@ parse_args() {
     INCLUDE_SECURITY="false"
     INCLUDE_REGISTRY="false"
     INCLUDE_DISCOVERY="false"
+    INCLUDE_SPOOLMAN="false"
     ENABLE_ORCA_WORKER=""
     ENABLE_PGADMIN="false"
     API_PORT=""
@@ -216,6 +217,8 @@ parse_args() {
                 INCLUDE_REGISTRY="true"; shift ;;
             --include-discovery)
                 INCLUDE_DISCOVERY="true"; shift ;;
+            --include-spoolman)
+                INCLUDE_SPOOLMAN="true"; shift ;;
             --enable-orca-worker)
                 ENABLE_ORCA_WORKER="$2"; shift 2 ;;
             --enable-pgadmin)
@@ -736,6 +739,16 @@ generate_compose() {
             fi
         else
             log_warning "pgAdmin is only supported with PostgreSQL database (current: $DB_PROVIDER, skipping)"
+        fi
+    fi
+    
+    # Conditionally merge Spoolman addon if user chose to deploy as container
+    if [[ "$INCLUDE_SPOOLMAN" == "true" ]]; then
+        if merge_addon_services "$compose_file" "spoolman"; then
+            log_info "Merged Spoolman filament manager service"
+            addons_merged=true
+        else
+            log_warning "Failed to merge Spoolman service, continuing without it"
         fi
     fi
     

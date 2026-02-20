@@ -828,6 +828,11 @@ generate_deployment_config() {
         generator_args+=("--include-discovery")
     fi
     
+    # Add Spoolman container if user chose to deploy it
+    if [ "${DEPLOY_SPOOLMAN_CONTAINER:-no}" = "yes" ]; then
+        generator_args+=("--include-spoolman")
+    fi
+    
     # Add worker configuration
     if [ -n "${ENABLE_ORCA_WORKER:-}" ]; then
         generator_args+=("--enable-orca-worker" "$ENABLE_ORCA_WORKER")
@@ -2699,14 +2704,16 @@ EOF
 
 # Spoolman Integration
 ENABLE_SPOOLMAN=yes
+DEPLOY_SPOOLMAN_CONTAINER=${DEPLOY_SPOOLMAN_CONTAINER:-no}
 SPOOLMAN_BASE_URL=$SPOOLMAN_BASE_URL
 SPOOLMAN_PORT=${SPOOLMAN_PORT:-7912}
+SPOOLMAN_IMAGE=${SPOOLMAN_IMAGE:-ghcr.io/olyforge3d/spoolman:latest}
 
 # Application Settings - Pre-populate Setup Wizard
 PFARM__Spoolman__BaseUrl=$SPOOLMAN_BASE_URL
 EOF
     else
-        echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no" >> "$CONFIG_FILE"
+        echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no\nDEPLOY_SPOOLMAN_CONTAINER=no" >> "$CONFIG_FILE"
     fi
 
     # Save external storage configuration (P0 Data Persistence)
@@ -3660,23 +3667,38 @@ configure_additional() {
 
     echo
     echo -e "${BLUE}Spoolman Integration${NC}"
-    echo "Spoolman provides centralized filament spool tracking. If you already run Spoolman you can point PrintFarmer at its base URL now (you can also configure later in the UI)."
-    prompt_yes_no "Enable Spoolman integration?" "no" "ENABLE_SPOOLMAN"
-    if [ "$ENABLE_SPOOLMAN" = "yes" ]; then
-        prompt_with_default "Spoolman base URL (protocol + host[:port], no trailing slash):" "http://spoolman:7912" "SPOOLMAN_BASE_URL"
-        # Derive port from URL (default 80 if none specified)
-        _tmp=${SPOOLMAN_BASE_URL#*://}
-        _hostport=${_tmp%%/*}
-        if [[ "$_hostport" == *:* ]]; then
-            SPOOLMAN_PORT=${_hostport##*:}
-        else
-            # Infer by scheme
-            if [[ $SPOOLMAN_BASE_URL == https://* ]]; then SPOOLMAN_PORT=443; else SPOOLMAN_PORT=80; fi
-        fi
-    else
-        SPOOLMAN_BASE_URL=""
-        SPOOLMAN_PORT=""
-    fi
+    echo "Spoolman provides centralized filament spool tracking."
+    echo "  1) Deploy Spoolman as a container alongside PrintFarmer"
+    echo "  2) Use an existing Spoolman instance (enter URL)"
+    echo "  3) Skip (you can configure later in the UI)"
+    prompt_with_default "Choose an option [1/2/3]:" "3" "SPOOLMAN_OPTION"
+    DEPLOY_SPOOLMAN_CONTAINER=no
+    case "$SPOOLMAN_OPTION" in
+        1)
+            ENABLE_SPOOLMAN=yes
+            DEPLOY_SPOOLMAN_CONTAINER=yes
+            prompt_with_default "Host port for Spoolman web UI:" "7912" "SPOOLMAN_PORT"
+            SPOOLMAN_BASE_URL="http://spoolman:8000"
+            prompt_with_default "Spoolman container image:" "ghcr.io/olyforge3d/spoolman:latest" "SPOOLMAN_IMAGE"
+            ;;
+        2)
+            ENABLE_SPOOLMAN=yes
+            prompt_with_default "Spoolman base URL (protocol + host[:port], no trailing slash):" "http://spoolman:7912" "SPOOLMAN_BASE_URL"
+            # Derive port from URL
+            _tmp=${SPOOLMAN_BASE_URL#*://}
+            _hostport=${_tmp%%/*}
+            if [[ "$_hostport" == *:* ]]; then
+                SPOOLMAN_PORT=${_hostport##*:}
+            else
+                if [[ $SPOOLMAN_BASE_URL == https://* ]]; then SPOOLMAN_PORT=443; else SPOOLMAN_PORT=80; fi
+            fi
+            ;;
+        *)
+            ENABLE_SPOOLMAN=no
+            SPOOLMAN_BASE_URL=""
+            SPOOLMAN_PORT=""
+            ;;
+    esac
 }
 
 # Generate and manage slicer worker API keys
@@ -3969,8 +3991,10 @@ SQLSERVER_IMAGE=mcr.microsoft.com/mssql/server:2022-latest
 
 # Spoolman
 SPOOLMAN_ENABLED=${ENABLE_SPOOLMAN:-no}
+DEPLOY_SPOOLMAN_CONTAINER=${DEPLOY_SPOOLMAN_CONTAINER:-no}
 SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
 SPOOLMAN_PORT=${SPOOLMAN_PORT:-7912}
+SPOOLMAN_IMAGE=${SPOOLMAN_IMAGE:-ghcr.io/olyforge3d/spoolman:latest}
 
 # Application Settings - PFARM Configuration
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_BASE_URL:-}

@@ -1,0 +1,26 @@
+# Spoolman Filament Manager Addon Service
+# This service is conditionally included via compose-generator.sh when --include-spoolman is passed
+# Uses the OlyForge3D community-maintained Spoolman container image
+# Spoolman listens on port 8000 internally; mapped to host port via SPOOLMAN_PORT (default 7912)
+
+services:
+  spoolman:
+    image: ${SPOOLMAN_IMAGE:-ghcr.io/olyforge3d/spoolman:latest}
+    container_name: printfarmer-spoolman
+    restart: unless-stopped
+    ports:
+      - "${SPOOLMAN_PORT:-7912}:8000"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${EXTERNAL_SPOOLMAN_PATH:-.volumes/printfarmer-spoolman-data}:/home/app/.local/share/spoolman
+    networks:
+      printfarmer-network:
+        aliases:
+          - spoolman
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/info"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
