@@ -12,6 +12,7 @@
     <ProjectReference Include="../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
     <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../../settings/Farm.Settings.Abstractions/Farm.Settings.Abstractions.csproj" />
+    <ProjectReference Include="..\Farm.Slicer.Plugin.Core\Farm.Slicer.Plugin.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

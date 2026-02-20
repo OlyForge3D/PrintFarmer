@@ -86,7 +86,17 @@ app.ConfigureSlicerMetrics();
 using (IServiceScope scope = app.Services.CreateScope())
 {
     SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
-    await db.Database.EnsureCreatedAsync();
+    string providerName = db.Database.ProviderName ?? string.Empty;
+    bool isSqlite = providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+
+    if (isSqlite)
+    {
+        await db.Database.EnsureCreatedAsync();
+    }
+    else
+    {
+        await db.Database.MigrateAsync();
+    }
 }
 
 app.UseCors();

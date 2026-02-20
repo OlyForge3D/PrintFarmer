@@ -1,18 +1,75 @@
 ﻿using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.Loader;
 using Farm.Slicer.Module.Contracts.Libraries;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Slicer.Module.Services;
 
 /// <summary>
-/// Discovers and loads slicer library plugins from referenced assemblies.
+/// Discovers and loads slicer library plugins from referenced assemblies
+/// and, optionally, from a runtime plugins directory.
 /// Uses the SlicerPluginAttribute to find and register implementations.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Compile-time plugins</b>: Assemblies linked via ProjectReference are
+/// automatically in <c>AppDomain.CurrentDomain.GetAssemblies()</c>.
+/// </para>
+/// <para>
+/// <b>Runtime plugins</b>: Call <see cref="LoadPluginAssemblies"/> before
+/// <see cref="DiscoverAndRegisterSlicerPlugins"/> to probe a directory for
+/// <c>*.dll</c> files that carry <see cref="SlicerPluginAttribute"/>.
+/// </para>
+/// </remarks>
 /// </summary>
 public static class SlicerPluginDiscovery
 {
     private static readonly List<ISlicerLibrary> RegisteredLibraries = [];
     private static readonly List<ISlicerUIProvider> RegisteredUIProviders = [];
+
+    /// <summary>
+    /// Loads all <c>*.dll</c> files from <paramref name="pluginsPath"/> into the
+    /// default <see cref="AssemblyLoadContext"/>. Unknown or non-.NET files are
+    /// silently skipped. Call this <b>before</b> <see cref="DiscoverAndRegisterSlicerPlugins"/>
+    /// so the loaded assemblies appear in <c>AppDomain.CurrentDomain.GetAssemblies()</c>.
+    /// </summary>
+    /// <param name="pluginsPath">Absolute or relative path to the plugins directory.</param>
+    public static void LoadPluginAssemblies(string? pluginsPath)
+    {
+        if (string.IsNullOrWhiteSpace(pluginsPath))
+            return;
+
+        string fullPath = Path.GetFullPath(pluginsPath);
+        if (!Directory.Exists(fullPath))
+        {
+            Debug.WriteLine($"[SlicerPluginDiscovery] Plugins directory does not exist: {fullPath}");
+            return;
+        }
+
+        string[] dlls = Directory.GetFiles(fullPath, "*.dll", SearchOption.TopDirectoryOnly);
+        foreach (string dll in dlls)
+        {
+            try
+            {
+                // Skip if already loaded (e.g., via compile-time reference)
+                string dllName = Path.GetFileNameWithoutExtension(dll);
+                if (AppDomain.CurrentDomain.GetAssemblies().Any(a =>
+                    string.Equals(a.GetName().Name, dllName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                AssemblyLoadContext.Default.LoadFromAssemblyPath(dll);
+                Debug.WriteLine($"[SlicerPluginDiscovery] Loaded assembly from plugins dir: {dll}");
+            }
+            catch (Exception ex)
+            {
+                // Non-.NET files, native DLLs, or incompatible assemblies — skip
+                Debug.WriteLine($"[SlicerPluginDiscovery] Skipped {dll}: {ex.Message}");
+            }
+        }
+    }
 
     /// <summary>
     /// Discovers all slicer plugins in the current application domain and registers them.

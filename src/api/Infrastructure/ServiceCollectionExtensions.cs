@@ -47,15 +47,7 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddPrintFarmerDatabase(this IServiceCollection services, IConfiguration configuration)
     {
-        // Read provider value without forcing culture-sensitive lowercasing.
-        // We'll trim and perform case-insensitive comparisons where needed.
-        string? providerRaw = configuration.GetValue<string>("DB_PROVIDER");
-        string provider = string.IsNullOrWhiteSpace(providerRaw) ? "sqlite" : providerRaw.Trim();
-
-        // Always use "Default" connection string key for all providers
-        string connectionString = configuration.GetConnectionString("Default")
-            ?? configuration.GetValue<string>("DB_CONNECTION")
-            ?? "Data Source=farm.db";
+        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(configuration);
 
         // Register the encryption interceptor as a singleton (it needs ISensitiveDataProtector)
         // Note: We don't use the interceptor in EF Core because it causes DI lifetime issues.
@@ -64,43 +56,34 @@ public static class ServiceCollectionExtensions
 
         // Register DbContext with scoped lifetime (default)
         _ = services.AddDbContext<AppDbContext>(options =>
-        {
-            if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseSqlServer(connectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
-            }
-            else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseNpgsql(connectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
-            }
-            else
-            {
-                // SQLite: Development only - uses EnsureCreated, no migrations
-                _ = options.UseSqlite(connectionString);
-            }
-        });
+            ConfigureAppDbProvider(options, dbConfig));
 
-        // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons.
-        // Build a DbContextOptions<AppDbContext> instance configured for the selected provider and
-        // register it as a Singleton so the factory and other singletons can consume it safely.
-        DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-        if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
+        // Register a factory that shares the same configuration as AddDbContext.
+        _ = services.AddDbContextFactory<AppDbContext>(options =>
+            ConfigureAppDbProvider(options, dbConfig));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Configures the EF Core provider for <see cref="AppDbContext"/> using the resolved
+    /// <paramref name="dbConfig"/>. Uses API-specific migration assembly names.
+    /// </summary>
+    private static void ConfigureAppDbProvider(DbContextOptionsBuilder options, DatabaseProviderConfiguration dbConfig)
+    {
+        if (dbConfig.IsSqlServer)
         {
-            _ = optionsBuilder.UseSqlServer(connectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
+            _ = options.UseSqlServer(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
         }
-        else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+        else if (dbConfig.IsPostgres)
         {
-            _ = optionsBuilder.UseNpgsql(connectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
+            _ = options.UseNpgsql(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
         }
         else
         {
-            _ = optionsBuilder.UseSqlite(connectionString);
+            // SQLite: Development only - uses EnsureCreated, no migrations
+            _ = options.UseSqlite(dbConfig.ConnectionString);
         }
-
-        _ = services.AddSingleton(optionsBuilder.Options);
-        _ = services.AddDbContextFactory<AppDbContext>();
-
-        return services;
     }
 
     #endregion

@@ -1,5 +1,7 @@
 # Slicer Plugin Architecture Plan
 
+> **Updated 2026-02-19** — Reflects actual implementation state after Phases 1-4.
+
 ## Problem Statement
 
 Slicing, 3D model uploads, and file library functionality are currently tightly wired into the API project. The goal is to refactor these into a **self-contained plugin system** (modeled after the existing backend plugin pattern) so that:
@@ -8,20 +10,29 @@ Slicing, 3D model uploads, and file library functionality are currently tightly 
 2. **Modules can be re-added with zero API changes** — drop plugin DLLs into the output directory and they self-register via assembly scanning
 3. **Each slicer engine is its own plugin** — OrcaSlicer and PrusaSlicer are independent, removable modules
 
-## Proposed Approach
-
-Mirror the proven `Farm.Backend.Plugin.*` pattern:
+## Actual Architecture (as implemented)
 
 ```
-Farm.Slicer.Plugin.Core         → Interfaces, attributes, registry (no implementation)
-Farm.Slicer.Plugin.OrcaSlicer   → OrcaSlicer-specific implementation
-Farm.Slicer.Plugin.PrusaSlicer  → PrusaSlicer-specific implementation
-Farm.Slicer.Integration         → API integration layer (controllers, hubs, services)
+Farm.Web.Api
+  ├── Farm.Slicer.Module.Api      (controllers, hubs, API-level services)
+  │     └── Farm.Slicer.Module    (domain, DbContext, repositories, business logic)
+  │           ├── Farm.Slicer.Plugin.Core  (contracts: interfaces, records, attribute)
+  │           └── Farm.Infrastructure      (shared infra, AppDbContext)
+  │
+  ├── Farm.Slicers.OrcaSlicer.v2_3_1  (compile-time ref; will become runtime-only)
+  │     └── Farm.Slicer.Plugin.Core    (contracts only — no Module dependency)
+  │
+  └── Farm.Slicer.Host            (standalone host for slicer microservice deployment)
+        └── Farm.Slicer.Module + Farm.Slicer.Module.Api
 ```
 
-**Discovery flow:** API startup → scan for `Farm.Slicer.Plugin.*.dll` → find `[SlicerPluginAttribute]` → instantiate `ISlicerPlugin` → call `RegisterServices(IServiceCollection)` → slicer features available.
-
-**When no plugins found:** Slicer-related API endpoints return 404 or are not registered. SignalR hub is not mapped. No slicer background services run.
+**Key differences from original plan:**
+- Named `Farm.Slicer.Module` / `Farm.Slicer.Module.Api` instead of `Farm.Slicer.Integration`
+  (pragmatic: avoids renaming everything; the Module + Module.Api pair is well-established).
+- OrcaSlicer is currently loaded via both compile-time ProjectReference AND runtime discovery
+  capability. Phase 5 removes the compile-time reference.
+- `Farm.Slicer.Plugin.Core` preserves the existing `Farm.Slicer.Module.Contracts.Libraries`
+  namespace to minimize consumer changes.
 
 ## Architecture Layers
 
@@ -81,53 +92,73 @@ Farm.Web.Api
         └── Farm.Slicer.Plugin.Core
 ```
 
-## Implementation Todos
+## Implementation Status
 
-### Phase 1: Core Contracts
+### Phase 1: Scaffolding — ✅ COMPLETED (PFarm1-2ni.1)
 
-- **slicer-plugin-core-interfaces** — Create `Farm.Slicer.Plugin.Core` project with `ISlicerPlugin`, `ISlicerPluginRegistry`, `SlicerPluginAttribute`, and shared DTOs/contracts. Model after `Farm.Backend.Plugin.Core` pattern. No dependencies on Infrastructure or API.
+Scaffolded `Farm.Slicer.Module`, `Farm.Slicer.Module.Api`, and `Farm.Slicer.Host`.
+Moved domain entities, DbContext, and repositories out of the API.
+Created `AddSlicerModule()` / `AddSlicerControllers()` / `MapSlicerHubs()` entry points.
 
-- **slicer-plugin-registry** — Implement `SlicerPluginRegistry` (thread-safe singleton) with `Register()`, `GetPlugin()`, `GetAllPlugins()`, `IsRegistered()`. Mirror `BackendPluginRegistry`.
+### Phase 2: Entity Migration — ✅ COMPLETED (PFarm1-2ni.2)
 
-### Phase 2: Integration Layer
+Moved all slicer domain entities from `Farm.Infrastructure` into `Farm.Slicer.Module.Domain`.
+Separated `SlicerDbContext` from `AppDbContext`.
+Resolved circular dependencies between modules.
 
-- **slicer-integration-project** — Create `Farm.Slicer.Integration` project. Move slicer controllers, SignalR hub, orchestration services, and job queue logic from `Farm.Web.Api` into this project. Expose a single `AddSlicerIntegration(IServiceCollection)` extension method.
+### Phase 3: Decoupling — ✅ COMPLETED (PFarm1-2ni.3)
 
-- **slicer-plugin-discovery** — Implement `SlicerPluginExtensions` assembly scanning: load `Farm.Slicer.Plugin.*.dll`, find `[SlicerPluginAttribute]`, instantiate `ISlicerPlugin`, register in `SlicerPluginRegistry`, call `RegisterServices()`. Model after `BackendPluginExtensions`.
+Broke remaining circular references. Moved services, controllers, SignalR hub, and background
+services into the slicer module assembly. Addressed first code-review findings (11 items).
+Committed as `3373ae96` on `feat/modularization`.
 
-- **conditional-registration** — Ensure controllers, hubs, and background services are only registered when at least one slicer plugin is discovered. API must build and run cleanly with zero slicer plugins.
+### Phase 4: Hardening & Plugin Contracts — ✅ COMPLETED (PFarm1-2ni.4)
 
-### Phase 3: Extract OrcaSlicer Plugin
+| Bead | Description | Status |
+|------|-------------|--------|
+| 4.1 | Fix `Slicer:Enabled` default comment mismatch | ✅ |
+| 4.2 | Remove duplicate `StaleWorkerCleanupSettings` registration | ✅ |
+| 4.3 | Provider-aware DB init (SQLite → EnsureCreated, others → MigrateAsync) | ✅ |
+| 4.4 | Idempotency guard on `AddSlicerModule` | ✅ |
+| 4.5 | Extract shared `DatabaseProviderConfiguration` | ✅ |
+| 4.6 | Fix `DbContextFactory` options drift | ✅ |
+| 4.7 | Catch-all disabled-mode middleware for all slicer route prefixes | ✅ |
+| 4.8 | `SlicerDisabledIntegrationTests` (11 tests, dedicated factory) | ✅ |
+| 4.9 | `ProfileTaskCheckServiceTests` (12 tests) | ✅ |
+| 4.10 | Extract `Farm.Slicer.Plugin.Core` contract library | ✅ |
+| 4.11 | Runtime DLL plugin discovery (`LoadPluginAssemblies`) | ✅ |
+| 4.12 | Document Phase 6 file library decision | ✅ |
+| 4.13 | Update this plan document | ✅ |
 
-- **orcaslicer-plugin** — Create `Farm.Slicer.Plugin.OrcaSlicer` project. Move OrcaSlicer-specific code from `Farm.Slicers.OrcaSlicer.v2_3_1` and `orcaslicer-worker` shared logic. Implement `ISlicerPlugin`. Remove direct project references from API.
+**Key artifacts created in Phase 4:**  
+- `Farm.Slicer.Plugin.Core` — standalone contract assembly (interfaces, records, attribute)
+- `DatabaseProviderConfiguration` — shared DB provider resolution (eliminates duplication)
+- `SlicerDisabledWebApplicationFactory` — env-var-based test factory for disabled-mode tests
+- `SlicerPluginDiscovery.LoadPluginAssemblies()` — loads DLLs from `Slicer:PluginsPath` at startup
 
-- **orcaslicer-profiles** — Implement `ISlicerProfilesProvider` for OrcaSlicer, including worker-based profile discovery and caching.
+### Phase 5: Clean Up API (FUTURE)
 
-### Phase 4: Extract PrusaSlicer Plugin
+- Remove `Farm.Slicers.OrcaSlicer.v2_3_1` ProjectReference from `Farm.Web.Api.csproj`
+- Configure `Slicer:PluginsPath` in production Docker to point to `/app/plugins/`
+- Add post-build copy step for slicer engine DLLs to plugins directory
+- Verify API works with zero plugins (already covered by disabled tests)
 
-- **prusaslicer-plugin** — Create `Farm.Slicer.Plugin.PrusaSlicer` project. Move PrusaSlicer-specific code. Implement `ISlicerPlugin`.
+### Phase 6: File Library Decision — ✅ DOCUMENTED
 
-### Phase 5: Clean Up API
+**Decision: (b) — Separate module.**
 
-- **remove-slicer-coupling** — Remove all direct slicer references from `Farm.Web.Api.csproj`. Verify API builds and runs with:
-  a. No slicer plugins (graceful degradation)
-  b. Only OrcaSlicer plugin
-  c. Only PrusaSlicer plugin
-  d. Both plugins
+The 3D model file library (uploads, folders, tagging) exists independently of slicing.
+Users may upload and organize STL/3MF files even without a slicer engine. The file library
+should remain accessible when `Slicer:Enabled=false`, similar to how print job management
+works without a specific printer backend.
 
-- **update-tests** — Update or create tests verifying:
-  - Plugin discovery finds/ignores plugins correctly
-  - API works with zero plugins (no 500 errors)
-  - Each plugin registers its services correctly
-  - Slice job routing works with multiple plugins
-
-### Phase 6: Related Features (3D File Library)
-
-- **file-library-extraction** — Evaluate whether 3D model uploads and file library should be:
-  a. Part of the slicer integration layer (removed with slicers)
-  b. Their own separate module (can exist without slicers)
-  - If (a): Move into `Farm.Slicer.Integration`
-  - If (b): Create a separate `Farm.FileLibrary.Integration` following the same pattern
+**Implications:**
+- File library routes (`/api/3d-models`, `/api/3d-models/folders`, `/api/3d-models/query`)
+  are currently served as empty-result stubs when slicer is disabled. These should be migrated
+  to a `Farm.FileLibrary.Module` in a future phase.
+- Slicing-specific routes (profiles, workers, slice jobs) correctly return SLICER_DISABLED 404.
+- The catch-all middleware already distinguishes between file library paths (stubs) and slicer
+  paths (404 with structured error), providing the right user experience for both cases.
 
 ## Key Design Decisions
 

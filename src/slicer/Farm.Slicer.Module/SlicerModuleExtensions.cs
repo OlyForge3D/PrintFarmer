@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Data;
+﻿using Farm.Infrastructure.Data;
+using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.HostedServices;
 using Farm.Slicer.Module.Services;
@@ -16,10 +17,17 @@ namespace Farm.Slicer.Module;
 public static class SlicerModuleExtensions
 {
     /// <summary>
+    /// Marker service used to detect whether <see cref="AddSlicerModule"/> has already been called,
+    /// preventing duplicate registrations when called more than once.
+    /// </summary>
+    private sealed class SlicerModuleMarker;
+
+    /// <summary>
     /// Registers all slicer-module owned services: <see cref="SlicerDbContext"/>,
     /// repositories, metrics, configuration POCOs, and hosted services.
     /// When <c>Slicer:Enabled</c> is <c>false</c>, nothing is registered
     /// (zero slicer footprint in the host process).
+    /// This method is idempotent — calling it multiple times has no additional effect.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
@@ -28,6 +36,14 @@ public static class SlicerModuleExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        // Idempotency guard: skip if already registered
+        if (services.Any(sd => sd.ServiceType == typeof(SlicerModuleMarker)))
+        {
+            return services;
+        }
+
+        _ = services.AddSingleton<SlicerModuleMarker>();
+
         bool enabled = configuration.GetValue("Slicer:Enabled", true);
         if (!enabled)
         {
@@ -36,6 +52,11 @@ public static class SlicerModuleExtensions
 
         AddSlicerDatabase(services, configuration);
         AddSlicerRepositories(services);
+
+        // Load runtime plugin assemblies from directory (if configured) before discovery
+        string? pluginsPath = configuration.GetValue<string>("Slicer:PluginsPath");
+        SlicerPluginDiscovery.LoadPluginAssemblies(pluginsPath);
+
         AddSlicerServices(services);
         AddSlicerMetrics(services);
         AddSlicerConfiguration(services, configuration);
@@ -47,52 +68,44 @@ public static class SlicerModuleExtensions
     /// <summary>
     /// Registers <see cref="SlicerDbContext"/> with multi-provider support
     /// (SQLite, PostgreSQL, SQL Server) and a <see cref="IDbContextFactory{TContext}"/>
-    /// for singleton consumers.
+    /// for singleton consumers. Uses <see cref="DatabaseProviderConfiguration"/> from
+    /// Farm.Infrastructure for consistent provider resolution.
     /// </summary>
     private static void AddSlicerDatabase(IServiceCollection services, IConfiguration configuration)
     {
-        string? providerRaw = configuration.GetValue<string>("DB_PROVIDER");
-        string provider = string.IsNullOrWhiteSpace(providerRaw) ? "sqlite" : providerRaw.Trim();
-
-        string connectionString = configuration.GetConnectionString("Default")
-            ?? configuration.GetValue<string>("DB_CONNECTION")
-            ?? "Data Source=farm.db";
+        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(configuration);
 
         _ = services.AddDbContext<SlicerDbContext>(options =>
-            ConfigureProvider(options, provider, connectionString));
+            ConfigureProvider(options, dbConfig));
 
-        // Factory for singletons that cannot accept a scoped DbContext directly.
-        DbContextOptionsBuilder<SlicerDbContext> optionsBuilder = new();
-        ConfigureProvider(optionsBuilder, provider, connectionString);
-        _ = services.AddSingleton(optionsBuilder.Options);
-        _ = services.AddDbContextFactory<SlicerDbContext>();
+        // Register a factory that shares the same configuration as AddDbContext.
+        _ = services.AddDbContextFactory<SlicerDbContext>(options =>
+            ConfigureProvider(options, dbConfig));
     }
 
     /// <summary>
     /// Configures the EF Core provider on <paramref name="options"/> based on
-    /// the <paramref name="provider"/> string (sqlite, postgres, sqlserver).
+    /// the resolved <paramref name="dbConfig"/>.
     /// </summary>
     private static void ConfigureProvider(
         DbContextOptionsBuilder options,
-        string provider,
-        string connectionString)
+        DatabaseProviderConfiguration dbConfig)
     {
-        if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
+        if (dbConfig.IsSqlServer)
         {
             _ = options.UseSqlServer(
-                connectionString,
+                dbConfig.ConnectionString,
                 x => x.MigrationsAssembly("Farm.Slicer.Migrations.SqlServer"));
         }
-        else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase)
-              || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+        else if (dbConfig.IsPostgres)
         {
             _ = options.UseNpgsql(
-                connectionString,
+                dbConfig.ConnectionString,
                 x => x.MigrationsAssembly("Farm.Slicer.Migrations.PostgreSQL"));
         }
         else
         {
-            _ = options.UseSqlite(connectionString);
+            _ = options.UseSqlite(dbConfig.ConnectionString);
         }
     }
 
@@ -177,8 +190,6 @@ public static class SlicerModuleExtensions
         _ = services.AddHostedService<JobTimeoutScannerHostedService>();
 
         // Stale worker cleanup service
-        _ = services.Configure<StaleWorkerCleanupSettings>(
-            configuration.GetSection(StaleWorkerCleanupSettings.SectionName));
         _ = services.AddHostedService<StaleWorkerCleanupHostedService>();
     }
 }

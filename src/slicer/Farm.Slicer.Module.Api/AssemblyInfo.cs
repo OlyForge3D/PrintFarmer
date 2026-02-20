@@ -5,3 +5,5 @@
 // Registration:
 //   services.AddSlicerControllers()
 //   app.MapSlicerHubs()
+
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Farm.Slicer.Module.Tests")]

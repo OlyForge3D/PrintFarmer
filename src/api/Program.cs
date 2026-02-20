@@ -97,7 +97,7 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 
 // Register slicer module (SlicerDbContext, module repositories, metrics, and configuration).
 // During transition both AppDbContext and SlicerDbContext coexist sharing the same underlying database.
-// All slicer registrations gated by Slicer:Enabled (default false).
+// All slicer registrations gated by Slicer:Enabled (default true).
 bool slicerEnabled = builder.Configuration.GetValue("Slicer:Enabled", true);
 builder.Services.AddSlicerModule(builder.Configuration);
 if (slicerEnabled)
@@ -329,14 +329,41 @@ if (slicerEnabled)
 else
 {
     // When slicer is disabled, the slicer controllers are not loaded.
-    // Map stub endpoints for routes the frontend expects so it gets empty
-    // results instead of 404s.
+    // Map stub endpoints for list routes the frontend expects (empty results
+    // instead of 404s) and a catch-all for all other slicer routes.
     app.MapGet("/api/3d-models", () => Results.Ok(Array.Empty<object>()))
         .RequireAuthorization();
     app.MapGet("/api/3d-models/folders", () => Results.Ok(Array.Empty<object>()))
         .RequireAuthorization();
     app.MapPost("/api/3d-models/query", () => Results.Ok(Array.Empty<object>()))
         .RequireAuthorization();
+
+    // Catch-all for all remaining slicer API routes when module is disabled.
+    // Returns a structured 404 so the frontend can display "Slicing not available".
+    // Skips requests that already matched a stub endpoint above (GetEndpoint != null).
+    string[] slicerPrefixes = ["/api/3d-models/", "/api/slicer", "/api/slicers", "/api/workers", "/api/artifacts", "/api/slice", "/api/admin/slicer"];
+    app.Use(async (context, next) =>
+    {
+        if (context.GetEndpoint() != null)
+        {
+            await next();
+            return;
+        }
+
+        string path = context.Request.Path.Value ?? string.Empty;
+        bool isSlicerRoute = Array.Exists(slicerPrefixes, prefix =>
+            path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+        if (isSlicerRoute)
+        {
+            context.Response.StatusCode = 404;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new { error = "Slicing module is not enabled", code = "SLICER_DISABLED" });
+            return;
+        }
+
+        await next();
+    });
 }
 
 // Prometheus metrics endpoint (guarded so tests without MeterProvider don't throw)
