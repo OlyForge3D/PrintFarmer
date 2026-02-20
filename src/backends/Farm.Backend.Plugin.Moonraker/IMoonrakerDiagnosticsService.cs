@@ -1,1 +1,0 @@
-global using IMoonrakerDiagnosticsService = Farm.Infrastructure.Contracts.Printers.Moonraker.IMoonrakerDiagnosticsService;

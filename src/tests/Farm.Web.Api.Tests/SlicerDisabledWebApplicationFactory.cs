@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Tests;
+﻿namespace Farm.Web.Api.Tests;
 
 /// <summary>
 /// WebApplicationFactory that boots the API with <c>Slicer:Enabled=false</c>.

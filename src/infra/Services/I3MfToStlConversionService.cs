@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services;
+﻿namespace Farm.Infrastructure.Services;
 
 /// <summary>
 /// Service for converting 3MF files to STL format for viewing.

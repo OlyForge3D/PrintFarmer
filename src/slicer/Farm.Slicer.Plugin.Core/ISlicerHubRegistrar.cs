@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Routing;
+﻿using Microsoft.AspNetCore.Routing;
 
 namespace Farm.Slicer.Module.Contracts.Libraries;
 

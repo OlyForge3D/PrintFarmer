@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Api.Controllers;
-using Farm.Slicer.Module.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Repositories;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;

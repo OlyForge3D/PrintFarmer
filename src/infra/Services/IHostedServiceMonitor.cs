@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services;
+﻿namespace Farm.Infrastructure.Services;
 
 /// <summary>
 /// Optional interface for background service status monitoring.

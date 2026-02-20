@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services;
+﻿using Farm.Infrastructure.Services;
 using Farm.Slicer.Module.Services;
 
 namespace Farm.Slicer.Module.Api.Services;

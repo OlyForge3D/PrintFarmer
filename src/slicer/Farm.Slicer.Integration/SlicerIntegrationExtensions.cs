@@ -113,7 +113,6 @@ public static class SlicerIntegrationExtensions
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
-
     private static List<Assembly> LoadSlicerAssemblies(string? pluginsPath)
     {
         List<Assembly> result = [];

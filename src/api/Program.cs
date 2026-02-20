@@ -126,6 +126,7 @@ catch
 
 // Add API services (returns mvcBuilder so the slicer integration shim can add ApplicationParts)
 IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
+
 if (slicerEnabled)
 {
     // Load slicer DLLs, register their services, and add their controllers as ApplicationParts.

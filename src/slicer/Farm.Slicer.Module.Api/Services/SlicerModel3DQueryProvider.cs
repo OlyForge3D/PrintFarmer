@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services;
+﻿using Farm.Infrastructure.Services;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;

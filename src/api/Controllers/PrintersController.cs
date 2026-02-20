@@ -266,12 +266,12 @@ public class PrintersController(
         try
         {
             Farm.Infrastructure.Contracts.Printers.IBackendClient client = _backendClientFactory.GetClient(PrinterBackend.SDCP);
-            if (client is not Farm.Infrastructure.Contracts.Printers.Sdcp.ISdcpClient sdcpClient)
+            if (client is not Farm.Infrastructure.Services.Printers.ISupportsConnectionTest connectionTestClient)
             {
                 return new TestConnectionResponse { Success = false, Message = "SDCP client is not available." };
             }
 
-            bool ok = await sdcpClient.TestConnectionAsync(uriToTest, ct);
+            bool ok = await connectionTestClient.TestConnectionAsync(uriToTest, ct);
             return ok
                 ? new TestConnectionResponse { Success = true, Message = "Successfully connected to SDCP printer." }
                 : new TestConnectionResponse { Success = false, Message = "SDCP endpoint did not respond." };

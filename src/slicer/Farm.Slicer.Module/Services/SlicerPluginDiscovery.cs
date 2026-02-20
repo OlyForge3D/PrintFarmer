@@ -38,7 +38,9 @@ public static class SlicerPluginDiscovery
     public static void LoadPluginAssemblies(string? pluginsPath)
     {
         if (string.IsNullOrWhiteSpace(pluginsPath))
+        {
             return;
+        }
 
         string fullPath = Path.GetFullPath(pluginsPath);
         if (!Directory.Exists(fullPath))

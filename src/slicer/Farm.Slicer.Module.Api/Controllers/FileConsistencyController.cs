@@ -5,8 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Slicer.Module.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Repositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

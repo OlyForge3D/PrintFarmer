@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services;
+﻿namespace Farm.Infrastructure.Services;
 
 /// <summary>
 /// Provides lightweight Model3D ID queries for repositories that must

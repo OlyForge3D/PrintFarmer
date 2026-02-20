@@ -466,6 +466,29 @@ public interface ISupportsFilamentControl
 }
 
 /// <summary>
+/// Capability marker interface for backend clients that support connection testing.
+/// Provides lightweight connectivity checks to verify a printer endpoint is reachable.
+/// </summary>
+public interface ISupportsConnectionTest
+{
+    /// <summary>
+    /// Tests connectivity to a printer by sending a lightweight probe request.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the printer endpoint</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if the endpoint responded, false otherwise</returns>
+    Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Tests connectivity to a printer by sending a lightweight probe request (Uri overload).
+    /// </summary>
+    /// <param name="baseUrl">The base URI of the printer endpoint</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if the endpoint responded, false otherwise</returns>
+    Task<bool> TestConnectionAsync(Uri baseUrl, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backends that support firmware and system restart operations.
 /// Used for restarting the printer firmware or associated services.
 /// </summary>

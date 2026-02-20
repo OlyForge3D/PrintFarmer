@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Contracts.Libraries;
+﻿using Farm.Slicer.Module.Contracts.Libraries;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,5 +18,7 @@ public sealed class SlicerModuleRegistrar : ISlicerModule
         services.AddSlicerModule(configuration);
 
     /// <inheritdoc />
-    public void Configure(WebApplication app) { /* No post-build configuration for core module. */ }
+    public void Configure(WebApplication app)
+    { /* No post-build configuration for core module. */
+    }
 }

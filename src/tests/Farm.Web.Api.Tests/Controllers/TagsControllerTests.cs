@@ -1,12 +1,12 @@
 ﻿using Farm.Api.Controllers;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
-using Farm.Infrastructure.Dtos;
 
 namespace Farm.Web.Api.Tests.Controllers;
 

@@ -588,7 +588,6 @@ public static class ServiceCollectionExtensions
             // System log cleanup (common service, not plugin-specific)
             _ = services.AddHostedService<SystemLogCleanupService>();
 
-
             // Slicer hosted services (WorkerHealthMonitor, JobDispatching,
             // JobTimeoutScanner, StaleWorkerCleanup) are now registered by
             // AddSlicerModule() in Farm.Slicer.Module.

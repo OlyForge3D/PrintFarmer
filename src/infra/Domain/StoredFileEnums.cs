@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 // ===========================================================================
 // Shared File Enumerations (used by both GcodeFile and Model3D)

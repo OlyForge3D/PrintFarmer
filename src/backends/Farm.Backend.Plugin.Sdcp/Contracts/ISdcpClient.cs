@@ -10,19 +10,8 @@ namespace Farm.Infrastructure.Contracts.Printers.Sdcp;
 /// Supports printer status monitoring, job control, camera operations, and file management for Elegoo and other SDCP printers.
 /// Implements IDisposable to properly cleanup WebSocket connections.
 /// </summary>
-public interface ISdcpClient : IBackendClient, ISupportsFileList, ISupportsFileUpload, ISupportsStartPrint, ISupportsControlOperations, ISupportsHistory, ISupportsFileDelete, ISupportsPrinterInformation, IDisposable
+public interface ISdcpClient : IBackendClient, ISupportsFileList, ISupportsFileUpload, ISupportsStartPrint, ISupportsControlOperations, ISupportsHistory, ISupportsFileDelete, ISupportsPrinterInformation, ISupportsConnectionTest, IDisposable
 {
-    /// <summary>
-    /// Tests connectivity to an SDCP printer by opening a WebSocket and requesting a status payload.
-    /// This is intentionally lightweight and avoids camera probing.
-    /// </summary>
-    /// <param name="baseUrl">The base URL for the printer (e.g., http://printer-ip or ws://printer-ip)</param>
-    /// <param name="ct">Cancellation token to cancel the operation</param>
-    /// <returns>A task indicating whether the SDCP endpoint responded</returns>
-    Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default);
-
-    Task<bool> TestConnectionAsync(Uri baseUrl, CancellationToken ct = default);
-
     /// <summary>
     /// Gets the basic status information from an SDCP printer.
     /// </summary>

@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services;
+﻿namespace Farm.Infrastructure.Services;
 
 /// <summary>
 /// Abstracts slicer profile import operations so that the main API

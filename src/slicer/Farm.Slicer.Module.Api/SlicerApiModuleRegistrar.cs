@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Contracts.Libraries;
+﻿using Farm.Slicer.Module.Contracts.Libraries;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;

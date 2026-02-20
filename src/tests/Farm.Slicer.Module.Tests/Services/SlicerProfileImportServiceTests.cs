@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Api.Services;
+﻿using Farm.Slicer.Module.Api.Services;
 using Moq;
 using Xunit;
 
