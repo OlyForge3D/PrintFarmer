@@ -6,18 +6,18 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.FileManagement;
+using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.FileManagement;
-using Farm.Web.Api.Services.FolderManagement;
-using Farm.Web.Api.Services.Model;
+using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
-using IStoredFileOperationsService = Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService;
+using IStoredFileOperationsService = Farm.Infrastructure.Services.FileManagement.IStoredFileOperationsService;
 
 
 namespace Farm.Slicer.Module.Tests.Services

@@ -30,9 +30,8 @@ builder.Services.AddSlicerApiServices(builder.Configuration);
 // the module-local adapters registered above.
 builder.Services.AddCrossDomainLookupServices(builder.Configuration);
 
-// ── Remaining stubs + real implementations for standalone host ─────────────────
-// IModel3DFileService is stubbed (implementation lives in API with deep dependencies).
-// I3MfToStlConversionService uses real implementation from Farm.Infrastructure.
+// ── Slicer service implementations for standalone host ────────────────────────
+// IModel3DFileService (Farm.Slicer.Module) and I3MfToStlConversionService (Farm.Infrastructure).
 builder.Services.AddUnimplementedSlicerServiceStubs();
 
 // ── Infrastructure services shared with the main API ──────────────────────────

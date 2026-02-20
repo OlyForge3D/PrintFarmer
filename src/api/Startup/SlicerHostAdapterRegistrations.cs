@@ -20,8 +20,8 @@ public static class SlicerHostAdapterRegistrations
         // API temp-path provider (used by Program.cs diagnostic logging, not slicer-specific)
         _ = services.AddSingleton<Infrastructure.Temp.ITempPathProvider, Infrastructure.Temp.DefaultTempPathProvider>();
 
-        // Model file service (API implementation of module interface)
-        _ = services.AddScoped<IModel3DFileService, Services.Model.Model3DFileService>();
+        // Model file service (now lives in Farm.Slicer.Module)
+        _ = services.AddScoped<IModel3DFileService, Model3DFileService>();
 
         // 3MF to STL conversion (infrastructure implementation)
         _ = services.AddScoped<I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();

@@ -5,46 +5,33 @@ using Farm.Slicer.Module.Services;
 namespace Farm.Slicer.Host;
 
 /// <summary>
-/// Extension methods that register stub (no-op) implementations for slicer service
-/// interfaces that do not yet have concrete implementations in
-/// <c>Farm.Slicer.Module</c> or <c>Farm.Slicer.Module.Api</c>.
+/// Extension methods that register slicer service implementations for the
+/// standalone slicer-host deployment.
 /// </summary>
 /// <remarks>
-/// <see cref="I3MfToStlConversionService"/> has a real implementation in Farm.Infrastructure
-/// and is registered directly. <see cref="IModel3DFileService"/> remains stubbed because
-/// its implementation (<c>Model3DFileService</c>) lives in the API project with deep
-/// API-layer dependencies (UnitOfWork, tags, file management, thumbnails). It needs to
-/// be refactored into the slicer module or exposed via HTTP cross-domain lookup.
+/// Both <see cref="IModel3DFileService"/> and <see cref="I3MfToStlConversionService"/>
+/// now have real implementations. Model3DFileService was moved from the API project
+/// to Farm.Slicer.Module; ThreeMfToStlConversionService lives in Farm.Infrastructure.
 /// </remarks>
 public static class StubServiceRegistrations
 {
     /// <summary>
-    /// Registers real implementations where available and stub implementations for
-    /// interfaces that have no standalone-compatible concrete implementation yet:
+    /// Registers slicer service implementations:
     /// <list type="bullet">
-    ///   <item><see cref="IModel3DFileService"/> – 3D model CRUD (implementation in API project, needs refactoring)</item>
-    ///   <item><see cref="I3MfToStlConversionService"/> – 3MF-to-STL conversion (real implementation from Farm.Infrastructure)</item>
+    ///   <item><see cref="IModel3DFileService"/> – 3D model CRUD (Farm.Slicer.Module)</item>
+    ///   <item><see cref="I3MfToStlConversionService"/> – 3MF-to-STL conversion (Farm.Infrastructure)</item>
     /// </list>
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddUnimplementedSlicerServiceStubs(this IServiceCollection services)
     {
-        RegisterStub<IModel3DFileService>(services);
+        // Real implementation — moved from API project to Farm.Slicer.Module.
+        services.AddScoped<IModel3DFileService, Model3DFileService>();
 
         // Real implementation — self-contained in Farm.Infrastructure, only needs IUnifiedLoggingService.
         services.AddScoped<I3MfToStlConversionService, ThreeMfToStlConversionService>();
 
         return services;
-    }
-
-    /// <summary>
-    /// Registers a <see cref="StubServiceProxy{T}"/> as the scoped implementation
-    /// for <typeparamref name="TInterface"/>.
-    /// </summary>
-    private static void RegisterStub<TInterface>(IServiceCollection services)
-        where TInterface : class
-    {
-        services.AddScoped(_ => StubServiceProxy<TInterface>.CreateInstance());
     }
 }

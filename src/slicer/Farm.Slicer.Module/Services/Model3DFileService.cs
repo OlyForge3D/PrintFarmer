@@ -6,23 +6,24 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.FileManagement;
+using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.Services.FileManagement;
-using Farm.Web.Api.Services.FolderManagement;
+using Farm.Slicer.Module.Dtos;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
-namespace Farm.Web.Api.Services.Model
+namespace Farm.Slicer.Module.Services
 {
     /// <summary>
     /// Service for managing 3D model files with support for virtual folder organization and metadata extraction.
@@ -445,7 +446,7 @@ namespace Farm.Web.Api.Services.Model
                 }
 
                 // Step 2: Analyze model metadata (best-effort)
-                ModelAnalysisResult? analysis = null;
+                Farm.Infrastructure.Services.Models.ModelAnalysisResult? analysis = null;
                 try
                 {
                     // analysis is optional; resolve from DI if available via _analysisService

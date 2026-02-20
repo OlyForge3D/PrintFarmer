@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Api.Services.Model;
+using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
