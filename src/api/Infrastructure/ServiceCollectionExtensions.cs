@@ -411,7 +411,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
 
         // SpoolmanDB community database service (GitHub Pages primary for temp ranges, Spoolman external fallback)
-        _ = services.AddHttpClient<Services.ISpoolmanDbService, Services.SpoolmanDbService>();
+        _ = services.AddHttpClient<Farm.Infrastructure.Services.Spoolman.ISpoolmanDbService, Farm.Infrastructure.Services.Spoolman.SpoolmanDbService>();
     }
 
     #endregion
@@ -571,7 +571,7 @@ public static class ServiceCollectionExtensions
         // This keeps backend-specific HTTP client configuration encapsulated in plugins
 
         // Spoolman Integration (not backend-specific, registered centrally)
-        _ = services.AddHttpClient<ISpoolmanService, SpoolmanService>("SpoolmanService", client =>
+        _ = services.AddHttpClient<ISpoolmanService, Farm.Infrastructure.Services.Spoolman.SpoolmanService>("SpoolmanService", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });

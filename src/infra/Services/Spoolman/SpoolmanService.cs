@@ -12,9 +12,8 @@ using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.Spoolman;
 
 public class SpoolmanService(HttpClient http, ISettingsService settingsService, IUnifiedLoggingService logger) : ISpoolmanService
 {

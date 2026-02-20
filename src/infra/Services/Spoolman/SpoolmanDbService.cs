@@ -5,11 +5,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
-using Farm.Web.Api.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.Spoolman;
 
 /// <summary>
 /// Service for fetching filament and material data from the SpoolmanDB community database.
