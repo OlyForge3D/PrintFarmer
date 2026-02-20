@@ -43,7 +43,7 @@ public class PrintersController(
     Services.Catalog.ICatalogService catalogService,
     IValidator<CreatePrinterFromDiscoveryDto> validator,
     Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
-    Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
+    Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
@@ -55,7 +55,7 @@ public class PrintersController(
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
-    private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
+    private readonly Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;

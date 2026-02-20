@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Filters;
 using Farm.Web.Api.Services.Gcode;

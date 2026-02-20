@@ -1,7 +1,7 @@
 ﻿using System.Text.Json.Serialization;
 using Farm.Infrastructure.Settings;
 
-namespace Farm.Web.Api.Services.OctoPrint;
+namespace Farm.Infrastructure.Settings;
 
 /// <summary>
 /// Settings for OctoPrint/Slicer compatibility API - controls authentication and rate limiting

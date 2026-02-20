@@ -15,7 +15,7 @@ public class IAppSettingTests
     [InlineData(typeof(SignalRSettings))]
     [InlineData(typeof(Farm.Slicer.Module.Settings.SlicerSettings))]
     [InlineData(typeof(DatabaseSettings))]
-    [InlineData(typeof(Farm.Web.Api.Services.OctoPrint.OctoPrintSettings))]
+    [InlineData(typeof(Farm.Infrastructure.Settings.OctoPrintSettings))]
     public void CanSerializeAndDeserializeSettings(Type settingsType)
     {
         object? instance = Activator.CreateInstance(settingsType);

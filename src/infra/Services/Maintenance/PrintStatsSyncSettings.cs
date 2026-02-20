@@ -1,7 +1,7 @@
 ﻿using System.Text.Json.Serialization;
 using Farm.Infrastructure.Settings;
 
-namespace Farm.Web.Api.Services.Maintenance;
+namespace Farm.Infrastructure.Services.Maintenance;
 
 /// <summary>
 /// Settings for the Print Statistics Sync Service

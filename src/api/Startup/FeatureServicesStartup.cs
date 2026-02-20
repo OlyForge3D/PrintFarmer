@@ -18,7 +18,7 @@ public static class FeatureServicesStartup
         IWebHostEnvironment environment)
     {
         // OctoPrint compatibility settings and services
-        services.Configure<Farm.Web.Api.Services.OctoPrint.OctoPrintSettings>(configuration.GetSection("OctoPrint"));
+        services.Configure<Farm.Infrastructure.Settings.OctoPrintSettings>(configuration.GetSection("OctoPrint"));
         services.AddScoped<Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService, Farm.Web.Api.Services.OctoPrint.OctoPrintAuthService>();
         services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
 

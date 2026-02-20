@@ -4,7 +4,7 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.Printers;
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Implementation of IPrinterBackendCapabilitiesService.

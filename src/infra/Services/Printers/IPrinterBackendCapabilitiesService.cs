@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.Printers;
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Service for exposing backend capabilities (what features a printer's backend supports)

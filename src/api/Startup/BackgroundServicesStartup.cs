@@ -19,7 +19,7 @@ public static class BackgroundServicesStartup
         IConfiguration configuration)
     {
         // Maintenance Module - Print Statistics Sync Service
-        services.Configure<Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings>(configuration.GetSection(Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings.SectionName));
+        services.Configure<Farm.Infrastructure.Services.Maintenance.PrintStatsSyncSettings>(configuration.GetSection(Farm.Infrastructure.Services.Maintenance.PrintStatsSyncSettings.SectionName));
         services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSyncHostedService>();
 
         // Maintenance Module - Maintenance Alert Engine
