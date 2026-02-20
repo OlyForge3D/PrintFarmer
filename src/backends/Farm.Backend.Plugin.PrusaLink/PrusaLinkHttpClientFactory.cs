@@ -1,4 +1,6 @@
-﻿namespace Farm.Backend.Plugin.PrusaLink;
+﻿using Farm.Backend.Plugin.Core;
+
+namespace Farm.Backend.Plugin.PrusaLink;
 
 /// <summary>
 /// Factory for creating HttpClient instances configured for PrusaLink authentication.

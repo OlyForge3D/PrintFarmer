@@ -151,7 +151,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
 
         _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
-        RegisterBackendClientPlugins(services);  // Register backend client plugins FIRST - they register HTTP clients
+        RegisterBackendClientPlugins(services, configuration);  // Register backend client plugins FIRST - they register HTTP clients
         RegisterHttpClients(services);
         RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients
         RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
@@ -545,11 +545,12 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
     }
 
-    private static void RegisterBackendClientPlugins(IServiceCollection services)
+    private static void RegisterBackendClientPlugins(IServiceCollection services, IConfiguration configuration)
     {
-        // Discover and register all backend client plugins
-        // This will scan all loaded assemblies for IBackendClientPlugin implementations
-        services.AddBackendClientPlugins();
+        // Discover and register all backend client plugins.
+        // BackendPlugins:PluginsPath (appsettings.json) is scanned for runtime-loaded plugin DLLs
+        // in addition to the main app output directory.
+        services.AddBackendClientPlugins(configuration);
     }
 
     #endregion

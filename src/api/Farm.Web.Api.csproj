@@ -17,11 +17,23 @@
   <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
-    <!-- Plugin implementations - needed for dynamic plugin discovery -->
-    <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj" />
-    <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj" />
-    <ProjectReference Include="../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj" />
-    <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj" />
+    <!-- Plugin implementations - runtime-loaded, not compile-time referenced -->
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
     <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.3" />
     <!-- TODO: Re-add OpenAPI packages after .NET 10 migration rewrite -->
@@ -73,7 +85,10 @@
     <ProjectReference Include="..\slicer\Farm.Slicer.Integration\Farm.Slicer.Integration.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
-    <ProjectReference Include="..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />    <!-- Slicer plugin projects: build before the API project but do not link their assemblies
+    <ProjectReference Include=".\..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>    <!-- Slicer plugin projects: build before the API project but do not link their assemblies
          directly — they are loaded at runtime from the plugins/slicer directory. -->
     <ProjectReference Include="..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -124,6 +139,23 @@
   <ItemGroup>
     <Protobuf Include="..\..\proto\slicer_jobs.proto" GrpcServices="Server" />
   </ItemGroup>
+
+  <!-- Copy backend plugin DLLs (runtime-loaded, not compile-time referenced)
+       into $(OutputPath)plugins/backends/ so they are available at runtime. -->
+  <Target Name="CopyBackendPlugins" AfterTargets="Build">
+    <PropertyGroup>
+      <_BackendPluginsOutputDir>$(OutputPath)plugins/backends/</_BackendPluginsOutputDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_BackendPluginsOutputDir)" />
+    <ItemGroup>
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.Moonraker\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.PrusaLink\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.OctoPrint\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.Sdcp\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.FlashForge\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_BackendPluginDll)" DestinationFolder="$(_BackendPluginsOutputDir)" SkipUnchangedFiles="true" />
+  </Target>
 
   <!-- Copy slicer plugin DLLs into the build output so they are available at runtime. -->
   <Target Name="CopySlicerPlugins" AfterTargets="Build">

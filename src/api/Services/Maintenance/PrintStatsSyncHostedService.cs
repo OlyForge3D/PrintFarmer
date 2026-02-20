@@ -1,7 +1,5 @@
-﻿using Farm.Backend.Plugin.Moonraker;
-using Farm.Backend.Plugin.OctoPrint;
-using Farm.Backend.Plugin.PrusaLink;
-using Farm.Backend.Plugin.Sdcp;
+﻿using Farm.Infrastructure.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Contracts.Printers.OctoPrint;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;

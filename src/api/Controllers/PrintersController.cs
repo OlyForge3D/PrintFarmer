@@ -8,7 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
@@ -266,7 +266,7 @@ public class PrintersController(
         try
         {
             Farm.Infrastructure.Contracts.Printers.IBackendClient client = _backendClientFactory.GetClient(PrinterBackend.SDCP);
-            if (client is not Farm.Backend.Plugin.Sdcp.ISdcpClient sdcpClient)
+            if (client is not Farm.Infrastructure.Contracts.Printers.Sdcp.ISdcpClient sdcpClient)
             {
                 return new TestConnectionResponse { Success = false, Message = "SDCP client is not available." };
             }

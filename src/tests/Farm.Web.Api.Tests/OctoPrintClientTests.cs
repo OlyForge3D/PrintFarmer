@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.OctoPrint;
+using Farm.Infrastructure.Contracts.Printers.OctoPrint;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;

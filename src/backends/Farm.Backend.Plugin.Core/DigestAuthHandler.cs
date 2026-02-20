@@ -1,9 +1,9 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Farm.Backend.Plugin.PrusaLink;
+namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
 /// HTTP message handler that implements HTTP Digest Authentication (RFC 7616).

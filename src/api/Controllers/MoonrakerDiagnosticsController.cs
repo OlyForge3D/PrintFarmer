@@ -1,5 +1,4 @@
-﻿using Farm.Backend.Plugin.Moonraker;
-using Farm.Infrastructure.Contracts.Printers.Moonraker;
+﻿using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
