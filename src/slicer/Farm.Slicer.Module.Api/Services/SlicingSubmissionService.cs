@@ -3,7 +3,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -20,7 +19,6 @@ namespace Farm.Slicer.Module.Api.Services;
 /// Service for handling slicing job submissions
 /// </summary>
 public class SlicingSubmissionService(
-    IUnitOfWork unitOfWork,
     IModel3DFileRepository model3dFiles,
     ISlicerFileStorage fileStorage,
     ISlicerOrchestrator orchestrator,

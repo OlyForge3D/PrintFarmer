@@ -4,7 +4,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Services;
@@ -22,7 +21,6 @@ namespace Farm.Slicer.Module.Tests.Services.Slicing;
 /// </summary>
 public class SlicingSubmissionServiceTests : IDisposable
 {
-    private readonly Mock<IUnitOfWork> _mockUnitOfWork;
     private readonly Mock<IModel3DFileRepository> _mockModel3dRepository;
     private readonly Mock<ISlicerFileStorage> _mockFileStorage;
     private readonly Mock<ISlicerOrchestrator> _mockOrchestrator;
@@ -34,7 +32,6 @@ public class SlicingSubmissionServiceTests : IDisposable
 
     public SlicingSubmissionServiceTests()
     {
-        _mockUnitOfWork = new Mock<IUnitOfWork>();
         _mockModel3dRepository = new Mock<IModel3DFileRepository>();
         _mockFileStorage = new Mock<ISlicerFileStorage>();
         _mockOrchestrator = new Mock<ISlicerOrchestrator>();
@@ -50,7 +47,6 @@ public class SlicingSubmissionServiceTests : IDisposable
             .Returns((Guid jobId) => $"/api/slicer/jobs/{jobId}/gcode");
 
         _service = new SlicingSubmissionService(
-            _mockUnitOfWork.Object,
             _mockModel3dRepository.Object,
             _mockFileStorage.Object,
             _mockOrchestrator.Object,
@@ -74,21 +70,11 @@ public class SlicingSubmissionServiceTests : IDisposable
     #region Constructor Tests
 
     [Fact]
-    public void Constructor_WithNullModelRepository_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(null!, _mockModel3dRepository.Object, _mockFileStorage.Object, _mockOrchestrator.Object, _mockEnvironment.Object, _logger, _mockFileOperations.Object)
-        );
-        Assert.Equal("unitOfWork", ex.ParamName);
-    }
-
-    [Fact]
     public void Constructor_WithNullFileStorage_ThrowsArgumentNullException()
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockModel3dRepository.Object, null!, _mockOrchestrator.Object, _mockEnvironment.Object, _logger, _mockFileOperations.Object)
+            new SlicingSubmissionService(_mockModel3dRepository.Object, null!, _mockOrchestrator.Object, _mockEnvironment.Object, _logger, _mockFileOperations.Object)
         );
         Assert.Equal("fileStorage", ex.ParamName);
     }
@@ -98,7 +84,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockModel3dRepository.Object, _mockFileStorage.Object, null!, _mockEnvironment.Object, _logger, _mockFileOperations.Object)
+            new SlicingSubmissionService(_mockModel3dRepository.Object, _mockFileStorage.Object, null!, _mockEnvironment.Object, _logger, _mockFileOperations.Object)
         );
         Assert.Equal("orchestrator", ex.ParamName);
     }
