@@ -1,6 +1,6 @@
 ﻿using System.Numerics;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Slicer.Module.Services.Rendering;
 
 #pragma warning disable S1104 // Struct fields used for performance in rendering pipeline
 #pragma warning disable CA1815 // Override equals and operator equals on value types

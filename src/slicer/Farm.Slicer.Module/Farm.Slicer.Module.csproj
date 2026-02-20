@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Farm.Slicer.Module</RootNamespace>
     <AssemblyName>Farm.Slicer.Module</AssemblyName>
   </PropertyGroup>
@@ -12,7 +13,7 @@
     <ProjectReference Include="../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
     <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../../settings/Farm.Settings.Abstractions/Farm.Settings.Abstractions.csproj" />
-    <ProjectReference Include="..\Farm.Slicer.Plugin.Core\Farm.Slicer.Plugin.Core.csproj" />
+    <ProjectReference Include="../Farm.Slicer.Plugin.Core/Farm.Slicer.Plugin.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,6 +23,9 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageReference Include="AssimpNetter" Version="6.0.2.1" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
   </ItemGroup>
 
 </Project>

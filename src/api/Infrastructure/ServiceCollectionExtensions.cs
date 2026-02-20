@@ -512,7 +512,7 @@ public static class ServiceCollectionExtensions
         // Model services
         _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
         _ = services.AddSingleton<IVirusScanner, ClamAVVirusScanner>();
-        _ = services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();
+        _ = services.AddSingleton<IThumbnailGenerationService, Farm.Slicer.Module.Services.Rendering.ThumbnailGenerationService>();
 
         // Harvest configuration and services
         _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));

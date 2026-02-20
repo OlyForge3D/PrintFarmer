@@ -5,7 +5,7 @@ using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Slicer.Module.Services.Rendering;
 
 // ------------------------------------------------------------
 // PRUSA RENDERER

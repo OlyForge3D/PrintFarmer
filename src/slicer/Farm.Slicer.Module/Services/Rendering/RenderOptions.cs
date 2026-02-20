@@ -2,7 +2,7 @@
 using System.Numerics;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Slicer.Module.Services.Rendering;
 
 // ------------------------------------------------------------
 // RENDER OPTIONS

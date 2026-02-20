@@ -13,7 +13,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Numerics = System.Numerics;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Slicer.Module.Services.Rendering;
 
 // ------------------------------------------------------------
 // BASE PREVIEW RENDERER (FULL TRIANGLE PIPELINE)

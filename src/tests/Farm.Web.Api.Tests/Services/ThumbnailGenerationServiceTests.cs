@@ -7,7 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.Services;
+using Farm.Slicer.Module.Services.Rendering;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;

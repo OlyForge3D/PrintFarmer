@@ -6,11 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591;S6960</NoWarn>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
-  <PropertyGroup>
-    <RestoreSources>https://api.nuget.org/v3/index.json;https://nuget.pkg.github.com/assimp/index.json</RestoreSources>
   </PropertyGroup>
 
   <ItemGroup>
@@ -69,10 +64,6 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.14.0" />
     <PackageReference Include="AutoMapper" Version="14.0.0" />
-    <PackageReference Include="AssimpNetter" Version="6.0.2.1" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
-    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
-    <PackageReference Include="YamlDotNet" Version="16.2.1" />
   </ItemGroup>
 
   <ItemGroup>

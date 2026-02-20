@@ -9,12 +9,13 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Domain;
+using Microsoft.Extensions.Configuration;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Slicer.Module.Services.Rendering;
 
 /// <summary>
 /// Service for generating thumbnails from 3D model files using assimp CLI tool

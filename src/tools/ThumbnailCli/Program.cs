@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using Farm.Web.Api.Services;
+using Farm.Slicer.Module.Services.Rendering;
 
 namespace ThumbnailCli;
 
