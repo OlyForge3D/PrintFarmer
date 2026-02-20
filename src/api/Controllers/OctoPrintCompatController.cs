@@ -118,7 +118,7 @@ namespace Farm.Web.Api.Controllers
             try
             {
                 var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
-                var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadQuotaService)) as Farm.Web.Api.Services.IGcodeUploadQuotaService;
+                var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Services.Quota.IGcodeUploadQuotaService)) as Farm.Infrastructure.Services.Quota.IGcodeUploadQuotaService;
 
                 _logger.LogDebug(
                     "OctoPrint upload: uploadSettings={HasSettings}, quotaService={HasQuota}",

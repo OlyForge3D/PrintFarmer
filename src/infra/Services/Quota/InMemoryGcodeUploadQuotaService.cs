@@ -1,7 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Farm.Infrastructure.Settings;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.Quota;
 
 /// <summary>
 /// Tracks per-user daily upload quota usage in memory.

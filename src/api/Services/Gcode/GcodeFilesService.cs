@@ -16,6 +16,7 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
@@ -450,7 +451,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// 5. Creates database record with all metadata
         /// 6. Associates file with virtual folder
         /// </remarks>
-        public async Task<GcodeFileEntryDto> UploadFileAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
+        public async Task<GcodeFileEntryDto> UploadFileAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Infrastructure.Services.Quota.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             string ext = Path.GetExtension(file.FileName) ?? string.Empty;
             if (!uploadSettings.GetAllowedExtensions().Contains(ext, StringComparer.OrdinalIgnoreCase))

@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services;
+﻿namespace Farm.Infrastructure.Services.Quota;
 
 /// <summary>
 /// Service for tracking user storage quota usage for G-code uploads.
