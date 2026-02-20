@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.SystemLogs;
-using Farm.Web.Api.Services.SystemLogs;
+using Farm.Infrastructure.Services.SystemLogs;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 

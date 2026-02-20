@@ -1,11 +1,11 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
+using Farm.Infrastructure.Services.Tags;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Services.Catalog;
-using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;

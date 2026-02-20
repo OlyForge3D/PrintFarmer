@@ -492,14 +492,14 @@ public static class ServiceCollectionExtensions
     private static void RegisterModelAndGcodeServices(IServiceCollection services, IConfiguration configuration, bool disableBackgroundServices)
     {
         // Tag services
-        _ = services.AddScoped<Services.Tags.ITagService, Services.Tags.TagService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Tags.ITagService, Farm.Infrastructure.Services.Tags.TagService>();
 
         // Task services (user task management)
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
 
         // SystemLogs service
-        _ = services.AddScoped<Services.SystemLogs.ISystemLogService, Services.SystemLogs.SystemLogService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.SystemLogs.ISystemLogService, Farm.Infrastructure.Services.SystemLogs.SystemLogService>();
 
         // Folder management service (shared by model and gcode file services)
         _ = services.AddScoped<IFolderManagementService, FolderManagementService>();
@@ -541,8 +541,8 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterSetupAndSchemaServices(IServiceCollection services)
     {
-        _ = services.AddScoped<Services.Setup.ISetupService, Services.Setup.SetupService>();
-        _ = services.AddScoped<Services.SchemaHealth.ISchemaHealthService, Services.SchemaHealth.SchemaHealthService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Setup.ISetupService, Farm.Infrastructure.Services.Setup.SetupService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.SchemaHealth.ISchemaHealthService, Farm.Infrastructure.Services.SchemaHealth.SchemaHealthService>();
         _ = services.AddScoped<Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
     }
 

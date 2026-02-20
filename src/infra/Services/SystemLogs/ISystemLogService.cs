@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.SystemLogs;
+namespace Farm.Infrastructure.Services.SystemLogs;
 
 /// <summary>
 /// Service for querying application system logs.

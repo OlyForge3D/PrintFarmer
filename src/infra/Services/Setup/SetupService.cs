@@ -3,14 +3,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Contracts.Setup;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Authentication;
 
-namespace Farm.Web.Api.Services.Setup;
+namespace Farm.Infrastructure.Services.Setup;
 
 /// <summary>
 /// Service for handling initial application setup and configuration.

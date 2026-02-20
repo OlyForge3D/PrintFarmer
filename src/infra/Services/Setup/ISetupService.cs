@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Setup;
 
-namespace Farm.Web.Api.Services.Setup;
+namespace Farm.Infrastructure.Services.Setup;
 
 /// <summary>
 /// Service for handling initial application setup and configuration.

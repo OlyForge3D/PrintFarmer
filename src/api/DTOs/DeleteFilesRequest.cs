@@ -9,9 +9,9 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Services.Tags;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
-using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;

@@ -2,8 +2,8 @@
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Tags;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Tags;
 using Moq;
 using Xunit;
 

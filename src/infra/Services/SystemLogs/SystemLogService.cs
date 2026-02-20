@@ -7,7 +7,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Services.SystemLogs;
+namespace Farm.Infrastructure.Services.SystemLogs;
 
 public class SystemLogService(Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository repo) : ISystemLogService
 {

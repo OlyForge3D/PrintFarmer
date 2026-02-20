@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Repositories.SchemaHealth;
 
-namespace Farm.Web.Api.Services.SchemaHealth;
+namespace Farm.Infrastructure.Services.SchemaHealth;
 
 public class SchemaHealthService(ISchemaHealthRepository repo) : ISchemaHealthService
 {

@@ -1,7 +1,7 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
 
-namespace Farm.Web.Api.Services.SchemaHealth;
+namespace Farm.Infrastructure.Services.SchemaHealth;
 
 /// <summary>
 /// Service for checking database schema health and readiness.

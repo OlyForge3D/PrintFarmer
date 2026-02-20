@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Dtos;
 
-namespace Farm.Web.Api.Services.Tags
+namespace Farm.Infrastructure.Services.Tags
 {
     /// <summary>
     /// Service for managing tags and tag assignments to objects (polymorphic tagging system).

@@ -5,12 +5,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Services.Tags
+namespace Farm.Infrastructure.Services.Tags
 {
     /// <summary>
     /// Service for managing tags with automatic name normalization.
