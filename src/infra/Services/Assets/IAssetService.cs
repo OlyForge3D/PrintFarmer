@@ -1,4 +1,6 @@
-﻿namespace Farm.Web.Api.Services
+﻿using Farm.Infrastructure.Dtos.Assets;
+
+namespace Farm.Infrastructure.Services.Assets
 {
     /// <summary>
     /// Service interface for managing printer asset images and manifests.

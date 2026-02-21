@@ -33,8 +33,8 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.PrintJobs.IPrintApprovalService, Farm.Web.Api.Services.PrintJobs.PrintApprovalService>();
 
         // Print Projects Service (multi-file job tracking)
-        services.AddScoped<Farm.Infrastructure.Services.Projects.IPrintProjectService, Farm.Web.Api.Services.Projects.PrintProjectService>();
-        services.AddScoped<Farm.Infrastructure.Services.Projects.IPrintProjectTemplateService, Farm.Web.Api.Services.Projects.PrintProjectTemplateService>();
+        services.AddScoped<Farm.Infrastructure.Services.Projects.IPrintProjectService, Farm.Infrastructure.Services.Projects.PrintProjectService>();
+        services.AddScoped<Farm.Infrastructure.Services.Projects.IPrintProjectTemplateService, Farm.Infrastructure.Services.Projects.PrintProjectTemplateService>();
 
         // File Management Services
         services.AddScoped<Farm.Infrastructure.Services.FileManagement.IFileManagementService, Farm.Infrastructure.Services.FileManagement.FileManagementService>();

@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Services.Discovery;
 
 /// <summary>
 /// Service for proxying discovery requests to the printer-discovery microservice.

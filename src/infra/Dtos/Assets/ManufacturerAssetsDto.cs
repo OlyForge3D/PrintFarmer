@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace Farm.Web.Api.Services
+namespace Farm.Infrastructure.Dtos.Assets
 {
 #pragma warning disable SA1402 // File may only contain a single type
     public class ManufacturerAssetsDto

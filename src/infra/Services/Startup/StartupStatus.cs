@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services;
+﻿namespace Farm.Infrastructure.Services.Startup;
 
 /// <summary>
 /// Represents the coarse phase of application startup used by readiness and health probes.
@@ -20,7 +20,7 @@ public enum StartupPhase
 /// starting, ready, and failed states while heavier database initialization &amp; seeding runs in the background.
 /// Thread-safe via volatile writes (single transitions) — no locking required.
 /// </summary>
-public class StartupStatus : Interfaces.IStartupStatus
+public class StartupStatus : IStartupStatus
 {
     private volatile StartupPhase _phase = StartupPhase.Starting;
     private long _initStartTicks; // 0 until started

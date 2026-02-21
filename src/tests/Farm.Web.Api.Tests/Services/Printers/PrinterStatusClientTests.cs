@@ -13,7 +13,6 @@ using Farm.Infrastructure.Contracts.Printers.Sdcp;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;

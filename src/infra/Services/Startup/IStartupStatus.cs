@@ -1,7 +1,6 @@
 ﻿using System;
-using Farm.Web.Api.Services;
 
-namespace Farm.Web.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Services.Startup;
 
 /// <summary>
 /// Abstraction over application startup readiness/status used by controllers and startup logic.

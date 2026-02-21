@@ -7,7 +7,6 @@ using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Tests.TestHelpers;
 using Moq;
 using Xunit;

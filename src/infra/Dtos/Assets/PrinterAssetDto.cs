@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace Farm.Web.Api.Services
+namespace Farm.Infrastructure.Dtos.Assets
 {
     /// <summary>
     /// DTOs for asset responses

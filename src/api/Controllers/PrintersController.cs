@@ -13,6 +13,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
@@ -20,7 +21,6 @@ using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Interfaces;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
@@ -42,7 +42,7 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
     IValidator<CreatePrinterFromDiscoveryDto> validator,
-    Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
+    IDiscoveryProxyService discoveryProxyService,
     Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
@@ -54,7 +54,7 @@ public class PrintersController(
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
-    private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
+    private readonly IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
@@ -2681,7 +2681,7 @@ public class PrintersController(
             _logger.LogInformation($"[DISCOVERY] Starting discovery stream via API endpoint (autoRegister={autoRegister})");
 
             IReadOnlyList<PrinterBackend>? backends = request?.Backends?.ToList();
-            Services.Interfaces.DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
+            DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
                 backends: backends,
                 autoRegister: autoRegister,
                 cancellationToken: ct);
@@ -2718,7 +2718,7 @@ public class PrintersController(
         {
             _logger.LogInformation($"[DISCOVERY] Cancelling discovery stream {sessionId}");
 
-            Services.Interfaces.DiscoveryCancelResponse result = await _discoveryProxyService.CancelDiscoveryStreamAsync(sessionId, ct);
+            DiscoveryCancelResponse result = await _discoveryProxyService.CancelDiscoveryStreamAsync(sessionId, ct);
 
             return Ok(new { message = result.Message });
         }

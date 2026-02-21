@@ -118,7 +118,7 @@ namespace Farm.Web.Api.Controllers
             // Save to IFormFile directly using existing file upload pipeline
             try
             {
-                var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
+                var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Services.Interfaces.IGcodeUploadSettings)) as Farm.Infrastructure.Services.Interfaces.IGcodeUploadSettings;
                 var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Services.Quota.IGcodeUploadQuotaService)) as Farm.Infrastructure.Services.Quota.IGcodeUploadQuotaService;
 
                 _logger.LogDebug(

@@ -1,7 +1,7 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
 
-namespace Farm.Web.Api.Services.SignalR;
+namespace Farm.Infrastructure.Services.SignalR;
 
 /// <summary>
 /// Service for testing SignalR hub connectivity and message delivery.

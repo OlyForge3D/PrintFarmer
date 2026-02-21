@@ -4,11 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Api.Services.Interfaces;
-using Microsoft.AspNetCore.Mvc;
+using Farm.Infrastructure.Dtos.Assets;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services
+namespace Farm.Infrastructure.Services.Assets
 {
     /// <summary>
     /// Service implementation for OrcaSlicer asset management

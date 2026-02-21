@@ -13,6 +13,7 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
 using Farm.Infrastructure.Services.DataManagement;
+using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
@@ -23,6 +24,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Services.Security;
+using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
@@ -32,7 +34,6 @@ using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -203,13 +204,13 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.IO.IFileSystem, Farm.Infrastructure.IO.SystemFileSystem>();
 
         // Startup status tracking
-        _ = services.AddSingleton<IStartupStatus, StartupStatus>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Startup.IStartupStatus, Farm.Infrastructure.Services.Startup.StartupStatus>();
 
         // Discovery progress cache for real-time updates
         _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
 
         // Discovery proxy service for streaming discovery with SignalR progress updates
-        _ = services.AddScoped<Services.Interfaces.IDiscoveryProxyService, Services.DiscoveryProxyService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService, Services.DiscoveryProxyService>();
     }
 
     #endregion
@@ -545,7 +546,7 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddScoped<Farm.Infrastructure.Services.Setup.ISetupService, Farm.Infrastructure.Services.Setup.SetupService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.SchemaHealth.ISchemaHealthService, Farm.Infrastructure.Services.SchemaHealth.SchemaHealthService>();
-        _ = services.AddScoped<Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
     }
 
     private static void RegisterBackendClientPlugins(IServiceCollection services, IConfiguration configuration)

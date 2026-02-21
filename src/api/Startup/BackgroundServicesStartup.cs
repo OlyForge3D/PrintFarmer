@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.StorageManagement;
+﻿using Farm.Infrastructure.Services.Assets;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 

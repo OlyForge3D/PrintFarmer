@@ -5,7 +5,7 @@ using Farm.Infrastructure.Services.Projects;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Services.Projects;
+namespace Farm.Infrastructure.Services.Projects;
 
 /// <summary>
 /// Service implementation for managing print project templates.

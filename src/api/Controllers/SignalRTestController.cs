@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -14,7 +15,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/signalr-test")]
 [Authorize(Roles = "farm_admin")]
 public class SignalRTestController(
-    Services.SignalR.ISignalRTestService testService,
+    ISignalRTestService testService,
     IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>

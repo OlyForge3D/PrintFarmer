@@ -1,6 +1,6 @@
 ﻿using System.Threading.Tasks;
 
-namespace Farm.Web.Api.Services.Interfaces
+namespace Farm.Infrastructure.Services.Interfaces
 {
     /// <summary>
     /// Service for initializing the database schema and seeding initial data.

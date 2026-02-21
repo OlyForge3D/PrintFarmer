@@ -3,13 +3,13 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Projects;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Services.Projects;
+namespace Farm.Infrastructure.Services.Projects;
 
 /// <summary>
 /// Service implementation for managing print projects.

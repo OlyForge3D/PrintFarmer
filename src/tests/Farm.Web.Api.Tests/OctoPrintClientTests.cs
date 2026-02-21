@@ -7,7 +7,6 @@ using Farm.Backend.Plugin.OctoPrint;
 using Farm.Infrastructure.Contracts.Printers.OctoPrint;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Interfaces;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;

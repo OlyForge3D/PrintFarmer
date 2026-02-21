@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services;
+﻿namespace Farm.Infrastructure.Services.Interfaces;
 
 /// <summary>
 /// Settings for G-code file upload constraints.

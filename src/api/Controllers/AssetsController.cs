@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Api.Services;
+using Farm.Infrastructure.Dtos.Assets;
+using Farm.Infrastructure.Services.Assets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

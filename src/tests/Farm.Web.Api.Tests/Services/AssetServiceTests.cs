@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services;
+﻿using Farm.Infrastructure.Dtos.Assets;
+using Farm.Infrastructure.Services.Assets;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
