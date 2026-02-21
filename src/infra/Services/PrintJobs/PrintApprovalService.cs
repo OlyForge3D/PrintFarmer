@@ -1,13 +1,12 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.PrintJobs;
 using Farm.Infrastructure.Services.PrintJobs;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Web.Api.Data.Repositories;
 
-namespace Farm.Web.Api.Services.PrintJobs
+namespace Farm.Infrastructure.Services.PrintJobs
 {
     public class PrintApprovalService(IPrintApprovalRepository repo, IJobQueueService queueService) : IPrintApprovalService
     {

@@ -15,7 +15,7 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.Filament
+namespace Farm.Infrastructure.Services.Filament
 {
     /// <summary>
     /// Service for managing 3D printer filament types and temperature presets with Spoolman integration.

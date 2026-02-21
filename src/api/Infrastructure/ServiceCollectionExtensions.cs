@@ -248,7 +248,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
 
         // Print approval repository
-        _ = services.AddScoped<Farm.Web.Api.Data.Repositories.IPrintApprovalRepository, Farm.Web.Api.Data.Repositories.EfPrintApprovalRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.PrintJobs.IPrintApprovalRepository, Farm.Web.Api.Data.Repositories.EfPrintApprovalRepository>();
 
         // Filament repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
@@ -409,7 +409,7 @@ public static class ServiceCollectionExtensions
         // Register API adapter that wraps Infrastructure service to work with request DTOs
         _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogServiceAdapter>();
 
-        _ = services.AddScoped<Farm.Infrastructure.Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Filament.IFilamentTypeService, Farm.Infrastructure.Services.Filament.FilamentTypeService>();
 
         // SpoolmanDB community database service (GitHub Pages primary for temp ranges, Spoolman external fallback)
         _ = services.AddHttpClient<Farm.Infrastructure.Services.Spoolman.ISpoolmanDbService, Farm.Infrastructure.Services.Spoolman.SpoolmanDbService>();
