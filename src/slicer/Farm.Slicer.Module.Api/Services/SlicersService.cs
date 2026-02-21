@@ -252,6 +252,23 @@ namespace Farm.Slicer.Module.Api.Services
                 _logger.LogWarning("[RegisterAsync] Failed to sync Worker entity: {ExMessage}", ex.Message);
             }
 
+            // Enable the slicer feature on first worker registration.
+            // This is the single source of truth: slicer UI is shown only when a worker exists.
+            try
+            {
+                var currentSettings = _settingsService.Get<Farm.Slicer.Module.Settings.SlicerSettings>();
+                if (!currentSettings.Enabled)
+                {
+                    currentSettings.Enabled = true;
+                    _settingsService.Save(currentSettings);
+                    _logger.LogInformation("Slicer feature enabled — first worker registered");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[RegisterAsync] Failed to enable slicer setting: {ExMessage}", ex.Message);
+            }
+
             // Seed profiles from the worker (OrcaSlicer only) - only if explicitly enabled
             // Default is pull-based (profiles imported on-demand when printers are added)
             if (svc.SlicerType == 1 && dto.SeedProfilesOnRegistration)

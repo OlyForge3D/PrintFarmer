@@ -46,8 +46,11 @@ public static class SlicerModuleExtensions
 
         _ = services.AddSingleton<SlicerModuleMarker>();
 
-        bool enabled = configuration.GetValue("Slicer:Enabled", true);
-        if (!enabled)
+        // In microservices mode, the main API does not load the slicer module inline —
+        // it runs in a separate slicer-host process. The user-facing SlicerSettings.Enabled
+        // is a separate concern, set dynamically when a worker registers.
+        string? deploymentMode = configuration.GetValue<string>("DEPLOYMENT_MODE");
+        if (string.Equals(deploymentMode, "microservices", StringComparison.OrdinalIgnoreCase))
         {
             return services;
         }

@@ -23,11 +23,7 @@ public static class FeatureServicesStartup
         services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
 
         // ApiKey repository
-        services.AddScoped<Farm.Web.Api.Data.Repositories.IApiKeyRepository>(sp =>
-        {
-            AppDbContext db = sp.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-            return new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(db);
-        });
+        services.AddScoped<Farm.Infrastructure.Repositories.Api.IApiKeyRepository, Farm.Infrastructure.Repositories.Api.EfApiKeyRepository>();
 
         // Print job approval service
         services.AddScoped<Farm.Infrastructure.Services.PrintJobs.IPrintApprovalService, Farm.Infrastructure.Services.PrintJobs.PrintApprovalService>();

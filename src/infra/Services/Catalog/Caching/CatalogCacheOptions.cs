@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Infrastructure.Caching;
+﻿namespace Farm.Infrastructure.Services.Catalog.Caching;
 
 public sealed class CatalogCacheOptions
 {

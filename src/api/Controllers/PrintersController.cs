@@ -18,13 +18,13 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 
 namespace Farm.Web.Api.Controllers;
 

@@ -86,7 +86,7 @@ namespace Farm.Slicer.Module.Tests.Services
             string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
+            Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile file = CreateFormFile("file", "dummy-content", "model.stl");
 
@@ -149,7 +149,7 @@ namespace Farm.Slicer.Module.Tests.Services
             string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
+            Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
             Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);

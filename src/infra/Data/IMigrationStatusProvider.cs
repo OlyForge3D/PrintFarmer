@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Infrastructure.Database;
+﻿namespace Farm.Infrastructure.Data;
 
 /// <summary>
 /// Provides database migration status information.

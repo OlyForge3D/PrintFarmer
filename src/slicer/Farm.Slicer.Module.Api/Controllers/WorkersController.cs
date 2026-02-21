@@ -48,7 +48,7 @@ public class WorkersController(
             ServiceId = w.ServiceId,
             Name = w.Name,
             EndpointUrl = w.EndpointUrl,
-            Capabilities = JsonSerializer.Deserialize<string[]>(w.CapabilitiesJson) ?? [],
+            Capabilities = ParseCapabilities(w.CapabilitiesJson),
             Status = w.Status,
             FreeSlots = w.FreeSlots,
             TotalSlots = w.TotalSlots,
@@ -221,5 +221,48 @@ public class WorkersController(
         await _workerRepository.DeleteAsync(id);
         _logger.LogWarning("Worker {WorkerId} deleted", id);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Parses CapabilitiesJson which may be a flat string[] or a structured object
+    /// with supportedFormats, supportedFeatures, and capabilities arrays.
+    /// </summary>
+    private string[] ParseCapabilities(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                return doc.RootElement.EnumerateArray()
+                    .Where(e => e.ValueKind == JsonValueKind.String)
+                    .Select(e => e.GetString()!)
+                    .ToArray();
+            }
+
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                // Flatten all string arrays from the object
+                return doc.RootElement.EnumerateObject()
+                    .Where(p => p.Value.ValueKind == JsonValueKind.Array)
+                    .SelectMany(p => p.Value.EnumerateArray())
+                    .Where(e => e.ValueKind == JsonValueKind.String)
+                    .Select(e => e.GetString()!)
+                    .ToArray();
+            }
+
+            _logger.LogWarning("Unexpected JSON value kind {Kind} in CapabilitiesJson: {Json}", doc.RootElement.ValueKind, json);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse CapabilitiesJson: {Json}", json);
+        }
+
+        return [];
     }
 }

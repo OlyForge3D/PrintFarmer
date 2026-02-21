@@ -39,7 +39,7 @@ public class OctoPrintAuthServiceTests
     {
         using AppDbContext ctx = CreateInMemoryContext();
         var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = false });
-        var repo = new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(ctx);
+        var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
         IConfigurationRoot config = new ConfigurationBuilder().Build();
         var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
 
@@ -52,7 +52,7 @@ public class OctoPrintAuthServiceTests
     {
         using AppDbContext ctx = CreateInMemoryContext();
         var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = true });
-        var repo = new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(ctx);
+        var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
         var inMemory = new Dictionary<string, string?> { ["OctoPrint:GlobalApiKey"] = "supersecret" };
         IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection(inMemory).Build();
         var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
@@ -66,7 +66,7 @@ public class OctoPrintAuthServiceTests
     {
         using AppDbContext ctx = CreateInMemoryContext();
         var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = true });
-        var repo = new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(ctx);
+        var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
         IConfigurationRoot config = new ConfigurationBuilder().Build();
         // create key
         string raw = "mygeneratedkey";

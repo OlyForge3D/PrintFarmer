@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 #pragma warning disable CA1724 // Type name conflicts with namespace
 

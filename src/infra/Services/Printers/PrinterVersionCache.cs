@@ -1,13 +1,11 @@
-﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Printers;
+﻿using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Infrastructure.Caching;
+namespace Farm.Infrastructure.Services.Printers;
 
-internal sealed class PrinterVersionCache(
+public sealed class PrinterVersionCache(
     IMemoryCache cache,
     IOptions<PrinterVersionCacheOptions> options,
     IPrintersService printersService,

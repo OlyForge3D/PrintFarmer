@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure;
 
-namespace Farm.Web.Api.Infrastructure.Caching;
+namespace Farm.Infrastructure.Services.Printers;
 
 public interface IPrinterVersionCache
 {

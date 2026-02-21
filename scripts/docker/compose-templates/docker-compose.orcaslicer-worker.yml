@@ -49,12 +49,12 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
-      # Primary: SLICER_SERVICE_URL points to slicer-host in split mode, falls back to main api.
-      - SlicerApi__BaseUrl=${SLICER_SERVICE_URL:-${WORKER_API_BASE_URL:-http://api:5245}}
-      - SlicerRegistry__ApiBaseUrl=${SLICER_SERVICE_URL:-${WORKER_API_BASE_URL:-http://api:5245}}
-      # Legacy keys kept for backward compatibility
-      - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://api:5245}
-      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5245}
+      # Slicer registration and job claiming target the slicer-host (microservices mode).
+      - SlicerApi__BaseUrl=${SLICER_SERVICE_URL:-http://slicer-host:5246}
+      - SlicerRegistry__ApiBaseUrl=${SLICER_SERVICE_URL:-http://slicer-host:5246}
+      # Storage and legacy keys point to the main API for file downloads.
+      - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://slicer-host:5246}
+      - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
       - Worker__WorkerId=orcaslicer-worker-1

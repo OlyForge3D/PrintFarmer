@@ -100,7 +100,7 @@ namespace Farm.Slicer.Module.Tests.Services
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
             Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
+            Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
@@ -143,7 +143,7 @@ namespace Farm.Slicer.Module.Tests.Services
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
             Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
+            Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile badFile = CreateFormFile("file", "x", "model.exe");
 
@@ -171,7 +171,7 @@ namespace Farm.Slicer.Module.Tests.Services
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
             Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
+            Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile empty = new FormFile(new MemoryStream(), 0, 0, "file", "empty.stl");
 
@@ -208,7 +208,7 @@ namespace Farm.Slicer.Module.Tests.Services
             string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object, mockAnalysis.Object);
+            Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object, mockAnalysis.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 
@@ -245,7 +245,7 @@ namespace Farm.Slicer.Module.Tests.Services
             string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
             mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
+            Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 

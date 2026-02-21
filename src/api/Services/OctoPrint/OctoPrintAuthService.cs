@@ -15,12 +15,12 @@ namespace Farm.Web.Api.Services.OctoPrint
     public class OctoPrintAuthService(
         ISettingsService settingsService,
         ILogger<OctoPrintAuthService> logger,
-        Farm.Web.Api.Data.Repositories.IApiKeyRepository apiKeyRepo,
+        Farm.Infrastructure.Repositories.Api.IApiKeyRepository apiKeyRepo,
         IConfiguration config) : IOctoPrintAuthService
     {
         private readonly ISettingsService _settingsService = settingsService;
         private readonly ILogger<OctoPrintAuthService> _logger = logger;
-        private readonly Farm.Web.Api.Data.Repositories.IApiKeyRepository _apiKeyRepo = apiKeyRepo;
+        private readonly Farm.Infrastructure.Repositories.Api.IApiKeyRepository _apiKeyRepo = apiKeyRepo;
         private readonly IConfiguration _config = config;
 
         public async Task<bool> ValidateApiKeyAsync(string? apiKey, Guid? targetPrinterId = null, Guid? userId = null)
