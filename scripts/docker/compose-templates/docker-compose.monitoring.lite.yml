@@ -36,7 +36,7 @@ services:
       GF_AUTH_PROXY_HEADER_PROPERTY: username
       GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
-      GF_AUTH_DISABLE_SIGNOUT_MENU: "true"
+      GF_AUTH_DISABLE_SIGNOUT_MENU: "false"
       # Serve from /grafana/ sub-path behind nginx
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"

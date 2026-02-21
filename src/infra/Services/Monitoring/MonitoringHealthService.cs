@@ -45,7 +45,7 @@ public class MonitoringHealthService(
         var requestRate = QueryPrometheusAsync(client, prometheusUrl,
             "sum(rate(printfarmer_api_calls_total[5m]))", cancellationToken);
         var errorRate = QueryPrometheusAsync(client, prometheusUrl,
-            "sum(rate(printfarmer_api_calls_total{status_class=\"5xx\"}[5m])) / sum(rate(printfarmer_api_calls_total[5m])) * 100", cancellationToken);
+            "(sum(rate(printfarmer_api_calls_total{status_class=\"5xx\"}[5m])) or vector(0)) / (sum(rate(printfarmer_api_calls_total[5m])) or vector(1)) * 100", cancellationToken);
         var p95Latency = QueryPrometheusAsync(client, prometheusUrl,
             "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000", cancellationToken);
         var memoryUsage = QueryPrometheusAsync(client, prometheusUrl,
@@ -55,7 +55,7 @@ public class MonitoringHealthService(
         var slicerJobs = QueryPrometheusAsync(client, prometheusUrl,
             "sum(increase(printfarmer_slicer_operations_total[24h]))", cancellationToken);
         var slicerSuccess = QueryPrometheusAsync(client, prometheusUrl,
-            "sum(rate(printfarmer_slicer_operations_total{success=\"true\"}[24h])) / sum(rate(printfarmer_slicer_operations_total[24h])) * 100", cancellationToken);
+            "(sum(rate(printfarmer_slicer_operations_total{success=\"true\"}[24h])) or vector(0)) / (sum(rate(printfarmer_slicer_operations_total[24h])) or vector(1)) * 100", cancellationToken);
 
         await Task.WhenAll(requestRate, errorRate, p95Latency, memoryUsage, printerOps, slicerJobs, slicerSuccess);
 

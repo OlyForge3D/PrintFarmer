@@ -1,12 +1,15 @@
 using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Infrastructure.Services.Monitoring;
 
-public class MonitoringSessionService(IConfiguration configuration) : IMonitoringSessionService
+public class MonitoringSessionService(
+    IConfiguration configuration,
+    ILogger<MonitoringSessionService> logger) : IMonitoringSessionService
 {
     private static readonly TimeSpan TokenLifetime = TimeSpan.FromMinutes(15);
     private const string MonitoringPurpose = "monitoring-session";
@@ -64,8 +67,9 @@ public class MonitoringSessionService(IConfiguration configuration) : IMonitorin
             var username = result.ClaimsIdentity.Name;
             return new MonitoringTokenValidationResult(true, username);
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogDebug(ex, "Monitoring token validation failed");
             return new MonitoringTokenValidationResult(false);
         }
     }

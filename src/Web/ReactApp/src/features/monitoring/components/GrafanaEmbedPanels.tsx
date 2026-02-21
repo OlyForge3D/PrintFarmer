@@ -3,6 +3,7 @@ import { Card } from '@/common/components/ui';
 
 const DASHBOARD_UID = 'printfarmer-overview';
 
+// Embed only timeseries panels (5-8) — stat panels (1-4) are redundant with MetricsSummaryWidgets
 const PANELS = [
   { id: 5, title: 'Request Rate Over Time', span: 6 },
   { id: 6, title: 'Response Latency Distribution', span: 6 },
@@ -27,6 +28,11 @@ function GrafanaPanel({ panelId, title }: { panelId: number; title: string }) {
   const [hasError, setHasError] = useState(false);
   const src = `/grafana/d-solo/${DASHBOARD_UID}/printfarmer-overview?panelId=${panelId}&refresh=30s&theme=dark`;
 
+  const handleError = () => {
+    console.warn(`[Monitoring] Failed to load Grafana panel ${panelId}: "${title}"`);
+    setHasError(true);
+  };
+
   if (hasError) {
     return (
       <Card>
@@ -44,7 +50,7 @@ function GrafanaPanel({ panelId, title }: { panelId: number; title: string }) {
           src={src}
           title={title}
           className="w-full h-[250px] border-0"
-          onError={() => setHasError(true)}
+          onError={handleError}
           loading="lazy"
         />
       </Card.Body>

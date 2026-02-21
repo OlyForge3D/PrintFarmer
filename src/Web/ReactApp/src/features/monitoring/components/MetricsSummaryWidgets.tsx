@@ -11,12 +11,12 @@ export function MetricsSummaryWidgets() {
   });
 
   const widgets = [
-    { label: 'Request Rate', value: metrics?.requestsPerSecond ?? 0, unit: 'req/s', color: 'text-blue-400' },
-    { label: 'Error Rate', value: metrics?.errorRatePercent ?? 0, unit: '%', color: metrics && metrics.errorRatePercent > 1 ? 'text-red-400' : 'text-green-400' },
-    { label: 'P95 Latency', value: metrics?.p95LatencyMs ?? 0, unit: 'ms', color: metrics && metrics.p95LatencyMs > 500 ? 'text-yellow-400' : 'text-green-400' },
-    { label: 'Memory', value: metrics?.memoryUsageMb ?? 0, unit: 'MB', color: 'text-purple-400' },
-    { label: 'Active Printers', value: metrics?.activePrinters ?? 0, unit: '', color: 'text-cyan-400' },
-    { label: 'Slicer Jobs (24h)', value: metrics?.slicerJobsLast24h ?? 0, unit: '', color: 'text-orange-400' },
+    { label: 'Request Rate', value: metrics?.requestsPerSecond ?? 0, unit: 'req/s', decimals: 1, color: 'text-blue-400' },
+    { label: 'Error Rate', value: metrics?.errorRatePercent ?? 0, unit: '%', decimals: 1, color: metrics && metrics.errorRatePercent > 1 ? 'text-red-400' : 'text-green-400' },
+    { label: 'P95 Latency', value: metrics?.p95LatencyMs ?? 0, unit: 'ms', decimals: 1, color: metrics && metrics.p95LatencyMs > 500 ? 'text-yellow-400' : 'text-green-400' },
+    { label: 'Memory', value: metrics?.memoryUsageMb ?? 0, unit: 'MB', decimals: 1, color: 'text-purple-400' },
+    { label: 'Active Printers', value: metrics?.activePrinters ?? 0, unit: '', decimals: 0, color: 'text-cyan-400' },
+    { label: 'Slicer Jobs (24h)', value: metrics?.slicerJobsLast24h ?? 0, unit: '', decimals: 0, color: 'text-orange-400' },
   ];
 
   return (
@@ -26,7 +26,7 @@ export function MetricsSummaryWidgets() {
           <Card.Body className="p-3 text-center">
             <div className="text-xs text-pf-text-secondary mb-1">{w.label}</div>
             <div className={`text-xl font-semibold ${w.color}`}>
-              {typeof w.value === 'number' ? w.value.toFixed(w.unit === '%' || w.unit === 'ms' || w.unit === 'MB' || w.unit === 'req/s' ? 1 : 0) : w.value}
+              {typeof w.value === 'number' ? w.value.toFixed(w.decimals) : w.value}
               {w.unit && <span className="text-xs ml-0.5 text-pf-text-secondary">{w.unit}</span>}
             </div>
           </Card.Body>

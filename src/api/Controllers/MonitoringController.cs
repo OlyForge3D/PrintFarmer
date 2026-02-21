@@ -26,10 +26,19 @@ public class MonitoringController(
 
         var token = sessionService.CreateMonitoringToken(username);
 
+        // Check X-Forwarded-Proto for HTTPS behind reverse proxy (e.g., nginx TLS termination)
+        var isSecure = Request.IsHttps;
+        if (!isSecure
+            && Request.Headers.TryGetValue("X-Forwarded-Proto", out var proto)
+            && string.Equals(proto.ToString().Split(',')[0].Trim(), "https", StringComparison.OrdinalIgnoreCase))
+        {
+            isSecure = true;
+        }
+
         var cookieOptions = new CookieOptions
         {
             HttpOnly = true,
-            Secure = Request.IsHttps,
+            Secure = isSecure,
             SameSite = SameSiteMode.Strict,
             Path = "/",
             MaxAge = TimeSpan.FromMinutes(15),
