@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure;
+﻿using Farm.Slicer.Module.Dtos;
 
 namespace Farm.Slicer.Worker.Core;
 

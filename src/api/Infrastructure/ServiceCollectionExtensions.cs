@@ -3,23 +3,28 @@ using System.Diagnostics;
 using AutoMapper;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
-using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
+using Farm.Infrastructure.Services.DataManagement;
+using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.Email;
+using Farm.Infrastructure.Services.FileManagement;
+using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Services.Security;
+using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
@@ -29,15 +34,7 @@ using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.FileManagement;
-using Farm.Web.Api.Services.FolderManagement;
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.JobDispatch;
-using Farm.Web.Api.Services.SlicerServices;
-using Farm.Web.Api.Services.Slicing;
-using Farm.Web.Api.Services.Slicing.Abstractions;
 using Farm.Web.Api.Services.StorageManagement;
-using Farm.Web.Api.Services.Workers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
@@ -54,15 +51,7 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddPrintFarmerDatabase(this IServiceCollection services, IConfiguration configuration)
     {
-        // Read provider value without forcing culture-sensitive lowercasing.
-        // We'll trim and perform case-insensitive comparisons where needed.
-        string? providerRaw = configuration.GetValue<string>("DB_PROVIDER");
-        string provider = string.IsNullOrWhiteSpace(providerRaw) ? "sqlite" : providerRaw.Trim();
-
-        // Always use "Default" connection string key for all providers
-        string connectionString = configuration.GetConnectionString("Default")
-            ?? configuration.GetValue<string>("DB_CONNECTION")
-            ?? "Data Source=farm.db";
+        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(configuration);
 
         // Register the encryption interceptor as a singleton (it needs ISensitiveDataProtector)
         // Note: We don't use the interceptor in EF Core because it causes DI lifetime issues.
@@ -71,43 +60,34 @@ public static class ServiceCollectionExtensions
 
         // Register DbContext with scoped lifetime (default)
         _ = services.AddDbContext<AppDbContext>(options =>
-        {
-            if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseSqlServer(connectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
-            }
-            else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseNpgsql(connectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
-            }
-            else
-            {
-                // SQLite: Development only - uses EnsureCreated, no migrations
-                _ = options.UseSqlite(connectionString);
-            }
-        });
+            ConfigureAppDbProvider(options, dbConfig));
 
-        // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons.
-        // Build a DbContextOptions<AppDbContext> instance configured for the selected provider and
-        // register it as a Singleton so the factory and other singletons can consume it safely.
-        DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-        if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
+        // Register a factory that shares the same configuration as AddDbContext.
+        _ = services.AddDbContextFactory<AppDbContext>(options =>
+            ConfigureAppDbProvider(options, dbConfig));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Configures the EF Core provider for <see cref="AppDbContext"/> using the resolved
+    /// <paramref name="dbConfig"/>. Uses API-specific migration assembly names.
+    /// </summary>
+    private static void ConfigureAppDbProvider(DbContextOptionsBuilder options, DatabaseProviderConfiguration dbConfig)
+    {
+        if (dbConfig.IsSqlServer)
         {
-            _ = optionsBuilder.UseSqlServer(connectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
+            _ = options.UseSqlServer(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
         }
-        else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+        else if (dbConfig.IsPostgres)
         {
-            _ = optionsBuilder.UseNpgsql(connectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
+            _ = options.UseNpgsql(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
         }
         else
         {
-            _ = optionsBuilder.UseSqlite(connectionString);
+            // SQLite: Development only - uses EnsureCreated, no migrations
+            _ = options.UseSqlite(dbConfig.ConnectionString);
         }
-
-        _ = services.AddSingleton(optionsBuilder.Options);
-        _ = services.AddDbContextFactory<AppDbContext>();
-
-        return services;
     }
 
     #endregion
@@ -169,13 +149,16 @@ public static class ServiceCollectionExtensions
         RegisterRateLimitingServices(services);
         RegisterImportingServices(services);
         RegisterCatalogServices(services);
-        RegisterSlicingServices(services, configuration);
+
+        // Print job queue services (API-owned, not slicer-module)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueDataService, Farm.Infrastructure.Services.Queue.QueueDataService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IJobQueueService, Farm.Infrastructure.Services.Queue.JobQueueService>();
+
         _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
-        RegisterBackendClientPlugins(services);  // Register backend client plugins FIRST - they register HTTP clients
+        RegisterBackendClientPlugins(services, configuration);  // Register backend client plugins FIRST - they register HTTP clients
         RegisterHttpClients(services);
         RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients
         RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
-        RegisterArtifactServices(services, configuration, disableBackgroundServices);
         RegisterSetupAndSchemaServices(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
 
@@ -212,22 +195,22 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.StorageManagement.IStoragePathService, Farm.Infrastructure.Services.StorageManagement.StoragePathService>();
 
         // File Management Services
-        _ = services.AddScoped<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
-        _ = services.AddScoped<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
-        _ = services.AddScoped<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
-        _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
+        _ = services.AddScoped<IFileManagementService, FileManagementService>();
+        _ = services.AddScoped<IFileIntegrityService, FileIntegrityService>();
+        _ = services.AddScoped<IChunkedUploadService, ChunkedUploadService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IGcodeThumbnailExtractorService, GcodeThumbnailExtractorService>();
 
         // File system abstraction (pure wrapper around static File/Directory APIs)
-        _ = services.AddSingleton<Services.IO.IFileSystem, Services.IO.SystemFileSystem>();
+        _ = services.AddSingleton<Farm.Infrastructure.IO.IFileSystem, Farm.Infrastructure.IO.SystemFileSystem>();
 
         // Startup status tracking
-        _ = services.AddSingleton<IStartupStatus, StartupStatus>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Startup.IStartupStatus, Farm.Infrastructure.Services.Startup.StartupStatus>();
 
         // Discovery progress cache for real-time updates
         _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
 
         // Discovery proxy service for streaming discovery with SignalR progress updates
-        _ = services.AddScoped<Services.Interfaces.IDiscoveryProxyService, Services.DiscoveryProxyService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService, Services.DiscoveryProxyService>();
     }
 
     #endregion
@@ -240,8 +223,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository, Farm.Infrastructure.Repositories.Catalog.EfCatalogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Users.IUsersRepository, Farm.Infrastructure.Repositories.Users.EfUsersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileConsistencyRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileConsistencyRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileAuditRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileAuditRepository>();
 
         // Unit of Work pattern: coordinates access to 6 repositories with a shared DbContext
         // This prevents FK constraint violations and ensures atomic transactions across coordinated operations:
@@ -258,7 +239,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().HarvestOperations);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Printers);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Folders);
-        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Model3dFiles);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Locations);
 
         // Tag repositories
@@ -268,13 +248,10 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
 
         // Print approval repository
-        _ = services.AddScoped<Farm.Web.Api.Data.Repositories.IPrintApprovalRepository, Farm.Web.Api.Data.Repositories.EfPrintApprovalRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.PrintJobs.IPrintApprovalRepository, Farm.Web.Api.Data.Repositories.EfPrintApprovalRepository>();
 
         // Filament repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
-
-        // Artifacts repository
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Artifacts.IArtifactsRepository, Farm.Infrastructure.Repositories.Artifacts.EfArtifactsRepository>();
 
         // Password policy repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Infrastructure.Repositories.PasswordPolicy.PasswordPolicyRepository>();
@@ -282,17 +259,7 @@ public static class ServiceCollectionExtensions
         // Schema health repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Infrastructure.Repositories.SchemaHealth.SchemaHealthRepository>();
 
-        // Slicing repositories
-        _ = services.AddScoped<IProfilesRepository, EfProfilesRepository>();
-        _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
-        _ = services.AddScoped<IMachineModelProfileRepository, EfMachineModelProfileRepository>();
-        _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
-        _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
-        _ = services.AddScoped<ISlicersRepository, EfSlicersRepository>();
-        _ = services.AddScoped<ISliceJobRepository, EfSliceJobRepository>();
-
-        // Worker repository
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Workers.IWorkerRepository, Farm.Infrastructure.Repositories.Workers.EfWorkerRepository>();
+        // Slicer repositories are registered by AddSlicerModule() in Farm.Slicer.Module
 
         // Task repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tasks.IUserTaskRepository, Farm.Infrastructure.Repositories.Tasks.EfUserTaskRepository>();
@@ -360,12 +327,12 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IPasswordHashingService, Farm.Infrastructure.Services.Authentication.PasswordHashingService>();
         _ = services.AddScoped<IAuthenticationService, Farm.Infrastructure.Services.Authentication.AuthenticationService>();
-        _ = services.AddScoped<Services.PasswordPolicy.IPasswordPolicyService, Services.PasswordPolicy.PasswordPolicyService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.PasswordPolicy.IPasswordPolicyService, Farm.Infrastructure.Services.PasswordPolicy.PasswordPolicyService>();
         _ = services.AddScoped<IAccountLockoutService, Farm.Infrastructure.Services.Authentication.AccountLockoutService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IAuthAuditService, Farm.Infrastructure.Services.Authentication.AuthAuditService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ITokenRevocationService, Farm.Infrastructure.Services.Authentication.TokenRevocationService>();
         _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
-        _ = services.AddScoped<Services.Users.IUsersService, Services.Users.UsersService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Users.IUsersService, Farm.Infrastructure.Services.Users.UsersService>();
     }
 
     #endregion
@@ -382,13 +349,13 @@ public static class ServiceCollectionExtensions
             cfg.GetSection("Email").Bind(opts);
             return opts;
         });
-        
+
         // Register HttpClient for Mailjet
         _ = services.AddHttpClient("Mailjet", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(10);
         });
-        
+
         _ = services.AddScoped<IEmailService>(sp =>
         {
             IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
@@ -442,62 +409,10 @@ public static class ServiceCollectionExtensions
         // Register API adapter that wraps Infrastructure service to work with request DTOs
         _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogServiceAdapter>();
 
-        _ = services.AddScoped<Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Filament.IFilamentTypeService, Farm.Infrastructure.Services.Filament.FilamentTypeService>();
 
         // SpoolmanDB community database service (GitHub Pages primary for temp ranges, Spoolman external fallback)
-        _ = services.AddHttpClient<Services.ISpoolmanDbService, Services.SpoolmanDbService>();
-    }
-
-    #endregion
-
-    #region Slicing
-
-    private static void RegisterSlicingServices(IServiceCollection services, IConfiguration configuration)
-    {
-        // Metrics
-        _ = services.AddSingleton<Services.Slicing.SliceJobMetrics>();
-        _ = services.AddSingleton<Services.Slicing.SlicerServiceMetrics>();
-
-        // Configuration
-        _ = services.Configure<Services.Workers.WorkerAuthSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.WorkerAuthSettings.SectionName));
-        _ = services.AddSingleton<Services.Workers.IWorkerAuthService, Services.Workers.WorkerAuthService>();
-        _ = services.Configure<Farm.Infrastructure.Settings.SlicerSettings>(configuration.GetSection(Farm.Infrastructure.Settings.SlicerSettings.SectionName));
-
-        // Core slicing services
-        _ = services.AddScoped<ISlicersService, SlicersService>();
-        _ = services.AddScoped<IProfilesService, ProfilesService>();
-        _ = services.AddScoped<Services.Slicing.IProfileParsingService, Services.Slicing.ProfileParsingService>();
-        _ = services.AddScoped<Services.Slicing.IOrcaBundleParsingService, Services.Slicing.OrcaBundleParsingService>();
-        _ = services.AddScoped<Services.Slicing.IOrcaPresetMappingService, Services.Slicing.OrcaPresetMappingService>();
-        _ = services.AddScoped<Services.Slicing.IOrcaBundleExportService, Services.Slicing.OrcaBundleExportService>();
-
-        // Job queue and orchestration
-        _ = services.AddScoped<ISlicerJobQueue, Services.SlicerServices.DbSlicerJobQueue>();
-        _ = services.AddSingleton<ISlicerProgressNotifier, Services.SlicerServices.SignalRSlicerProgressNotifier>();
-        _ = services.AddScoped<ISlicerOrchestrator, Services.SlicerServices.SlicerOrchestrator>();
-        _ = services.AddScoped<Services.Slicing.ISliceJobEventService, Services.Slicing.SliceJobEventService>();
-        _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
-        _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
-        _ = services.AddScoped<IJobDispatcherService, JobDispatcherService>();
-
-        // Job dispatch retry options
-        _ = services.AddSingleton(sp =>
-        {
-            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
-            RetryOptions opts = new RetryOptions();
-            cfg.GetSection("JobDispatchRetry").Bind(opts);
-            return opts;
-        });
-
-        // Submission and file storage
-        _ = services.AddScoped<Services.Slicing.ISlicingSubmissionService, Services.Slicing.SlicingSubmissionService>();
-        _ = services.AddScoped<Services.SlicerServices.LocalSlicerFileStorage>();
-        _ = services.AddScoped<ISlicerFileStorage>(sp => sp.GetRequiredService<Services.SlicerServices.LocalSlicerFileStorage>());
-
-        // Slicer Library Registration (plugin discovery)
-        _ = services
-            .DiscoverAndRegisterSlicerPlugins()
-            .AddSlicerRegistry();
+        _ = services.AddHttpClient<Farm.Infrastructure.Services.Spoolman.ISpoolmanDbService, Farm.Infrastructure.Services.Spoolman.SpoolmanDbService>();
     }
 
     #endregion
@@ -555,7 +470,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusFallbackService, Farm.Infrastructure.Services.Printers.PrinterStatusFallbackService>();
 
         // Register the backend capabilities service for exposing plugin capabilities to the UI
-        _ = services.AddScoped<Services.Printers.IPrinterBackendCapabilitiesService, Services.Printers.PrinterBackendCapabilitiesService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService, Farm.Infrastructure.Services.Printers.PrinterBackendCapabilitiesService>();
 
         // Register the multi-printer status coordinator for parallel operation orchestration
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IMultiPrinterStatusCoordinator, Farm.Infrastructure.Services.Printers.MultiPrinterStatusCoordinator>();
@@ -580,14 +495,14 @@ public static class ServiceCollectionExtensions
     private static void RegisterModelAndGcodeServices(IServiceCollection services, IConfiguration configuration, bool disableBackgroundServices)
     {
         // Tag services
-        _ = services.AddScoped<Services.Tags.ITagService, Services.Tags.TagService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Tags.ITagService, Farm.Infrastructure.Services.Tags.TagService>();
 
         // Task services (user task management)
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
 
         // SystemLogs service
-        _ = services.AddScoped<Services.SystemLogs.ISystemLogService, Services.SystemLogs.SystemLogService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.SystemLogs.ISystemLogService, Farm.Infrastructure.Services.SystemLogs.SystemLogService>();
 
         // Folder management service (shared by model and gcode file services)
         _ = services.AddScoped<IFolderManagementService, FolderManagementService>();
@@ -596,10 +511,9 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IStoredFileOperationsService, StoredFileOperationsService>();
 
         // Model services
-        _ = services.AddScoped<Services.Model.IModel3DFileService, Services.Model.Model3DFileService>();
         _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
         _ = services.AddSingleton<IVirusScanner, ClamAVVirusScanner>();
-        _ = services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();
+        _ = services.AddSingleton<IThumbnailGenerationService, Farm.Slicer.Module.Services.Rendering.ThumbnailGenerationService>();
 
         // Harvest configuration and services
         _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
@@ -626,37 +540,21 @@ public static class ServiceCollectionExtensions
 
     #endregion
 
-    #region Artifact Services
-
-    private static void RegisterArtifactServices(IServiceCollection services, IConfiguration configuration, bool disableBackgroundServices)
-    {
-        _ = services.AddSingleton<Services.Artifacts.ArtifactsMetrics>();
-        _ = services.Configure<ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
-        _ = services.AddScoped<Services.Artifacts.IArtifactsService, Services.Artifacts.ArtifactsService>();
-        _ = services.AddScoped<Services.Artifacts.IArtifactCleanupService, Services.Artifacts.ArtifactCleanupService>();
-
-        if (!disableBackgroundServices)
-        {
-            _ = services.AddHostedService<Services.Artifacts.ArtifactCleanupHostedService>();
-        }
-    }
-
-    #endregion
-
     #region Setup and Schema
 
     private static void RegisterSetupAndSchemaServices(IServiceCollection services)
     {
-        _ = services.AddScoped<Services.Setup.ISetupService, Services.Setup.SetupService>();
-        _ = services.AddScoped<Services.SchemaHealth.ISchemaHealthService, Services.SchemaHealth.SchemaHealthService>();
-        _ = services.AddScoped<Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Setup.ISetupService, Farm.Infrastructure.Services.Setup.SetupService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.SchemaHealth.ISchemaHealthService, Farm.Infrastructure.Services.SchemaHealth.SchemaHealthService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
     }
 
-    private static void RegisterBackendClientPlugins(IServiceCollection services)
+    private static void RegisterBackendClientPlugins(IServiceCollection services, IConfiguration configuration)
     {
-        // Discover and register all backend client plugins
-        // This will scan all loaded assemblies for IBackendClientPlugin implementations
-        services.AddBackendClientPlugins();
+        // Discover and register all backend client plugins.
+        // BackendPlugins:PluginsPath (appsettings.json) is scanned for runtime-loaded plugin DLLs
+        // in addition to the main app output directory.
+        services.AddBackendClientPlugins(configuration);
     }
 
     #endregion
@@ -674,7 +572,7 @@ public static class ServiceCollectionExtensions
         // This keeps backend-specific HTTP client configuration encapsulated in plugins
 
         // Spoolman Integration (not backend-specific, registered centrally)
-        _ = services.AddHttpClient<ISpoolmanService, SpoolmanService>("SpoolmanService", client =>
+        _ = services.AddHttpClient<ISpoolmanService, Farm.Infrastructure.Services.Spoolman.SpoolmanService>("SpoolmanService", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
@@ -687,18 +585,16 @@ public static class ServiceCollectionExtensions
     private static void RegisterBackgroundServices(IServiceCollection services, bool disableBackgroundServices)
     {
         // Background service monitor - always register as it's used for status reporting
-        _ = services.AddSingleton<Services.Background.IBackgroundServiceMonitor, Services.Background.BackgroundServiceMonitor>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Background.IBackgroundServiceMonitor, Farm.Infrastructure.Services.Background.BackgroundServiceMonitor>();
 
         if (!disableBackgroundServices)
         {
             // System log cleanup (common service, not plugin-specific)
-            _ = services.AddHostedService<SystemLogCleanupService>();
+            _ = services.AddHostedService<Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService>();
 
-            // Stale worker cleanup service
-            _ = services.AddHostedService<Services.Workers.StaleWorkerCleanupHostedService>();
-
-            // Profile task check service - creates tasks for printers without slicer profiles
-            _ = services.AddHostedService<Services.ProfileTaskCheckService>();
+            // Slicer hosted services (WorkerHealthMonitor, JobDispatching,
+            // JobTimeoutScanner, StaleWorkerCleanup) are now registered by
+            // AddSlicerModule() in Farm.Slicer.Module.
 
             // Backend-specific background services are now registered by their respective plugins
             // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:

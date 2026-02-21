@@ -6,9 +6,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.PrintJobs;
+using Farm.Infrastructure.Services.PrintJobs;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Web.Api.Data.Repositories;
-using Farm.Web.Api.Services.PrintJobs;
-using Farm.Web.Api.Services.Queue;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -208,7 +209,7 @@ public class PrintApprovalServiceTests : IDisposable
             FolderType = "gcode",
             CreatedAt = DateTime.UtcNow
         };
-        _context.Folders.Add(folder);
+        _context.Set<FolderNode>().Add(folder);
         await _context.SaveChangesAsync();
 
         // Create a valid GcodeFile (required for PrintJob foreign key)

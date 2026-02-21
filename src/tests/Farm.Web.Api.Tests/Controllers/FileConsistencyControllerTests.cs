@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.FileConsistency;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.DTOs;
+using Farm.Slicer.Module.Api.Controllers;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Repositories;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
@@ -294,4 +294,5 @@ public class FileConsistencyControllerTests
         FileHealthSummaryDto summary = Assert.IsType<FileHealthSummaryDto>(okResult.Value);
         Assert.Equal(100.0, summary.OverallHealthPercentage);
     }
+
 }

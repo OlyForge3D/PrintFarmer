@@ -78,7 +78,7 @@ export ORCA_WORKER_COUNT=2
 
 ### 3. Dry-Run (Planning Only)
 ```bash
-./scripts/deploy-docker.sh --dry-run --architecture microservices
+./scripts/deploy-docker.sh --dry-run
 ```
 
 ## Access Points
@@ -256,7 +256,7 @@ If migrating from monolithic deployment:
 
 3. **Deploy microservices**:
    ```bash
-   ./scripts/deploy-docker.sh --architecture microservices
+   ./scripts/deploy-docker.sh
    ```
 
 4. **Restore data** (if needed):

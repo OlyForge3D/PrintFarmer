@@ -2,8 +2,9 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Dtos.Assets;
+using Farm.Infrastructure.Services.Assets;
 using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;

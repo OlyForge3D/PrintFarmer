@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../../slicer/Farm.Slicer.Plugin.Core/Farm.Slicer.Plugin.Core.csproj" />
   </ItemGroup>
 
   <!-- Embed assets as resources -->

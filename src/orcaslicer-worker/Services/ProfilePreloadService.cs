@@ -5,9 +5,10 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
+using ManufacturerDto = Farm.Infrastructure.ManufacturerDto;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 

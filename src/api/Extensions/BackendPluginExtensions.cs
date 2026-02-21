@@ -2,6 +2,7 @@
 
 using System.Reflection;
 using Farm.Backend.Plugin.Core;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Extensions;
@@ -18,26 +19,23 @@ public static class BackendPluginExtensions
     /// Supports both standard plugins and extended plugins with additional services.
     /// </summary>
     /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Optional: application configuration used to read
+    /// <c>BackendPlugins:PluginsPath</c> for runtime-loaded plugin DLLs.</param>
     /// <param name="pluginAssemblies">Optional: specific assemblies to search for plugins. If null, searches all loaded assemblies.</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddBackendClientPlugins(
         this IServiceCollection services,
+        IConfiguration? configuration = null,
         IEnumerable<System.Reflection.Assembly>? pluginAssemblies = null)
     {
-        // Write marker to console immediately so we know this method was called
-        Console.WriteLine("=== AddBackendClientPlugins called ===");
-        Console.Out.Flush();
-
         // Register the plugin registry as singleton
         var registry = new BackendPluginRegistry();
         services.AddSingleton<IBackendPluginRegistry>(registry);
         services.AddSingleton<IBackendPluginLoader, BackendPluginLoader>();
 
         // Discover and load plugins dynamically
-        DiscoverAndLoadPlugins(registry, services, pluginAssemblies);
-
-        Console.WriteLine("=== AddBackendClientPlugins completed ===");
-        Console.Out.Flush();
+        string? pluginsPath = configuration?["BackendPlugins:PluginsPath"];
+        DiscoverAndLoadPlugins(registry, services, pluginsPath, pluginAssemblies);
 
         return services;
     }
@@ -49,47 +47,35 @@ public static class BackendPluginExtensions
     /// </summary>
     /// <param name="registry">The plugin registry to register discovered plugins with.</param>
     /// <param name="services">The service collection for dependency injection setup.</param>
+    /// <param name="pluginsPath">Optional: directory to scan for additional runtime-loaded plugin DLLs
+    /// (e.g. <c>BackendPlugins:PluginsPath</c>). Relative paths are resolved against
+    /// <see cref="AppDomain.BaseDirectory"/>.</param>
     /// <param name="assembliesToSearch">Optional: specific assemblies to search. If null, searches all loaded assemblies.</param>
     private static void DiscoverAndLoadPlugins(
         BackendPluginRegistry registry,
         IServiceCollection services,
+        string? pluginsPath = null,
         IEnumerable<System.Reflection.Assembly>? assembliesToSearch = null)
     {
-        Console.WriteLine("[Plugin Discovery] Starting plugin discovery");
-
-        // If no assemblies specified, first try to explicitly load plugin DLLs from the app directory
+        // If no assemblies specified, load plugin DLLs from the app directory and the
+        // explicitly configured plugins path (BackendPlugins:PluginsPath).
         if (assembliesToSearch == null)
         {
-            try
+            LoadPluginDllsFromDirectory(AppDomain.CurrentDomain.BaseDirectory);
+
+            if (!string.IsNullOrWhiteSpace(pluginsPath))
             {
-                string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-                Console.WriteLine($"[Plugin Discovery] Plugin search directory: {appDirectory}");
-
-                string[] pluginDlls = Directory.GetFiles(appDirectory, "Farm.Backend.Plugin.*.dll");
-                Console.WriteLine($"[Plugin Discovery] Found {pluginDlls.Length} plugin DLLs to load");
-
-                foreach (string dllPath in pluginDlls)
+                if (!Path.IsPathRooted(pluginsPath))
                 {
-                    try
-                    {
-                        Console.WriteLine($"[Plugin Discovery] Loading: {dllPath}");
-                        System.Reflection.Assembly.LoadFrom(dllPath);
-                        Console.WriteLine($"[Plugin Discovery]   ✓ Loaded");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Plugin Discovery]   ✗ Error: {ex.Message}");
-                    }
+                    pluginsPath = Path.GetFullPath(
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pluginsPath));
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Plugin Discovery] Error during plugin DLL loading: {ex.Message}");
+
+                LoadPluginDllsFromDirectory(pluginsPath);
             }
         }
 
         IEnumerable<Assembly> assemblies = assembliesToSearch ?? AppDomain.CurrentDomain.GetAssemblies();
-        Console.WriteLine($"[Plugin Discovery] Scanning {assemblies.Count()} assemblies for plugins");
 
         int discoveredCount = 0;
         foreach (Assembly assembly in assemblies)
@@ -171,6 +157,26 @@ public static class BackendPluginExtensions
         }
 
         Console.WriteLine($"[Plugin Discovery] Plugin discovery complete. Discovered {discoveredCount} plugins");
+    }
+
+    private static void LoadPluginDllsFromDirectory(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        foreach (string dllPath in Directory.GetFiles(directory, "Farm.Backend.Plugin.*.dll"))
+        {
+            try
+            {
+                System.Reflection.Assembly.LoadFrom(dllPath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Plugin Discovery] Failed to load {dllPath}: {ex.Message}");
+            }
+        }
     }
 
     /// <summary>

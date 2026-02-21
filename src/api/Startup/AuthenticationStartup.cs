@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;

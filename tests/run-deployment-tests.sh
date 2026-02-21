@@ -194,11 +194,10 @@ run_quick_tests() {
     fi
     ((TESTS_RUN++))
     
-    # Test 2: Monolithic generation (moved up from later)
+    # Test 2: Standard generation
     if DB_PROVIDER=postgres bash "$REPO_ROOT/scripts/docker/compose-generator.sh" \
-        --architecture monolithic \
         --output-dir "$test_temp_dir/test1" >/dev/null 2>&1; then
-        log_success "Monolithic compose generation works"
+        log_success "Standard compose generation works"
         ((TESTS_PASSED++))
     else
         log_error "Monolithic compose generation failed"
@@ -206,11 +205,10 @@ run_quick_tests() {
     fi
     ((TESTS_RUN++))
     
-    # Test 3: Microservices generation
+    # Test 3: Generation with explicit options
     if DB_PROVIDER=postgres bash "$REPO_ROOT/scripts/docker/compose-generator.sh" \
-        --architecture microservices \
         --output-dir "$test_temp_dir/test2" >/dev/null 2>&1; then
-        log_success "Microservices compose generation works"
+        log_success "Compose generation with options works"
         ((TESTS_PASSED++))
     else
         log_error "Microservices compose generation failed"

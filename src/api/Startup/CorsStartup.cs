@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Startup;
+﻿namespace Farm.Web.Api.Startup;
 
 /// <summary>
 /// Configures CORS policies for API access.

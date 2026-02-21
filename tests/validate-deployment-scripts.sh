@@ -48,7 +48,7 @@ echo "Test 2: Compose generator creates multistage files"
 TEST2_DIR="$TEMP_DIR/test2-compose"
 rm -rf "$TEST2_DIR" 2>/dev/null || true
 mkdir -p "$TEST2_DIR"
-if "$REPO_ROOT/scripts/docker/compose-generator.sh" --architecture monolithic --output-dir "$TEST2_DIR" >/dev/null 2>&1; then
+if "$REPO_ROOT/scripts/docker/compose-generator.sh" --output-dir "$TEST2_DIR" >/dev/null 2>&1; then
     if [ -f "$TEST2_DIR/docker-compose.yml" ] && [ -f "$TEST2_DIR/Dockerfile.multistage" ]; then
         if grep -q "dockerfile: Dockerfile.multistage" "$TEST2_DIR/docker-compose.yml"; then
             check_result "Compose generator creates multistage configuration"
@@ -201,7 +201,7 @@ echo "Test 8: Generated compose files contain no Redis services"
 MS_COMPOSE_DIR="$TEMP_DIR/ms-compose"
 rm -rf "$MS_COMPOSE_DIR" 2>/dev/null || true
 mkdir -p "$MS_COMPOSE_DIR"
-if ! "$REPO_ROOT/scripts/docker/compose-generator.sh" --architecture microservices --output-dir "$MS_COMPOSE_DIR" >/dev/null 2>&1; then
+if ! "$REPO_ROOT/scripts/docker/compose-generator.sh" --output-dir "$MS_COMPOSE_DIR" >/dev/null 2>&1; then
     check_result "Microservices compose generation" || true
 else
     redis_check_pass=true
@@ -225,7 +225,6 @@ STACK_DIR="$TEMP_DIR/telemetry"
 rm -rf "$STACK_DIR" 2>/dev/null || true
 mkdir -p "$STACK_DIR"
 if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
-    --architecture microservices \
     --include-monitoring \
     --include-telemetry \
     --output-dir "$STACK_DIR" >/dev/null 2>&1; then

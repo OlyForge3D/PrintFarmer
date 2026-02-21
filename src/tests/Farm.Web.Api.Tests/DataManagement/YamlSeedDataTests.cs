@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Models.SeedData;
-using Farm.Web.Api.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;

@@ -159,22 +159,37 @@ else
   print ".NET already present: $(dotnet --info 2>/dev/null | head -n1 || true)"
 fi
 
-print "Bootstrap complete. Run the following (non-root) commands to verify and continue:"
+# Restore project-level dependencies (dotnet + npm)
+print "Restoring .NET dependencies..."
+if [ -f "$REPO_ROOT/src/farm-web.sln" ]; then
+  run_as_user "cd '$REPO_ROOT/src' && dotnet restore ./farm-web.sln"
+else
+  print "Warning: farm-web.sln not found at $REPO_ROOT/src — skipping dotnet restore"
+fi
+
+print "Installing React/frontend dependencies (npm install)..."
+if [ -f "$REPO_ROOT/src/Web/ReactApp/package.json" ]; then
+  run_as_user "cd '$REPO_ROOT/src/Web/ReactApp' && npm install"
+else
+  print "Warning: package.json not found at $REPO_ROOT/src/Web/ReactApp — skipping npm install"
+fi
+
+print "Bootstrap complete. Verify with:"
 cat <<'EOF'
-# As your normal user (not root):
 # Ensure dotnet is in PATH if installed via dotnet-install.sh
 export PATH="$HOME/.dotnet:$PATH"
 
-# Verify basic tooling
 dotnet --info
 node --version
 npm --version
-git --version
 
-# Build the repo (from the 'src' directory)
+# Build
 cd src
-dotnet restore ./farm-web.sln
 dotnet build ./farm-web.sln -c Debug
+
+# Run tests
+dotnet test ./farm-web.sln -c Debug
+cd Web/ReactApp && npm run test:run
 EOF
 
 print "Done."
@@ -183,12 +198,17 @@ print "Done."
 if [ "$VERIFY" = true ]; then
   print "Running verification (--verify) checks as non-root user"
   run_as_user "export PATH=\"$HOME/.dotnet:$PATH\"; dotnet --info || true; node --version || true; npm --version || true; git --version || true"
-  # Small smoke test: build the API project only
+  # Small smoke test: build the API project and check vitest is available
   if [ -f "$REPO_ROOT/src/api/Farm.Web.Api.csproj" ]; then
-    print "Running small dotnet build smoke test (API project)"
-    run_as_user "cd '$REPO_ROOT/src' && dotnet restore ./farm-web.sln && dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore"
+    print "Running dotnet build smoke test (API project)"
+    run_as_user "cd '$REPO_ROOT/src' && dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore"
   else
     print "API project not found for smoke test; skipping build"
+  fi
+  if [ -x "$REPO_ROOT/src/Web/ReactApp/node_modules/.bin/vitest" ]; then
+    print "vitest binary found — React test runner available"
+  else
+    print "Warning: vitest binary not found — run 'npm install' in src/Web/ReactApp/"
   fi
   print "Verification complete"
 fi

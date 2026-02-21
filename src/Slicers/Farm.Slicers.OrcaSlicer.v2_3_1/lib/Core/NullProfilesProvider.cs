@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Contracts.Slicing.Libraries;
+﻿using Farm.Slicer.Module.Contracts.Libraries;
 
 namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 

@@ -8,11 +8,12 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
@@ -20,7 +21,6 @@ using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Interfaces;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
@@ -42,22 +42,22 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
     IValidator<CreatePrinterFromDiscoveryDto> validator,
-    Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
-    Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
+    IDiscoveryProxyService discoveryProxyService,
+    Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
-    Services.Slicing.ISlicersService slicersService,
-    IPrinterVersionCache printerVersionCache)
+    Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
+    IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
-    private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
-    private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
+    private readonly IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
+    private readonly Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly Services.Slicing.ISlicersService _slicersService = slicersService;
+    private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed
@@ -266,12 +266,12 @@ public class PrintersController(
         try
         {
             Farm.Infrastructure.Contracts.Printers.IBackendClient client = _backendClientFactory.GetClient(PrinterBackend.SDCP);
-            if (client is not Farm.Backend.Plugin.Sdcp.ISdcpClient sdcpClient)
+            if (client is not Farm.Infrastructure.Services.Printers.ISupportsConnectionTest connectionTestClient)
             {
                 return new TestConnectionResponse { Success = false, Message = "SDCP client is not available." };
             }
 
-            bool ok = await sdcpClient.TestConnectionAsync(uriToTest, ct);
+            bool ok = await connectionTestClient.TestConnectionAsync(uriToTest, ct);
             return ok
                 ? new TestConnectionResponse { Success = true, Message = "Successfully connected to SDCP printer." }
                 : new TestConnectionResponse { Success = false, Message = "SDCP endpoint did not respond." };
@@ -895,15 +895,18 @@ public class PrintersController(
         {
             try
             {
-                int imported = await _slicersService.ImportProfilesForModelAsync(
-                    modelId.Value,
-                    modelName,
-                    manufacturerName,
-                    ct);
-
-                if (imported > 0)
+                if (_profileImportService is not null)
                 {
-                    _logger.LogInformation($"Imported {imported} slicer profiles for {modelName}");
+                    int imported = await _profileImportService.ImportProfilesForModelAsync(
+                        modelId.Value,
+                        modelName,
+                        manufacturerName,
+                        ct);
+
+                    if (imported > 0)
+                    {
+                        _logger.LogInformation($"Imported {imported} slicer profiles for {modelName}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -1029,11 +1032,11 @@ public class PrintersController(
                 _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
 
                 // Import slicer profiles for this printer's model (pull-based, on-demand import)
-                if (createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
+                if (_profileImportService is not null && createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
                 {
                     try
                     {
-                        int imported = await _slicersService.ImportProfilesForModelAsync(
+                        int imported = await _profileImportService.ImportProfilesForModelAsync(
                             createDto.ModelId.Value,
                             createDto.NewModelName ?? created.ModelName ?? "Unknown",
                             createDto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown",
@@ -2678,7 +2681,7 @@ public class PrintersController(
             _logger.LogInformation($"[DISCOVERY] Starting discovery stream via API endpoint (autoRegister={autoRegister})");
 
             IReadOnlyList<PrinterBackend>? backends = request?.Backends?.ToList();
-            Services.Interfaces.DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
+            DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
                 backends: backends,
                 autoRegister: autoRegister,
                 cancellationToken: ct);
@@ -2715,7 +2718,7 @@ public class PrintersController(
         {
             _logger.LogInformation($"[DISCOVERY] Cancelling discovery stream {sessionId}");
 
-            Services.Interfaces.DiscoveryCancelResponse result = await _discoveryProxyService.CancelDiscoveryStreamAsync(sessionId, ct);
+            DiscoveryCancelResponse result = await _discoveryProxyService.CancelDiscoveryStreamAsync(sessionId, ct);
 
             return Ok(new { message = result.Message });
         }

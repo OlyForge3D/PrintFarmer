@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Services.SchemaHealth;
+﻿using Farm.Infrastructure.Services.SchemaHealth;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;

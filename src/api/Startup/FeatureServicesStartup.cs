@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 
@@ -18,7 +18,7 @@ public static class FeatureServicesStartup
         IWebHostEnvironment environment)
     {
         // OctoPrint compatibility settings and services
-        services.Configure<Farm.Web.Api.Services.OctoPrint.OctoPrintSettings>(configuration.GetSection("OctoPrint"));
+        services.Configure<Farm.Infrastructure.Settings.OctoPrintSettings>(configuration.GetSection("OctoPrint"));
         services.AddScoped<Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService, Farm.Web.Api.Services.OctoPrint.OctoPrintAuthService>();
         services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
 
@@ -30,22 +30,19 @@ public static class FeatureServicesStartup
         });
 
         // Print job approval service
-        services.AddScoped<Farm.Web.Api.Services.PrintJobs.IPrintApprovalService, Farm.Web.Api.Services.PrintJobs.PrintApprovalService>();
+        services.AddScoped<Farm.Infrastructure.Services.PrintJobs.IPrintApprovalService, Farm.Infrastructure.Services.PrintJobs.PrintApprovalService>();
 
         // Print Projects Service (multi-file job tracking)
-        services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectService, Farm.Web.Api.Services.Projects.PrintProjectService>();
-        services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectTemplateService, Farm.Web.Api.Services.Projects.PrintProjectTemplateService>();
+        services.AddScoped<Farm.Infrastructure.Services.Projects.IPrintProjectService, Farm.Infrastructure.Services.Projects.PrintProjectService>();
+        services.AddScoped<Farm.Infrastructure.Services.Projects.IPrintProjectTemplateService, Farm.Infrastructure.Services.Projects.PrintProjectTemplateService>();
 
         // File Management Services
-        services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
-        services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService, Farm.Web.Api.Services.FileManagement.StoredFileOperationsService>();
-
-        // 3MF to STL Conversion Service
-        services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
+        services.AddScoped<Farm.Infrastructure.Services.FileManagement.IFileManagementService, Farm.Infrastructure.Services.FileManagement.FileManagementService>();
+        services.AddScoped<Farm.Infrastructure.Services.FileManagement.IStoredFileOperationsService, Farm.Infrastructure.Services.FileManagement.StoredFileOperationsService>();
 
         // Print Job Management Service (renamed from PrintQueueService)
         services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobManagementRepository>();
-        services.AddScoped<Farm.Api.Services.Interfaces.IPrintJobManagementService, Farm.Api.Services.PrintQueue.PrintJobManagementService>();
+        services.AddScoped<Farm.Infrastructure.Services.Interfaces.IPrintJobManagementService, Farm.Api.Services.PrintQueue.PrintJobManagementService>();
 
         // Print Job Completion Sync Service (auto-marks jobs as completed when printer finishes)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintJobCompletionService, Farm.Infrastructure.Services.Printers.PrintJobCompletionService>();
@@ -67,7 +64,7 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceLogRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceLogRepository>();
 
         // Maintenance Module - Services
-        services.AddScoped<Farm.Web.Api.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
 
         // SPA services (only for monolithic deployments)
         bool isMonolithicDeployment = configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";

@@ -1,0 +1,48 @@
+# Standalone Slicer Host Addon Service
+# Automatically included by compose-generator.sh whenever OrcaSlicer workers are enabled.
+# Provides an independent slicer microservice with its own database, calling back to the
+# main API for cross-domain data (printers, catalog models, manufacturers).
+
+x-slicer-host-healthcheck: &slicer-host-healthcheck
+  test: ["CMD", "curl", "-f", "http://localhost:5246/healthz"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+services:
+  slicer-host:
+    build:
+      context: .
+      dockerfile: Dockerfile.multistage
+      target: slicer-host-runtime
+      args:
+        SDK_TAG: ${SDK_TAG}
+        ASPNET_TAG: ${ASPNET_TAG}
+        NODE_TAG: ${NODE_TAG}
+        NGINX_TAG: ${NGINX_TAG}
+        UBUNTU_TAG: ${UBUNTU_TAG}
+    image: printfarmer-slicer-host
+    container_name: printfarmer-slicer-host
+    restart: unless-stopped
+    ports:
+      - "${SLICER_HOST_PORT:-5246}:5246"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://+:5246
+      - DB_PROVIDER=${DB_PROVIDER:-Postgres}
+      - ConnectionStrings__Default=${ConnectionStrings__Default}
+      # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
+      - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
+      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+    volumes:
+      - ${EXTERNAL_SLICER_DATA_PATH:-.volumes/printfarmer-slicer-data}:/data
+      - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles:ro
+    networks:
+      - printfarmer-network
+    healthcheck: *slicer-host-healthcheck

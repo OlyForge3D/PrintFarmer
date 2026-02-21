@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
 using Moq;

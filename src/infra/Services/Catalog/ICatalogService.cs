@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.Catalog;
 

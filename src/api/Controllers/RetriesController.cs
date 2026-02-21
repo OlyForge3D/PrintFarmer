@@ -1,7 +1,7 @@
-﻿using Farm.Api.Services.Interfaces;
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services;
-using Farm.Web.Api.DTOs.PrintQueue;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Web.Api.DTOs.Retries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

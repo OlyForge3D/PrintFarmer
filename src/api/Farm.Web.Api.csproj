@@ -6,41 +6,48 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591;S6960</NoWarn>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
-  <PropertyGroup>
-    <RestoreSources>https://api.nuget.org/v3/index.json;https://nuget.pkg.github.com/assimp/index.json</RestoreSources>
   </PropertyGroup>
 
   <ItemGroup>
   <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
-    <!-- Plugin implementations - needed for dynamic plugin discovery -->
-    <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj" />
-    <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj" />
-    <ProjectReference Include="../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj" />
-    <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj" />
-    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <!-- Plugin implementations - runtime-loaded, not compile-time referenced -->
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.3" />
     <!-- TODO: Re-add OpenAPI packages after .NET 10 migration rewrite -->
     <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.3" />
     <!-- Database Providers: SQLite, PostgreSQL, SQL Server -->
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.4" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.3" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.2">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.3">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.2">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.3">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Refit.HttpClientFactory" Version="9.0.2" />
-    <PackageReference Include="Microsoft.AspNetCore.SpaServices.Extensions" Version="10.0.2" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
+    <PackageReference Include="Microsoft.AspNetCore.SpaServices.Extensions" Version="10.0.3" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.76.0" />
     <PackageReference Include="Grpc.Tools" Version="2.78.0">
@@ -57,20 +64,39 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.14.0" />
     <PackageReference Include="AutoMapper" Version="14.0.0" />
-    <PackageReference Include="AssimpNetter" Version="6.0.2.1" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
-    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
-    <PackageReference Include="YamlDotNet" Version="16.2.1" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\import\Farm.Importing.csproj" />
-    <!-- Slicer libraries -->
-    <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
+    <!-- Slicer domain types (Models, Domain, Data namespaces) needed by FileManagement, Model3D,
+         and Swagger helpers. No SignalR hubs, no OrcaSlicer, no slicer EF migrations. -->
+    <ProjectReference Include="..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
+    <!-- Slicer integration shim: discovers ISlicerModule/ISlicerHubRegistrar implementations from
+         DLLs in Slicer:PluginsPath at startup (Farm.Slicer.Module.Api, OrcaSlicer, etc.). -->
+    <ProjectReference Include="..\slicer\Farm.Slicer.Integration\Farm.Slicer.Integration.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
-    <ProjectReference Include="..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />
-  </ItemGroup>
+    <ProjectReference Include=".\..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>    <!-- Slicer plugin projects: build before the API project but do not link their assemblies
+         directly — they are loaded at runtime from the plugins/slicer directory. -->
+    <ProjectReference Include="..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.PostgreSQL\Farm.Slicer.Migrations.PostgreSQL.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.SqlServer\Farm.Slicer.Migrations.SqlServer.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>  </ItemGroup>
 
 
   <ItemGroup>
@@ -104,5 +130,37 @@
   <ItemGroup>
     <Protobuf Include="..\..\proto\slicer_jobs.proto" GrpcServices="Server" />
   </ItemGroup>
+
+  <!-- Copy backend plugin DLLs (runtime-loaded, not compile-time referenced)
+       into $(OutputPath)plugins/backends/ so they are available at runtime. -->
+  <Target Name="CopyBackendPlugins" AfterTargets="Build">
+    <PropertyGroup>
+      <_BackendPluginsOutputDir>$(OutputPath)plugins/backends/</_BackendPluginsOutputDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_BackendPluginsOutputDir)" />
+    <ItemGroup>
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.Moonraker\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.PrusaLink\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.OctoPrint\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.Sdcp\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.FlashForge\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_BackendPluginDll)" DestinationFolder="$(_BackendPluginsOutputDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- Copy slicer plugin DLLs into the build output so they are available at runtime. -->
+  <Target Name="CopySlicerPlugins" AfterTargets="Build">
+    <PropertyGroup>
+      <_SlicerPluginsOutputDir>$(OutputPath)plugins/slicer/</_SlicerPluginsOutputDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_SlicerPluginsOutputDir)" />
+    <ItemGroup>
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\slicer\Farm.Slicer.Module.Api\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.PostgreSQL\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.SqlServer\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SlicerPluginDll)" DestinationFolder="$(_SlicerPluginsOutputDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

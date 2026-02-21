@@ -2,7 +2,7 @@
 using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Services.PrintJobs;
+using Farm.Infrastructure.Services.PrintJobs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,10 +11,10 @@ namespace Farm.Web.Api.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
-    public class PrintApprovalsController(IPrintApprovalService approvalService, Farm.Web.Api.Data.Repositories.IPrintApprovalRepository? repo = null) : ControllerBase
+    public class PrintApprovalsController(IPrintApprovalService approvalService, Farm.Infrastructure.Repositories.PrintJobs.IPrintApprovalRepository? repo = null) : ControllerBase
     {
         private readonly IPrintApprovalService _approvalService = approvalService;
-        private readonly Farm.Web.Api.Data.Repositories.IPrintApprovalRepository? _repo = repo;
+        private readonly Farm.Infrastructure.Repositories.PrintJobs.IPrintApprovalRepository? _repo = repo;
 
         [HttpGet]
         public async Task<IActionResult> GetPendingAsync()

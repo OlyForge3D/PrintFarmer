@@ -447,9 +447,9 @@ public sealed class SdcpPollingService(
 
     private void RecordHealthTransition(Guid printerId, string printerName, PrinterConnectionState newState, string? reason)
     {
-        var health = _connectionHealth.GetOrAdd(printerId, _ => new PrinterConnectionHealth
+        var health = _connectionHealth.GetOrAdd(printerId, id => new PrinterConnectionHealth
         {
-            PrinterId = printerId,
+            PrinterId = id,
             PrinterName = printerName,
             Backend = PrinterBackend.SDCP
         });

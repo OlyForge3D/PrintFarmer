@@ -17,12 +17,12 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/users")]
 [Authorize(Roles = "farm_admin")]
 public class UsersController(
-    Services.Users.IUsersService usersService,
+    Farm.Infrastructure.Services.Users.IUsersService usersService,
     IAuthenticationService authService,
     ITokenRevocationService tokenRevocationService,
     IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly Services.Users.IUsersService _users = usersService;
+    private readonly Farm.Infrastructure.Services.Users.IUsersService _users = usersService;
     private readonly IAuthenticationService _authService = authService;
     private readonly ITokenRevocationService _tokenRevocation = tokenRevocationService;
     private readonly IUnifiedLoggingService _logger = logger;

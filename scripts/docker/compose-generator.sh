@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # compose-generator.sh - Generate deployment-specific docker-compose.yml files
-# This script combines compose templates based on deployment architecture and configuration
+# This script combines compose templates based on configuration options
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,9 +20,8 @@ if [[ -f "$VERSIONS_FILE" ]]; then
     export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION BUILD_VERBOSITY
 fi
 
-# Ensure required compose templates exist (monolithic and microservices)
+# Ensure required compose templates exist
 required_templates=(
-    "$TEMPLATES_DIR/docker-compose.yml"
     "$TEMPLATES_DIR/docker-compose.yml"
     "$TEMPLATES_DIR/docker-compose.common.yml"
 )
@@ -109,7 +108,6 @@ Usage: $0 [OPTIONS]
 Generate deployment-specific Docker Compose configuration and copy required files.
 
 OPTIONS:
-    --architecture ARCH     Deployment architecture (monolithic|microservices)
     --output-dir DIR        Output directory (default: repository root)
     --include-monitoring    Include monitoring stack
     --include-telemetry     Include telemetry/observability
@@ -117,6 +115,7 @@ OPTIONS:
     --include-registry      Include local registry
     --include-discovery     Include printer discovery service
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
+    --enable-pgadmin            Enable pgAdmin web UI (PostgreSQL only)
 
     --db-provider PROVIDER  Database provider (postgres|sqlserver, default: postgres)
     --cleanup-generated     Remove generated files after deployment (default keeps them)
@@ -125,11 +124,11 @@ OPTIONS:
     --help                 Show this help message
 
 EXAMPLES:
-    # Generate microservices configuration with OrcaSlicer workers only
-    $0 --architecture microservices --enable-orca-worker yes
+    # Generate with OrcaSlicer workers
+    $0 --enable-orca-worker yes
 
     # Generate with monitoring and telemetry
-    $0 --architecture microservices --include-monitoring --include-telemetry
+    $0 --include-monitoring --include-telemetry
 EOF
 
 }
@@ -177,7 +176,6 @@ generate_database_config() {
 
 # Parse CLI arguments and set defaults
 parse_args() {
-    ARCHITECTURE=""
     OUTPUT_DIR=""
     # Monitoring and telemetry enabled by default for production observability
     INCLUDE_MONITORING="true"
@@ -196,7 +194,8 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --architecture)
-                ARCHITECTURE="$2"; shift 2 ;;
+                # Accepted for backwards compatibility, ignored
+                shift 2 ;;
             --output-dir)
                 OUTPUT_DIR="$2"; shift 2 ;;
             --api-port)
@@ -239,7 +238,6 @@ parse_args() {
         esac
     done
 
-    ARCHITECTURE="${ARCHITECTURE:-microservices}"
     OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT}"
     ENABLE_ORCA_WORKER="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
 }
@@ -548,31 +546,14 @@ PY
     return 0
 }
 
-# Function to generate docker-compose.yml based on architecture and options
+# Function to generate docker-compose.yml from templates and configuration
 generate_compose() {
-    local arch="$1"
-    local output_dir="$2"
-    # Always output to docker-compose.yml regardless of architecture
-    # The generator customizes the template for the specific architecture
+    local output_dir="$1"
     local compose_file="$output_dir/docker-compose.yml"
     
-    log_info "Generating docker-compose.yml for $arch architecture..."
+    log_info "Generating docker-compose.yml..."
     
-    # Start with base template
-    local base_template=""
-    case "$arch" in
-        "monolithic")
-            base_template="$TEMPLATES_DIR/docker-compose.yml"
-            ;;
-        "microservices")
-            base_template="$TEMPLATES_DIR/docker-compose.yml"
-            ;;
-        *)
-            log_error "Unsupported architecture: $arch"
-            log_error "Valid options: monolithic, microservices"
-            return 1
-            ;;
-    esac
+    local base_template="$TEMPLATES_DIR/docker-compose.yml"
     
     if [[ ! -f "$base_template" ]]; then
         log_error "Base template not found: $base_template"
@@ -599,7 +580,6 @@ generate_compose() {
     fi
     
     # Replace the database service with provider-specific configuration
-    # Database is now required for ALL architectures (monolithic and microservices)
     # Generate provider-specific database config
     local db_config
     if ! db_config="$(generate_database_config)"; then
@@ -723,6 +703,17 @@ generate_compose() {
         else
             log_warning "Failed to merge OrcaSlicer worker service, continuing without it"
         fi
+
+        # Slicer-host always accompanies orca-worker (orchestrator for distributed slicing)
+        if merge_addon_services "$compose_file" "slicer-host"; then
+            log_info "Merged slicer-host service (distributed slicing orchestrator)"
+            addons_merged=true
+            # Switch nginx to the split-mode config that routes /api/slicer to slicer-host
+            sed -i 's|/deploy/nginx/${NGINX_CONFIG:-nginx-proxy.conf}|/deploy/nginx/nginx-proxy-split.conf|' "$compose_file"
+            log_info "Switched nginx config to nginx-proxy-split.conf for slicer routing"
+        else
+            log_warning "Failed to merge slicer-host service, continuing without it"
+        fi
     else
         log_info "OrcaSlicer worker service disabled (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
     fi
@@ -787,11 +778,10 @@ generate_compose() {
         log_info "Docker Compose validation skipped (command not available)"
     fi
 
-    # When generating microservices deployment, remove frontend ports to avoid conflicts
-    # with nginx-proxy (the only service that should bind host ports in microservices).
+    # Remove frontend ports to avoid conflicts with nginx-proxy.
+    # nginx-proxy is the only service that should bind host ports.
     # API stays on bridge network for service discovery by hostname.
-    if [[ "$arch" == "microservices" ]]; then
-        log_info "Applying microservices adjustments: removing frontend host ports (keep bridge network)"
+    log_info "Applying microservices adjustments: removing frontend host ports (keep bridge network)"
 
     python3 - "$compose_file" "$HOST_IP" <<'PY'
 import sys
@@ -861,7 +851,6 @@ if start is not None:
 
 open(path,'w').write('\n'.join(txt) + '\n')
 PY
-    fi
     
     return 0
 }
@@ -905,10 +894,9 @@ copy_configs() {
 
 # Copy dockerfiles needed for builds into the output directory (tolerant noop if not present)
 copy_dockerfiles() {
-    local arch="$1"
-    local output_dir="$2"
+    local output_dir="$1"
 
-    log_info "Copying Dockerfiles for $arch into $output_dir"
+    log_info "Copying Dockerfiles into $output_dir"
     # Prefer dockerfiles under scripts/docker/dockerfiles, but fall back to repository-level dockerfiles/
     local src_dir=""
     if [[ -d "$DOCKERFILES_DIR" ]]; then
@@ -931,9 +919,7 @@ copy_dockerfiles() {
 
 # Function to show what would be generated (dry run)
 show_dry_run() {
-    local arch="$1"
-    
-    log_info "DRY RUN: Would generate the following for $arch architecture:"
+    log_info "DRY RUN: Would generate the following:"
     echo
     echo "Dockerfiles:"
     # Determine worker configuration for dry run display
@@ -945,16 +931,12 @@ show_dry_run() {
         need_orca_worker="false"
     fi
 
-    case "$arch" in
-        "monolithic"|"microservices")
-            echo "  - Dockerfile.multistage (efficient multi-stage build for all services)"
-            if [[ "$need_orca_worker" == "true" ]]; then
-                echo "    • Includes OrcaSlicer worker build target"
-            else
-                echo "    • Slicer workers disabled"  
-            fi
-            ;;
-    esac
+    echo "  - Dockerfile.multistage (efficient multi-stage build for all services)"
+    if [[ "$need_orca_worker" == "true" ]]; then
+        echo "    • Includes OrcaSlicer worker build target"
+    else
+        echo "    • Slicer workers disabled"  
+    fi
     
     echo
     echo "Docker Compose:"
@@ -972,6 +954,10 @@ show_dry_run() {
     if [[ "$INCLUDE_REGISTRY" == "true" ]]; then
         echo "  - Includes local registry"
     fi
+    local dry_run_orca="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
+    if [[ "$dry_run_orca" =~ ^(yes|true|1)$ ]] || [[ "$dry_run_orca" =~ ^[0-9]+$ && "$dry_run_orca" -gt 0 ]]; then
+        echo "  - Includes slicer-host service (distributed slicing orchestrator)"
+    fi
     
     echo
     echo "Configuration files:"
@@ -987,20 +973,7 @@ show_dry_run() {
 main() {
     parse_args "$@"
     log_info "Docker Compose Generator for PrintFarmer"
-    log_info "Architecture: $ARCHITECTURE"
     log_info "Output directory: $OUTPUT_DIR"
-    
-    # Validate architecture
-    case "$ARCHITECTURE" in
-        monolithic|microservices)
-            : # Valid architecture
-            ;;
-        *)
-            log_error "Invalid architecture: $ARCHITECTURE"
-            log_error "Valid options: monolithic, microservices"
-            return 1
-            ;;
-    esac
     
     # Validate database provider - SQLite not supported for Docker deployments
     # Docker deployments require a separate database container for production reliability
@@ -1033,7 +1006,7 @@ main() {
     fi
     
     if [[ "$DRY_RUN" == "true" ]]; then
-        show_dry_run "$ARCHITECTURE"
+        show_dry_run
         return 0
     fi
     
@@ -1041,11 +1014,11 @@ main() {
     mkdir -p "$OUTPUT_DIR"
     
     # Generate the configuration
-    copy_dockerfiles "$ARCHITECTURE" "$OUTPUT_DIR"
-    generate_compose "$ARCHITECTURE" "$OUTPUT_DIR"
+    copy_dockerfiles "$OUTPUT_DIR"
+    generate_compose "$OUTPUT_DIR"
     copy_configs "$OUTPUT_DIR"
     
-    log_success "Successfully generated Docker configuration for $ARCHITECTURE architecture"
+    log_success "Successfully generated Docker configuration"
     log_info "Files generated in: $OUTPUT_DIR"
     
     if [[ "$KEEP_GENERATED" == "true" ]]; then

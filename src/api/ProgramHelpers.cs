@@ -8,11 +8,12 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Database;
-using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -331,6 +332,9 @@ namespace Farm.Web.Api
                 // This call ensures the database schema exists and runs seeding. Do this before any
                 // SettingsService or SettingsInitializationService read/write operations that depend on DB tables.
                 await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
+
+                // SlicerDbContext initialization is handled by SlicerDbInitializationHostedService
+                // registered in AddSlicerModule().
 
                 // After the DB schema exists and seeding has completed, apply environment-based settings initialization.
                 try

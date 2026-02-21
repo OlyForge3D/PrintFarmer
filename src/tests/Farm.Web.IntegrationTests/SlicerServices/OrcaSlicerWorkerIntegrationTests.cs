@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Slicer.Module.Services;
 using Farm.Web.IntegrationTests;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;

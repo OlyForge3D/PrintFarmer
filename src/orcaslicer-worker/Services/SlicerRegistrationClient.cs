@@ -1,8 +1,8 @@
 ﻿using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure.Contracts.Slicing;
-using Farm.Infrastructure.Domain;
+using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Domain;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -58,8 +58,11 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        // Load configuration
-        _apiBaseUrl = configuration["SlicerRegistry:ApiBaseUrl"] ?? configuration["Worker:StorageEndpoint"] ?? "http://api:5245";
+        // Load configuration — prefer unified SlicerApi:BaseUrl, then legacy keys
+        _apiBaseUrl = configuration["SlicerApi:BaseUrl"]
+                   ?? configuration["SlicerRegistry:ApiBaseUrl"]
+                   ?? configuration["Worker:StorageEndpoint"]
+                   ?? "http://api:5245";
         _serviceName = configuration["SlicerRegistry:ServiceName"] ?? Environment.GetEnvironmentVariable("HOSTNAME") ?? "orcaslicer-worker";
         _serviceVersion = configuration["SlicerRegistry:Version"] ?? "1.0.0";
         _serviceHost = configuration["SlicerRegistry:Host"] ?? "http://orcaslicer-worker:8080";

@@ -1,8 +1,8 @@
 ﻿using System.Text.Json.Serialization;
-using Farm.Api.Services.Interfaces;
+using Farm.Infrastructure.Services.Background;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Background;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.Workers;

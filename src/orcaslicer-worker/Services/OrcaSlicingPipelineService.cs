@@ -1,8 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core; // shared interfaces
 
 namespace Farm.OrcaSlicer.Worker.Services;
@@ -23,7 +24,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(configuration);
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
-        _storageEndpoint = configuration["Worker:StorageEndpoint"] ?? "http://api:5245";
+        _storageEndpoint = configuration["SlicerApi:BaseUrl"]
+                          ?? configuration["Worker:StorageEndpoint"]
+                          ?? "http://api:5245";
         _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/usr/local/bin/orcaslicer";
         if (!Directory.Exists(_workingDirectory))
         {

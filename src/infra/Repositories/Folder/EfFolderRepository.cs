@@ -34,7 +34,7 @@ public class EfFolderRepository(AppDbContext db) : IFolderRepository
         }
 
         // Try to find existing folder
-        FolderNode? existingFolder = await _db.Folders
+        FolderNode? existingFolder = await _db.Set<FolderNode>()
             .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, cancellationToken);
 
         if (existingFolder != null)
@@ -68,7 +68,7 @@ public class EfFolderRepository(AppDbContext db) : IFolderRepository
     {
         string normalizedPath = string.IsNullOrWhiteSpace(path) ? "/" : path.TrimEnd(System.IO.Path.DirectorySeparatorChar, '/');
 
-        return await _db.Folders
+        return await _db.Set<FolderNode>()
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, cancellationToken);
     }
@@ -81,7 +81,7 @@ public class EfFolderRepository(AppDbContext db) : IFolderRepository
     /// <returns>List of all folders matching the specified type.</returns>
     public async Task<List<FolderNode>> GetAllByFolderTypeAsync(string folderType, CancellationToken cancellationToken = default)
     {
-        return await _db.Folders
+        return await _db.Set<FolderNode>()
             .AsNoTracking()
             .Where(f => f.FolderType == folderType && !f.DeletedAt.HasValue)
             .OrderBy(f => f.Path)

@@ -46,7 +46,7 @@ public static class CliCommandExtensions
             AppDbContext cliDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             _ = await cliDb.Database.EnsureCreatedAsync();
 
-            Services.Interfaces.IDatabaseInitializer? dbInitializer = scope.ServiceProvider.GetService<Services.Interfaces.IDatabaseInitializer>();
+            Farm.Infrastructure.Services.Interfaces.IDatabaseInitializer? dbInitializer = scope.ServiceProvider.GetService<Farm.Infrastructure.Services.Interfaces.IDatabaseInitializer>();
             if (dbInitializer != null)
             {
                 await dbInitializer.SeedAllAsync();

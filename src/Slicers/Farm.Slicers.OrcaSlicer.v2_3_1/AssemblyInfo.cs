@@ -1,5 +1,5 @@
 ﻿using System.Reflection;
-using Farm.Infrastructure.Contracts.Slicing.Libraries;
+using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicers.OrcaSlicer.v2_3_1;
 
 // Declare this assembly as a slicer library plugin

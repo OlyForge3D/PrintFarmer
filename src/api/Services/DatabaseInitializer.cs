@@ -2,9 +2,10 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.DataManagement;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Normalization;
-using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -421,10 +422,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
 
             foreach (string folderType in folderTypes)
             {
-                bool rootExists = await _context.Folders.AnyAsync(f => f.Path == folderPath && f.FolderType == folderType);
+                bool rootExists = await _context.Set<FolderNode>().AnyAsync(f => f.Path == folderPath && f.FolderType == folderType);
                 if (!rootExists)
                 {
-                    _context.Folders.Add(new FolderNode
+                    _context.Set<FolderNode>().Add(new FolderNode
                     {
                         Id = Guid.NewGuid(),
                         Path = folderPath,

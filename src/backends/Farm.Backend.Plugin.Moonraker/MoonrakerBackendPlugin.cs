@@ -89,9 +89,6 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
         // on-demand by PrinterStatusClientFactory which properly handles their dependencies
         // on scoped services.
 
-        // Register the Moonraker diagnostics service for API diagnostics endpoints
-        services.AddScoped<IMoonrakerDiagnosticsService, MoonrakerDiagnosticsService>();
-
         // Register the MoonrakerSubscriptionService hosted service
         // This service manages real-time WebSocket subscriptions for printer status updates
         // and updates the shared cache before broadcasting via SignalR

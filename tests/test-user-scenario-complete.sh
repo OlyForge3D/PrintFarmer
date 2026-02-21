@@ -45,14 +45,12 @@ warn() {
 
 # Step 1: Generate compose file
 echo "Step 1: Generating Docker Compose with exact user configuration..."
-info "  Architecture: microservices"
 info "  Database: sqlserver"
 info "  Workers: orcaslicer (1 instance)"
 info "  Integrations: spoolman"
 echo ""
 
 if $COMPOSE_GENERATOR \
-    --architecture microservices \
     --db-provider sqlserver \
     --addon-stacks orcaslicer,spoolman \
     --output-dir "$TEST_DIR" >/dev/null 2>&1; then

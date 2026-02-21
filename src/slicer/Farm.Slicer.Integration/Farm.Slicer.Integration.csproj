@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Farm.Slicer.Integration</RootNamespace>
+    <AssemblyName>Farm.Slicer.Integration</AssemblyName>
+    <Description>Thin shim that loads slicer plugin DLLs at runtime and wires them into the
+ASP.NET Core host via ISlicerModule / ISlicerHubRegistrar contracts. The API project references
+only this assembly — zero compile-time dependency on EF Core, SignalR hubs, or OrcaSlicer.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Farm.Slicer.Plugin.Core/Farm.Slicer.Plugin.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

@@ -19,13 +19,13 @@ PrintFarmer now includes optional pgAdmin 4 support for PostgreSQL deployments. 
 ### Enable pgAdmin During Deployment
 
 ```bash
-./scripts/deploy-docker.sh --architecture microservices --enable-pgadmin
+./scripts/deploy-docker.sh --enable-pgadmin
 ```
 
 Or in non-interactive mode:
 
 ```bash
-./scripts/deploy-docker.sh --architecture microservices --enable-pgadmin --non-interactive
+./scripts/deploy-docker.sh --enable-pgadmin --non-interactive
 ```
 
 ### Default Credentials
@@ -282,7 +282,6 @@ pgAdmin is **only supported with PostgreSQL**. Other database providers will ski
 
 ```bash
 ./scripts/deploy-docker.sh \
-  --architecture microservices \
   --include-monitoring \
   --enable-pgadmin \
   --non-interactive

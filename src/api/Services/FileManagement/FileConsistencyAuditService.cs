@@ -6,12 +6,13 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.FileConsistency;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace Farm.Web.Api.Services.FileManagement;
+namespace Farm.Infrastructure.Services.FileManagement;
 
 /// <summary>
 /// Periodic background service that audits file consistency between database records and disk.
@@ -109,7 +110,12 @@ public class FileConsistencyAuditService(
         {
             IFileManagementService fileManagementService = scope.ServiceProvider.GetRequiredService<IFileManagementService>();
             IFileIntegrityService fileIntegrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
-            IFileAuditRepository auditRepo = scope.ServiceProvider.GetRequiredService<IFileAuditRepository>();
+            IFileAuditRepository? auditRepo = scope.ServiceProvider.GetService<IFileAuditRepository>();
+            if (auditRepo is null)
+            {
+                _logger.LogInformation("File audit repository not available - skipping audit");
+                return;
+            }
 
             // Collect results from all audit passes
             AuditResults model3dResults = await AuditModel3DFilesAsync(auditRepo, fileManagementService, fileIntegrityService, ct);

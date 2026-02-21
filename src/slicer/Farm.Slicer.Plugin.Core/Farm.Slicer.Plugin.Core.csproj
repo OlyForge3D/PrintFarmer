@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Farm.Slicer.Module.Contracts.Libraries</RootNamespace>
+    <Description>Plugin contract interfaces and records for slicer library plugins.
+Slicer engine implementations (e.g., OrcaSlicer) reference only this assembly.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Required for IEndpointRouteBuilder, WebApplication (ISlicerHubRegistrar, ISlicerModule) -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

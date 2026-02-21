@@ -17,15 +17,6 @@ namespace Farm.Infrastructure;
 public record CommandResult(bool Success, string? Message = null);
 
 /// <summary>
-/// Response for folder operations (create, move, delete).
-/// </summary>
-/// <param name="Success">Whether the folder operation completed successfully.</param>
-/// <param name="Message">Description of the operation result.</param>
-public record FolderOperationResultDto(
-    [property: JsonPropertyName("success")] bool Success,
-    [property: JsonPropertyName("message")] string Message);
-
-/// <summary>
 /// Result of uploading a G-code file directly to a printer backend.
 /// </summary>
 /// <param name="Message">Status message from the upload operation.</param>

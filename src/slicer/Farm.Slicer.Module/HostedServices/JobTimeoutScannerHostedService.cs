@@ -1,0 +1,187 @@
+﻿using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Configuration;
+using Farm.Slicer.Module.Services.Metrics;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace Farm.Slicer.Module.HostedServices;
+
+/// <summary>
+/// Background service that periodically scans for stuck / timed-out slice jobs
+/// and triggers retry/requeue or failure according to policy.
+/// </summary>
+public class JobTimeoutScannerHostedService : BackgroundService
+{
+    private readonly ILogger<JobTimeoutScannerHostedService> _logger;
+    private readonly IServiceProvider _sp;
+    private readonly JobDispatchRetrySettings _retrySettings;
+    private readonly TimeSpan _scanInterval;
+    private readonly IWorkerCircuitBreakerService? _circuitBreaker;
+
+    public JobTimeoutScannerHostedService(
+        ILogger<JobTimeoutScannerHostedService> logger,
+        IServiceProvider sp,
+        IOptions<JobDispatchRetrySettings> retryOptions,
+        IWorkerCircuitBreakerService? circuitBreaker = null)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _sp = sp ?? throw new ArgumentNullException(nameof(sp));
+        _retrySettings = retryOptions?.Value ?? new JobDispatchRetrySettings();
+        _scanInterval = TimeSpan.FromSeconds(30);
+        _circuitBreaker = circuitBreaker;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("JobTimeoutScannerHostedService started");
+
+        // Short initial delay to allow dependent services (DB, network) to come online
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+        }
+        catch (OperationCanceledException)
+        { /* shutting down */
+        }
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await ScanOnceAsync(stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                if (IsTransientDatabaseError(ex))
+                {
+                    _logger.LogWarning(ex, "Transient DB/DNS error while scanning for stuck slice jobs; will retry");
+                }
+                else
+                {
+                    _logger.LogError(ex, "Error while scanning for stuck slice jobs");
+                }
+            }
+
+            await Task.Delay(_scanInterval, stoppingToken);
+        }
+
+        _logger.LogInformation("JobTimeoutScannerHostedService stopping");
+    }
+
+    private static bool IsTransientDatabaseError(Exception? ex)
+    {
+        while (ex != null)
+        {
+            if (ex is System.Net.Sockets.SocketException)
+            {
+                return true;
+            }
+
+            string typeName = ex.GetType().Name;
+            if (typeName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) ||
+                (ex.Message != null && ex.Message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            ex = ex.InnerException;
+        }
+
+        return false;
+    }
+
+    private async Task ScanOnceAsync(CancellationToken ct)
+    {
+        // Check circuit breaker states and transition to half-open if cooldown elapsed
+        _circuitBreaker?.CheckCircuits();
+
+        using IServiceScope scope = _sp.CreateScope();
+        ISliceJobRepository repo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IWorkerRepository workerRepo = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
+
+        int longRunningSeconds = 60 * 15; // 15 minutes
+
+        // Retry on transient DB/DNS errors with exponential backoff
+        const int maxDbRetries = 4;
+        int attempt = 0;
+        IReadOnlyList<SliceJob>? stuck = null;
+        while (attempt < maxDbRetries)
+        {
+            try
+            {
+                stuck = await repo.GetStuckJobsAsync(longRunningSeconds, limit: 100, ct: ct);
+                break;
+            }
+            catch (Exception ex)
+            {
+                if (IsTransientDatabaseError(ex) && attempt < maxDbRetries - 1)
+                {
+                    int delayMs = (int)(Math.Pow(2, attempt) * 1000);
+                    _logger.LogWarning(ex, "Transient DB/DNS error querying stuck jobs. Retrying in {Delay}ms (attempt {Attempt}/{Max})", delayMs, attempt + 1, maxDbRetries);
+                    try
+                    {
+                        await Task.Delay(delayMs, ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    attempt++;
+                    continue;
+                }
+
+                throw;
+            }
+        }
+
+        if (stuck == null || stuck.Count == 0)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Found {Count} stuck slice jobs to evaluate", stuck.Count);
+
+        foreach (SliceJob? job in stuck.ToList())
+        {
+            try
+            {
+                // Record failure in circuit breaker if worker is known
+                if (job.WorkerId.HasValue && job.WorkerId.Value != Guid.Empty && _circuitBreaker != null)
+                {
+                    await _circuitBreaker.RecordJobFailureAsync(job.WorkerId.Value, workerRepo, ct);
+                }
+
+                // If lease expired, increment retry and requeue or fail depending on retry count
+                await repo.IncrementRetryAndRequeueAsync(job.Id, _retrySettings.MaxAttempts, ct);
+                SliceJobMetrics? metrics = scope.ServiceProvider.GetService<SliceJobMetrics>();
+                metrics?.RecordJobRetry();
+                metrics?.RecordJobTimedOut();
+                if (job.RetryCount + 1 > _retrySettings.MaxAttempts)
+                {
+                    _logger.LogWarning("Job {JobId} exceeded max retries and was marked Failed", job.Id);
+                }
+                else
+                {
+                    _logger.LogInformation("Job {JobId} lease expired, requeued for retry (attempt {Attempt})", job.Id, job.RetryCount + 1);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed handling stuck job {JobId}", job.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Public helper to let tests run a single scan iteration.
+    /// </summary>
+    public async Task ProcessStuckJobsOnceAsync(CancellationToken ct = default)
+    {
+        await ScanOnceAsync(ct);
+    }
+}

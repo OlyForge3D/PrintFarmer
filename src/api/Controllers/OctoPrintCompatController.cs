@@ -2,11 +2,12 @@
 using System.IO;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Filters;
 using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.OctoPrint;
-using Farm.Web.Api.Services.Queue;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -117,8 +118,8 @@ namespace Farm.Web.Api.Controllers
             // Save to IFormFile directly using existing file upload pipeline
             try
             {
-                var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
-                var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadQuotaService)) as Farm.Web.Api.Services.IGcodeUploadQuotaService;
+                var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Services.Interfaces.IGcodeUploadSettings)) as Farm.Infrastructure.Services.Interfaces.IGcodeUploadSettings;
+                var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Infrastructure.Services.Quota.IGcodeUploadQuotaService)) as Farm.Infrastructure.Services.Quota.IGcodeUploadQuotaService;
 
                 _logger.LogDebug(
                     "OctoPrint upload: uploadSettings={HasSettings}, quotaService={HasQuota}",

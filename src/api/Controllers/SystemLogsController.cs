@@ -13,9 +13,9 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/systemlogs")]
 [Authorize(Roles = "farm_admin")]
-public class SystemLogsController(Services.SystemLogs.ISystemLogService systemLogService) : ControllerBase
+public class SystemLogsController(ISystemLogService systemLogService) : ControllerBase
 {
-    private readonly Services.SystemLogs.ISystemLogService _service = systemLogService;
+    private readonly ISystemLogService _service = systemLogService;
 
     [HttpGet]
     public async Task<IActionResult> GetLogsAsync(

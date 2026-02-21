@@ -796,19 +796,18 @@ generate_jwt_key() {
 }
 
 generate_deployment_config() {
-    local architecture="$1"
-    local include_monitoring="${2:-true}"  # Default to true
-    local include_telemetry="${3:-true}"   # Default to true
-    local include_security="${4:-false}"
-    local include_registry="${5:-false}"
-    local include_discovery="${6:-false}"
-    local output_dir="${7:-$(pwd)}"
+    local include_monitoring="${1:-true}"  # Default to true
+    local include_telemetry="${2:-true}"   # Default to true
+    local include_security="${3:-false}"
+    local include_registry="${4:-false}"
+    local include_discovery="${5:-false}"
+    local output_dir="${6:-$(pwd)}"
     
-    print_info "Generating deployment configuration for $architecture architecture..."
+    print_info "Generating deployment configuration..."
     
     # Use the compose generator
     local generator_cmd="$SCRIPT_DIR/docker/compose-generator.sh"
-    local generator_args=("--architecture" "$architecture")
+    local generator_args=()
     
     # Monitoring and telemetry: pass exclude flags if disabled, include flags if enabled
     # Generator defaults to enabled, so we only need to pass exclude when false
@@ -2287,7 +2286,6 @@ MANUAL IMAGE MANAGEMENT OPTIONS (Advanced):
     --load-cached-orcaslicer     Show cached OrcaSlicer AppImage info
 
 COMPOSE GENERATOR OPTIONS:
-        --architecture ARCH Architecture flag (deprecated, standard deployment always used)
         --exclude-monitoring Disable monitoring stack (Prometheus, Grafana) - enabled by default
         --exclude-telemetry Disable telemetry/observability (OpenTelemetry, Jaeger) - enabled by default
         --include-monitoring Legacy flag - monitoring now included by default
@@ -2924,25 +2922,13 @@ install_dotnet_sdk() {
     fi
 }
 
-# Set deployment architecture (simplified - only microservices mode)
+# Set standard deployment constants
 choose_architecture() {
-    # Architecture is now always microservices (monolithic was identical and confusing)
-    # The --architecture CLI flag is accepted for backwards compatibility but ignored
-    if [ -n "${CLI_ARCHITECTURE:-}" ]; then
-        # Accept for backwards compatibility, but always use microservices
-        if [ "$CLI_ARCHITECTURE" = "monolithic" ] || [ "$CLI_ARCHITECTURE" = "mono" ]; then
-            print_info "Note: Monolithic mode deprecated - using standard deployment (identical behavior)"
-        fi
-    fi
-    
-    # Always use microservices architecture
     ARCHITECTURE="microservices"
     ENV_FILE=".env"
     COMPOSE_FILE="docker-compose.yml"
     
-    # In non-interactive mode, just confirm
     if [ "$NON_INTERACTIVE" = "true" ]; then
-        print_info "Using standard deployment architecture"
         return 0
     fi
     
@@ -3227,6 +3213,51 @@ adjust_connection_strings_for_network_mode() {
 
  
 
+# Configure distributed slicing and worker settings
+# Must run BEFORE configure_external_storage so storage prompts can
+# conditionally show model/profile paths when slicing is enabled.
+configure_slicing() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENABLE_DISTRIBUTED_SLICING:-}" ]; then
+        print_info "Using configured distributed slicing: $ENABLE_DISTRIBUTED_SLICING"
+        return 0
+    fi
+
+    print_header "🔪 Distributed Slicing Configuration"
+
+    prompt_yes_no "Enable distributed slicing (uses external slicer workers)?" "yes" "ENABLE_DIST_SLICING_CHOICE"
+    if [ "$ENABLE_DIST_SLICING_CHOICE" = "yes" ]; then
+        ENABLE_DISTRIBUTED_SLICING=true
+    else
+        ENABLE_DISTRIBUTED_SLICING=false
+    fi
+
+    # Worker enablement & scaling (only meaningful if distributed slicing enabled)
+    if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
+        echo
+        echo -e "${BLUE}Configure slicer workers. You can enable OrcaSlicer workers and specify replica counts.${NC}"
+        # Default to 'no' to avoid accidental enabling when slicer work is paused
+        prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.1}" "ORCASLICER_VERSION"
+            prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
+        else
+            ORCA_WORKER_COUNT=0
+        fi
+
+        # Allow endpoint override (advanced)
+        prompt_yes_no "Override default worker service endpoints?" "no" "OVERRIDE_WORKER_ENDPOINTS"
+        if [ "$OVERRIDE_WORKER_ENDPOINTS" = "yes" ]; then
+            if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+                prompt_with_default "OrcaSlicer worker endpoint (API reachable URL):" "http://orcaslicer-worker:8080" "ORCA_WORKER_ENDPOINT"
+            fi
+        fi
+    else
+        ENABLE_ORCA_WORKER=no
+        ORCA_WORKER_COUNT=0
+    fi
+}
+
 # Configure additional settings
 configure_external_storage() {
     # In non-interactive mode, use pre-loaded config if available
@@ -3235,9 +3266,16 @@ configure_external_storage() {
         
         # Apply defaults for any missing paths when external storage is enabled
         if [ "$USE_EXTERNAL_STORAGE" = "yes" ] || [ "$USE_EXTERNAL_STORAGE" = "true" ]; then
-            EXTERNAL_MODELS_PATH="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
+            # G-code storage is always needed (manual uploads, slicer uploads)
             EXTERNAL_GCODE_PATH="${EXTERNAL_GCODE_PATH:-$HOME/.printfarmer/gcode}"
-            EXTERNAL_PROFILES_PATH="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
+            # Slicer-only storage: models and profiles only when distributed slicing is enabled
+            if [ "${ENABLE_DISTRIBUTED_SLICING:-false}" = "true" ]; then
+                EXTERNAL_MODELS_PATH="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
+                EXTERNAL_PROFILES_PATH="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
+            else
+                EXTERNAL_MODELS_PATH=""
+                EXTERNAL_PROFILES_PATH=""
+            fi
             EXTERNAL_DATAPROTECTION_PATH="${EXTERNAL_DATAPROTECTION_PATH:-$HOME/.printfarmer/dataprotection-keys}"
             EXTERNAL_DATABASE_PATH="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
             EXTERNAL_PGADMIN_PATH="${EXTERNAL_PGADMIN_PATH:-$HOME/.printfarmer/pgadmin}"
@@ -3274,21 +3312,9 @@ configure_external_storage() {
         print_success "External storage enabled - data will persist on host filesystem"
         echo
         
-        # Model storage directory (defaults to user's home directory - no sudo needed)
-        local default_models_path="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
-        prompt_with_default "Host directory for 3D model storage (all uploaded models):" "$default_models_path" "EXTERNAL_MODELS_PATH"
-        
-        # Ensure directory exists
-        if ! mkdir -p "$EXTERNAL_MODELS_PATH" 2>/dev/null; then
-            print_error "Failed to create models directory: $EXTERNAL_MODELS_PATH"
-            print_info "Please ensure the directory path is writable or change the path above"
-            return 1
-        fi
-        print_success "Models directory ready: $EXTERNAL_MODELS_PATH"
-        
-        # G-code storage directory (defaults to user's home directory)
+        # G-code storage directory (always needed - manual uploads, slicer uploads)
         local default_gcode_path="${EXTERNAL_GCODE_PATH:-$HOME/.printfarmer/gcode}"
-        prompt_with_default "Host directory for generated G-code:" "$default_gcode_path" "EXTERNAL_GCODE_PATH"
+        prompt_with_default "Host directory for G-code files:" "$default_gcode_path" "EXTERNAL_GCODE_PATH"
         
         # Ensure directory exists
         if ! mkdir -p "$EXTERNAL_GCODE_PATH" 2>/dev/null; then
@@ -3298,17 +3324,36 @@ configure_external_storage() {
         fi
         print_success "G-code directory ready: $EXTERNAL_GCODE_PATH"
         
-        # Slicer profiles directory (defaults to user's home directory, optional)
-        local default_profiles_path="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
-        prompt_with_default "Host directory for slicer profiles (optional):" "$default_profiles_path" "EXTERNAL_PROFILES_PATH"
-        
-        # Ensure directory exists
-        if ! mkdir -p "$EXTERNAL_PROFILES_PATH" 2>/dev/null; then
-            print_error "Failed to create slicer profiles directory: $EXTERNAL_PROFILES_PATH"
-            print_info "Please ensure the directory path is writable or change the path above"
-            return 1
+        # Slicer-only storage: models and profiles only when distributed slicing is enabled
+        if [ "${ENABLE_DISTRIBUTED_SLICING:-false}" = "true" ]; then
+            # Model storage directory (defaults to user's home directory - no sudo needed)
+            local default_models_path="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
+            prompt_with_default "Host directory for 3D model storage (all uploaded models):" "$default_models_path" "EXTERNAL_MODELS_PATH"
+            
+            # Ensure directory exists
+            if ! mkdir -p "$EXTERNAL_MODELS_PATH" 2>/dev/null; then
+                print_error "Failed to create models directory: $EXTERNAL_MODELS_PATH"
+                print_info "Please ensure the directory path is writable or change the path above"
+                return 1
+            fi
+            print_success "Models directory ready: $EXTERNAL_MODELS_PATH"
+            
+            # Slicer profiles directory (defaults to user's home directory, optional)
+            local default_profiles_path="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
+            prompt_with_default "Host directory for slicer profiles (optional):" "$default_profiles_path" "EXTERNAL_PROFILES_PATH"
+            
+            # Ensure directory exists
+            if ! mkdir -p "$EXTERNAL_PROFILES_PATH" 2>/dev/null; then
+                print_error "Failed to create slicer profiles directory: $EXTERNAL_PROFILES_PATH"
+                print_info "Please ensure the directory path is writable or change the path above"
+                return 1
+            fi
+            print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
+        else
+            print_info "Distributed slicing disabled - skipping model/profile storage directories"
+            EXTERNAL_MODELS_PATH=""
+            EXTERNAL_PROFILES_PATH=""
         fi
-        print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
         
         # Data Protection keys storage (ASP.NET Core encryption keys - persists across container restarts)
         local default_dataprotection_path="${EXTERNAL_DATAPROTECTION_PATH:-$HOME/.printfarmer/dataprotection-keys}"
@@ -3347,9 +3392,9 @@ configure_external_storage() {
         print_success "pgAdmin directory ready: $EXTERNAL_PGADMIN_PATH"
         
         print_success "External storage directories configured:"
-        echo "  • Models:       $EXTERNAL_MODELS_PATH"
-        echo "  • G-code:       $EXTERNAL_GCODE_PATH"
-        echo "  • Profiles:     $EXTERNAL_PROFILES_PATH"
+        [ -n "$EXTERNAL_MODELS_PATH" ] && echo "  • Models:       $EXTERNAL_MODELS_PATH"
+        [ -n "$EXTERNAL_GCODE_PATH" ] && echo "  • G-code:       $EXTERNAL_GCODE_PATH"
+        [ -n "$EXTERNAL_PROFILES_PATH" ] && echo "  • Profiles:     $EXTERNAL_PROFILES_PATH"
         echo "  • Keys:         $EXTERNAL_DATAPROTECTION_PATH (Encryption keys)"
         echo "  • Database:     $EXTERNAL_DATABASE_PATH (PostgreSQL/SQL Server)"
         echo "  • pgAdmin:      $EXTERNAL_PGADMIN_PATH (pgAdmin configuration)"
@@ -3629,41 +3674,6 @@ configure_additional() {
         ENABLE_DISCOVERY="false"
     fi
     
-
-
-    echo
-    echo -e "${BLUE}Distributed Slicing Configuration${NC}"
-    prompt_yes_no "Enable distributed slicing (uses external slicer workers)?" "yes" "ENABLE_DIST_SLICING_CHOICE"
-    if [ "$ENABLE_DIST_SLICING_CHOICE" = "yes" ]; then
-        ENABLE_DISTRIBUTED_SLICING=true
-    else
-        ENABLE_DISTRIBUTED_SLICING=false
-    fi
-
-    # Worker enablement & scaling (only meaningful if distributed slicing enabled)
-    if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
-        echo
-        echo -e "${BLUE}Configure slicer workers. You can enable OrcaSlicer workers and specify replica counts.${NC}"
-    # Default to 'no' to avoid accidental enabling when slicer work is paused
-    prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
-        if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.3.1}" "ORCASLICER_VERSION"
-            prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
-        else
-            ORCA_WORKER_COUNT=0
-        fi
-
-        # Allow endpoint override (advanced)
-        prompt_yes_no "Override default worker service endpoints?" "no" "OVERRIDE_WORKER_ENDPOINTS"
-        if [ "$OVERRIDE_WORKER_ENDPOINTS" = "yes" ]; then
-            if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-                prompt_with_default "OrcaSlicer worker endpoint (API reachable URL):" "http://orcaslicer-worker:8080" "ORCA_WORKER_ENDPOINT"
-            fi
-        fi
-    else
-        ENABLE_ORCA_WORKER=no
-        ORCA_WORKER_COUNT=0
-    fi
 
     echo
     echo -e "${BLUE}Spoolman Integration${NC}"
@@ -4295,75 +4305,6 @@ EOF
 }
 
 # Generate docker-compose override if needed
-generate_compose_override() {
-    if [ "$ARCHITECTURE" = "microservices" ] && { [ "${INCLUDE_POSTGRES:-no}" = "yes" ] || [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; }; then
-        print_info "Creating docker-compose override for database services"
-        
-        cat > docker-compose.override.yml << EOF
-# Auto-generated database services
-
-services:
-EOF
-        
-        if [ "${INCLUDE_POSTGRES:-no}" = "yes" ]; then
-            cat >> docker-compose.override.yml << EOF
-    postgres:
-        image: postgres:15
-    environment:
-      - POSTGRES_DB=\${POSTGRES_DB}
-      - POSTGRES_USER=\${POSTGRES_USER}
-      - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
-    ports:
-    - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts/docker/init-postgres.sh:/docker-entrypoint-initdb.d/01-init-auth.sh:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER} -d \${POSTGRES_DB}"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-EOF
-        fi
-        
-        if [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; then
-            cat >> docker-compose.override.yml << EOF
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=\${MSSQL_SA_PASSWORD}
-      - MSSQL_PID=\${MSSQL_PID:-Developer}
-    ports:
-      - "\${SQLSERVER_PORT:-1433}:1433"
-    volumes:
-      - sqlserver_data:/var/opt/mssql
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"\${MSSQL_SA_PASSWORD}\" -C -Q 'SELECT 1' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-EOF
-        fi
-        
-        
-        cat >> docker-compose.override.yml << EOF
-
-volumes:
-EOF
-        
-        [ "${INCLUDE_POSTGRES:-no}" = "yes" ] && echo "  postgres_data:" >> docker-compose.override.yml
-        [ "${INCLUDE_SQLSERVER:-no}" = "yes" ] && echo "  sqlserver_data:" >> docker-compose.override.yml
-        
-        print_success "Docker Compose override file created: docker-compose.override.yml"
-        # Ensure no top-level `version:` key remains in generated override
-        remove_version_keys "docker-compose.override.yml"
-    else
-        print_info "No database services needed - skipping override file generation"
-    fi
-}
-
 # Build and deploy
 deploy_containers() {
     print_header "🚀 Building and Deploying Containers"
@@ -4388,11 +4329,6 @@ deploy_containers() {
     print_info "Build verbosity: $BUILD_VERBOSITY (set with --build-verbosity or --verbose-build)"
     # Always include selected compose file
     local compose_cmd=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
-
-    # Host network mode removed. Use standard compose override if present.
-    if [ -f docker-compose.override.yml ]; then
-        compose_cmd+=( -f docker-compose.override.yml )
-    fi
 
     # Registry deployment: pull pre-built images instead of building locally
     if [ "$USE_REGISTRY" = "true" ]; then
@@ -4480,6 +4416,18 @@ EOF
         ORCA_ASSET_IMAGE=${ORCA_ASSET_IMAGE:-}
         ORCA_ASSET_PATH=${ORCA_ASSET_PATH:-}
         ORCA_ASSET_URL=${ORCA_ASSET_URL:-}
+
+        # Clean directories with literal backslashes created by dotnet ef on WSL.
+        # These cannot be excluded by .dockerignore (backslash is an escape char in Go filepath.Match)
+        # and cause MSB3552 "Resource file **/*.resx cannot be found" during Docker builds.
+        local backslash_dirs
+        backslash_dirs=$(find ./src -type d -name '*\*' 2>/dev/null || true)
+        if [ -n "$backslash_dirs" ]; then
+            print_info "Cleaning dotnet ef backslash directories from build context..."
+            echo "$backslash_dirs" | while IFS= read -r dir; do
+                rm -rf "$dir"
+            done
+        fi
 
         # Prepare a temporary build_context folder that will be used by docker compose build
         BUILD_CTX_DIR="./.tmp_build_context"
@@ -4708,9 +4656,6 @@ EOF
             local seed_cmd=("")
             # Build a minimal compose command for core infra
             local infra_compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
-            if [ -f docker-compose.override.yml ]; then
-                infra_compose+=( -f docker-compose.override.yml )
-            fi
 
             # Decide which services to start
             local infra_services=(database)
@@ -4963,7 +4908,7 @@ wait_for_database() {
         print_error "- Verify SA_PASSWORD in .env is correct: grep MSSQL_SA_PASSWORD .env"
         print_error ""
         print_error "Try restarting with a new strong password:"
-        print_error "  rm .env docker-compose.override.yml 2>/dev/null"
+        print_error "  rm .env 2>/dev/null"
         print_error "  ./scripts/deploy-docker.sh  # Let script generate new password"
     fi
     
@@ -5581,6 +5526,9 @@ validate_external_storage_permissions() {
     if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
         paths_to_validate+=("${EXTERNAL_DATABASE_PATH}:Database")
     fi
+    if [ -n "${EXTERNAL_DATAPROTECTION_PATH:-}" ]; then
+        paths_to_validate+=("${EXTERNAL_DATAPROTECTION_PATH}:Data Protection Keys")
+    fi
     
     if [ ${#paths_to_validate[@]} -eq 0 ]; then
         return 0
@@ -5612,7 +5560,18 @@ validate_external_storage_permissions() {
             continue
         fi
         
-        # Check if directory is readable and writable by current user
+        # Container-mounted directories (G-code, Models, Profiles, Data Protection Keys)
+        # are chown'd by the container entrypoint at startup. The deploy user doesn't
+        # need write access — only verify the directory exists and is readable.
+        case "$desc" in
+            "G-code Files"|"3D Models"|"Slicer Profiles"|"Data Protection Keys")
+                print_success "✓ [$desc] $path (exists - container manages permissions)"
+                ((valid_dirs++))
+                continue
+                ;;
+        esac
+        
+        # For remaining directories, check if readable and writable by current user
         if [ ! -r "$path" ]; then
             print_error "✗ [$desc] Directory not readable: $path"
             ((invalid_dirs++))
@@ -5812,6 +5771,21 @@ verify_deployment() {
             print_info "  (Worker may still be starting. Check 'docker-compose -f $COMPOSE_FILE ps' and logs for details)"
             health_check_failed=true
         fi
+
+        # Slicer-host always accompanies orca-worker
+        print_info "Testing slicer-host..."
+        local slicer_host_checked=false
+
+        if dc exec -T slicer-host curl -sf "http://localhost:5246/healthz" >/dev/null 2>&1; then
+            print_success "✓ Slicer host: Healthy"
+            slicer_host_checked=true
+        fi
+
+        if [ "$slicer_host_checked" = false ]; then
+            print_warning "✗ Slicer host: Not responding"
+            print_info "  (Slicer host may still be starting. Check 'docker-compose -f $COMPOSE_FILE ps' and logs for details)"
+            health_check_failed=true
+        fi
     fi
     
     # Test pgAdmin health if enabled
@@ -6003,9 +5977,6 @@ display_final_info() {
     echo -e "${GREEN}Configuration Files:${NC}"
     echo -e "${BLUE}  • Environment: $ENV_FILE${NC}"
     echo -e "${BLUE}  • Compose: $COMPOSE_FILE${NC}"
-    if [ -f "docker-compose.override.yml" ]; then
-        echo -e "${BLUE}  • Override: docker-compose.override.yml${NC}"
-    fi
     echo
     
     # Troubleshooting section
@@ -6097,9 +6068,12 @@ redeploy_existing() {
     generate_env_file
     generate_react_env_production
     
-    # Use existing compose override if it exists
+    # Remove stale legacy override file - the compose-generator produces a complete
+    # docker-compose.yml that already includes the database service configuration.
+    # A leftover docker-compose.override.yml would add a conflicting duplicate service.
     if [ -f "docker-compose.override.yml" ]; then
-        print_info "Using existing docker-compose.override.yml"
+        print_info "Removing stale docker-compose.override.yml (database already in generated compose file)"
+        rm -f docker-compose.override.yml
     fi
     
     # Pre-create external storage directories with proper ownership on the host
@@ -6181,101 +6155,22 @@ configure_pgadmin_servers() {
         return 0
     fi
     
-    print_info "Configuring pgAdmin servers..."
+    # Server configuration is handled via servers.json pre-seeding (generated by
+    # generate_pgadmin_servers_config) and mounted into the container at
+    # /pgadmin4/servers.json. This is the officially supported approach per
+    # https://www.pgadmin.org/docs/pgadmin4/latest/import_export_servers.html
+    # The REST API endpoint (/api/v1/servers) was removed in newer pgAdmin versions.
     
-    # Check if pgAdmin is running
-    if ! docker ps --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
-        print_warning "pgAdmin container is not running - skipping server configuration"
-        return 0
-    fi
-    
-    # Wait a bit for pgAdmin to fully initialize
-    sleep 3
-    
-    # Use curl to configure PostgreSQL server via REST API
     local PGADMIN_URL="http://localhost:5050/pgadmin"
-    local PGADMIN_USER="${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}"
-    local PGADMIN_PASS="${AUTO_ADMIN_PASSWORD:-adminpass}"
-    
-    # Create a temporary file for curl cookies
-    local COOKIE_JAR=$(mktemp)
-    trap "rm -f '$COOKIE_JAR'" EXIT
-    
-    # Step 1: Get login page to establish session
-    print_info "Establishing pgAdmin session..."
-    
-    curl -s -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-        -X GET "${PGADMIN_URL}/login" \
-        -H "Content-Type: text/html" \
-        >/dev/null 2>&1
-    
-    # Step 2: Authenticate with pgAdmin
-    print_info "Authenticating with pgAdmin..."
-    
-    local LOGIN_RESPONSE=$(curl -s -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-        -X POST "${PGADMIN_URL}/login" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "email=${PGADMIN_USER}&password=${PGADMIN_PASS}" \
-        2>&1)
-    
-    # Check if authentication was successful by checking if we can access the API
-    local AUTH_CHECK=$(curl -s -b "$COOKIE_JAR" \
-        -X GET "${PGADMIN_URL}/api/v1/preferences" \
-        -H "Content-Type: application/json" \
-        2>&1)
-    
-    if echo "$AUTH_CHECK" | grep -q "errors\|Unauthorized\|401"; then
-        print_warning "Failed to authenticate with pgAdmin - servers may need manual configuration"
-        print_info "You can add servers manually in pgAdmin at ${PGADMIN_URL}"
-        return 0
-    fi
-    
-    # Step 2: Configure PostgreSQL server
-    print_info "Adding PostgreSQL server to pgAdmin..."
-    
-    # Get the database service name and credentials
     local DB_HOST="${POSTGRES_HOST:-database}"
     local DB_PORT="${POSTGRES_PORT:-5432}"
     local DB_USER="${POSTGRES_USER:-postgres}"
-    local DB_NAME="postgres"
-    local DB_PASS="${POSTGRES_PASSWORD:-}"
     
-    # Create the server configuration JSON
-    local SERVER_CONFIG="{
-        \"name\": \"PrintFarmer PostgreSQL\",
-        \"group_id\": 1,
-        \"host\": \"${DB_HOST}\",
-        \"port\": ${DB_PORT},
-        \"username\": \"${DB_USER}\",
-        \"password\": \"${DB_PASS}\",
-        \"db\": \"${DB_NAME}\",
-        \"ssl_mode\": \"prefer\",
-        \"maintenance_db\": \"postgres\",
-        \"comment\": \"PrintFarmer database server - auto configured\"
-    }"
+    print_success "PostgreSQL server pre-configured in pgAdmin via servers.json"
+    print_info "Server: ${DB_HOST}:${DB_PORT}, User: ${DB_USER}"
+    print_info "Access pgAdmin at ${PGADMIN_URL}"
+    print_info "Note: Password must be entered on first connection"
     
-    # Add the server via REST API
-    local ADD_SERVER=$(curl -s -b "$COOKIE_JAR" \
-        -X POST "${PGADMIN_URL}/api/v1/servers" \
-        -H "Content-Type: application/json" \
-        -d "$SERVER_CONFIG" \
-        2>&1)
-    
-    # Check if server was added successfully
-    if echo "$ADD_SERVER" | grep -q "\"name\": \"PrintFarmer PostgreSQL\"" || echo "$ADD_SERVER" | grep -q "\"id\""; then
-        print_success "PostgreSQL server configured in pgAdmin successfully"
-        print_info "Server: ${DB_HOST}:${DB_PORT}"
-        print_info "You can access it at ${PGADMIN_URL}"
-    elif echo "$ADD_SERVER" | grep -q "already exists"; then
-        print_info "PostgreSQL server already configured in pgAdmin"
-    else
-        # Log the response for debugging
-        print_warning "Server configuration response: $ADD_SERVER"
-        print_info "You can add the server manually in pgAdmin at ${PGADMIN_URL}"
-        print_info "Use database host: ${DB_HOST}, port: ${DB_PORT}, user: ${DB_USER}"
-    fi
-    
-    rm -f "$COOKIE_JAR"
     return 0
 }
 
@@ -6318,7 +6213,7 @@ main() {
         
         # Determine output directory
         local output_dir="$(pwd)"
-        if generate_deployment_config "$ARCHITECTURE" "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "${INCLUDE_DISCOVERY:-false}" "$output_dir"; then
+        if generate_deployment_config "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "${INCLUDE_DISCOVERY:-false}" "$output_dir"; then
             print_success "Configuration regenerated successfully"
             print_info "Updated files:"
             print_info "  - .env"
@@ -6440,6 +6335,7 @@ main() {
     configure_database
     configure_networking
     adjust_connection_strings_for_network_mode
+    configure_slicing
     configure_external_storage
     configure_additional
     validate_configuration
@@ -6471,12 +6367,20 @@ main() {
     # Determine output directory (CLI option or default to current directory)
     local output_dir="${CLI_OUTPUT_DIR:-$(pwd)}"
 
-    if generate_deployment_config "$ARCHITECTURE" "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "$INCLUDE_DISCOVERY" "$output_dir"; then
-        print_success "Using new compose generator"
-    else
-        print_warning "Falling back to legacy compose generation"
-        generate_compose_override
+    # Remove any stale docker-compose.override.yml left by previous deployments.
+    # The compose-generator produces a single complete docker-compose.yml with the
+    # database service already configured; an override would create a conflicting
+    # duplicate service on the same port.
+    if [ -f docker-compose.override.yml ]; then
+        print_info "Removing stale docker-compose.override.yml (database already in generated compose file)"
+        rm -f docker-compose.override.yml
     fi
+
+    if ! generate_deployment_config "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "$INCLUDE_DISCOVERY" "$output_dir"; then
+        print_error "Failed to generate deployment configuration. Cannot proceed."
+        exit 1
+    fi
+    print_success "Deployment configuration generated successfully"
 
     # Optional prepull for Apple Silicon or slow networks: pull common base images
     prepull_images() {
@@ -6628,15 +6532,15 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --architecture)
+            # Accepted for backwards compatibility, ignored
             if [ -n "${2:-}" ]; then
-                CLI_ARCHITECTURE="$2"
                 shift 2
             else
-                echo "Missing value for --architecture" >&2; exit 2
+                shift
             fi
             ;;
         --architecture=*)
-            CLI_ARCHITECTURE="${1#--architecture=}"
+            # Accepted for backwards compatibility, ignored
             shift
             ;;
         --include-monitoring)

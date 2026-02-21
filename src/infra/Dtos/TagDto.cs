@@ -1,24 +1,19 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Diagnostics.CodeAnalysis;
-using System.Text.Json.Serialization;
-using Farm.Infrastructure.Annotations;
-using Farm.Infrastructure.Domain;
-
-namespace Farm.Infrastructure;
+﻿namespace Farm.Infrastructure.Dtos;
 
 /// <summary>
-/// Tag for organizing and categorizing 3D models
-/// </summary>
-/// <summary>
-/// Tag data transfer object (works for any taggable object type)
+/// Tag data transfer object for organizing and categorizing items.
 /// </summary>
 public class TagDto
 {
+    /// <summary>Gets or sets the tag identifier.</summary>
     public Guid Id { get; set; }
 
+    /// <summary>Gets or sets the tag name.</summary>
     public string Name { get; set; } = string.Empty;
 
-    public string? Color { get; set; } // Hex color for UI display
+    /// <summary>Gets or sets the hex color for UI display.</summary>
+    public string? Color { get; set; }
 
+    /// <summary>Gets or sets the tag description.</summary>
     public string? Description { get; set; }
 }

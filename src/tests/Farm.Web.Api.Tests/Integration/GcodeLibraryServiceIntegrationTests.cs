@@ -49,7 +49,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     /// </summary>
     private async Task<FolderNode> GetOrCreateGcodeFolderAsync(AppDbContext context)
     {
-        FolderNode? folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
+        FolderNode? folder = await context.Set<FolderNode>().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
         if (folder == null)
         {
             folder = new FolderNode
@@ -58,7 +58,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
                 Path = "/",
                 FolderType = "gcode"
             };
-            context.Folders.Add(folder);
+            context.Set<FolderNode>().Add(folder);
             await context.SaveChangesAsync();
         }
         return folder;

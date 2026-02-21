@@ -7,12 +7,14 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.FileManagement;
+using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Services.Tags;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
-using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
-using Farm.Web.Api.Services.FileManagement;
-using Farm.Web.Api.Services.Tags;
+using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -37,8 +39,8 @@ public class GcodeFilesController(
     IGcodeUploadSettings uploadSettings,
     IGcodeUploadQuotaService quotaService,
     Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService,
-    Farm.Web.Api.Services.FileManagement.IChunkedUploadService chunkedUploadService,
-    Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService,
+    Farm.Infrastructure.Services.FileManagement.IChunkedUploadService chunkedUploadService,
+    Farm.Infrastructure.Services.FileManagement.IFileManagementService fileManagementService,
     IStoragePathService storagePathService,
     IStoredFileOperationsService storedFileOperationsService) : ControllerBase
 {
@@ -816,7 +818,7 @@ public class GcodeFilesController(
         {
             if (request == null || string.IsNullOrWhiteSpace(request.Path))
             {
-                return BadRequest(new FolderOperationResultDto(false, "Folder path is required"));
+                return BadRequest(new FolderOperationResultDto { Success = false, Message = "Folder path is required" });
             }
 
             // Extract parent path and folder name from the full path
@@ -827,7 +829,7 @@ public class GcodeFilesController(
 
             if (string.IsNullOrWhiteSpace(name))
             {
-                return BadRequest(new FolderOperationResultDto(false, "Folder path cannot be empty. Please provide a folder name."));
+                return BadRequest(new FolderOperationResultDto { Success = false, Message = "Folder path cannot be empty. Please provide a folder name." });
             }
 
             logger.LogDebug($"[CreateFolder] Input: '{request.Path}' -> path='{path}', name='{name}'");
@@ -835,32 +837,32 @@ public class GcodeFilesController(
             GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, ct);
 
             logger.LogInformation($"[CreateFolder] Successfully created virtual folder: '{request.Path}'");
-            return StatusCode(StatusCodes.Status201Created, new FolderOperationResultDto(true, "Folder created successfully"));
+            return StatusCode(StatusCodes.Status201Created, new FolderOperationResultDto { Success = true, Message = "Folder created successfully" });
         }
         catch (ArgumentException ex)
         {
             logger.LogWarning($"[CreateFolder] Invalid argument: {ex.Message}");
-            return BadRequest(new FolderOperationResultDto(false, ex.Message));
+            return BadRequest(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (DirectoryNotFoundException ex)
         {
             logger.LogWarning($"[CreateFolder] Parent directory not found: {ex.Message}");
-            return NotFound(new FolderOperationResultDto(false, ex.Message));
+            return NotFound(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
         {
             logger.LogInformation($"[CreateFolder] Folder already exists at: {request.Path}");
-            return Conflict(new FolderOperationResultDto(false, ex.Message));
+            return Conflict(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
             logger.LogWarning($"[CreateFolder] Invalid operation: {ex.Message}");
-            return BadRequest(new FolderOperationResultDto(false, ex.Message));
+            return BadRequest(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (Exception ex)
         {
             logger.LogError($"[CreateFolder] Unexpected error (path={path}, name={name}): {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to create folder: {ex.GetType().Name}"));
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto { Success = false, Message = $"Failed to create folder: {ex.GetType().Name}" });
         }
     }
 
@@ -961,12 +963,12 @@ public class GcodeFilesController(
         {
             if (request == null || request.ModelIds == null || request.ModelIds.Count == 0)
             {
-                return BadRequest(new FolderOperationResultDto(false, "At least one file ID is required"));
+                return BadRequest(new FolderOperationResultDto { Success = false, Message = "At least one file ID is required" });
             }
 
             if (string.IsNullOrWhiteSpace(request.TargetDirectoryId))
             {
-                return BadRequest(new FolderOperationResultDto(false, "Target directory ID is required"));
+                return BadRequest(new FolderOperationResultDto { Success = false, Message = "Target directory ID is required" });
             }
 
             // Use the directory ID (virtual path) exactly as provided by the frontend
@@ -1052,27 +1054,27 @@ public class GcodeFilesController(
             }
 
             logger.LogInformation($"[MoveFiles] Completed: {movedCount} succeeded, {failedCount} failed");
-            return Ok(new FolderOperationResultDto(failedCount == 0, message));
+            return Ok(new FolderOperationResultDto { Success = failedCount == 0, Message = message });
         }
         catch (ArgumentException ex)
         {
             logger.LogError($"[MoveFiles] Invalid argument: {ex.Message}");
-            return BadRequest(new FolderOperationResultDto(false, $"Invalid request: {ex.Message}"));
+            return BadRequest(new FolderOperationResultDto { Success = false, Message = $"Invalid request: {ex.Message}" });
         }
         catch (UnauthorizedAccessException ex)
         {
             logger.LogError($"[MoveFiles] Access denied: {ex.Message}");
-            return StatusCode(StatusCodes.Status403Forbidden, new FolderOperationResultDto(false, "Access denied: insufficient permissions"));
+            return StatusCode(StatusCodes.Status403Forbidden, new FolderOperationResultDto { Success = false, Message = "Access denied: insufficient permissions" });
         }
         catch (IOException ex)
         {
             logger.LogError($"[MoveFiles] IO error: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"I/O error: {ex.Message}"));
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto { Success = false, Message = $"I/O error: {ex.Message}" });
         }
         catch (Exception ex)
         {
             logger.LogError($"[MoveFiles] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to move files: {ex.GetType().Name}"));
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto { Success = false, Message = $"Failed to move files: {ex.GetType().Name}" });
         }
     }
 }

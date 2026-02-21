@@ -7,9 +7,11 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Integration;
 using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
@@ -18,9 +20,6 @@ using Farm.Web.Api.Infrastructure.Database;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Artifacts;
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Startup;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
@@ -95,6 +94,14 @@ builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Envir
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
 
+// Slicer integration shim: loads Farm.Slicer.Module + Farm.Slicer.Module.Api DLLs at runtime
+// from Slicer:PluginsPath. No compile-time reference to EF Core, SignalR hubs, or OrcaSlicer.
+// All slicer registrations delegated to runtime-discovered ISlicerModule implementations.
+bool slicerEnabled = builder.Configuration.GetValue("Slicer:Enabled", true);
+
+// When slicer is disabled, cross-module consumers use = null default parameter values.
+// .NET DI's ActivatorUtilities skips unregistered services that have default values.
+
 // Register SystemLog logger provider to capture all application logs to the database
 builder.Logging.AddSystemLogProvider(LogLevel.Information);
 
@@ -117,8 +124,15 @@ catch
 { /* non-fatal */
 }
 
-// Add API services
-builder.Services.AddPrintFarmerControllers();
+// Add API services (returns mvcBuilder so the slicer integration shim can add ApplicationParts)
+IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
+
+if (slicerEnabled)
+{
+    // Load slicer DLLs, register their services, and add their controllers as ApplicationParts.
+    builder.Services.AddSlicerIntegration(mvcBuilder, builder.Configuration);
+    builder.Services.AddSlicerHostAdapters();
+}
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -224,39 +238,10 @@ catch
     // If capture fails, leave captured variables null and fall back to app-level resolution later.
 }
 
-// Configure artifact storage metrics thresholds and alerts
-try
+// Post-build slicer module configuration (metrics thresholds, alert subscriptions, etc.)
+if (slicerEnabled)
 {
-    ArtifactStorageSettings artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
-    ArtifactsMetrics artifactMetrics = app.Services.GetRequiredService<ArtifactsMetrics>();
-
-    if (artifactSettings.EnableStorageAlerts)
-    {
-        artifactMetrics.SetThresholds(artifactSettings.StorageWarningThresholdBytes, artifactSettings.StorageCriticalThresholdBytes);
-
-        // Subscribe to threshold events for logging
-        artifactMetrics.ThresholdExceeded += (sender, e) =>
-        {
-            ILogger<Program>? logger = app.Services.GetService<ILogger<Program>>();
-            string levelStr = e.Level switch
-            {
-                Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Warning => "WARNING",
-                Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Critical => "CRITICAL",
-                _ => "UNKNOWN"
-            };
-
-            logger?.LogWarning(
-                "[ArtifactStorage] {Level} threshold exceeded: {CurrentGB:F2} GB (Warning: {WarningGB:F2} GB, Critical: {CriticalGB:F2} GB)",
-                levelStr,
-                e.CurrentBytes / (1024.0 * 1024 * 1024),
-                e.WarningThreshold / (1024.0 * 1024 * 1024),
-                e.CriticalThreshold / (1024.0 * 1024 * 1024));
-        };
-    }
-}
-catch (Exception ex)
-{
-    app.Logger.LogWarning(ex, "[Startup] Failed to configure artifact storage thresholds");
+    app.UseSlicerIntegration();
 }
 
 // NOTE: Settings initialization from environment variables is performed
@@ -336,11 +321,50 @@ app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
-// Slicer registry events hub (worker registration, heartbeat, deregistration, profile import events)
-app.MapHub<SlicerHub>("/hubs/slicer-registry");
+// Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
+if (slicerEnabled)
+{
+    app.MapSlicerIntegrationHubs();
+}
+else
+{
+    // When slicer is disabled, the slicer controllers are not loaded.
+    // Map stub endpoints for list routes the frontend expects (empty results
+    // instead of 404s) and a catch-all for all other slicer routes.
+    app.MapGet("/api/3d-models", () => Results.Ok(Array.Empty<object>()))
+        .RequireAuthorization();
+    app.MapGet("/api/3d-models/folders", () => Results.Ok(Array.Empty<object>()))
+        .RequireAuthorization();
+    app.MapPost("/api/3d-models/query", () => Results.Ok(Array.Empty<object>()))
+        .RequireAuthorization();
 
-// Slicer progress hub for job processing progress events
-app.MapHub<SlicerProgressHub>("/hubs/slicers");
+    // Catch-all for all remaining slicer API routes when module is disabled.
+    // Returns a structured 404 so the frontend can display "Slicing not available".
+    // Skips requests that already matched a stub endpoint above (GetEndpoint != null).
+    string[] slicerPrefixes = ["/api/3d-models/", "/api/slicer", "/api/slicers", "/api/workers", "/api/artifacts", "/api/slice", "/api/admin/slicer"];
+    app.Use(async (context, next) =>
+    {
+        if (context.GetEndpoint() != null)
+        {
+            await next();
+            return;
+        }
+
+        string path = context.Request.Path.Value ?? string.Empty;
+        bool isSlicerRoute = Array.Exists(slicerPrefixes, prefix =>
+            path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+        if (isSlicerRoute)
+        {
+            context.Response.StatusCode = 404;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new { error = "Slicing module is not enabled", code = "SLICER_DISABLED" });
+            return;
+        }
+
+        await next();
+    });
+}
 
 // Prometheus metrics endpoint (guarded so tests without MeterProvider don't throw)
 try
@@ -459,10 +483,6 @@ app.MapGet("/api/debug/db-info", async (
         [nameof(db.PrintJobs)] = await db.PrintJobs.CountAsync(ct),
         [nameof(db.GcodeHarvestOperations)] = await db.GcodeHarvestOperations.CountAsync(ct),
         [nameof(db.HarvestDiscoveredFiles)] = await db.HarvestDiscoveredFiles.CountAsync(ct),
-        [nameof(db.Models3D)] = await db.Models3D.CountAsync(ct),
-        [nameof(db.ProcessProfiles)] = await db.ProcessProfiles.CountAsync(ct),
-        [nameof(db.MachineProfiles)] = await db.MachineProfiles.CountAsync(ct),
-        [nameof(db.FilamentProfiles)] = await db.FilamentProfiles.CountAsync(ct),
         [nameof(db.Users)] = await db.Users.CountAsync(ct),
         [nameof(db.Roles)] = await db.Roles.CountAsync(ct),
         [nameof(db.Resources)] = await db.Resources.CountAsync(ct),

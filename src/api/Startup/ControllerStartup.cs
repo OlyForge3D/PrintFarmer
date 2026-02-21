@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Json;
 using Farm.Web.Api.Infrastructure.Filters;
@@ -12,11 +12,12 @@ public static class ControllerStartup
 {
     /// <summary>
     /// Adds PrintFarmer Controllers with JSON options and filters.
+    /// Returns the <see cref="IMvcBuilder"/> so callers (e.g. the slicer integration shim)
+    /// can add additional <see cref="Microsoft.AspNetCore.Mvc.ApplicationParts.ApplicationPart"/>s.
     /// </summary>
-    public static IServiceCollection AddPrintFarmerControllers(this IServiceCollection services)
+    public static IMvcBuilder AddPrintFarmerControllers(this IServiceCollection services)
     {
-        // Add API services
-        services.AddControllers(options =>
+        return services.AddControllers(options =>
             {
                 _ = options.Filters.Add<DuplicateConflictExceptionFilter>();
             })
@@ -32,7 +33,5 @@ public static class ControllerStartup
                 // Default string enum converter for all other enums
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
             });
-
-        return services;
     }
 }

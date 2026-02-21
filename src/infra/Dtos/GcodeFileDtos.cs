@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+﻿using Farm.Infrastructure.Dtos;
+
+namespace Farm.Infrastructure;
 
 // G-code Library & Job Queue DTOs
 

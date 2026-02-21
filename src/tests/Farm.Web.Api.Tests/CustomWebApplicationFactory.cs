@@ -8,6 +8,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -28,10 +29,15 @@ namespace Farm.Web.Api.Tests
         private readonly string _modelStoragePath;
         private readonly string _gcodeStoragePath;
         private readonly SqliteConnection _keepAliveConnection;
+        private readonly Dictionary<string, string?>? _configOverrides;
         private static int _databaseCounter = 0;
 
-        public CustomWebApplicationFactory()
+        public CustomWebApplicationFactory() : this(configOverrides: null) { }
+
+        internal CustomWebApplicationFactory(Dictionary<string, string?>? configOverrides)
         {
+            _configOverrides = configOverrides;
+
             // Create a unique in-memory database per factory instance
             // Using auto-increment ID ensures complete isolation between tests
             int dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
@@ -56,12 +62,23 @@ namespace Farm.Web.Api.Tests
             // Configure worker auth shared key and storage paths for testing
             builder.ConfigureAppConfiguration((context, config) =>
             {
-                config.AddInMemoryCollection(new Dictionary<string, string?>
+                Dictionary<string, string?> testConfig = new()
                 {
                     ["WorkerAuth:SharedKey"] = "test-worker-key",
                     ["STORAGE_PATHS:UPLOADS"] = _modelStoragePath,
                     ["STORAGE_PATHS:GCODE"] = _gcodeStoragePath
-                });
+                };
+
+                // Merge any caller-supplied config overrides (e.g., "Slicer:Enabled" = "false")
+                if (_configOverrides != null)
+                {
+                    foreach (KeyValuePair<string, string?> kvp in _configOverrides)
+                    {
+                        testConfig[kvp.Key] = kvp.Value;
+                    }
+                }
+
+                config.AddInMemoryCollection(testConfig);
             });
 
             builder.ConfigureServices(services =>
@@ -106,6 +123,61 @@ namespace Farm.Web.Api.Tests
                 {
                     AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     db.Database.EnsureCreated();
+                }
+
+                // Re-configure SlicerDbContext to use the same test SQLite database.
+                // AddSlicerModule registered it with production defaults; override here.
+                // Skip when slicer is disabled (no SlicerDbContext will be registered).
+                bool slicerRegistered = services.Any(d =>
+                    d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
+
+                if (slicerRegistered)
+                {
+                    ServiceDescriptor? slicerDbDescriptor = services.FirstOrDefault(d =>
+                        d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
+                    if (slicerDbDescriptor != null)
+                    {
+                        services.Remove(slicerDbDescriptor);
+                    }
+
+                    ServiceDescriptor? slicerFactoryDescriptor = services.FirstOrDefault(d =>
+                        d.ServiceType == typeof(IDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>));
+                    if (slicerFactoryDescriptor != null)
+                    {
+                        services.Remove(slicerFactoryDescriptor);
+                    }
+
+                    ServiceDescriptor? slicerSingletonOpts = services.FirstOrDefault(d =>
+                        d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>)
+                        && d.Lifetime == ServiceLifetime.Singleton);
+                    if (slicerSingletonOpts != null)
+                    {
+                        services.Remove(slicerSingletonOpts);
+                    }
+
+                    services.AddDbContext<Farm.Slicer.Module.Data.SlicerDbContext>(options =>
+                    {
+                        options.UseSqlite(_connectionString);
+                    });
+
+                    DbContextOptionsBuilder<Farm.Slicer.Module.Data.SlicerDbContext> slicerOptionsBuilder = new();
+                    slicerOptionsBuilder.UseSqlite(_connectionString);
+                    services.AddSingleton(slicerOptionsBuilder.Options);
+                    services.AddDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>();
+
+                    // Create SlicerDbContext tables after reconfiguration
+                    ServiceProvider sp2 = services.BuildServiceProvider();
+                    using (IServiceScope scope2 = sp2.CreateScope())
+                    {
+                        // EnsureCreated on a second context is a no-op if the DB already exists.
+                        // Use CreateTables() to add SlicerDbContext tables to the shared DB.
+                        Farm.Slicer.Module.Data.SlicerDbContext slicerDb = scope2.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Data.SlicerDbContext>();
+                        var creator1 = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)slicerDb).Instance
+                            .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
+                        try
+                        { creator1.CreateTables(); }
+                        catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
+                    }
                 }
             });
         }
@@ -213,6 +285,15 @@ namespace Farm.Web.Api.Tests
                 await context.Database.EnsureDeletedAsync();
                 await context.Database.EnsureCreatedAsync();
 
+                // EnsureCreated on a second context is a no-op if the DB already exists.
+                // Use CreateTables() to add SlicerDbContext tables to the shared DB.
+                Farm.Slicer.Module.Data.SlicerDbContext slicerContext = scope.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Data.SlicerDbContext>();
+                var creator2 = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)slicerContext).Instance
+                    .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
+                try
+                { creator2.CreateTables(); }
+                catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
+
                 // Seed root folders for gcode and models to match production behavior
                 await SeedRootFoldersAsync(context);
             }
@@ -227,10 +308,10 @@ namespace Farm.Web.Api.Tests
             try
             {
                 // Ensure root "/" folder exists for "gcode" category
-                FolderNode? existingGcodeRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
+                FolderNode? existingGcodeRoot = await context.Set<FolderNode>().AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
                 if (existingGcodeRoot == null)
                 {
-                    context.Folders.Add(new FolderNode
+                    context.Set<FolderNode>().Add(new FolderNode
                     {
                         Id = Guid.NewGuid(),
                         Path = "/",
@@ -240,10 +321,10 @@ namespace Farm.Web.Api.Tests
                 }
 
                 // Ensure root "/" folder exists for "models" category
-                FolderNode? existingModelsRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "models");
+                FolderNode? existingModelsRoot = await context.Set<FolderNode>().AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "models");
                 if (existingModelsRoot == null)
                 {
-                    context.Folders.Add(new FolderNode
+                    context.Set<FolderNode>().Add(new FolderNode
                     {
                         Id = Guid.NewGuid(),
                         Path = "/",
@@ -428,7 +509,7 @@ namespace Farm.Web.Api.Tests
             {
                 AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                Worker? existingWorker = await context.Workers.FirstOrDefaultAsync(w => w.ApiKey == workerKey);
+                Worker? existingWorker = await context.Set<Worker>().FirstOrDefaultAsync(w => w.ApiKey == workerKey);
                 if (existingWorker == null)
                 {
                     var worker = new Worker
@@ -444,7 +525,7 @@ namespace Farm.Web.Api.Tests
                         ActiveJobs = 0,
                         LastHeartbeat = DateTime.UtcNow
                     };
-                    context.Workers.Add(worker);
+                    context.Set<Worker>().Add(worker);
                     await context.SaveChangesAsync();
                 }
             }

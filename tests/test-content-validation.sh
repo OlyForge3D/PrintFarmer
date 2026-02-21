@@ -185,7 +185,7 @@ validate_health_checks() {
 test_monolithic_content_validation() {
     start_test "monolithic architecture content validation"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture monolithic --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
     assert_file_exists "$compose_file"
@@ -205,7 +205,7 @@ test_monolithic_content_validation() {
 test_microservices_content_validation() {
     start_test "microservices architecture content validation"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
     assert_file_exists "$compose_file"
@@ -225,7 +225,7 @@ test_microservices_content_validation() {
 test_orcaslicer_worker_content_validation() {
     start_test "OrcaSlicer worker content validation"
     
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker yes --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --output-dir $TEST_TEMP_DIR"
     
     local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
     assert_file_exists "$compose_file"
@@ -246,7 +246,7 @@ test_database_provider_content_validation() {
     start_test "database provider content validation"
     
     # Test PostgreSQL configuration
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider postgres --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --db-provider postgres --output-dir $TEST_TEMP_DIR"
     
     local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
     local content=$(cat "$compose_file")
@@ -257,7 +257,7 @@ test_database_provider_content_validation() {
     rm -f "$compose_file"
     
     # Test SQL Server configuration
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --db-provider sqlserver --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --db-provider sqlserver --output-dir $TEST_TEMP_DIR"
     
     content=$(cat "$compose_file")
     # The compose generator uses environment variable templating, not hardcoded values
@@ -273,7 +273,7 @@ test_security_monitoring_content_validation() {
     start_test "security and monitoring content validation"
     
     # Test with monitoring enabled
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --include-monitoring --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --include-monitoring --output-dir $TEST_TEMP_DIR"
     
     local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
     assert_file_exists "$compose_file"
@@ -308,7 +308,7 @@ ORCASLICER_VERSION=2.3.1
 EOF
     
     # Run deployment to generate environment file from repo root
-    capture_output "cd '$REPO_ROOT' && timeout 60 $DEPLOY_SCRIPT --architecture microservices --dry-run --batch 2>&1 || true"
+    capture_output "cd '$REPO_ROOT' && timeout 60 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
     
     # Check that environment file was mentioned/created
     local output=$(get_output)
@@ -322,7 +322,7 @@ test_configuration_consistency_validation() {
     start_test "configuration consistency validation"
     
     # Generate with compose generator
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker yes --db-provider postgres --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --db-provider postgres --output-dir $TEST_TEMP_DIR"
     
     local generator_compose=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
@@ -331,7 +331,7 @@ test_configuration_consistency_validation() {
     rm -f docker-compose.yml
     
     # Generate another config with same architecture but different database
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker yes --db-provider mysql --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --db-provider mysql --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml"
     
     local mysql_compose=$(cat "docker-compose.yml")
@@ -408,7 +408,7 @@ test_complete_configuration_validation() {
     cd "$TEST_TEMP_DIR"
     
     # Generate comprehensive configuration with compose generator
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-orca-worker yes --db-provider postgres --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --db-provider postgres --output-dir $TEST_TEMP_DIR"
     
     assert_file_exists "docker-compose.yml"
     assert_file_exists "Dockerfile.multistage"

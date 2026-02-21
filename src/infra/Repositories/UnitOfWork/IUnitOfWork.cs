@@ -6,7 +6,6 @@ using Farm.Infrastructure.Repositories.Folder;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Locations;
-using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
@@ -56,11 +55,8 @@ public interface IUnitOfWork : IDisposable, IAsyncDisposable
     /// </summary>
     IFolderRepository Folders { get; }
 
-    /// <summary>
-    /// Repository for 3D model file persistence and retrieval.
-    /// Coordinated with folder operations via shared DbContext.
-    /// </summary>
-    IModel3DFileRepository Model3dFiles { get; }
+    // Note: IModel3DFileRepository removed — Model3D repos are now in Farm.Slicer.Module.
+    // Use IModel3DFileRepository from Farm.Slicer.Module.Data.Repositories instead.
 
     /// <summary>
     /// Repository for location (farm site/facility) persistence and retrieval.

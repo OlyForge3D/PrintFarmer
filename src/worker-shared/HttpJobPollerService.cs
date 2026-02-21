@@ -1,9 +1,10 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Slicing; // ClaimJobRequest & completion DTOs
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -53,8 +54,9 @@ public abstract class HttpJobPollerService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Resolve API base URL from hierarchical config or environment variable, fall back to dev default.
-        string apiBaseUrl = _configuration["Worker:ApiBaseUrl"]
+        // Resolve API base URL — prefer unified SlicerApi:BaseUrl, then legacy keys.
+        string apiBaseUrl = _configuration["SlicerApi:BaseUrl"]
+                              ?? _configuration["Worker:ApiBaseUrl"]
                               ?? Environment.GetEnvironmentVariable("WORKER_API_BASE_URL")
                               ?? DefaultApiBaseUrl;
         int pollIntervalSeconds = int.Parse(_configuration["Worker:PollIntervalSeconds"] ?? "5");

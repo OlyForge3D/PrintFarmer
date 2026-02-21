@@ -350,7 +350,7 @@ bash tests/test-deploy-docker.sh
 bash tests/test-user-scenario-complete.sh
 
 # Test specific architecture/provider combination
-DB_PROVIDER=sqlserver bash scripts/docker/compose-generator.sh --architecture host-network --output-dir /tmp/test
+DB_PROVIDER=sqlserver bash scripts/docker/compose-generator.sh --output-dir /tmp/test
 
 # Validate generated compose file
 docker compose -f /tmp/test/docker-compose.yml config

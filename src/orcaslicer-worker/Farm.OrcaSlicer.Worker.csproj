@@ -10,10 +10,11 @@
   </PropertyGroup>
   <!-- Note: Health check and System.Text.Json packages removed - available via project references -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.3" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../worker-shared/Farm.Slicer.Worker.Core.csproj" />
     <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj" />
   </ItemGroup>
 </Project>

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Farm.Infrastructure;
+using Farm.Slicer.Module.Dtos;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 

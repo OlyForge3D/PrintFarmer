@@ -2,7 +2,6 @@
 using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.SlicerServices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;

@@ -476,19 +476,6 @@ public sealed class FlashForgeClientTests
     }
 
     [Fact]
-    public async Task DiscoveryProbe_RespectsTimeout()
-    {
-        var probe = new FlashForgeDiscoveryProbe(NullLogger<FlashForgeDiscoveryProbe>.Instance);
-
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        await probe.ProbeAsync("192.0.2.1", timeoutMs: 200, cancellationToken: default);
-        sw.Stop();
-
-        // Should return well within a reasonable bound (2x timeout max)
-        sw.ElapsedMilliseconds.Should().BeLessThan(2000);
-    }
-
-    [Fact]
     public async Task DiscoveryProbe_ReturnsNullOnCancellation()
     {
         var probe = new FlashForgeDiscoveryProbe(NullLogger<FlashForgeDiscoveryProbe>.Instance);

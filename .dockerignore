@@ -1,5 +1,8 @@
 **/bin/
 **/obj/
+# dotnet ef on WSL creates directories with literal backslashes (bin\Debug).
+# Docker's .dockerignore cannot match these (backslash is an escape char in Go filepath.Match).
+# The deploy script cleans them before building instead.
 **/.vs/
 **/.vscode/
 **/node_modules/
