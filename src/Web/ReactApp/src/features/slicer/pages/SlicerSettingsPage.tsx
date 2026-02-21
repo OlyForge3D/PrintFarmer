@@ -46,7 +46,7 @@ export const SlicerSettingsPage: React.FC = () => {
       } catch (err: unknown) {
         const error = err as Record<string, unknown>;
         const text = (error.response as Record<string, unknown>)?.data || `Save failed with status ${(error.response as Record<string, unknown>)?.status}`;
-        throw new Error(String(text));
+        throw new Error(String(text), { cause: err });
       }
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['slicerSettings'] }); setSaveError(null); },

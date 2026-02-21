@@ -97,9 +97,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       setOriginalFormData(initialFormData);
       
       // Initialize toolheads from printer details
-      let initialToolheads: UpdateToolheadDto[] = [];
       if (printerDetails.toolheads && printerDetails.toolheads.length > 0) {
-        initialToolheads = printerDetails.toolheads.map((th: ToolheadDto) => ({
+        const initialToolheads = printerDetails.toolheads.map((th: ToolheadDto) => ({
           id: th.id,
           name: th.name,
           index: th.index,
