@@ -4453,7 +4453,7 @@ EOF
         # These cannot be excluded by .dockerignore (backslash is an escape char in Go filepath.Match)
         # and cause MSB3552 "Resource file **/*.resx cannot be found" during Docker builds.
         local backslash_dirs
-        backslash_dirs=$(find ./src -type d -name '*\*' 2>/dev/null || true)
+        backslash_dirs=$(find ./src -maxdepth 3 -type d 2>/dev/null | grep '\\' || true)
         if [ -n "$backslash_dirs" ]; then
             print_info "Cleaning dotnet ef backslash directories from build context..."
             echo "$backslash_dirs" | while IFS= read -r dir; do
