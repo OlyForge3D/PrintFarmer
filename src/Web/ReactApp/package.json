@@ -61,7 +61,7 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.57.0",
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.3.0",
@@ -78,17 +78,16 @@
     "@vitejs/plugin-react": "^5.0.0",
     "@vitest/coverage-v8": "^4.0.18",
     "esbuild": "0.25.9",
-    "eslint": "^9.35.0",
-    "eslint-plugin-import": "^2.32.0",
+    "eslint": "^10.0.1",
     "eslint-plugin-local": "file:eslint-rules",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.20",
+    "eslint-plugin-react-refresh": "^0.5.0",
     "globals": "^17.2.0",
     "jsdom": "^27.4.0",
     "three": "^0.182.0",
     "three-stdlib": "^2.36.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.44.0",
+    "typescript-eslint": "^8.56.0",
     "vite": "^7.1.7",
     "vite-tsconfig-paths": "^6.0.5",
     "vitest": "^4.0.18"
@@ -97,7 +96,7 @@
     "stats-gl": {
       "three": "0.180.0"
     },
-    "ajv": "6.14.0"
+    "minimatch": "10.2.2"
   },
   "engines": {
     "node": ">=24.0.0",
