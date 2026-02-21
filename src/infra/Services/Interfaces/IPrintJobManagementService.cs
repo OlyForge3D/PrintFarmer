@@ -1,6 +1,6 @@
-﻿using Farm.Web.Api.DTOs.PrintQueue;
+﻿using Farm.Infrastructure.Dtos.PrintQueue;
 
-namespace Farm.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Services.Interfaces;
 
 /// <summary>
 /// Service for managing print jobs including CRUD operations, queue management,

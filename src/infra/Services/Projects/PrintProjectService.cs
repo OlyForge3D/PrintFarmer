@@ -3,7 +3,6 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Interfaces;
-using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Projects;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Telemetry;

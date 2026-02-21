@@ -1,5 +1,5 @@
-﻿using Farm.Api.Services.Interfaces;
-using Farm.Web.Api.DTOs.PrintQueue;
+﻿using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

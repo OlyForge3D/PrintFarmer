@@ -42,7 +42,7 @@ public static class FeatureServicesStartup
 
         // Print Job Management Service (renamed from PrintQueueService)
         services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobManagementRepository>();
-        services.AddScoped<Farm.Api.Services.Interfaces.IPrintJobManagementService, Farm.Api.Services.PrintQueue.PrintJobManagementService>();
+        services.AddScoped<Farm.Infrastructure.Services.Interfaces.IPrintJobManagementService, Farm.Api.Services.PrintQueue.PrintJobManagementService>();
 
         // Print Job Completion Sync Service (auto-marks jobs as completed when printer finishes)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintJobCompletionService, Farm.Infrastructure.Services.Printers.PrintJobCompletionService>();

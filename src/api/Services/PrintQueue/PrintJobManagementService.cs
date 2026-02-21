@@ -1,13 +1,13 @@
 ﻿using System.Diagnostics;
-using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
-using Farm.Web.Api.DTOs.PrintQueue;
 using Farm.Web.Api.DTOs.SignalR;
 using Microsoft.AspNetCore.SignalR;
 

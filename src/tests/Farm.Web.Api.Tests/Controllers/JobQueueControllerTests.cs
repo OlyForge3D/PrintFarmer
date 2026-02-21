@@ -1,5 +1,5 @@
-﻿using Farm.Api.Services.Interfaces;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Telemetry;
