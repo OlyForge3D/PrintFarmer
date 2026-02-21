@@ -685,6 +685,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
+                    b.Property<string>("InstanceId")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("LastSeen")
                         .HasColumnType("datetime2");
 
