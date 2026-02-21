@@ -25,32 +25,13 @@ public class NfcDeviceConfiguration : IEntityTypeConfiguration<NfcDevice>
             .HasForeignKey(n => n.PrinterId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.HasIndex(n => n.PrinterId)
+            .IsUnique()
+            .HasFilter("\"PrinterId\" IS NOT NULL");
+
         builder.HasMany(n => n.ScanHistory)
             .WithOne(s => s.NfcDevice)
             .HasForeignKey(s => s.NfcDeviceId)
             .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
-public class NfcScanEventConfiguration : IEntityTypeConfiguration<NfcScanEvent>
-{
-    public void Configure(EntityTypeBuilder<NfcScanEvent> builder)
-    {
-        builder.HasKey(s => s.Id);
-
-        builder.Property(s => s.TagFormat)
-            .HasMaxLength(32);
-
-        builder.Property(s => s.MaterialType)
-            .HasMaxLength(64);
-
-        builder.Property(s => s.BrandName)
-            .HasMaxLength(128);
-
-        builder.Property(s => s.Action)
-            .HasMaxLength(64);
-
-        builder.HasIndex(s => s.ScannedAt);
-        builder.HasIndex(s => s.NfcDeviceId);
     }
 }

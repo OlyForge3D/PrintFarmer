@@ -107,7 +107,7 @@ export function NfcDevicesPage() {
                     <span className="text-pf-text-secondary">Last Scan</span>
                     <span className="text-pf-text-primary">{formatTimeAgo(device.lastScanAt)}</span>
                   </div>
-                  {device.lastScannedSpoolId && (
+                  {device.lastScannedSpoolId != null && (
                     <div className="flex justify-between">
                       <span className="text-pf-text-secondary">Last Spool</span>
                       <span className="text-pf-text-primary">#{device.lastScannedSpoolId}</span>

@@ -19,5 +19,5 @@ public interface INfcDeviceService
 
     Task<NfcScanHistoryDto?> ProcessScanEventAsync(NfcScanEventDto dto, CancellationToken ct);
 
-    Task<NfcScanHistoryDto[]> GetScanHistoryAsync(Guid deviceId, int limit, CancellationToken ct);
+    Task<NfcScanHistoryDto[]> GetScanHistoryAsync(Guid deviceId, int limit, int offset, CancellationToken ct);
 }

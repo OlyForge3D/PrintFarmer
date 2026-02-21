@@ -99,6 +99,8 @@ public class NfcScanEventDto
 
     public int? SpoolId { get; set; }
 
+    [Required]
+    [StringLength(32)]
     public string TagFormat { get; set; } = "nfc";
 
     public string? MaterialType { get; set; }

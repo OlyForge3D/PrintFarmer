@@ -1406,9 +1406,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(45)
                         .HasColumnType("nvarchar(45)");
 
-                    b.Property<bool>("IsOnline")
-                        .HasColumnType("bit");
-
                     b.Property<DateTime?>("LastHeartbeat")
                         .HasColumnType("datetime2");
 
@@ -1437,7 +1434,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PrinterId");
+                    b.HasIndex("PrinterId")
+                        .IsUnique()
+                        .HasFilter("\"PrinterId\" IS NOT NULL");
 
                     b.ToTable("NfcDevices");
                 });

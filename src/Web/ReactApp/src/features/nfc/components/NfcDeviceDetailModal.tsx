@@ -45,7 +45,7 @@ export function NfcDeviceDetailModal({ device, isOpen, onClose }: NfcDeviceDetai
           </div>
           <div>
             <span className="text-pf-text-secondary block">Free Heap</span>
-            <span className="text-pf-text-primary">{device.freeHeap ? `${(device.freeHeap / 1024).toFixed(1)} KB` : 'N/A'}</span>
+            <span className="text-pf-text-primary">{device.freeHeap != null ? `${(device.freeHeap / 1024).toFixed(1)} KB` : 'N/A'}</span>
           </div>
           <div>
             <span className="text-pf-text-secondary block">NFC Reader</span>
@@ -89,7 +89,9 @@ export function NfcDeviceDetailModal({ device, isOpen, onClose }: NfcDeviceDetai
                   {history.map((event: NfcScanHistoryDto) => (
                     <tr key={event.id} className="border-b border-pf-border/50">
                       <td className="py-2 text-pf-text-primary">{formatDate(event.scannedAt)}</td>
-                      <td className="py-2 text-pf-text-primary">{event.spoolId ? `#${event.spoolId}` : 'N/A'}</td>
+                      <td className="py-2 text-pf-text-primary">
+                        {event.spoolId !== null && event.spoolId !== undefined ? `#${event.spoolId}` : 'N/A'}
+                      </td>
                       <td className="py-2">
                         <Badge variant="default">{event.tagFormat}</Badge>
                       </td>

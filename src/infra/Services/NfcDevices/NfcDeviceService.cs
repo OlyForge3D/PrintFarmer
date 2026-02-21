@@ -31,6 +31,11 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
 
     public async Task<NfcDeviceDto> CreateAsync(CreateNfcDeviceDto dto, CancellationToken ct)
     {
+        if (dto.PrinterId.HasValue && !await db.Printers.AnyAsync(p => p.Id == dto.PrinterId.Value, ct))
+        {
+            throw new ArgumentException($"Printer with ID {dto.PrinterId} not found.");
+        }
+
         var device = new NfcDevice
         {
             Id = Guid.NewGuid(),
@@ -62,10 +67,12 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
             device.Name = dto.Name;
         }
 
-        if (dto.PrinterId is not null)
+        if (dto.PrinterId.HasValue && !await db.Printers.AnyAsync(p => p.Id == dto.PrinterId.Value, ct))
         {
-            device.PrinterId = dto.PrinterId;
+            throw new ArgumentException($"Printer with ID {dto.PrinterId} not found.");
         }
+
+        device.PrinterId = dto.PrinterId;
 
         device.UpdatedAt = DateTime.UtcNow;
 
@@ -90,7 +97,6 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
 
     public async Task<NfcDeviceDto?> ProcessHeartbeatAsync(NfcDeviceHeartbeatDto dto, CancellationToken ct)
     {
-        // Find device by printer ID
         var printerId = Guid.TryParse(dto.PrinterId, out var pid) ? pid : (Guid?)null;
         if (printerId is null)
         {
@@ -103,7 +109,6 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
 
         if (device is null)
         {
-            // Auto-register device on first heartbeat
             device = new NfcDevice
             {
                 Id = Guid.NewGuid(),
@@ -123,7 +128,6 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
         device.IpAddress = dto.Ip ?? device.IpAddress;
         device.FirmwareVersion = dto.FirmwareVersion ?? device.FirmwareVersion;
         device.LastHeartbeat = DateTime.UtcNow;
-        device.IsOnline = true;
         device.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
@@ -151,7 +155,7 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
             Id = Guid.NewGuid(),
             NfcDeviceId = device.Id,
             SpoolId = dto.SpoolId,
-            TagFormat = dto.TagFormat,
+            TagFormat = dto.TagFormat ?? "nfc",
             MaterialType = dto.MaterialType,
             BrandName = dto.BrandName,
             Action = dto.SpoolId.HasValue ? "spool_set" : "tag_read",
@@ -184,11 +188,12 @@ public class NfcDeviceService(AppDbContext db, ILogger<NfcDeviceService> logger)
         };
     }
 
-    public async Task<NfcScanHistoryDto[]> GetScanHistoryAsync(Guid deviceId, int limit, CancellationToken ct)
+    public async Task<NfcScanHistoryDto[]> GetScanHistoryAsync(Guid deviceId, int limit, int offset, CancellationToken ct)
     {
         return await db.NfcScanEvents
             .Where(s => s.NfcDeviceId == deviceId)
             .OrderByDescending(s => s.ScannedAt)
+            .Skip(offset)
             .Take(limit)
             .Select(s => new NfcScanHistoryDto
             {

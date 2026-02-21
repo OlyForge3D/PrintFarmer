@@ -45,10 +45,18 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     [Authorize]
     [HttpPost]
     [ProducesResponseType(typeof(NfcDeviceDto), 201)]
+    [ProducesResponseType(400)]
     public async Task<ActionResult<NfcDeviceDto>> CreateAsync([FromBody] CreateNfcDeviceDto dto, CancellationToken ct)
     {
-        var device = await nfcDeviceService.CreateAsync(dto, ct);
-        return Created($"/api/nfc-devices/{device.Id}", device);
+        try
+        {
+            var device = await nfcDeviceService.CreateAsync(dto, ct);
+            return Created($"/api/nfc-devices/{device.Id}", device);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     /// <summary>
@@ -58,10 +66,18 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(NfcDeviceDto), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(400)]
     public async Task<ActionResult<NfcDeviceDto>> UpdateAsync(Guid id, [FromBody] UpdateNfcDeviceDto dto, CancellationToken ct)
     {
-        var device = await nfcDeviceService.UpdateAsync(id, dto, ct);
-        return device is null ? NotFound() : Ok(device);
+        try
+        {
+            var device = await nfcDeviceService.UpdateAsync(id, dto, ct);
+            return device is null ? NotFound() : Ok(device);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     /// <summary>
@@ -113,15 +129,29 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     [HttpGet("{id:guid}/history")]
     [ProducesResponseType(typeof(NfcScanHistoryDto[]), 200)]
     [ProducesResponseType(404)]
-    public async Task<ActionResult<NfcScanHistoryDto[]>> GetHistoryAsync(Guid id, [FromQuery] int limit = 50, CancellationToken ct = default)
+    public async Task<ActionResult<NfcScanHistoryDto[]>> GetHistoryAsync(
+        Guid id,
+        [FromQuery] int limit = 50,
+        [FromQuery] int offset = 0,
+        CancellationToken ct = default)
     {
+        if (limit is < 1 or > 200)
+        {
+            return BadRequest(new { error = "Limit must be between 1 and 200." });
+        }
+
+        if (offset < 0)
+        {
+            return BadRequest(new { error = "Offset must be non-negative." });
+        }
+
         var device = await nfcDeviceService.GetByIdAsync(id, ct);
         if (device is null)
         {
             return NotFound();
         }
 
-        var history = await nfcDeviceService.GetScanHistoryAsync(id, limit, ct);
+        var history = await nfcDeviceService.GetScanHistoryAsync(id, limit, offset, ct);
         return Ok(history);
     }
 }

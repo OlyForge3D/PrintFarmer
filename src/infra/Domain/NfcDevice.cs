@@ -55,11 +55,6 @@ public class NfcDevice
     public int? FreeHeap { get; set; }
 
     /// <summary>
-    /// Whether the device is considered online (heartbeat within threshold)
-    /// </summary>
-    public bool IsOnline { get; set; }
-
-    /// <summary>
     /// Last time a heartbeat was received
     /// </summary>
     public DateTime? LastHeartbeat { get; set; }

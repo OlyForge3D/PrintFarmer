@@ -11,18 +11,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropForeignKey(
-                name: "FK_PrinterModelAliases_PrinterModels_PrinterModelId1",
-                table: "PrinterModelAliases");
-
-            migrationBuilder.DropIndex(
-                name: "IX_PrinterModelAliases_PrinterModelId1",
-                table: "PrinterModelAliases");
-
-            migrationBuilder.DropColumn(
-                name: "PrinterModelId1",
-                table: "PrinterModelAliases");
-
             migrationBuilder.CreateTable(
                 name: "NfcDevices",
                 columns: table => new
@@ -35,7 +23,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     WifiRssi = table.Column<int>(type: "integer", nullable: true),
                     NfcReaderOk = table.Column<bool>(type: "boolean", nullable: false),
                     FreeHeap = table.Column<int>(type: "integer", nullable: true),
-                    IsOnline = table.Column<bool>(type: "boolean", nullable: false),
                     LastHeartbeat = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     LastScanAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     LastScannedSpoolId = table.Column<int>(type: "integer", nullable: true),
@@ -80,7 +67,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_NfcDevices_PrinterId",
                 table: "NfcDevices",
-                column: "PrinterId");
+                column: "PrinterId",
+                unique: true,
+                filter: "\"PrinterId\" IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_NfcScanEvents_NfcDeviceId",
@@ -101,24 +90,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
             migrationBuilder.DropTable(
                 name: "NfcDevices");
-
-            migrationBuilder.AddColumn<Guid>(
-                name: "PrinterModelId1",
-                table: "PrinterModelAliases",
-                type: "uuid",
-                nullable: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_PrinterModelAliases_PrinterModelId1",
-                table: "PrinterModelAliases",
-                column: "PrinterModelId1");
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_PrinterModelAliases_PrinterModels_PrinterModelId1",
-                table: "PrinterModelAliases",
-                column: "PrinterModelId1",
-                principalTable: "PrinterModels",
-                principalColumn: "Id");
         }
     }
 }

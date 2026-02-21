@@ -1406,9 +1406,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(45)
                         .HasColumnType("character varying(45)");
 
-                    b.Property<bool>("IsOnline")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTime?>("LastHeartbeat")
                         .HasColumnType("timestamp with time zone");
 
@@ -1437,7 +1434,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PrinterId");
+                    b.HasIndex("PrinterId")
+                        .IsUnique()
+                        .HasFilter("\"PrinterId\" IS NOT NULL");
 
                     b.ToTable("NfcDevices");
                 });

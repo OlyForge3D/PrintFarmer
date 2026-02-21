@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260221005702_AddNfcDeviceTables")]
+    [Migration("20260221042706_AddNfcDeviceTables")]
     partial class AddNfcDeviceTables
     {
         /// <inheritdoc />
@@ -1791,9 +1791,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(45)
                         .HasColumnType("character varying(45)");
 
-                    b.Property<bool>("IsOnline")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTime?>("LastHeartbeat")
                         .HasColumnType("timestamp with time zone");
 
@@ -1822,7 +1819,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PrinterId");
+                    b.HasIndex("PrinterId")
+                        .IsUnique()
+                        .HasFilter("\"PrinterId\" IS NOT NULL");
 
                     b.ToTable("NfcDevices");
                 });
