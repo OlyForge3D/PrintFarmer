@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Web.Api.Services.Gcode;
 
 /// <summary>
 /// Adapter that provides G-code upload settings from the persisted IAppSetting system.

@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Web.Api.Services.Startup;
 
 /// <summary>
 /// Hosted service that integrates with ASP.NET Core's application lifecycle to properly await completion of background harvest tasks during shutdown

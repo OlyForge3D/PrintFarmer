@@ -9,7 +9,7 @@ using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Discovery;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Moq;

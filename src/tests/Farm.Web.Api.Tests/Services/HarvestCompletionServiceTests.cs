@@ -2,7 +2,7 @@
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Gcode;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;

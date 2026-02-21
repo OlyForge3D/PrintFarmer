@@ -32,8 +32,10 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Extensions;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
-using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Services.Discovery;
+using Farm.Web.Api.Services.Gcode;
+using Farm.Web.Api.Services.Startup;
 using Farm.Web.Api.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -210,7 +212,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
 
         // Discovery proxy service for streaming discovery with SignalR progress updates
-        _ = services.AddScoped<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService, Services.DiscoveryProxyService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService, DiscoveryProxyService>();
     }
 
     #endregion
