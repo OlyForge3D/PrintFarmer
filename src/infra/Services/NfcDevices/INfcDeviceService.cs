@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.NfcDevices;
+﻿namespace Farm.Infrastructure.Services.NfcDevices;
 
 /// <summary>
 /// Service for managing NFC reader devices and their scan history.

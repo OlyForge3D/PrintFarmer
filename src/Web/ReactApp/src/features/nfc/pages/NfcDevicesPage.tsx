@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { toast } from 'sonner';
 import { Button, Card, Badge, Spinner } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { useNfcDevices, useDeleteNfcDevice } from '@/common/hooks/useApi';
