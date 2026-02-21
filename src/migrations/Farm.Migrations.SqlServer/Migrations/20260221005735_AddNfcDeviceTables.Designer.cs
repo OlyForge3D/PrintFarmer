@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,13 +12,15 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260221005735_AddNfcDeviceTables")]
+    partial class AddNfcDeviceTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.3")
+                .HasAnnotation("ProductVersion", "10.0.2")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -90,6 +93,62 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("UserId", "IsActive");
 
                     b.ToTable("ApiKeys");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Artifact", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("WorkerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("JobId");
+
+                    b.HasIndex("WorkerId");
+
+                    b.HasIndex("JobId", "Kind");
+
+                    b.ToTable("Artifacts");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.AuthAuditLog", b =>
@@ -264,6 +323,98 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("FailedLoginAttempts");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("BedTemperature")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CompatiblePrinters")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Hash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSystem")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Manufacturer")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("Material")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<int>("NozzleTemperature")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PrintSpeed")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RawJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SettingsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SlicerType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SlicerVersion")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("Hash")
+                        .IsUnique()
+                        .HasFilter("[Hash] IS NOT NULL");
+
+                    b.HasIndex("IsSystem");
+
+                    b.HasIndex("Material");
+
+                    b.HasIndex("SlicerType");
+
+                    b.HasIndex("Name", "Material", "SlicerType")
+                        .IsUnique();
+
+                    b.ToTable("FilamentProfiles");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -388,7 +539,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("Path", "FolderType")
                         .IsUnique();
 
-                    b.ToTable("FolderNode");
+                    b.ToTable("Folders");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.GcodeFile", b =>
@@ -1121,6 +1272,148 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Locations");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MachineModelProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("Hash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Manufacturer")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("PrinterModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RawJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("SlicerType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SlicerVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterModelId");
+
+                    b.ToTable("MachineModelProfiles");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MachineProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Hash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSystem")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<Guid?>("MachineModelProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Manufacturer")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<Guid?>("PrinterModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RawJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SettingsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SlicerType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SlicerVersion")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("Hash")
+                        .IsUnique()
+                        .HasFilter("[Hash] IS NOT NULL");
+
+                    b.HasIndex("IsSystem");
+
+                    b.HasIndex("MachineModelProfileId");
+
+                    b.HasIndex("Manufacturer");
+
+                    b.HasIndex("PrinterModelId");
+
+                    b.HasIndex("SlicerType");
+
+                    b.HasIndex("Name", "SlicerType")
+                        .IsUnique();
+
+                    b.ToTable("MachineProfiles");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceAlert", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1371,19 +1664,113 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Manufacturers");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.Model3DTagMapping", b =>
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Model3D", b =>
                 {
-                    b.Property<Guid>("Model3DId")
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("TagsId")
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<double?>("DimensionX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("DimensionY")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("DimensionZ")
+                        .HasColumnType("float");
+
+                    b.Property<int>("FileFormat")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FileHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<long>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("FolderId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.HasKey("Model3DId", "TagsId");
+                    b.Property<int>("HealthStatus")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
 
-                    b.HasIndex("TagsId");
+                    b.Property<bool>("IsValid")
+                        .HasColumnType("bit");
 
-                    b.ToTable("Model3DTag", (string)null);
+                    b.Property<DateTime?>("LastHealthCheckDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastVerificationResult")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("ThumbnailFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<int?>("TriangleCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("UploadedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ValidationErrors")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FileFormat");
+
+                    b.HasIndex("FileHash")
+                        .IsUnique();
+
+                    b.HasIndex("FolderId");
+
+                    b.HasIndex("HealthStatus");
+
+                    b.HasIndex("IsValid");
+
+                    b.HasIndex("LastHealthCheckDate");
+
+                    b.HasIndex("UploadedAt");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("Models3D");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
@@ -2319,6 +2706,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("ServerUrl")
                         .IsUnique();
 
+                    b.HasIndex("TemplateMachineProfileId");
+
                     b.ToTable("Printers");
                 });
 
@@ -2536,6 +2925,111 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasFilter("[PrinterId1] IS NOT NULL");
 
                     b.ToTable("PrinterStatisticsSet");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ProcessProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AdvancedSettings")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CompatiblePrinters")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("EnableSupports")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Hash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("InfillPercentage")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSystem")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<double>("LayerHeight")
+                        .HasColumnType("float");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<double>("PrintSpeed")
+                        .HasColumnType("float");
+
+                    b.Property<Guid?>("PrinterModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quality")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RawJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SettingsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SlicerType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SlicerVersion")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("SpecificPrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("Hash")
+                        .IsUnique()
+                        .HasFilter("[Hash] IS NOT NULL");
+
+                    b.HasIndex("IsDefault");
+
+                    b.HasIndex("IsPublic");
+
+                    b.HasIndex("IsSystem");
+
+                    b.HasIndex("PrinterModelId");
+
+                    b.HasIndex("SlicerType");
+
+                    b.HasIndex("SpecificPrinterId");
+
+                    b.HasIndex("Name", "SlicerType", "PrinterModelId")
+                        .IsUnique()
+                        .HasFilter("[PrinterModelId] IS NOT NULL");
+
+                    b.ToTable("ProcessProfiles");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.RefreshToken", b =>
@@ -2809,6 +3303,223 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("RolePermissions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.SliceJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ArtifactIdsCsv")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("ArtifactsCount")
+                        .HasColumnType("int");
+
+                    b.Property<long?>("ArtifactsTotalBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Checksum")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime?>("ClaimedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CorrelationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("EstimatedPrintTimeSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("FilamentUsedGrams")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("LeaseExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ModelFileName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("ModelFileUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<Guid?>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProgressMessage")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<int>("ProgressPercent")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("QueuedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RequiredCapabilitiesJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultFileUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SlicerEngine")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SlicerProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SlicerProfileJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("WorkerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId");
+
+                    b.HasIndex("QueuedAt");
+
+                    b.HasIndex("SlicerProfileId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("WorkerId");
+
+                    b.HasIndex("Status", "Priority", "QueuedAt");
+
+                    b.ToTable("SliceJobs");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.SlicerService", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApiKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime?>("ApiKeyRotatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CapabilitiesJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Host")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime>("LastSeen")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("MaxConcurrentJobs")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("SlicerType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Tags")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("UiManifestUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Version")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name");
+
+                    b.HasIndex("SlicerType");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("SlicerServices");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.SlicerSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("bit");
+
+                    b.Property<double>("JitterPercent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("float")
+                        .HasDefaultValue(15.0);
+
+                    b.Property<string>("PerEngineJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SlicerSettings");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Spool", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2940,7 +3651,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Tag");
+                    b.ToTable("Tags");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Toolhead", b =>
@@ -3255,6 +3966,105 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("UserTasks");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Worker", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ActiveJobs")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ApiKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<long>("ArtifactBytesProduced")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("ArtifactsProduced")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("AverageProcessingTimeSeconds")
+                        .HasColumnType("float");
+
+                    b.Property<string>("CapabilitiesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CompletedJobs")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DisabledReason")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("EndpointUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<int>("FailedJobs")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDisabled")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastHeartbeat")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("MetadataJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime?>("OfflineAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("OnlineAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("RegisteredAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ServiceId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("TotalSlots")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Version")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastHeartbeat");
+
+                    b.HasIndex("ServiceId")
+                        .IsUnique();
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("Workers");
+                });
+
             modelBuilder.Entity("FilamentTypePrinterModel", b =>
                 {
                     b.Property<Guid>("PrinterModelsId")
@@ -3285,6 +4095,21 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("GcodeFileTag");
                 });
 
+            modelBuilder.Entity("Model3DTag", b =>
+                {
+                    b.Property<Guid>("Model3DId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TagsId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Model3DId", "TagsId");
+
+                    b.HasIndex("TagsId");
+
+                    b.ToTable("Model3DTag");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.AuthAuditLog", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
@@ -3304,6 +4129,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("Manufacturer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentProfile", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CreatedByUser");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.GcodeFile", b =>
@@ -3466,6 +4301,38 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("PrintJob");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MachineModelProfile", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterModel", "PrinterModel")
+                        .WithMany()
+                        .HasForeignKey("PrinterModelId");
+
+                    b.Navigation("PrinterModel");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MachineProfile", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.MachineModelProfile", "MachineModelProfile")
+                        .WithMany("MachineProfiles")
+                        .HasForeignKey("MachineModelProfileId");
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterModel", "PrinterModel")
+                        .WithMany()
+                        .HasForeignKey("PrinterModelId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("MachineModelProfile");
+
+                    b.Navigation("PrinterModel");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceAlert", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.MaintenanceSchedule", "MaintenanceSchedule")
@@ -3531,15 +4398,22 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("PrinterModel");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.Model3DTagMapping", b =>
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Model3D", b =>
                 {
-                    b.HasOne("Farm.Infrastructure.Domain.Tag", "Tag")
-                        .WithMany()
-                        .HasForeignKey("TagsId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                    b.HasOne("Farm.Infrastructure.Domain.FolderNode", "Folder")
+                        .WithMany("Models")
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.SetNull)
                         .IsRequired();
 
-                    b.Navigation("Tag");
+                    b.HasOne("Farm.Infrastructure.Domain.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Folder");
+
+                    b.Navigation("UploadedByUser");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
@@ -3714,11 +4588,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Farm.Infrastructure.Domain.MachineProfile", "TemplateMachineProfile")
+                        .WithMany()
+                        .HasForeignKey("TemplateMachineProfileId");
+
                     b.Navigation("Location");
 
                     b.Navigation("Manufacturer");
 
                     b.Navigation("Model");
+
+                    b.Navigation("TemplateMachineProfile");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
@@ -3797,6 +4677,30 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Printer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ProcessProfile", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterModel", "PrinterModel")
+                        .WithMany()
+                        .HasForeignKey("PrinterModelId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "SpecificPrinter")
+                        .WithMany()
+                        .HasForeignKey("SpecificPrinterId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("PrinterModel");
+
+                    b.Navigation("SpecificPrinter");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.RefreshToken", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
@@ -3851,6 +4755,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Resource");
 
                     b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.SliceJob", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.ProcessProfile", "SlicerProfile")
+                        .WithMany()
+                        .HasForeignKey("SlicerProfileId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("SlicerProfile");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Spool", b =>
@@ -3987,9 +4901,26 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Model3DTag", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Model3D", null)
+                        .WithMany()
+                        .HasForeignKey("Model3DId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagsId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.FolderNode", b =>
                 {
                     b.Navigation("Files");
+
+                    b.Navigation("Models");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.GcodeFile", b =>
@@ -4015,6 +4946,11 @@ namespace Farm.Migrations.SqlServer.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.Location", b =>
                 {
                     b.Navigation("Printers");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MachineModelProfile", b =>
+                {
+                    b.Navigation("MachineProfiles");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Manufacturer", b =>
