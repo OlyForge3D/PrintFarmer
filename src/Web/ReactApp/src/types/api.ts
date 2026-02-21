@@ -2503,3 +2503,49 @@ export interface ConnectionDiagnosticsResponse {
   degradedCount: number;
   timestampUtc: string;
 }
+
+// ============================================================================
+// NFC Devices
+// ============================================================================
+
+export interface NfcDeviceDto {
+  id: string;
+  name: string;
+  ipAddress?: string;
+  printerId?: string;
+  printerName?: string;
+  firmwareVersion?: string;
+  wifiRssi?: number;
+  nfcReaderOk: boolean;
+  freeHeap?: number;
+  isOnline: boolean;
+  lastHeartbeat?: string;
+  lastScanAt?: string;
+  lastScannedSpoolId?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CreateNfcDeviceDto {
+  name: string;
+  ipAddress?: string;
+  printerId?: string;
+  firmwareVersion?: string;
+}
+
+export interface UpdateNfcDeviceDto {
+  name?: string;
+  printerId?: string;
+}
+
+export interface NfcScanHistoryDto {
+  id: string;
+  nfcDeviceId: string;
+  deviceName?: string;
+  spoolId?: number;
+  tagFormat: string;
+  materialType?: string;
+  brandName?: string;
+  action?: string;
+  scannedAt: string;
+}

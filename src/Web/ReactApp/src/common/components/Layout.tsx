@@ -26,7 +26,8 @@ import {
   KeyIcon,
   DatabaseIcon,
   CheckIcon,
-  CameraIcon
+  CameraIcon,
+  NfcIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -94,6 +95,11 @@ const navigation: NavigationElement[] = [
     name: 'Cameras',
     href: '/cameras',
     icon: CameraIcon
+  },
+  {
+    name: 'NFC Devices',
+    href: '/nfc-devices',
+    icon: NfcIcon
   },
   {
     name: 'Maintenance',

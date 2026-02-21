@@ -46,6 +46,7 @@ import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
+import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
@@ -165,6 +166,7 @@ function AuthenticatedAppRoutes() {
         <Route path="files/*" element={<FilesPage />} />
         <Route path="spools" element={<SpoolsPage />} />
         <Route path="cameras" element={<CamerasPage />} />
+        <Route path="nfc-devices" element={<NfcDevicesPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />

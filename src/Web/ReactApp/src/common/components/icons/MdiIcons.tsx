@@ -48,6 +48,7 @@ import {
   mdiCube,
   mdiOpenInNew,
   mdiCamera,
+  mdiNfc,
   mdiMinus,
   mdiWrench,
   mdiViewDashboard,
@@ -1535,6 +1536,19 @@ export function CameraIcon({ className = 'w-4 h-4', ariaLabel = 'Camera' }: Omit
       role="img"
     >
       <path fill="currentColor" d={mdiCamera} />
+    </svg>
+  );
+}
+
+export function NfcIcon({ className = 'w-4 h-4', ariaLabel = 'NFC' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiNfc} />
     </svg>
   );
 }
