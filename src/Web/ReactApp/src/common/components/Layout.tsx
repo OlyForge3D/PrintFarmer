@@ -27,7 +27,8 @@ import {
   DatabaseIcon,
   CheckIcon,
   CameraIcon,
-  NfcIcon
+  NfcIcon,
+  ChartIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -156,6 +157,12 @@ const navigation: NavigationElement[] = [
     name: 'System',
     href: '/admin/system',
     icon: TrendingUpIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Monitoring',
+    href: '/admin/monitoring',
+    icon: ChartIcon,
     requiredRole: 'farm_admin'
   },
   {
