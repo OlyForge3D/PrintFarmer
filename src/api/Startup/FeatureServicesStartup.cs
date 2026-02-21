@@ -118,6 +118,15 @@ public static class FeatureServicesStartup
             _ = services.AddHostedService<SpaDevServerWatcher>();
         }
 
+        // Monitoring services (Grafana/Jaeger auth proxy, Prometheus metrics)
+        services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
+        services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
+        services.AddHttpClient("MonitoringHealth", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+        });
+
         return services;
     }
 }

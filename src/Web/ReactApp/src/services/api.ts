@@ -3222,6 +3222,22 @@ export class ApiClient {
     const response = await this.client.get(`/nfc-devices/${id}/history`, { params: { limit } });
     return response.data;
   }
+
+  // Monitoring
+  async createMonitoringSession(): Promise<{ success: boolean; expiresAt: string }> {
+    const response = await this.client.post('/monitoring/session');
+    return response.data;
+  }
+
+  async getMonitoringStatus(): Promise<import('@/types/api').MonitoringStatusDto> {
+    const response = await this.client.get('/monitoring/status');
+    return response.data;
+  }
+
+  async getMonitoringMetricsSummary(): Promise<import('@/types/api').MonitoringMetricsSummaryDto> {
+    const response = await this.client.get('/monitoring/metrics/summary');
+    return response.data;
+  }
 }
 
 // Export singleton instance

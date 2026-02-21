@@ -2549,3 +2549,27 @@ export interface NfcScanHistoryDto {
   action?: string;
   scannedAt: string;
 }
+
+// Monitoring
+export interface MonitoringServiceStatus {
+  available: boolean;
+  url?: string;
+  error?: string;
+}
+
+export interface MonitoringStatusDto {
+  grafana: MonitoringServiceStatus;
+  jaeger: MonitoringServiceStatus;
+  prometheus: MonitoringServiceStatus;
+}
+
+export interface MonitoringMetricsSummaryDto {
+  requestsPerSecond: number;
+  errorRatePercent: number;
+  p95LatencyMs: number;
+  memoryUsageMb: number;
+  activePrinters: number;
+  slicerJobsLast24h: number;
+  slicerSuccessRatePercent: number;
+  timestamp: string;
+}
