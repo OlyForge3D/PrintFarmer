@@ -52,7 +52,7 @@ jobs:
           echo "image=printfarmer-slicer-base:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Scan slicer-base with Trivy (table output)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           image-ref: ${{ steps.build-base.outputs.image }}
           format: 'table'
@@ -61,7 +61,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Scan slicer-base with Trivy (SARIF output)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           image-ref: ${{ steps.build-base.outputs.image }}
           format: 'sarif'
@@ -125,7 +125,7 @@ jobs:
           echo "image=orcaslicer-worker:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Scan OrcaSlicer with Trivy (table output)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           image-ref: ${{ steps.build-orca.outputs.image }}
           format: 'table'
@@ -134,7 +134,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Scan OrcaSlicer with Trivy (SARIF output)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           image-ref: ${{ steps.build-orca.outputs.image }}
           format: 'sarif'
