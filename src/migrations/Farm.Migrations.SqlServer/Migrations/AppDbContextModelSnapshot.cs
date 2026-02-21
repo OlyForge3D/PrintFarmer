@@ -1386,6 +1386,102 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Model3DTag", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FirmwareVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<int?>("FreeHeap")
+                        .HasColumnType("int");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("nvarchar(45)");
+
+                    b.Property<DateTime?>("LastHeartbeat")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastScanAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("LastScannedSpoolId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<bool>("NfcReaderOk")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("WifiRssi")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId")
+                        .IsUnique()
+                        .HasFilter("\"PrinterId\" IS NOT NULL");
+
+                    b.ToTable("NfcDevices");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcScanEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Action")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("BrandName")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("MaterialType")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("NfcDeviceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("ScannedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("SpoolId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TagFormat")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NfcDeviceId");
+
+                    b.HasIndex("ScannedAt");
+
+                    b.ToTable("NfcScanEvents");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
                 {
                     b.Property<string>("Id")
@@ -3445,6 +3541,27 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Tag");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcScanEvent", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.NfcDevice", "NfcDevice")
+                        .WithMany("ScanHistory")
+                        .HasForeignKey("NfcDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("NfcDevice");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "Job")
@@ -3902,6 +4019,11 @@ namespace Farm.Migrations.SqlServer.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.Manufacturer", b =>
                 {
                     b.Navigation("Models");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
+                {
+                    b.Navigation("ScanHistory");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJob", b =>

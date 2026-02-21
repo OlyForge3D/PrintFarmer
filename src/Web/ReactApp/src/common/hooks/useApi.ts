@@ -50,6 +50,10 @@ import {
   SpoolmanMaterial,
   SpoolmanUpdateFilamentRequest,
   SpoolmanFilament,
+  NfcDeviceDto,
+  CreateNfcDeviceDto,
+  UpdateNfcDeviceDto,
+  NfcScanHistoryDto,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -93,6 +97,9 @@ export const queryKeys = {
     model3DHealth: (id: string) => ['file-consistency', 'model3d', id] as const,
     gcodeFileHealth: (id: string) => ['file-consistency', 'gcode', id] as const,
   },
+  nfcDevices: ['nfc-devices'] as const,
+  nfcDevice: (id: string) => ['nfc-devices', id] as const,
+  nfcDeviceHistory: (id: string) => ['nfc-devices', id, 'history'] as const,
 } as const;
 
 // ============ Printer Hooks ============
@@ -1341,5 +1348,72 @@ export function useGcodeFileHealth(id: string, options?: QueryOptions<FileHealth
     staleTime: 60000, // 1 minute
     enabled: !!id,
     ...options,
+  });
+}
+
+// ============ NFC Device Hooks ============
+
+export function useNfcDevices(options?: QueryOptions<NfcDeviceDto[]>) {
+  return useQuery({
+    queryKey: queryKeys.nfcDevices,
+    queryFn: () => apiClient.getNfcDevices(),
+    staleTime: 30_000,
+    ...options,
+  });
+}
+
+export function useNfcDevice(id: string, options?: QueryOptions<NfcDeviceDto>) {
+  return useQuery({
+    queryKey: queryKeys.nfcDevice(id),
+    queryFn: () => apiClient.getNfcDevice(id),
+    staleTime: 30_000,
+    enabled: !!id,
+    ...options,
+  });
+}
+
+export function useNfcDeviceScanHistory(id: string, options?: QueryOptions<NfcScanHistoryDto[]>) {
+  return useQuery({
+    queryKey: queryKeys.nfcDeviceHistory(id),
+    queryFn: () => apiClient.getNfcDeviceScanHistory(id),
+    staleTime: 30_000,
+    enabled: !!id,
+    ...options,
+  });
+}
+
+export function useCreateNfcDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateNfcDeviceDto) => apiClient.createNfcDevice(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nfcDevices });
+      toast.success('NFC device registered');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to register device: ${err.message}`),
+  });
+}
+
+export function useUpdateNfcDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateNfcDeviceDto }) => apiClient.updateNfcDevice(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nfcDevices });
+      toast.success('NFC device updated');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to update device: ${err.message}`),
+  });
+}
+
+export function useDeleteNfcDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteNfcDevice(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nfcDevices });
+      toast.success('NFC device removed');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to remove device: ${err.message}`),
   });
 }

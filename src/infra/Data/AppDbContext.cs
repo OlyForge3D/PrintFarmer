@@ -131,6 +131,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Cameras (standalone webcams not attached to printers)
     public DbSet<Camera> Cameras => Set<Camera>();
 
+    // NFC Devices (ESP32 + PN532 filament spool readers)
+    public DbSet<NfcDevice> NfcDevices => Set<NfcDevice>();
+
+    public DbSet<NfcScanEvent> NfcScanEvents => Set<NfcScanEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

@@ -3191,6 +3191,37 @@ export class ApiClient {
     const response = await this.client.patch(`/cameras/${id}/toggle`, { isEnabled });
     return response.data;
   }
+
+  // ====== NFC Devices ======
+
+  async getNfcDevices(): Promise<import('@/types/api').NfcDeviceDto[]> {
+    const response = await this.client.get('/nfc-devices');
+    return response.data;
+  }
+
+  async getNfcDevice(id: string): Promise<import('@/types/api').NfcDeviceDto> {
+    const response = await this.client.get(`/nfc-devices/${id}`);
+    return response.data;
+  }
+
+  async createNfcDevice(dto: import('@/types/api').CreateNfcDeviceDto): Promise<import('@/types/api').NfcDeviceDto> {
+    const response = await this.client.post('/nfc-devices', dto);
+    return response.data;
+  }
+
+  async updateNfcDevice(id: string, dto: import('@/types/api').UpdateNfcDeviceDto): Promise<import('@/types/api').NfcDeviceDto> {
+    const response = await this.client.put(`/nfc-devices/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteNfcDevice(id: string): Promise<void> {
+    await this.client.delete(`/nfc-devices/${id}`);
+  }
+
+  async getNfcDeviceScanHistory(id: string, limit = 50): Promise<import('@/types/api').NfcScanHistoryDto[]> {
+    const response = await this.client.get(`/nfc-devices/${id}/history`, { params: { limit } });
+    return response.data;
+  }
 }
 
 // Export singleton instance

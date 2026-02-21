@@ -93,22 +93,12 @@ public class HarvestCompletionServiceTests
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation>());
 
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-
         // Act
-        await _service.StartAsync(cts.Token);
-        await Task.Delay(150);
-        cts.Cancel();
-
-        try
-        {
-            await _service.StopAsync(cts.Token);
-        }
-        catch (OperationCanceledException) { }
+        await _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None);
 
         // Assert
         _harvestRepoMock.Verify(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-        _harvestRepoMock.Verify(h => h.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -193,24 +183,13 @@ public class HarvestCompletionServiceTests
 
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation> { operation });
-        _harvestRepoMock.Setup(h => h.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
         // Act
-        await _service.StartAsync(cts.Token);
-        await Task.Delay(150);
-        cts.Cancel();
-
-        try
-        {
-            await _service.StopAsync(cts.Token);
-        }
-        catch (OperationCanceledException) { }
+        await _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None);
 
         // Assert
         Assert.Equal(GcodeHarvestStatus.Completed, operation.Status);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

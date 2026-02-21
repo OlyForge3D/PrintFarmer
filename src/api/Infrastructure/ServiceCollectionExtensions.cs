@@ -484,6 +484,9 @@ public static class ServiceCollectionExtensions
         // Register CameraService from Infrastructure layer - standalone camera management service
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
 
+        // Register NfcDeviceService from Infrastructure layer - NFC reader device management
+        _ = services.AddScoped<Farm.Infrastructure.Services.NfcDevices.INfcDeviceService, Farm.Infrastructure.Services.NfcDevices.NfcDeviceService>();
+
         // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();
     }
