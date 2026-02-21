@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Startup;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

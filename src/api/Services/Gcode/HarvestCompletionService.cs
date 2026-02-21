@@ -3,7 +3,7 @@ using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Web.Api.Services.Gcode;
 
 /// <summary>
 /// Background service to monitor harvest operations and mark them as completed

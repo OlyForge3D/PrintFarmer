@@ -9,7 +9,7 @@ using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Web.Api.Services.Discovery;
 
 /// <summary>
 /// Proxies discovery requests to the printer-discovery microservice.

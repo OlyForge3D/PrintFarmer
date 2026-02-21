@@ -8,7 +8,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Web.Api.Services.Startup;
 
 /// <summary>
 /// Handles database initialization with retry logic for resilient startup
