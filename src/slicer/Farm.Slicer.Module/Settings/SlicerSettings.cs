@@ -12,9 +12,9 @@ public class SlicerSettings : IAppSetting
 
     public static string SectionKey => SectionName;
 
-    [SettingDisplay(Name = "Slicer Enabled", Description = "Enable or disable slicer integration.", InputType = SettingInputType.Boolean)]
+    [SettingDisplay(Name = "Slicer Enabled", Description = "Automatically enabled when a slicer worker registers. Disable to hide slicer UI.", InputType = SettingInputType.Boolean)]
     [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
 
     [SettingDisplay(Name = "Per-Engine Slicer Settings", Description = "Settings for each slicer engine.", InputType = SettingInputType.Custom)]
     [JsonPropertyName("perEngine")]

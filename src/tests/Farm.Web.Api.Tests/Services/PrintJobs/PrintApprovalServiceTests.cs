@@ -9,7 +9,6 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.PrintJobs;
 using Farm.Infrastructure.Services.PrintJobs;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Web.Api.Data.Repositories;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;

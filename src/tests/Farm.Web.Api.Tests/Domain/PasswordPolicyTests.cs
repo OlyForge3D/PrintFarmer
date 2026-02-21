@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Domain;
+﻿using Farm.Infrastructure.Domain;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Domain;

@@ -13,7 +13,7 @@ using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Infrastructure.Database;
+
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;

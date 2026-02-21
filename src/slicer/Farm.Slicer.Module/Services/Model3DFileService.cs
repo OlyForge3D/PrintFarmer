@@ -9,7 +9,6 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Tags;
-using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Models;
@@ -40,7 +39,6 @@ namespace Farm.Slicer.Module.Services
     /// </remarks>
     public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileService
     {
-        private readonly IUnitOfWork _unitOfWork;
         private readonly IModel3DFileRepository _model3dFiles;
         private readonly ITagRepository _tagRepository;
         private readonly IUnifiedLoggingService _logger;
@@ -54,7 +52,6 @@ namespace Farm.Slicer.Module.Services
         private readonly IStoragePathService _storagePathService;
 
         public Model3DFileService(
-            IUnitOfWork unitOfWork,
             IModel3DFileRepository model3dFiles,
             ITagRepository tagRepository,
             IUnifiedLoggingService logger,
@@ -67,7 +64,6 @@ namespace Farm.Slicer.Module.Services
             IModelAnalysisService? analysisService = null,
             IThumbnailGenerationService? thumbnailService = null)
         {
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
             _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));

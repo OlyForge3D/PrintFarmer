@@ -19,6 +19,10 @@ public interface IWorkerRepository
     /// <param name="serviceId">The service identifier.</param>
     Task<Worker?> GetByServiceIdAsync(string serviceId);
 
+    /// <summary>Gets a worker by its endpoint URL.</summary>
+    /// <param name="endpointUrl">The endpoint URL.</param>
+    Task<Worker?> GetByEndpointUrlAsync(string endpointUrl);
+
     /// <summary>Gets all workers with pagination.</summary>
     /// <param name="limit">Maximum number of workers to return.</param>
     /// <param name="offset">Number of workers to skip.</param>

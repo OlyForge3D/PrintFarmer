@@ -2674,6 +2674,13 @@ EOF
             local api_key="${SLICER_WORKER_API_KEYS[$i]}"
             echo "SLICER_WORKER_API_KEY_${key_index}=$(printf '%q' "$api_key")" >> "$CONFIG_FILE"
         done
+        # Save stable instance IDs alongside API keys
+        echo "# Slicer Worker Instance IDs (preserved to prevent duplicate registrations on restart)" >> "$CONFIG_FILE"
+        for ((i=0; i<${#SLICER_WORKER_INSTANCE_IDS[@]}; i++)); do
+            local id_index=$((i+1))
+            local instance_id="${SLICER_WORKER_INSTANCE_IDS[$i]}"
+            echo "SLICER_WORKER_INSTANCE_ID_${id_index}=$instance_id" >> "$CONFIG_FILE"
+        done
     fi
 
     # Save JWT signing key to preserve user sessions across deployments
@@ -3724,8 +3731,9 @@ generate_slicer_worker_api_keys() {
     # Initialize arrays for storing worker info (without -g for cross-shell compatibility)
     SLICER_WORKER_API_KEYS=()
     SLICER_WORKER_NAMES=()
+    SLICER_WORKER_INSTANCE_IDS=()
     
-    # Generate unique API keys for each worker replica
+    # Generate unique API keys and stable instance IDs for each worker replica
     for ((i=1; i<=ORCA_WORKER_COUNT; i++)); do
         local worker_name="orcaslicer-worker"
         if [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
@@ -3745,9 +3753,22 @@ generate_slicer_worker_api_keys() {
         else
             print_info "Reusing existing API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
         fi
+
+        # Generate or reuse stable instance ID (survives container restarts)
+        local instance_id
+        local instance_config_var="SLICER_WORKER_INSTANCE_ID_${i}"
+        instance_id="${!instance_config_var:-}"
+
+        if [ -z "$instance_id" ]; then
+            instance_id=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || echo "$(date +%s)-$$-$RANDOM")
+            print_info "Generated new instance ID for worker replica $i: $instance_id"
+        else
+            print_info "Reusing existing instance ID for worker replica $i: $instance_id"
+        fi
         
         SLICER_WORKER_NAMES+=("$worker_name")
         SLICER_WORKER_API_KEYS+=("$api_key")
+        SLICER_WORKER_INSTANCE_IDS+=("$instance_id")
     done
     
     print_success "Configured ${#SLICER_WORKER_API_KEYS[@]} API keys for OrcaSlicer workers"
@@ -3793,6 +3814,17 @@ EOF
                 local env_var_name="SlicerRegistry__ApiKey__${worker_name//-/_}"
                 echo "$env_var_name=$api_key" >> "$ENV_FILE"
             done
+        fi
+        
+        # Export stable worker instance IDs (survive container restarts for re-registration)
+        local primary_instance_id="${SLICER_WORKER_INSTANCE_IDS[0]:-}"
+        if [ -n "$primary_instance_id" ]; then
+            cat >> "$ENV_FILE" << EOF
+
+# Slicer Worker Instance IDs - Stable across container restarts
+# Workers send this ID during registration so the API can upsert instead of creating duplicates
+ORCA_WORKER_INSTANCE_ID=$primary_instance_id
+EOF
         fi
         
         print_info "Exported worker API keys to $ENV_FILE"

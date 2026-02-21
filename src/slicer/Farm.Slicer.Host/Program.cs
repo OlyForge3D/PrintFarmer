@@ -30,6 +30,12 @@ builder.Services.AddSlicerApiServices(builder.Configuration);
 // the module-local adapters registered above.
 builder.Services.AddCrossDomainLookupServices(builder.Configuration);
 
+// ── Shared infrastructure services (AppDbContext, tags, catalog, settings) ────
+// In standalone mode, the slicer-host shares the same PostgreSQL database
+// as the main API and registers infrastructure services locally rather than
+// proxying all calls over HTTP.
+builder.Services.AddSharedInfrastructureServices(builder.Configuration);
+
 // ── Slicer service implementations for standalone host ────────────────────────
 // IModel3DFileService (Farm.Slicer.Module) and I3MfToStlConversionService (Farm.Infrastructure).
 builder.Services.AddUnimplementedSlicerServiceStubs();

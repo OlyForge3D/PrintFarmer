@@ -16,7 +16,6 @@ using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Infrastructure.Database;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
@@ -97,7 +96,9 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 // Slicer integration shim: loads Farm.Slicer.Module + Farm.Slicer.Module.Api DLLs at runtime
 // from Slicer:PluginsPath. No compile-time reference to EF Core, SignalR hubs, or OrcaSlicer.
 // All slicer registrations delegated to runtime-discovered ISlicerModule implementations.
-bool slicerEnabled = builder.Configuration.GetValue("Slicer:Enabled", true);
+// In microservices mode, the slicer module runs in a separate slicer-host process.
+// The user-facing SlicerSettings.Enabled is set dynamically when a worker registers.
+bool slicerEnabled = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 
 // When slicer is disabled, cross-module consumers use = null default parameter values.
 // .NET DI's ActivatorUtilities skips unregistered services that have default values.

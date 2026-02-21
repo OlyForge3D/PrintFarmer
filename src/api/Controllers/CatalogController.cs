@@ -3,7 +3,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
 using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Infrastructure.Caching;
+
 using Farm.Web.Api.Infrastructure.Normalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

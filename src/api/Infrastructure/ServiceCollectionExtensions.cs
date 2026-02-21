@@ -30,7 +30,6 @@ using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Extensions;
-using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Discovery;
@@ -250,7 +249,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
 
         // Print approval repository
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.PrintJobs.IPrintApprovalRepository, Farm.Web.Api.Data.Repositories.EfPrintApprovalRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.PrintJobs.IPrintApprovalRepository, Farm.Infrastructure.Repositories.PrintJobs.EfPrintApprovalRepository>();
 
         // Filament repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
@@ -312,13 +311,16 @@ public static class ServiceCollectionExtensions
     private static void RegisterCachingServices(IServiceCollection services)
     {
         _ = services.AddMemoryCache();
-        _ = services.AddOptions<CatalogCacheOptions>();
-        _ = services.AddOptions<PrinterVersionCacheOptions>();
+        _ = services.AddOptions<Farm.Infrastructure.Services.Catalog.Caching.CatalogCacheOptions>();
+        _ = services.AddOptions<Farm.Infrastructure.Services.Printers.PrinterVersionCacheOptions>();
 
         // CatalogCache resolves scoped AppDbContext per-call, so it can be a Singleton
-        _ = services.AddSingleton<ICatalogCache, CatalogCache>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Catalog.Caching.ICatalogCacheProvider, Farm.Infrastructure.Services.Catalog.Caching.CatalogCache>();
 
-        _ = services.AddScoped<IPrinterVersionCache, PrinterVersionCache>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterVersionCache, Farm.Infrastructure.Services.Printers.PrinterVersionCache>();
+
+        // Migration status for health checks
+        _ = services.AddScoped<Farm.Infrastructure.Data.IMigrationStatusProvider, Farm.Infrastructure.Data.MigrationStatusProvider>();
     }
 
     #endregion
@@ -402,8 +404,7 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterCatalogServices(IServiceCollection services)
     {
-        // Register cache adapter that wraps API-specific ICatalogCache for Infrastructure use
-        _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.Caching.ICatalogCacheProvider, Services.Catalog.CatalogCacheAdapter>();
+        // CatalogCache now directly implements ICatalogCacheProvider — no adapter needed
 
         // Register Infrastructure catalog service with cache abstraction
         _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.ICatalogService, Farm.Infrastructure.Services.Catalog.CatalogService>();

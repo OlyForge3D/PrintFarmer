@@ -1,7 +1,6 @@
-﻿using Farm.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Infrastructure.Database;
+namespace Farm.Infrastructure.Data;
 
 public class MigrationStatusProvider(AppDbContext context) : IMigrationStatusProvider
 {

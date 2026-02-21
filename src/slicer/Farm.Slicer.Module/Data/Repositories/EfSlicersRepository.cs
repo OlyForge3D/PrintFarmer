@@ -29,6 +29,13 @@ public class EfSlicersRepository(SlicerDbContext db) : ISlicersRepository
     }
 
     /// <inheritdoc/>
+    public async Task<SlicerService?> GetByInstanceIdAsync(string instanceId, CancellationToken ct)
+    {
+        return await _db.SlicerServices
+            .FirstOrDefaultAsync(s => s.InstanceId == instanceId, ct);
+    }
+
+    /// <inheritdoc/>
     public Task RemoveAsync(SlicerService svc, CancellationToken ct)
     {
         _ = _db.SlicerServices.Remove(svc);

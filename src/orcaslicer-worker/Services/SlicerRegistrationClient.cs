@@ -89,7 +89,8 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                     capabilities = WorkerConstants.Capabilities
                 }),
                 MaxConcurrentJobs = _configuration.GetValue("Worker:MaxConcurrentJobs", 1),
-                Tags = "orcaslicer,production"
+                Tags = "orcaslicer,production",
+                InstanceId = _configuration["Worker:InstanceId"]
             };
 
             string json = JsonSerializer.Serialize(registrationDto);

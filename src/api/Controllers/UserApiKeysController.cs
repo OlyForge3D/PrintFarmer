@@ -14,11 +14,11 @@ namespace Farm.Web.Api.Controllers
     [Route("api/users/{userId:guid}/apikeys")]
     public class UserApiKeysController : ControllerBase
     {
-        private readonly Farm.Web.Api.Data.Repositories.IApiKeyRepository _repo;
+        private readonly Farm.Infrastructure.Repositories.Api.IApiKeyRepository _repo;
         private readonly ISettingsService _settingsService;
 
         public UserApiKeysController(
-            Farm.Web.Api.Data.Repositories.IApiKeyRepository repo,
+            Farm.Infrastructure.Repositories.Api.IApiKeyRepository repo,
             ISettingsService settingsService)
         {
             _repo = repo;

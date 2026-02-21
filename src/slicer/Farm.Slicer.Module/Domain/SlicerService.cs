@@ -38,4 +38,10 @@ public class SlicerService
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public string? Tags { get; set; }
+
+    /// <summary>
+    /// Stable instance identifier assigned by the deployment environment.
+    /// Survives container restarts to enable re-registration without duplicates.
+    /// </summary>
+    public string? InstanceId { get; set; }
 }

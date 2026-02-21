@@ -22,6 +22,11 @@ public interface ISlicersRepository
     /// <param name="ct">Cancellation token.</param>
     Task<SlicerService?> GetByIdAsync(Guid id, CancellationToken ct);
 
+    /// <summary>Gets an existing slicer service by its stable instance identifier.</summary>
+    /// <param name="instanceId">The stable instance identifier assigned during deployment.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<SlicerService?> GetByInstanceIdAsync(string instanceId, CancellationToken ct);
+
     /// <summary>Removes a slicer service registration.</summary>
     /// <param name="svc">The slicer service to remove.</param>
     /// <param name="ct">Cancellation token.</param>

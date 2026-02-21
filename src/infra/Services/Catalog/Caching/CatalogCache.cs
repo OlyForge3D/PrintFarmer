@@ -1,16 +1,16 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Infrastructure.Caching;
+namespace Farm.Infrastructure.Services.Catalog.Caching;
 
-internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Options.IOptions<CatalogCacheOptions> options, IServiceProvider services) : ICatalogCache
+public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOptions> options, IServiceProvider services) : ICatalogCacheProvider
 {
     private const string ManufacturersKey = "catalog:mfglst";
     private const string ModelsAllKey = "catalog:models:all";
@@ -22,7 +22,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
 
     private static string ModelsKey(Guid id) => $"catalog:models:{id}";
 
-    public async Task<(IReadOnlyList<ManufacturerDto> List, string Etag)> GetManufacturersAsync(CancellationToken ct)
+    public async Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
     {
         if (_cache.TryGetValue(ManufacturersKey, out (IReadOnlyList<ManufacturerDto> List, string Etag) cached))
         {
@@ -44,7 +44,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         return (list, etag);
     }
 
-    public async Task<(IReadOnlyList<PrinterModelDto> List, string Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
+    public async Task<(IReadOnlyList<PrinterModelDto> List, string? Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
         string key = manufacturerId is Guid mid ? ModelsKey(mid) : ModelsAllKey;
         if (_cache.TryGetValue(key, out (IReadOnlyList<PrinterModelDto> List, string Etag) cached))

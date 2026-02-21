@@ -12,9 +12,9 @@ public class SlicerDisabledCollection { }
 
 /// <summary>
 /// Integration tests that verify the API starts and behaves correctly when
-/// the slicer module is disabled via <c>Slicer:Enabled=false</c>.
-/// Uses <see cref="SlicerDisabledWebApplicationFactory"/> which sets an
-/// environment variable before the host boots.
+/// the slicer module is not loaded (microservices deployment mode).
+/// Uses <see cref="SlicerDisabledWebApplicationFactory"/> which sets
+/// <c>DEPLOYMENT_MODE=microservices</c> before the host boots.
 /// </summary>
 [Collection("SlicerDisabled")]
 public class SlicerDisabledIntegrationTests : IAsyncLifetime
