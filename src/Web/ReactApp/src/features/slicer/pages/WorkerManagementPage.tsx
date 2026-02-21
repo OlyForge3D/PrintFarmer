@@ -266,22 +266,21 @@ export function WorkerManagementPage() {
       subtitle="Monitor and manage your Slicer workers"
       icon={WrenchIcon}
       actions={
-        <div className="w-full min-w-max flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('workers')}>Workers</Button>
-            <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
-          </div>
-          <Button
-            variant="secondary"
-            size="md"
-            onClick={loadWorkers}
-            iconLeft={<RefreshIcon className="h-4 w-4" />}
-          >
-            Refresh
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={loadWorkers}
+          iconCenter={<RefreshIcon className="h-4 w-4" />}
+        >
+        </Button>
       }
     >
+      {/* Tab buttons */}
+      <div className="mb-4 flex items-center gap-2">
+        <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('workers')}>Workers</Button>
+        <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
+      </div>
+
       {/* Connection status */}
       <div className="mb-4 flex items-center gap-2">
         <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>

@@ -22,6 +22,12 @@ public class RegisterSlicerDto
     public string? Tags { get; set; }
 
     /// <summary>
+    /// Stable instance identifier for this worker, persisted across container restarts.
+    /// When provided, the API upserts instead of creating duplicate registrations.
+    /// </summary>
+    public string? InstanceId { get; set; }
+
+    /// <summary>
     /// If true, seed all system profiles from the worker on registration (push-based).
     /// </summary>
     public bool SeedProfilesOnRegistration { get; set; }

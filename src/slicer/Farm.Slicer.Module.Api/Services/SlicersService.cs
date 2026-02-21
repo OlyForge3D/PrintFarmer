@@ -196,55 +196,117 @@ namespace Farm.Slicer.Module.Api.Services
         /// <exception cref="InvalidOperationException">Thrown if worker registration fails or worker is unreachable</exception>
         public async Task<(Guid Id, string ApiKey)> RegisterAsync(RegisterSlicerDto dto, CancellationToken ct)
         {
-            SlicerService svc = new SlicerService
+            int maxJobs = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs));
+
+            // Look for an existing service by stable instance ID to handle container restarts
+            SlicerService? svc = !string.IsNullOrWhiteSpace(dto.InstanceId)
+                ? await _repo.GetByInstanceIdAsync(dto.InstanceId, ct)
+                : null;
+
+            bool isReregistration = svc != null;
+
+            if (svc != null)
             {
-                Id = Guid.NewGuid(),
-                Name = dto.Name ?? "orca-service",
-                SlicerType = dto.SlicerType,
-                Version = dto.Version,
-                Host = dto.Host,
-                UiManifestUrl = dto.UiManifestUrl,
-                CapabilitiesJson = dto.CapabilitiesJson,
-                MaxConcurrentJobs = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)), // enforce global upper bound
-                Status = "Online",
-                LastSeen = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Tags = dto.Tags
-            };
+                // Re-registration: update existing service in place
+                _logger.LogInformation(
+                    "Re-registering existing slicer service {ServiceId} with InstanceId {InstanceId} (container restart detected)",
+                    svc.Id, svc.InstanceId);
 
-            svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", string.Empty);
+                svc.Name = dto.Name ?? svc.Name;
+                svc.Version = dto.Version;
+                svc.UiManifestUrl = dto.UiManifestUrl;
+                svc.CapabilitiesJson = dto.CapabilitiesJson;
+                svc.MaxConcurrentJobs = maxJobs;
+                svc.Status = "Online";
+                svc.LastSeen = DateTime.UtcNow;
+                svc.UpdatedAt = DateTime.UtcNow;
+                svc.Tags = dto.Tags;
+                svc.Host = dto.Host;
 
-            await _repo.AddAsync(svc, ct);
+                // Keep existing ApiKey so the worker doesn't need to re-auth
+            }
+            else
+            {
+                // Fresh registration
+                svc = new SlicerService
+                {
+                    Id = Guid.NewGuid(),
+                    Name = dto.Name ?? "orca-service",
+                    SlicerType = dto.SlicerType,
+                    Version = dto.Version,
+                    Host = dto.Host,
+                    UiManifestUrl = dto.UiManifestUrl,
+                    CapabilitiesJson = dto.CapabilitiesJson,
+                    MaxConcurrentJobs = maxJobs,
+                    Status = "Online",
+                    LastSeen = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    Tags = dto.Tags,
+                    InstanceId = dto.InstanceId
+                };
+
+                svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", string.Empty);
+
+                await _repo.AddAsync(svc, ct);
+            }
+
             await _repo.SaveChangesAsync(ct);
 
             // Synchronize to Worker table for dispatcher
             try
             {
-                Worker worker = new Worker
-                {
-                    Id = Guid.NewGuid(),
-                    ServiceId = svc.Id.ToString(),
-                    Name = svc.Name,
-                    EndpointUrl = svc.Host ?? string.Empty,
-                    CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
-                    Status = WorkerStatus.Online,
-                    TotalSlots = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)),
-                    ActiveJobs = 0,
-                    CompletedJobs = 0,
-                    FailedJobs = 0,
-                    LastHeartbeat = DateTime.UtcNow,
-                    RegisteredAt = DateTime.UtcNow,
-                    OnlineAt = DateTime.UtcNow,
-                    ApiKey = svc.ApiKey,
-                    Version = svc.Version,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                    IsDisabled = false
-                };
+                // Find existing worker by service ID or endpoint URL
+                Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString())
+                    ?? (!string.IsNullOrWhiteSpace(svc.Host)
+                        ? await _workerRepo.GetByEndpointUrlAsync(svc.Host)
+                        : null);
 
-                await _workerRepo.AddAsync(worker);
-                await _repo.SaveChangesAsync(ct); // Use _repo's SaveChanges since both entities use same DbContext
+                if (worker != null)
+                {
+                    // Update existing worker
+                    worker.ServiceId = svc.Id.ToString();
+                    worker.Name = svc.Name;
+                    worker.EndpointUrl = svc.Host ?? string.Empty;
+                    worker.CapabilitiesJson = svc.CapabilitiesJson ?? "[]";
+                    worker.Status = WorkerStatus.Online;
+                    worker.TotalSlots = maxJobs;
+                    worker.ActiveJobs = 0;
+                    worker.LastHeartbeat = DateTime.UtcNow;
+                    worker.OnlineAt = DateTime.UtcNow;
+                    worker.ApiKey = svc.ApiKey;
+                    worker.Version = svc.Version;
+                    worker.UpdatedAt = DateTime.UtcNow;
+                    worker.IsDisabled = false;
+                }
+                else
+                {
+                    worker = new Worker
+                    {
+                        Id = Guid.NewGuid(),
+                        ServiceId = svc.Id.ToString(),
+                        Name = svc.Name,
+                        EndpointUrl = svc.Host ?? string.Empty,
+                        CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
+                        Status = WorkerStatus.Online,
+                        TotalSlots = maxJobs,
+                        ActiveJobs = 0,
+                        CompletedJobs = 0,
+                        FailedJobs = 0,
+                        LastHeartbeat = DateTime.UtcNow,
+                        RegisteredAt = DateTime.UtcNow,
+                        OnlineAt = DateTime.UtcNow,
+                        ApiKey = svc.ApiKey,
+                        Version = svc.Version,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                        IsDisabled = false
+                    };
+
+                    await _workerRepo.AddAsync(worker);
+                }
+
+                await _repo.SaveChangesAsync(ct);
             }
             catch (Exception ex)
             {

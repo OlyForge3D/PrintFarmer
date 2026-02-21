@@ -58,6 +58,7 @@ services:
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
       - Worker__WorkerId=orcaslicer-worker-1
+      - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
     volumes: *worker-volumes

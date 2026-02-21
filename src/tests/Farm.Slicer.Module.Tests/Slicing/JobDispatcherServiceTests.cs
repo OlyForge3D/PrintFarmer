@@ -126,6 +126,7 @@ public class JobDispatcherServiceTests
         public Task AddAsync(Worker w) { Workers.Add(w); return Task.CompletedTask; }
         public Task<Worker?> GetByIdAsync(Guid id) => Task.FromResult(Workers.Find(w => w.Id == id));
         public Task<Worker?> GetByServiceIdAsync(string serviceId) => Task.FromResult<Worker?>(null);
+        public Task<Worker?> GetByEndpointUrlAsync(string endpointUrl) => Task.FromResult<Worker?>(null);
         public Task<IReadOnlyList<Worker>> GetAllAsync(int limit = 100, int offset = 0) => Task.FromResult((IReadOnlyList<Worker>)Workers);
         public Task<IReadOnlyList<Worker>> GetByStatusAsync(string status, int limit = 100, int offset = 0) => Task.FromResult((IReadOnlyList<Worker>)Workers.FindAll(w => w.Status == status));
         public Task<IReadOnlyList<Worker>> GetAvailableWorkersAsync(int limit = 100)
