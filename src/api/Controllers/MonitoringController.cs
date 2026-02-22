@@ -98,4 +98,33 @@ public class MonitoringController(
         var summary = await healthService.GetMetricsSummaryAsync(cancellationToken);
         return Ok(summary);
     }
+
+    /// <summary>
+    /// Streams individual metric results as Server-Sent Events for progressive UI updates.
+    /// Each metric is emitted as it resolves from Prometheus, allowing cards to render progressively.
+    /// </summary>
+    [HttpGet("metrics/stream")]
+    [Authorize(Roles = "farm_admin")]
+    public async Task StreamMetricsSseAsync(CancellationToken cancellationToken)
+    {
+        Response.ContentType = "text/event-stream";
+        Response.Headers["Cache-Control"] = "no-cache";
+        Response.Headers["Connection"] = "keep-alive";
+        Response.Headers["X-Accel-Buffering"] = "no";
+
+        var jsonOptions = new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+        };
+
+        await foreach (var evt in healthService.StreamMetricsAsync(cancellationToken))
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(evt, jsonOptions);
+            await Response.WriteAsync($"event: metric\ndata: {json}\n\n", cancellationToken);
+            await Response.Body.FlushAsync(cancellationToken);
+        }
+
+        await Response.WriteAsync("event: done\ndata: {}\n\n", cancellationToken);
+        await Response.Body.FlushAsync(cancellationToken);
+    }
 }

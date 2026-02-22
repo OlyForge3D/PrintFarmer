@@ -2565,10 +2565,19 @@ export interface MonitoringStatusDto {
 
 export interface MonitoringMetricsSummaryDto {
   requestsPerSecond: number;
+  apiCallsLast24h: number;
+  topEndpointName: string;
+  topEndpointRequestsPerSecond: number;
   errorRatePercent: number;
+  clientErrorRatePercent: number;
   p95LatencyMs: number;
+  p99LatencyMs: number;
   memoryUsageMb: number;
   activePrinters: number;
+  printerSuccessRatePercent: number;
+  fileOperationsLast24h: number;
+  averageFileSizeMbLast24h: number;
+  databaseOperationsLast24h: number;
   slicerJobsLast24h: number;
   slicerSuccessRatePercent: number;
   timestamp: string;

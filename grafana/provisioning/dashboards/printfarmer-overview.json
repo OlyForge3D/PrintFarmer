@@ -85,7 +85,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "targets": [
         {
-          "expr": "process_working_set_bytes / 1024 / 1024",
+          "expr": "dotnet_process_memory_working_set_bytes / 1024 / 1024",
           "legendFormat": "MB"
         }
       ],
@@ -169,8 +169,120 @@
       "fieldConfig": {
         "defaults": { "unit": "ops" }
       }
+    },
+    {
+      "id": 9,
+      "title": "Error Rate Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum(rate(printfarmer_api_calls_total{status_class=\"5xx\"}[5m])) or vector(0)",
+          "legendFormat": "5xx"
+        },
+        {
+          "expr": "sum(rate(printfarmer_api_calls_total{status_class=\"4xx\"}[5m])) or vector(0)",
+          "legendFormat": "4xx"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "title": "Memory Usage Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        {
+          "expr": "dotnet_process_memory_working_set_bytes / 1024 / 1024",
+          "legendFormat": "Working Set"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes",
+          "custom": { "fillOpacity": 15, "gradientMode": "scheme" }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Database Operations Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        {
+          "expr": "sum(rate(printfarmer_database_operations_total[5m])) by (operation)",
+          "legendFormat": "{{ operation }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      }
+    },
+    {
+      "id": 12,
+      "title": "File Operations Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [
+        {
+          "expr": "sum(rate(printfarmer_file_operations_total[5m])) by (operation)",
+          "legendFormat": "{{ operation }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Request Rate by Endpoint",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "targets": [
+        {
+          "expr": "topk(5, sum by (endpoint) (rate(printfarmer_api_calls_total[5m])))",
+          "legendFormat": "{{ endpoint }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      }
+    },
+    {
+      "id": 14,
+      "title": "API Latency Percentiles Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "fillOpacity": 10, "gradientMode": "scheme" }
+        }
+      }
     }
   ],
   "schemaVersion": 39,
-  "version": 1
+  "version": 3
 }

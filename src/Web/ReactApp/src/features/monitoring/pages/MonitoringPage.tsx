@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Card, Spinner, Badge } from '@/common/components/ui';
-import { ChartIcon } from '@/common/components/icons/MdiIcons';
+import { ChartIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import { MetricsSummaryWidgets } from '@/features/monitoring/components/MetricsSummaryWidgets';
 import { GrafanaEmbedPanels } from '@/features/monitoring/components/GrafanaEmbedPanels';
@@ -41,15 +41,18 @@ export function MonitoringPage() {
 
   if (statusLoading) {
     return (
-      <PageTemplate title="Monitoring" icon={<ChartIcon className="w-6 h-6" />}>
+      <PageTemplate title="Monitoring" icon={ChartIcon}>
         <div className="flex justify-center py-12"><Spinner size="lg" /></div>
       </PageTemplate>
     );
   }
 
-  if (statusError) {
+  // Only show error view on initial load failure (no cached data).
+  // Background refetch errors keep the last-known UI visible to avoid
+  // unmounting all Grafana iframes (which causes the whole page to flash).
+  if (statusError && !status) {
     return (
-      <PageTemplate title="Monitoring" icon={<ChartIcon className="w-6 h-6" />}>
+      <PageTemplate title="Monitoring" icon={ChartIcon}>
         <div className="p-4 text-pf-error">Failed to load monitoring status: {String(statusError)}</div>
       </PageTemplate>
     );
@@ -61,7 +64,7 @@ export function MonitoringPage() {
     <PageTemplate
       title="Monitoring"
       subtitle="Application metrics, traces, and observability"
-      icon={<ChartIcon className="w-6 h-6" />}
+      icon={ChartIcon}
       actions={<DeepLinks status={status} />}
     >
       {!anyAvailable ? (
@@ -114,9 +117,10 @@ function DeepLinks({ status }: { status?: MonitoringStatusDto }) {
           href="/grafana/"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-pf-accent-bg text-pf-accent hover:opacity-80 transition-opacity"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-pf-border text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 transition-colors"
         >
           Open Grafana
+          <ExternalLinkIcon className="w-3.5 h-3.5" />
         </a>
       )}
       {status?.jaeger.available && (
@@ -124,9 +128,10 @@ function DeepLinks({ status }: { status?: MonitoringStatusDto }) {
           href="/jaeger/"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-pf-accent-bg text-pf-accent hover:opacity-80 transition-opacity"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-pf-border text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 transition-colors"
         >
           Open Jaeger
+          <ExternalLinkIcon className="w-3.5 h-3.5" />
         </a>
       )}
     </div>

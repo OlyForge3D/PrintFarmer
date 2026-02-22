@@ -52,6 +52,14 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      '/grafana': {
+        target: 'http://localhost:80',
+        changeOrigin: true,
+      },
+      '/jaeger': {
+        target: 'http://localhost:80',
+        changeOrigin: true,
+      },
     },
   },
   preview: {

@@ -1,4 +1,3 @@
-```skill
 ---
 name: api-debugging
 description: Debug PrintFarmer API errors by authenticating against endpoints, querying Docker containers, and inspecting logs. Use when investigating 500 errors, auth failures, or API endpoint issues in both local dev and Docker deployments.
@@ -184,4 +183,3 @@ docker exec printfarmer-nginx-proxy cat /etc/nginx/nginx.conf
 ```
 
 The nginx config routes slicer paths to `slicer-host:5246` and everything else to `api:5245`.
-```
