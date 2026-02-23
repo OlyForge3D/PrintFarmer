@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
@@ -105,13 +105,13 @@ public class MonitoringHealthService(
         var client = httpClientFactory.CreateClient("MonitoringHealth");
 
         Task<MetricStreamEvent[]> QAsync(string key, string query, bool asInt = false) =>
-            WrapMetricAsync(key, QueryPrometheusAsync(client, prometheusUrl, query, cancellationToken), asInt);
+            WrapMetricAsync(key, () => QueryPrometheusAsync(client, prometheusUrl, query, cancellationToken), asInt);
 
         var pending = new List<Task<MetricStreamEvent[]>>
         {
             QAsync("requestsPerSecond", "sum(rate(printfarmer_api_calls_total[5m]))"),
             QAsync("apiCallsLast24h", "sum(increase(printfarmer_api_calls_total[24h]))", asInt: true),
-            WrapTopEndpointAsync(QueryPrometheusTopEndpointAsync(client, prometheusUrl, cancellationToken)),
+            WrapTopEndpointAsync(() => QueryPrometheusTopEndpointAsync(client, prometheusUrl, cancellationToken)),
             QAsync("errorRatePercent", "(sum(rate(printfarmer_api_calls_total{status_class=\"5xx\"}[5m])) or vector(0)) / (sum(rate(printfarmer_api_calls_total[5m])) or vector(1)) * 100"),
             QAsync("clientErrorRatePercent", "(sum(rate(printfarmer_api_calls_total{status_class=\"4xx\"}[5m])) or vector(0)) / (sum(rate(printfarmer_api_calls_total[5m])) or vector(1)) * 100"),
             QAsync("p95LatencyMs", "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000"),
@@ -139,17 +139,17 @@ public class MonitoringHealthService(
     }
 
     private static async Task<MetricStreamEvent[]> WrapMetricAsync(
-        string key, Task<double> query, bool asInt = false)
+        string key, Func<Task<double>> queryFactory, bool asInt = false)
     {
-        var value = await query;
+        var value = await queryFactory();
         object result = asInt ? (int)value : value;
         return [new MetricStreamEvent { Key = key, Value = result }];
     }
 
     private static async Task<MetricStreamEvent[]> WrapTopEndpointAsync(
-        Task<(string Endpoint, double RequestsPerSecond)> query)
+        Func<Task<(string Endpoint, double RequestsPerSecond)>> queryFactory)
     {
-        var (endpoint, rps) = await query;
+        var (endpoint, rps) = await queryFactory();
         return
         [
             new MetricStreamEvent { Key = "topEndpointName", Value = endpoint },

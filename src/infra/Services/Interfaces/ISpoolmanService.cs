@@ -36,8 +36,9 @@ public interface ISpoolmanService
     /// Gets a list of all filament spools from the configured Spoolman server.
     /// </summary>
     /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <param name="limit">Optional maximum number of spools to return for faster partial loads</param>
     /// <returns>A task containing a read-only list of all spools with their current status and information</returns>
-    Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct);
+    Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct, int? limit = null);
 
     /// <summary>
     /// Gets a list of all filament types (product definitions) from the configured Spoolman server.

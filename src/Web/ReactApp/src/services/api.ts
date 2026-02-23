@@ -79,6 +79,7 @@ import {
   SpoolmanDbImportRequest,
   SpoolmanDbImportResult,
   ConnectionDiagnosticsResponse,
+  PagedResponse,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -1083,6 +1084,19 @@ export class ApiClient {
   async getFilamentTypes(): Promise<FilamentTypeDto[]> {
     const response = await this.client.get<FilamentTypeDto[]>(
       "/filament-types"
+    );
+    return response.data;
+  }
+
+  async getFilamentTypesPaged(page = 1, pageSize = 50, search?: string): Promise<PagedResponse<FilamentTypeDto>> {
+    const params: Record<string, string | number> = {};
+    params.page = page;
+    params.pageSize = pageSize;
+    if (search) params.search = search;
+
+    const response = await this.client.get<PagedResponse<FilamentTypeDto>>(
+      "/filament-types",
+      { params }
     );
     return response.data;
   }
@@ -2452,8 +2466,9 @@ export class ApiClient {
   /**
    * Get spools from Spoolman
    */
-  async getSpools(): Promise<SpoolmanSpool[]> {
-    const response = await this.client.get('/spoolman/spools');
+  async getSpools(limit?: number): Promise<SpoolmanSpool[]> {
+    const params = limit && limit > 0 ? { limit } : undefined;
+    const response = await this.client.get('/spoolman/spools', { params });
     const data = response.data;
     return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanSpool[] || [];
   }

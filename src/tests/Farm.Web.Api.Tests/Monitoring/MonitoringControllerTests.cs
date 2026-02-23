@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;

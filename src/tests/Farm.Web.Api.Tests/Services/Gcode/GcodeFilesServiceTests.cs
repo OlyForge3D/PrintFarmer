@@ -72,7 +72,7 @@ public class GcodeFilesServiceTests
 
         var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
-        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -129,7 +129,7 @@ public class GcodeFilesServiceTests
 
         Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock("prints/models");
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
-        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -236,7 +236,7 @@ public class GcodeFilesServiceTests
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
 
-        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
 
         // Act
         GcodeFileListResponse response = await service.QueryAsync(
@@ -323,7 +323,7 @@ public class GcodeFilesServiceTests
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
-            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
+            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
 
         // Act
         bool result = await service.DeleteFilesAsync(new[] { fileId }, CancellationToken.None);
@@ -394,7 +394,7 @@ public class GcodeFilesServiceTests
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
-            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
+            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
 
         // Act
         bool result = await service.DeleteFilesAsync(new[] { fileId }, CancellationToken.None);
@@ -482,7 +482,7 @@ public class GcodeFilesServiceTests
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
-            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
+            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
 
         // Act
         bool result = await service.DeleteFilesAsync(new[] { file1Id, file2Id }, CancellationToken.None);

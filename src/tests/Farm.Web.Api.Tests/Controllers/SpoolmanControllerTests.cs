@@ -161,11 +161,11 @@ namespace Farm.Web.Api.Tests.Controllers
             };
 
             _spoolmanServiceMock
-                .Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>()))
+                .Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>(), It.IsAny<int?>()))
                 .ReturnsAsync(spools);
 
             // Act
-            ActionResult<IEnumerable<SpoolmanSpoolDto>> result = await _controller.GetSpoolsAsync(CancellationToken.None);
+            ActionResult<IEnumerable<SpoolmanSpoolDto>> result = await _controller.GetSpoolsAsync(null, CancellationToken.None);
 
             // Assert
             ActionResult<IEnumerable<SpoolmanSpoolDto>> okResult = Assert.IsType<ActionResult<IEnumerable<SpoolmanSpoolDto>>>(result);
@@ -177,15 +177,15 @@ namespace Farm.Web.Api.Tests.Controllers
             // Arrange
             var spools = new List<SpoolmanSpoolDto>();
             _spoolmanServiceMock
-                .Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>()))
+                .Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>(), It.IsAny<int?>()))
                 .ReturnsAsync(spools);
 
             // Act
-            await _controller.GetSpoolsAsync(CancellationToken.None);
+            await _controller.GetSpoolsAsync(null, CancellationToken.None);
 
             // Assert
             _spoolmanServiceMock.Verify(
-                s => s.ListSpoolsAsync(It.IsAny<CancellationToken>()),
+                s => s.ListSpoolsAsync(It.IsAny<CancellationToken>(), It.IsAny<int?>()),
                 Times.Once);
         }
 

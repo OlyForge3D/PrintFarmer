@@ -63,6 +63,16 @@ namespace Farm.Infrastructure.Services.Filament
         }
 
         /// <summary>
+        /// Retrieves a paged, optionally filtered list of filament types.
+        /// </summary>
+        public async Task<PagedResult<FilamentTypeDto>> GetPagedFilamentTypesAsync(int page, int pageSize, string? search, CancellationToken ct)
+        {
+            return !_startupStatus.IsReady
+                ? throw new InvalidOperationException("System is still initializing")
+                : await _repo.GetPagedAsync(page, pageSize, search, ct);
+        }
+
+        /// <summary>
         /// Retrieves all filament presets with temperature configurations.
         /// </summary>
         /// <param name="ct">Cancellation token for async operation</param>

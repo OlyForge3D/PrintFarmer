@@ -16,6 +16,13 @@ public interface IFilamentTypeRepository
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct = default);
 
+    /// <summary>Gets a paged, optionally filtered list of filament types.</summary>
+    /// <param name="page">1-based page number.</param>
+    /// <param name="pageSize">Items per page.</param>
+    /// <param name="search">Optional case-insensitive name filter.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<PagedResult<FilamentTypeDto>> GetPagedAsync(int page, int pageSize, string? search = null, CancellationToken ct = default);
+
     /// <summary>Gets filament presets including bed temperatures, print temperatures, and enclosure requirements.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct = default);

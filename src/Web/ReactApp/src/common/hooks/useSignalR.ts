@@ -64,6 +64,12 @@ export function usePrinterStatusUpdates(
   const onUpdateRef = useRef(onUpdate);
   const printerIdsRef = useRef(printerIds);
 
+  // Refs for batching: accumulate updates without triggering re-renders,
+  // then flush to state once per second.
+  const pendingRef = useRef<Map<string, PrinterStatusUpdate>>(new Map());
+  const dirtyRef = useRef(false);
+  const latestRef = useRef<PrinterStatusUpdate | null>(null);
+
   // Update refs when props change
   useEffect(() => {
     onUpdateRef.current = onUpdate;
@@ -72,6 +78,20 @@ export function usePrinterStatusUpdates(
     printerIdsRef.current = printerIds;
   }, [printerIds]);
 
+  // Flush interval: sync accumulated ref updates to React state (~1 render/sec max)
+  useEffect(() => {
+    const flushId = setInterval(() => {
+      if (!dirtyRef.current) return;
+      dirtyRef.current = false;
+      const snapshot = new Map(pendingRef.current);
+      setPrinterStatuses(snapshot);
+      if (latestRef.current) {
+        setLatestUpdate(latestRef.current);
+      }
+    }, 1000);
+    return () => clearInterval(flushId);
+  }, []);
+
   useEffect(() => {
     printerSignalRService.connect();
 
@@ -79,12 +99,14 @@ export function usePrinterStatusUpdates(
     try {
       const cached = printerSignalRService.getLastStatuses();
       if (cached.size > 0) {
-        setPrinterStatuses(() => {
-          if (printerIdsRef.current && printerIdsRef.current.length > 0) {
-            return new Map(Array.from(cached.entries()).filter(([id]) => printerIdsRef.current!.includes(id)));
-          }
-          return cached;
-        });
+        const seed = printerIdsRef.current?.length
+          ? new Map(Array.from(cached.entries()).filter(([id]) => printerIdsRef.current!.includes(id)))
+          : cached;
+        // Populate both ref and state for immediate display
+        for (const [id, status] of seed) {
+          pendingRef.current.set(id, status);
+        }
+        setPrinterStatuses(new Map(pendingRef.current));
       }
     } catch {
       // ignore cache seed failures
@@ -104,11 +126,12 @@ export function usePrinterStatusUpdates(
       }
       if (printerIdsRef.current && !printerIdsRef.current.includes(status.id)) return;
       
-      // Update state normally - React will batch these appropriately
-      // Note: Printer status updates are less frequent than discovery progress,
-      // so batching is acceptable here
-      setLatestUpdate(status);
-      setPrinterStatuses(prev => new Map(prev.set(status.id, status)));
+      // Accumulate in ref (no re-render). The flush interval syncs to state.
+      pendingRef.current.set(status.id, status);
+      latestRef.current = status;
+      dirtyRef.current = true;
+
+      // Fire callback immediately for consumers that need it
       onUpdateRef.current?.(status);
     };
     const unsubscribe = printerSignalRService.onPrinterStatusUpdate(handleStatusUpdate);
@@ -119,6 +142,7 @@ export function usePrinterStatusUpdates(
     return printerStatuses.get(printerId);
   }, [printerStatuses]);
   const clearPrinterStatus = useCallback((printerId: string) => {
+    pendingRef.current.delete(printerId);
     setPrinterStatuses(prev => {
       const newMap = new Map(prev);
       newMap.delete(printerId);
@@ -126,6 +150,9 @@ export function usePrinterStatusUpdates(
     });
   }, []);
   const clearAllStatuses = useCallback(() => {
+    pendingRef.current.clear();
+    latestRef.current = null;
+    dirtyRef.current = false;
     setPrinterStatuses(new Map());
     setLatestUpdate(null);
   }, []);

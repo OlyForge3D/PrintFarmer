@@ -15,13 +15,15 @@ import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, DownloadIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 import { 
-  useFilamentTypes, 
+  useFilamentTypesPaged,
   useCreateFilamentType, 
   useUpdateFilamentType, 
   useDeleteFilamentType,
   useImportFilamentTypesFromSpoolman,
 } from '@/common/hooks/useApi';
 import type { FilamentTypeDto, CreateFilamentTypeRequest, UpdateFilamentTypeRequest, TempTargets } from '@/types/api';
+
+const PAGE_SIZE = 50;
 
 
 /**
@@ -185,8 +187,18 @@ const emptyForm: FilamentFormState = {
  * - Import filament types from Spoolman
  */
 export function FilamentsCatalog() {
-  // Data queries
-  const { data: filamentTypes, isLoading, isError } = useFilamentTypes();
+  // Pagination & search state
+  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState<string | undefined>(undefined);
+
+  // Data queries — paged
+  const { data: pagedResult, isLoading, isError } = useFilamentTypesPaged(page, PAGE_SIZE, search);
+
+  // Extract items and paging info from response
+  const filaments = useMemo(() => pagedResult?.items ?? [], [pagedResult]);
+  const totalCount = pagedResult?.totalCount ?? filaments.length;
+  const totalPages = pagedResult?.totalPages ?? 1;
 
   // Mutations
   const createMutation = useCreateFilamentType();
@@ -398,8 +410,14 @@ export function FilamentsCatalog() {
     setFormErrors(prev => ({ ...prev, [field]: undefined }));
   }, []);
 
+  // Handle search submission
+  const handleSearch = useCallback(() => {
+    setSearch(searchInput.trim() || undefined);
+    setPage(1);
+  }, [searchInput]);
+
   // Render loading state
-  if (isLoading) {
+  if (isLoading && filaments.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-pf-text-secondary">Loading filament types...</div>
@@ -416,16 +434,36 @@ export function FilamentsCatalog() {
     );
   }
 
-  const filaments = filamentTypes ?? [];
-
   return (
     <div className="space-y-4">
       {/* Header with action buttons */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-2">
         <h2 className="text-lg font-semibold text-pf-text-primary">
-          Filament Types ({filaments.length})
+          Filament Types ({totalCount})
         </h2>
         <div className="flex items-center gap-2">
+          <form
+            className="flex gap-1"
+            onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
+          >
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by name…"
+              className="w-44"
+            />
+            {search && (
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={() => { setSearchInput(''); setSearch(undefined); setPage(1); }}
+                title="Clear search"
+              >
+                ✕
+              </Button>
+            )}
+          </form>
           <Button 
             onClick={handleImportFromSpoolman}
             title="Import filament types from Spoolman"
@@ -504,6 +542,33 @@ export function FilamentsCatalog() {
             </div>
           )}
         />
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between py-2">
+          <div className="text-sm text-pf-text-secondary">
+            Page {page} of {totalPages} &middot; {totalCount} total
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1 || isLoading}
+              variant="secondary"
+              size="sm"
+            >
+              ← Previous
+            </Button>
+            <Button
+              onClick={() => setPage(p => p + 1)}
+              disabled={page >= totalPages || isLoading}
+              variant="secondary"
+              size="sm"
+            >
+              Next →
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* Add Filament Modal */}
