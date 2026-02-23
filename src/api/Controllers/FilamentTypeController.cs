@@ -33,15 +33,23 @@ public class FilamentTypeController(
     /// <summary>
     /// Gets all available filament types.
     /// </summary>
+    /// <param name="page">Page number (1-based). Omit for unpaged.</param>
+    /// <param name="pageSize">Items per page (default 50).</param>
+    /// <param name="search">Optional case-insensitive name filter.</param>
     /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>List of all filament types ordered by name</returns>
+    /// <returns>List of filament types, optionally paged</returns>
     /// <response code="200">Returns the list of filament types</response>
     /// <response code="503">If the system is still initializing</response>
     [AllowAnonymous]
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<FilamentTypeDto>), 200)]
+    [ProducesResponseType(typeof(PagedResult<FilamentTypeDto>), 200)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<IEnumerable<FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
+    public async Task<IActionResult> GetFilamentTypesAsync(
+        [FromQuery] int? page = null,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
     {
         // Ensure initialization is complete to prevent race conditions during startup
         try
@@ -51,6 +59,14 @@ public class FilamentTypeController(
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
+            if (page.HasValue)
+            {
+                PagedResult<FilamentTypeDto> paged = await _filamentService.GetPagedFilamentTypesAsync(
+                    Math.Max(1, page.Value), Math.Clamp(pageSize, 1, 200), search, ct);
+                return Ok(paged);
+            }
+
+            // Unpaged fallback for backwards compatibility
             IReadOnlyList<FilamentTypeDto> list = await _filamentService.GetFilamentTypesAsync(ct);
             return Ok(list);
         }

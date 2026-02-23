@@ -8,7 +8,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { usePrinters } from '@/common/hooks/useApi';
 import { maintenanceService } from '@/services/maintenanceService';
-import type { MaintenanceAlert, MaintenanceSchedule } from '@/types/maintenance';
+import type { MaintenanceAlert } from '@/types/maintenance';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
 
 export interface PrinterMaintenanceStatus {
@@ -89,20 +89,8 @@ export function useMaintenanceStats(
     staleTime: 30000,
   });
 
-  // Fetch all schedules (may be used for future schedule-related features)
-  const { 
-    isLoading: schedulesLoading,
-    error: schedulesError,
-    refetch: refetchSchedules 
-  } = useQuery<MaintenanceSchedule[], Error>({
-    queryKey: [QUERY_KEY, 'schedules'],
-    queryFn: () => maintenanceService.getAllSchedules(),
-    refetchInterval: refetchInterval * 2, // Less frequent refresh for schedules
-    staleTime: 60000,
-  });
-
-  const isLoading = printersLoading || alertsLoading || schedulesLoading;
-  const error = printersError || alertsError || schedulesError || null;
+  const isLoading = printersLoading || alertsLoading;
+  const error = printersError || alertsError || null;
 
   // Calculate aggregated stats
   const stats: FleetMaintenanceStats | null = !isLoading && printers && alerts ? (() => {
@@ -171,7 +159,6 @@ export function useMaintenanceStats(
 
   const refetch = () => {
     refetchAlerts();
-    refetchSchedules();
   };
 
   return {

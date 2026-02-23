@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -13,6 +13,7 @@ const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 min (cookie TTL is 15 
 
 export function MonitoringPage() {
   const sessionRefreshRef = useRef<ReturnType<typeof setInterval>>();
+  const [sessionKey, setSessionKey] = useState(0);
 
   const { data: status, isLoading: statusLoading, error: statusError } = useQuery({
     queryKey: ['monitoring-status'],
@@ -23,6 +24,9 @@ export function MonitoringPage() {
 
   const sessionMutation = useMutation({
     mutationFn: () => apiClient.createMonitoringSession(),
+    retry: 3,
+    retryDelay: 5_000,
+    onSuccess: () => setSessionKey(k => k + 1),
     onError: (err: Error) => toast.error(`Failed to create monitoring session: ${err.message}`),
   });
 
@@ -83,7 +87,7 @@ export function MonitoringPage() {
         <div className="space-y-6">
           <ServiceStatusBar status={status} />
           {status?.prometheus.available && <MetricsSummaryWidgets />}
-          {status?.grafana.available && <GrafanaEmbedPanels />}
+          {status?.grafana.available && <GrafanaEmbedPanels sessionKey={sessionKey} />}
         </div>
       )}
     </PageTemplate>

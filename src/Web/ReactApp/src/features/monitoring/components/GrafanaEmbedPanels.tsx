@@ -2,9 +2,12 @@ import { useState, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
+import { useSlicer } from '@/hooks/useSlicer';
 import type { MonitoringMetricsSummaryDto } from '@/types/api';
 
 const DASHBOARD_UID = 'printfarmer-overview';
+
+const SLICER_PANEL_ID = 8;
 
 interface PanelConfig {
   id: number;
@@ -26,9 +29,10 @@ const PANELS: PanelConfig[] = [
   { id: 12, title: 'File Operations Over Time', metricKey: 'fileOperationsLast24h', noDataMessage: 'No file operation metrics available.', noDataHint: 'This panel will populate when file activity is tracked.' },
   { id: 13, title: 'Request Rate by Endpoint', metricKey: 'requestsPerSecond', noDataMessage: 'No per-endpoint traffic data available yet.', noDataHint: 'This panel will show top endpoints once HTTP traffic is detected.' },
   { id: 14, title: 'API Latency Percentiles Over Time', metricKey: 'p95LatencyMs', noDataMessage: 'No latency percentile data available yet.', noDataHint: 'This panel will show p50/p95/p99 latency once requests are processed.' },
+  { id: 15, title: 'Slowest Endpoints (P95)', metricKey: 'requestsPerSecond', noDataMessage: 'No per-endpoint latency data available yet.', noDataHint: 'This panel will rank endpoints by P95 latency once HTTP traffic is detected.' },
 ];
 
-export function GrafanaEmbedPanels() {
+export function GrafanaEmbedPanels({ sessionKey = 0 }: { sessionKey?: number }) {
   // Read from the TanStack cache that useStreamingMetrics already populates.
   // No refetchInterval — the SSE hook handles periodic updates.
   // staleTime: Infinity prevents this query from overwriting SSE data.
@@ -39,11 +43,16 @@ export function GrafanaEmbedPanels() {
     refetchInterval: false,
   });
 
+  const { isSlicerAvailable } = useSlicer();
+
+  // Filter out the Slicer Operations panel entirely when slicing is disabled
+  const visiblePanels = isSlicerAvailable ? PANELS : PANELS.filter(p => p.id !== SLICER_PANEL_ID);
+
   return (
     <div>
       <h3 className="text-sm font-medium text-pf-text-secondary mb-3">Live Charts</h3>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {PANELS.map(panel => {
+        {visiblePanels.map(panel => {
           // Only show fallback when metrics have loaded and the relevant value is 0/missing.
           // While metrics are still loading (undefined), render the iframe — it may have data.
           const metricValue = metrics?.[panel.metricKey];
@@ -61,16 +70,16 @@ export function GrafanaEmbedPanels() {
             );
           }
 
-          return <GrafanaPanel key={panel.id} panelId={panel.id} title={panel.title} />;
+          return <GrafanaPanel key={panel.id} panelId={panel.id} title={panel.title} sessionKey={sessionKey} />;
         })}
       </div>
     </div>
   );
 }
 
-const GrafanaPanel = memo(function GrafanaPanel({ panelId, title }: { panelId: number; title: string }) {
+const GrafanaPanel = memo(function GrafanaPanel({ panelId, title, sessionKey }: { panelId: number; title: string; sessionKey: number }) {
   const [hasError, setHasError] = useState(false);
-  const src = `/grafana/d-solo/${DASHBOARD_UID}/printfarmer-overview?panelId=${panelId}&refresh=30s&theme=dark`;
+  const src = `/grafana/d-solo/${DASHBOARD_UID}/printfarmer-overview?panelId=${panelId}&refresh=30s&theme=dark&_sk=${sessionKey}`;
 
   const handleError = () => {
     console.warn(`[Monitoring] Failed to load Grafana panel ${panelId}: "${title}"`);

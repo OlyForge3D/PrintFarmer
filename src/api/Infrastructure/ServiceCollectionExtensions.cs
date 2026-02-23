@@ -59,13 +59,22 @@ public static class ServiceCollectionExtensions
         // Instead, encryption is handled at the service layer in PrintersService.
         _ = services.AddSingleton<SensitiveDataEncryptionInterceptor>();
 
+        // Register telemetry interceptor for automatic database operation metrics
+        _ = services.AddSingleton<TelemetrySaveChangesInterceptor>();
+
         // Register DbContext with scoped lifetime (default)
-        _ = services.AddDbContext<AppDbContext>(options =>
-            ConfigureAppDbProvider(options, dbConfig));
+        _ = services.AddDbContext<AppDbContext>((sp, options) =>
+        {
+            ConfigureAppDbProvider(options, dbConfig);
+            options.AddInterceptors(sp.GetRequiredService<TelemetrySaveChangesInterceptor>());
+        });
 
         // Register a factory that shares the same configuration as AddDbContext.
-        _ = services.AddDbContextFactory<AppDbContext>(options =>
-            ConfigureAppDbProvider(options, dbConfig));
+        _ = services.AddDbContextFactory<AppDbContext>((sp, options) =>
+        {
+            ConfigureAppDbProvider(options, dbConfig);
+            options.AddInterceptors(sp.GetRequiredService<TelemetrySaveChangesInterceptor>());
+        });
 
         return services;
     }

@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Monitoring;
+﻿namespace Farm.Infrastructure.Services.Monitoring;
 
 public interface IMonitoringSessionService
 {

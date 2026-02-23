@@ -175,8 +175,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         settingsService.Save(settings);
     }
 
-    public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct, int? limit = null)
     {
+        int? effectiveLimit = limit.HasValue ? Math.Clamp(limit.Value, 1, 500) : null;
+
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
@@ -198,9 +200,15 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         foreach (string ep in candidates)
         {
             string full = baseUrl + ep;
+            if (effectiveLimit.HasValue)
+            {
+                string separator = full.Contains('?') ? "&" : "?";
+                full = $"{full}{separator}page_size={effectiveLimit.Value}";
+            }
+
             try
             {
-                PageFetchResult result = await FetchAllPagesAsync(full, ct);
+                PageFetchResult result = await FetchAllPagesAsync(full, ct, effectiveLimit);
                 if (result.Items.Count > 0)
                 {
                     if (result.AttemptedPages > 1)
@@ -691,7 +699,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
     private sealed record MaterialPageFetchResult(List<SpoolmanMaterialDto> Items, bool Success, int AttemptedPages, HttpStatusCode? LastStatusCode);
 
-    private async Task<PageFetchResult> FetchAllPagesAsync(string initialUrl, CancellationToken ct)
+    private async Task<PageFetchResult> FetchAllPagesAsync(string initialUrl, CancellationToken ct, int? maxItems = null)
     {
         List<SpoolmanSpoolDto> collected = new();
         string? nextUrl = initialUrl;
@@ -739,6 +747,16 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
             int added = collected.Count - before;
             logger.LogDebug($"Spoolman page {page} added {added} spools (total {collected.Count})");
+
+            if (maxItems.HasValue && maxItems.Value > 0 && collected.Count >= maxItems.Value)
+            {
+                if (collected.Count > maxItems.Value)
+                {
+                    collected = collected.Take(maxItems.Value).ToList();
+                }
+
+                break;
+            }
 
             // Pagination detection: common DRF style { "next": "url or null" }
             string? next = null;
