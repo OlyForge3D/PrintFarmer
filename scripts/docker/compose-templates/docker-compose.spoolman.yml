@@ -12,6 +12,7 @@ services:
       - "${SPOOLMAN_PORT:-7912}:8000"
     environment:
       - TZ=${TZ:-UTC}
+      - SPOOLMAN_CORS_ORIGIN=*
     volumes:
       - ${EXTERNAL_SPOOLMAN_PATH:-.volumes/printfarmer-spoolman-data}:/home/app/.local/share/spoolman
     networks:
