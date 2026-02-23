@@ -281,8 +281,40 @@
           "custom": { "fillOpacity": 10, "gradientMode": "scheme" }
         }
       }
+    },
+    {
+      "id": 15,
+      "title": "Slowest Endpoints (P95)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "targets": [
+        {
+          "expr": "topk(10, histogram_quantile(0.95, sum by (endpoint, le) (rate(printfarmer_api_call_duration_seconds_bucket[5m]))) * 1000)",
+          "legendFormat": "{{ endpoint }}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 200 },
+              { "color": "orange", "value": 500 },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        }
+      }
     }
   ],
   "schemaVersion": 39,
-  "version": 3
+  "version": 4
 }

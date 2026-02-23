@@ -42,7 +42,8 @@ public class GcodeHarvestService(
     IStoragePathService storagePathService,
     IBackendCapabilityFactory capabilityFactory,
     IHarvestEventBroadcaster harvestEventBroadcaster,
-    IGcodeFileProcessingService gcodeFileProcessingService) : IGcodeHarvestService
+    IGcodeFileProcessingService gcodeFileProcessingService,
+    IPrintFarmerTelemetryService telemetry) : IGcodeHarvestService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork;
     private readonly IUnifiedLoggingService _logger = logger;
@@ -52,6 +53,7 @@ public class GcodeHarvestService(
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory;
     private readonly IHarvestEventBroadcaster _harvestEventBroadcaster = harvestEventBroadcaster;
     private readonly IGcodeFileProcessingService _gcodeFileProcessingService = gcodeFileProcessingService;
+    private readonly IPrintFarmerTelemetryService _telemetry = telemetry;
 
     private static readonly string[] sourceArray = { "gcode" };
 
@@ -903,6 +905,7 @@ public class GcodeHarvestService(
                 }
 
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved file to disk: {filePath}");
+                _telemetry.RecordFileOperation("harvest_download", Path.GetExtension(discoveredFile.FileName).TrimStart('.'), gcodeContent.Length);
 
                 // Get or create root folder for gcode files
                 FolderNode targetFolder = await _unitOfWork.Folders.GetOrCreateFolderAsync("/", "gcode", ct);

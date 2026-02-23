@@ -1456,7 +1456,7 @@ export interface ApiResponse<T> {
 }
 
 export interface PagedResponse<T> {
-  data: T[];
+  items: T[];
   totalCount: number;
   page: number;
   pageSize: number;

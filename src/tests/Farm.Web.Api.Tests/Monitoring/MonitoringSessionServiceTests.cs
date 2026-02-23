@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Monitoring;
+﻿using Farm.Infrastructure.Services.Monitoring;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;

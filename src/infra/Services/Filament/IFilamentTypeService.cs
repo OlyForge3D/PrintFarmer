@@ -13,6 +13,9 @@ namespace Farm.Infrastructure.Services.Filament
         /// <summary>Gets all available filament types.</summary>
         Task<IReadOnlyList<FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct);
 
+        /// <summary>Gets a paged, optionally filtered list of filament types.</summary>
+        Task<PagedResult<FilamentTypeDto>> GetPagedFilamentTypesAsync(int page, int pageSize, string? search, CancellationToken ct);
+
         /// <summary>Gets filament presets for temperature recommendations.</summary>
         Task<FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct);
 

@@ -21,6 +21,30 @@ public class FilamentTypeRepository(AppDbContext db) : IFilamentTypeRepository
             .ToListAsync(ct);
     }
 
+    public async Task<PagedResult<FilamentTypeDto>> GetPagedAsync(int page, int pageSize, string? search = null, CancellationToken ct = default)
+    {
+        IQueryable<FilamentType> query = _db.FilamentTypes.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            string term = search.Trim().ToUpperInvariant();
+            query = query.Where(f => EF.Functions.Like(f.Name.ToUpper(), $"%{term}%"));
+        }
+
+        query = query.OrderBy(f => f.Name);
+
+        int totalCount = await query.CountAsync(ct);
+        int totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
+        List<FilamentTypeDto> items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure))
+            .ToListAsync(ct);
+
+        return new PagedResult<FilamentTypeDto>(items, totalCount, page, pageSize, totalPages);
+    }
+
     public async Task<FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct = default)
     {
         var items = await _db.FilamentTypes.AsNoTracking().Select(f => new { f.Name, f.DefaultHotendTemp, f.DefaultBedTemp }).ToListAsync(ct);

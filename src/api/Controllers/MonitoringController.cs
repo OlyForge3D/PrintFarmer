@@ -39,7 +39,7 @@ public class MonitoringController(
         {
             HttpOnly = true,
             Secure = isSecure,
-            SameSite = SameSiteMode.Strict,
+            SameSite = SameSiteMode.Lax,
             Path = "/",
             MaxAge = TimeSpan.FromMinutes(15),
         };

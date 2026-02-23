@@ -54,6 +54,7 @@ import {
   CreateNfcDeviceDto,
   UpdateNfcDeviceDto,
   NfcScanHistoryDto,
+  PagedResponse,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -79,6 +80,7 @@ export const queryKeys = {
   toolheadModels: ['toolhead-models'] as const,
   nozzleModels: ['nozzle-models'] as const,
   filamentTypes: ['filament-types'] as const,
+  filamentTypesPaged: (page?: number, pageSize?: number, search?: string) => ['filament-types', page, pageSize, search] as const,
   filamentPresets: ['presets', 'filament'] as const,
   spoolmanDbFilaments: ['spoolmandb', 'filaments'] as const,
   spoolmanDbMaterials: ['spoolmandb', 'materials'] as const,
@@ -727,6 +729,20 @@ export function useFilamentTypes(options?: QueryOptions<FilamentTypeDto[]>) {
   });
 }
 
+export function useFilamentTypesPaged(
+  page = 1,
+  pageSize = 50,
+  search?: string,
+  options?: QueryOptions<PagedResponse<FilamentTypeDto>>
+) {
+  return useQuery({
+    queryKey: queryKeys.filamentTypesPaged(page, pageSize, search),
+    queryFn: () => apiClient.getFilamentTypesPaged(page, pageSize, search),
+    staleTime: 300000, // 5 minutes
+    ...options,
+  });
+}
+
 export function useFilamentPresets(options?: QueryOptions<FilamentPresets>) {
   return useQuery({
     queryKey: queryKeys.filamentPresets,
@@ -754,7 +770,7 @@ export function useImportFilamentTypesFromSpoolman() {
     mutationFn: () => apiClient.importFilamentTypesFromSpoolman(),
     onSuccess: () => {
       // Invalidate both filament types and presets since new types were added
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
     },
   });
@@ -772,7 +788,7 @@ export function useImportFilamentTypesCsv() {
   return useMutation({
     mutationFn: (file: File) => apiClient.importFilamentTypesCsv(file),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
     },
   });
@@ -804,7 +820,7 @@ export function useImportFromSpoolmanDb() {
   return useMutation({
     mutationFn: (request: SpoolmanDbImportRequest) => apiClient.importFromSpoolmanDb(request),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
     },
   });
@@ -833,7 +849,7 @@ export function useBulkUpdateFilaments() {
   return useMutation<SpoolmanBulkUpdateResult, ApiError, SpoolmanBulkUpdateFilamentsRequest>({
     mutationFn: (request: SpoolmanBulkUpdateFilamentsRequest) => apiClient.bulkUpdateFilaments(request),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
     },
   });
@@ -844,7 +860,7 @@ export function useUpdateFilament() {
   return useMutation<SpoolmanFilament, ApiError, { id: number; request: SpoolmanUpdateFilamentRequest }>({
     mutationFn: ({ id, request }) => apiClient.updateFilament(id, request),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
     },
   });
@@ -855,7 +871,7 @@ export function useCreateFilament() {
   return useMutation<SpoolmanFilament, ApiError, SpoolmanUpdateFilamentRequest>({
     mutationFn: (request) => apiClient.createFilament(request),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
     },
   });
@@ -866,7 +882,7 @@ export function useDeleteFilament() {
   return useMutation<void, ApiError, number>({
     mutationFn: (id: number) => apiClient.deleteFilament(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
     },
   });
@@ -877,7 +893,7 @@ export function useBulkDeleteFilaments() {
   return useMutation<SpoolmanBulkUpdateResult, ApiError, number[]>({
     mutationFn: (filamentIds: number[]) => apiClient.bulkDeleteFilaments(filamentIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
     },
   });
@@ -901,7 +917,7 @@ export function useSyncExternalMaterials() {
   return useMutation({
     mutationFn: () => apiClient.syncExternalMaterials(),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
     },
   });
@@ -913,7 +929,7 @@ export function useCreateFilamentType() {
   return useMutation({
     mutationFn: (dto: CreateFilamentTypeRequest) => apiClient.createFilamentType(dto),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
     },
   });
 }
@@ -925,7 +941,7 @@ export function useUpdateFilamentType() {
     mutationFn: ({ id, dto }: { id: string; dto: CreateFilamentTypeRequest }) => 
       apiClient.updateFilamentType(id, dto),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
     },
   });
 }
@@ -936,7 +952,7 @@ export function useDeleteFilamentType() {
   return useMutation({
     mutationFn: (id: string) => apiClient.deleteFilamentType(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
     },
   });
 }

@@ -97,15 +97,24 @@ public class SpoolmanController(
     /// <summary>
     /// Gets all spools from the connected Spoolman server.
     /// </summary>
+    /// <param name="limit">Optional maximum number of spools to fetch for faster partial loads.</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of all filament spools from Spoolman</returns>
     /// <response code="200">Returns the list of spools from Spoolman</response>
     /// <response code="503">If Spoolman is not configured or unavailable</response>
     [HttpGet("spools")]
     [ProducesResponseType(typeof(IEnumerable<SpoolmanSpoolDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetSpoolsAsync(CancellationToken ct)
-        => Ok(await spoolman.ListSpoolsAsync(ct));
+    public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetSpoolsAsync([FromQuery] int? limit, CancellationToken ct)
+    {
+        if (limit.HasValue && (limit.Value < 1 || limit.Value > 500))
+        {
+            return BadRequest(new { message = "limit must be between 1 and 500." });
+        }
+
+        return Ok(await spoolman.ListSpoolsAsync(ct, limit));
+    }
 
     /// <summary>
     /// Gets all filament types (product definitions) from the connected Spoolman server.

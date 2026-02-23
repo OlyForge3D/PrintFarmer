@@ -59,6 +59,7 @@ namespace Farm.Web.Api.Services.Gcode
     /// <param name="thumbnailExtractor">Service for extracting thumbnail images from G-code files.</param>
     /// <param name="folderService">Service for managing virtual folder hierarchy.</param>
     /// <param name="fileOperations">Service for stored file operations including thumbnail URL building.</param>
+    /// <param name="telemetry">Telemetry service for recording file operation metrics.</param>
     /// <exception cref="ArgumentNullException">Thrown if any dependency is null.</exception>
     public class GcodeFilesService(
         IGcodeRepository gcodeRepo,
@@ -68,7 +69,8 @@ namespace Farm.Web.Api.Services.Gcode
         IGcodeMetadataExtractorService metadataExtractor,
         IGcodeThumbnailExtractorService thumbnailExtractor,
         IFolderManagementService folderService,
-        IStoredFileOperationsService fileOperations) : IGcodeFilesService, IGcodeFileProcessingService
+        IStoredFileOperationsService fileOperations,
+        IPrintFarmerTelemetryService telemetry) : IGcodeFilesService, IGcodeFileProcessingService
     {
         private readonly IGcodeRepository _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
         private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -78,6 +80,7 @@ namespace Farm.Web.Api.Services.Gcode
         private readonly IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
         private readonly IFolderManagementService _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
         private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
+        private readonly IPrintFarmerTelemetryService _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
 
         /// <summary>
         /// New efficient query method that pushes all filtering, sorting, and pagination to the database.
@@ -525,6 +528,7 @@ namespace Farm.Web.Api.Services.Gcode
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 await _gcodeRepo.SaveChangesAsync(ct);
                 _logger.LogInformation("Created GcodeFile database record for {FileName} with ID {FileId}", originalName, gcodeFile.Id);
+                _telemetry.RecordFileOperation("upload", ext.TrimStart('.'), info.Length);
             }
             catch (Exception ex)
             {
@@ -1509,6 +1513,7 @@ namespace Farm.Web.Api.Services.Gcode
                 await _gcodeRepo.SaveChangesAsync(ct);
 
                 _logger.LogInformation($"[GcodeUpload] File successfully processed and stored: {gcodeFile.Id}");
+                _telemetry.RecordFileOperation("upload", Path.GetExtension(file.FileName).TrimStart('.'), file.Length);
 
                 GcodeFile? saved = await _gcodeRepo.GetByIdWithIncludesAsync(gcodeFile.Id, ct);
                 return MapToDto(saved!);

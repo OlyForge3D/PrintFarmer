@@ -267,7 +267,11 @@ export function SpoolsTab() {
     startTransition(async () => {
       try {
         setSpoolmanError(null);
-        const data = await apiClient.getSpools();
+        const parsedPageSize = parseInt(filters.pageSize, 10);
+        const serverLimit = filters.pageSize === 'All' || !Number.isFinite(parsedPageSize)
+          ? undefined
+          : parsedPageSize;
+        const data = await apiClient.getSpools(serverLimit);
         const list: SpoolmanSpoolDto[] = Array.isArray(data) ? (data as SpoolmanSpoolDto[]) : ((data as Record<string, unknown>).items as SpoolmanSpoolDto[] || []);
         setSpools(list);
       } catch (err) {
@@ -278,10 +282,10 @@ export function SpoolsTab() {
         setLoading(false);
       }
     });
-  }, [startTransition]);
+  }, [filters.pageSize, startTransition]);
 
   useEffect(() => {
-    const init = async () => {
+    const loadConfig = async () => {
       try {
         const cfg = await apiClient.getSpoolmanConfig();
         if ((cfg as Record<string, unknown>)?.baseUrl) setSpoolmanBaseUrl((cfg as Record<string, unknown>).baseUrl as string);
@@ -293,9 +297,12 @@ export function SpoolsTab() {
         const saved = localStorage.getItem('spoolman-base-url');
         if (saved) setSpoolmanBaseUrl(saved);
       }
-      await loadSpools();
     };
-    init();
+    loadConfig();
+  }, []);
+
+  useEffect(() => {
+    void loadSpools();
   }, [loadSpools]);
 
   const getFilteredSpools = (): SpoolmanSpoolDto[] => spools.filter(spool => {
