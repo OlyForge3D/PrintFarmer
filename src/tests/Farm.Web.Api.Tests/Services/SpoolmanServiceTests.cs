@@ -132,10 +132,10 @@ public class SpoolmanServiceTests
 
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
-        // Prepare a message handler that responds to /api/v1/spools with a JSON array of one object
+        // Prepare a message handler that responds to /api/v1/spool/ (correct singular endpoint)
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
                 {
-                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
+                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spool"))
                     {
                         string json = JsonSerializer.Serialize(new[] { new { id = 42, name = "Test Spool" } });
                         return new HttpResponseMessage(HttpStatusCode.OK)
@@ -257,7 +257,7 @@ public class SpoolmanServiceTests
     }
 
     [Fact]
-    public async Task ListSpoolsAsync_LogsWarnings_OnEmptySuccessfulResponses()
+    public async Task ListSpoolsAsync_ReturnsEmpty_WhenEndpointReturnsEmptyArray()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
@@ -265,7 +265,7 @@ public class SpoolmanServiceTests
 
         FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
         {
-            // Return empty successful payload to trigger warning and try next candidate
+            // Return empty successful payload
             string json = JsonSerializer.Serialize(new object[] { });
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -278,6 +278,5 @@ public class SpoolmanServiceTests
 
         IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
         Assert.Empty(items);
-        logger.Verify(l => l.LogWarning(It.Is<string>(s => s.Contains("returned 0 spools")), null, null), Times.AtLeastOnce);
     }
 }

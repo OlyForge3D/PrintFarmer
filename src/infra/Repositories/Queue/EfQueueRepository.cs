@@ -307,4 +307,21 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             job.GcodeFileId = null;
         }
     }
+
+    /// <summary>
+    /// Retrieves all print jobs assigned to any of the specified printers in a single query.
+    /// Results are ordered by status priority (printing/starting first), then priority, then queue time.
+    /// </summary>
+    public async Task<List<PrintJob>> GetPrintJobsForPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+    {
+        List<Guid> ids = printerIds.ToList();
+        return await _db.PrintJobs
+            .Include(j => j.GcodeFile)
+            .Include(j => j.AssignedPrinter)
+            .Where(j => j.AssignedPrinterId != null && ids.Contains(j.AssignedPrinterId.Value))
+            .OrderBy(j => j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting ? 0 : 1)
+            .ThenBy(j => j.Priority)
+            .ThenBy(j => j.QueuedAt)
+            .ToListAsync(ct);
+    }
 }

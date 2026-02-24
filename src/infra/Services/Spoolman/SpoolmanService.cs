@@ -187,60 +187,31 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
-
-        // Candidate endpoints (some deployments may expose plural or require trailing slash)
-        string[] candidates =
-        [
-            "/api/v1/spool",
-            "/api/v1/spool/",
-            "/api/v1/spools",   // fallback (in case of alternative routing)
-            "/api/v1/spools/"
-        ];
-
-        foreach (string ep in candidates)
+        string url = $"{baseUrl}/api/v1/spool/";
+        if (effectiveLimit.HasValue)
         {
-            string full = baseUrl + ep;
-            if (effectiveLimit.HasValue)
-            {
-                string separator = full.Contains('?') ? "&" : "?";
-                full = $"{full}{separator}page_size={effectiveLimit.Value}";
-            }
-
-            try
-            {
-                PageFetchResult result = await FetchAllPagesAsync(full, ct, effectiveLimit);
-                if (result.Items.Count > 0)
-                {
-                    if (result.AttemptedPages > 1)
-                    {
-                        logger.LogInformation($"Retrieved {result.Items.Count} spools across {result.AttemptedPages} pages via endpoint {ep}", null, null);
-                    }
-                    else
-                    {
-                        logger.LogDebug($"Retrieved {result.Items.Count} spools via endpoint {ep}", null, null);
-                    }
-
-                    return result.Items;
-                }
-
-                // If zero AND status success we still try next candidate, but log once
-                if (result.Success && result.Items.Count == 0)
-                {
-                    logger.LogWarning($"Spoolman endpoint {ep} returned 0 spools (status {result.LastStatusCode}). Trying next candidate…", null, null);
-                }
-                else if (!result.Success)
-                {
-                    logger.LogDebug($"Spoolman endpoint {ep} non-success status {result.LastStatusCode}; trying next candidate", null, null);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, $"Exception when querying Spoolman endpoint {ep}; trying next candidate", null, null);
-            }
+            url = $"{url}?page_size={effectiveLimit.Value}";
         }
 
-        logger.LogWarning($"All candidate Spoolman endpoints returned 0 spools or failed – returning empty list", null, null);
-        return [];
+        try
+        {
+            PageFetchResult result = await FetchAllPagesAsync(url, ct, effectiveLimit);
+            if (result.AttemptedPages > 1)
+            {
+                logger.LogInformation($"Retrieved {result.Items.Count} spools across {result.AttemptedPages} pages", null, null);
+            }
+            else
+            {
+                logger.LogDebug($"Retrieved {result.Items.Count} spools", null, null);
+            }
+
+            return result.Items;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, $"Failed to fetch spools from Spoolman", null, null);
+            return [];
+        }
     }
 
     /// <inheritdoc/>
@@ -254,56 +225,43 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
+        string url = $"{baseUrl}/api/v1/filament/";
 
-        string[] candidates =
-        [
-            "/api/v1/filament",
-            "/api/v1/filament/",
-            "/api/v1/filaments",
-            "/api/v1/filaments/"
-        ];
-
-        foreach (string ep in candidates)
+        try
         {
-            string full = baseUrl + ep;
-            try
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            if (!response.IsSuccessStatusCode)
             {
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(TimeSpan.FromSeconds(20));
-
-                HttpResponseMessage response = await http.GetAsync(full, cts.Token);
-                if (!response.IsSuccessStatusCode)
-                {
-                    logger.LogDebug($"Spoolman filament endpoint {ep} returned status {(int)response.StatusCode}; trying next candidate", null, null);
-                    continue;
-                }
-
-                string json = await response.Content.ReadAsStringAsync(cts.Token);
-                using JsonDocument doc = JsonDocument.Parse(json);
-
-                if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                {
-                    logger.LogDebug($"Spoolman filament endpoint {ep} did not return an array; trying next candidate", null, null);
-                    continue;
-                }
-
-                var filaments = new List<SpoolmanFilamentDto>();
-                foreach (JsonElement el in doc.RootElement.EnumerateArray())
-                {
-                    filaments.Add(SpoolmanJsonParser.ParseFilament(el));
-                }
-
-                logger.LogDebug($"Retrieved {filaments.Count} filament types via endpoint {ep}", null, null);
-                return filaments;
+                logger.LogWarning($"Spoolman filament list returned status {(int)response.StatusCode}", null, null);
+                return [];
             }
-            catch (Exception ex)
+
+            string json = await response.Content.ReadAsStringAsync(cts.Token);
+            using JsonDocument doc = JsonDocument.Parse(json);
+
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
-                logger.LogDebug(ex, $"Exception when querying Spoolman filament endpoint {ep}; trying next candidate", null, null);
+                logger.LogWarning($"Spoolman filament endpoint did not return an array", null, null);
+                return [];
             }
+
+            var filaments = new List<SpoolmanFilamentDto>();
+            foreach (JsonElement el in doc.RootElement.EnumerateArray())
+            {
+                filaments.Add(SpoolmanJsonParser.ParseFilament(el));
+            }
+
+            logger.LogDebug($"Retrieved {filaments.Count} filament types", null, null);
+            return filaments;
         }
-
-        logger.LogWarning($"All candidate Spoolman filament endpoints failed – returning empty list", null, null);
-        return [];
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, $"Failed to fetch filaments from Spoolman", null, null);
+            return [];
+        }
     }
 
     /// <inheritdoc/>
@@ -637,9 +595,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
     /// <summary>
     /// Gets all material types directly from Spoolman's /api/v1/material endpoint.
-    /// This is the correct endpoint for getting material definitions like PLA, ABS, PETG, etc.
     /// </summary>
-    /// <param name="ct">The cancellation token.</param>
     public async Task<IReadOnlyList<SpoolmanMaterialDto>> ListMaterialsAsync(CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();
@@ -650,49 +606,27 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
+        string url = $"{baseUrl}/api/v1/material/";
 
-        // Candidate endpoints for materials
-        string[] candidates =
+        try
         {
-            "/api/v1/material",
-            "/api/v1/material/",
-            "/api/v1/materials",   // fallback (in case of alternative routing)
-            "/api/v1/materials/"
-        };
-
-        foreach (string ep in candidates)
-        {
-            string full = baseUrl + ep;
-            try
+            MaterialPageFetchResult result = await FetchAllMaterialPagesAsync(url, ct);
+            if (result.AttemptedPages > 1)
             {
-                MaterialPageFetchResult result = await FetchAllMaterialPagesAsync(full, ct);
-                if (result.Items.Count > 0)
-                {
-                    if (result.AttemptedPages > 1)
-                    {
-                        logger.LogInformation($"Retrieved {result.Items.Count} materials across {result.AttemptedPages} pages via endpoint {ep}", null, null);
-                    }
-                    else
-                    {
-                        logger.LogDebug($"Retrieved {result.Items.Count} materials via endpoint {ep}", null, null);
-                    }
-
-                    return result.Items;
-                }
-                else if (result.Success)
-                {
-                    logger.LogInformation($"Successfully queried Spoolman material endpoint {ep} but got 0 results", null, null);
-                    return [];
-                }
+                logger.LogInformation($"Retrieved {result.Items.Count} materials across {result.AttemptedPages} pages", null, null);
             }
-            catch (Exception ex)
+            else
             {
-                logger.LogDebug(ex, $"Exception when querying Spoolman material endpoint {ep}; trying next candidate", null, null);
+                logger.LogDebug($"Retrieved {result.Items.Count} materials", null, null);
             }
+
+            return result.Items;
         }
-
-        logger.LogWarning($"All candidate Spoolman material endpoints returned 0 materials or failed – returning empty list", null, null);
-        return [];
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, $"Failed to fetch materials from Spoolman", null, null);
+            return [];
+        }
     }
 
     private sealed record PageFetchResult(List<SpoolmanSpoolDto> Items, bool Success, int AttemptedPages, HttpStatusCode? LastStatusCode);

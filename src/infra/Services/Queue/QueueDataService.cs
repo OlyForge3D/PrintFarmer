@@ -141,4 +141,12 @@ public class QueueDataService(
     {
         return await _unitOfWork.Queue.CountActiveJobsUsingGcodeAsync(gcodeFileId, ct);
     }
+
+    /// <summary>
+    /// Gets all print jobs assigned to any of the specified printers in a single query.
+    /// </summary>
+    public async Task<List<PrintJob>> GetPrintJobsForPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+    {
+        return await _unitOfWork.Queue.GetPrintJobsForPrintersAsync(printerIds, ct);
+    }
 }

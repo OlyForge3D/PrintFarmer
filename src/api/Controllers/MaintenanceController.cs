@@ -312,17 +312,31 @@ public class MaintenanceController(
 
             List<UpcomingMaintenanceTaskDto> tasks = [];
 
+            // Batch-load all data in 3 queries instead of 3 per printer
+            List<Guid> printerIds = printers.Select(p => p.Id).ToList();
+            List<PrinterStatistics> allStats = await _statisticsRepository.GetAllAsync(ct);
+            Dictionary<Guid, PrinterStatistics> statsByPrinter = allStats
+                .Where(s => printerIds.Contains(s.PrinterId))
+                .ToDictionary(s => s.PrinterId);
+            List<MaintenanceSchedule> allSchedules = await _scheduleRepository.GetAllAsync(ct);
+            ILookup<Guid, MaintenanceSchedule> schedulesByPrinter = allSchedules
+                .Where(s => s.PrinterId.HasValue && s.IsActive && printerIds.Contains(s.PrinterId.Value))
+                .ToLookup(s => s.PrinterId!.Value);
+            List<MaintenanceLog> allLogs = await _logRepository.GetAllAsync(cancellationToken: ct);
+            ILookup<Guid, MaintenanceLog> logsByPrinter = allLogs
+                .Where(l => printerIds.Contains(l.PrinterId))
+                .ToLookup(l => l.PrinterId);
+
             foreach (Printer printer in printers)
             {
-                PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(printer.Id, ct);
-                List<MaintenanceSchedule> schedules = await _scheduleRepository.GetActivePrinterSchedulesAsync(printer.Id, ct);
+                statsByPrinter.TryGetValue(printer.Id, out PrinterStatistics? stats);
+                List<MaintenanceSchedule> schedules = schedulesByPrinter[printer.Id].ToList();
                 if (schedules.Count == 0)
                 {
                     continue;
                 }
 
-                List<MaintenanceLog> logs = await _logRepository.GetByPrinterIdAsync(printer.Id, ct);
-                Dictionary<Guid, MaintenanceLog> lastLogByScheduleId = logs
+                Dictionary<Guid, MaintenanceLog> lastLogByScheduleId = logsByPrinter[printer.Id]
                     .Where(l => l.MaintenanceScheduleId.HasValue)
                     .GroupBy(l => l.MaintenanceScheduleId!.Value)
                     .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.PerformedAt).First());
