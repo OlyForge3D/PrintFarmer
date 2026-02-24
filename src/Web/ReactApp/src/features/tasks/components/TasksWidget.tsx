@@ -110,7 +110,8 @@ export function TasksWidget() {
   const { data: tasks, isLoading, error } = useQuery({
     queryKey: ['tasks', 'pending'],
     queryFn: () => tasksApi.getPendingTasks(),
-    refetchInterval: 30000, // Refresh every 30 seconds
+    staleTime: 30_000,
+    refetchInterval: 30000,
   });
 
   // Skip task mutation
