@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.SystemLogs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -104,32 +103,42 @@ public class SystemLogLoggerProvider : ILoggerProvider
     }
 
     /// <summary>
-    /// Writes a batch of logs to the database.
+    /// Writes a batch of logs to the database in a single SaveChanges call.
+    /// Truncates Message to 1024 chars to avoid varchar overflow errors.
     /// </summary>
     private async Task WriteBatchAsync(List<SystemLog> batch, CancellationToken ct)
     {
         try
         {
-            // Create a scope to get the repository
             using AsyncServiceScope scope = _serviceProvider.CreateAsyncScope();
-            ISystemLogRepository? repository = scope.ServiceProvider.GetService<ISystemLogRepository>();
-
-            if (repository == null)
+            var db = scope.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
+            if (db is null)
             {
-                return; // Repository not available yet
+                return;
             }
 
             foreach (SystemLog log in batch)
             {
-                try
+                // Truncate to avoid varchar(1024) overflow
+                if (log.Message?.Length > 1024)
                 {
-                    await repository.AddAsync(log, ct);
+                    log.Message = log.Message[..1021] + "...";
                 }
-                catch
+
+                if (log.Source?.Length > 128)
                 {
-                    // Individual log write failed, continue with others
+                    log.Source = log.Source[..125] + "...";
                 }
+
+                if (log.CorrelationId?.Length > 64)
+                {
+                    log.CorrelationId = log.CorrelationId[..64];
+                }
+
+                db.SystemLogs.Add(log);
             }
+
+            await db.SaveChangesAsync(ct);
         }
         catch
         {
@@ -231,8 +240,9 @@ internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog
                 CorrelationId = correlationId
             };
 
-            // Non-blocking add to queue
-            _logQueue.TryAdd(log, 100);
+            // Non-blocking add — drop the entry if the queue is full rather
+            // than blocking the caller (which may be a request thread).
+            _logQueue.TryAdd(log, 0);
         }
         catch
         {

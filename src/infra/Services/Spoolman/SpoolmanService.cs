@@ -187,7 +187,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
-        string url = $"{baseUrl}/api/v1/spool/";
+        string url = $"{baseUrl}/api/v1/spool";
         if (effectiveLimit.HasValue)
         {
             url = $"{url}?page_size={effectiveLimit.Value}";
@@ -225,7 +225,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
-        string url = $"{baseUrl}/api/v1/filament/";
+        string url = $"{baseUrl}/api/v1/filament";
 
         try
         {
@@ -606,7 +606,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
-        string url = $"{baseUrl}/api/v1/material/";
+        string url = $"{baseUrl}/api/v1/material";
 
         try
         {

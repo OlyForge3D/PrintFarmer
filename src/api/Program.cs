@@ -103,8 +103,10 @@ bool slicerEnabled = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") !
 // When slicer is disabled, cross-module consumers use = null default parameter values.
 // .NET DI's ActivatorUtilities skips unregistered services that have default values.
 
-// Register SystemLog logger provider to capture all application logs to the database
-builder.Logging.AddSystemLogProvider(LogLevel.Information);
+// Register SystemLog logger provider to capture warnings and errors to the database.
+// Using Warning level to avoid flooding PostgreSQL with high-volume Information logs
+// (at Information level the 146M-row SystemLogs table caused severe I/O contention).
+builder.Logging.AddSystemLogProvider(LogLevel.Warning);
 
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.
