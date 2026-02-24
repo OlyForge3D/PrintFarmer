@@ -1374,6 +1374,7 @@ export function useNfcDevices(options?: QueryOptions<NfcDeviceDto[]>) {
     queryKey: queryKeys.nfcDevices,
     queryFn: () => apiClient.getNfcDevices(),
     staleTime: 30_000,
+    refetchInterval: 30_000,
     ...options,
   });
 }
@@ -1383,6 +1384,7 @@ export function useNfcDevice(id: string, options?: QueryOptions<NfcDeviceDto>) {
     queryKey: queryKeys.nfcDevice(id),
     queryFn: () => apiClient.getNfcDevice(id),
     staleTime: 30_000,
+    refetchInterval: 30_000,
     enabled: !!id,
     ...options,
   });
@@ -1393,6 +1395,7 @@ export function useNfcDeviceScanHistory(id: string, options?: QueryOptions<NfcSc
     queryKey: queryKeys.nfcDeviceHistory(id),
     queryFn: () => apiClient.getNfcDeviceScanHistory(id),
     staleTime: 30_000,
+    refetchInterval: 30_000,
     enabled: !!id,
     ...options,
   });

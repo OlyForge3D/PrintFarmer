@@ -10,9 +10,11 @@
       "id": 1,
       "title": "Request Rate",
       "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_api_calls_total[5m]))",
           "legendFormat": "req/s"
         }
@@ -34,9 +36,11 @@
       "id": 2,
       "title": "Error Rate",
       "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_api_calls_total{status_class=\"5xx\"}[5m])) / sum(rate(printfarmer_api_calls_total[5m])) * 100",
           "legendFormat": "%"
         }
@@ -58,9 +62,11 @@
       "id": 3,
       "title": "P95 Latency",
       "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
           "legendFormat": "ms"
         }
@@ -82,9 +88,11 @@
       "id": 4,
       "title": "Memory Usage",
       "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "dotnet_process_memory_working_set_bytes / 1024 / 1024",
           "legendFormat": "MB"
         }
@@ -106,9 +114,11 @@
       "id": 5,
       "title": "Request Rate Over Time",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_api_calls_total[5m])) by (method)",
           "legendFormat": "{{ method }}"
         }
@@ -121,17 +131,21 @@
       "id": 6,
       "title": "Response Latency Distribution",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.50, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
           "legendFormat": "p50"
         },
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
           "legendFormat": "p95"
         },
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
           "legendFormat": "p99"
         }
@@ -144,9 +158,11 @@
       "id": 7,
       "title": "Printer Operations",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_printer_operations_total[5m])) by (operation)",
           "legendFormat": "{{ operation }}"
         }
@@ -159,9 +175,11 @@
       "id": 8,
       "title": "Slicer Operations",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_slicer_operations_total[5m])) by (engine)",
           "legendFormat": "{{ engine }}"
         }
@@ -174,13 +192,16 @@
       "id": 9,
       "title": "Error Rate Over Time",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_api_calls_total{status_class=\"5xx\"}[5m])) or vector(0)",
           "legendFormat": "5xx"
         },
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_api_calls_total{status_class=\"4xx\"}[5m])) or vector(0)",
           "legendFormat": "4xx"
         }
@@ -197,9 +218,11 @@
       "id": 10,
       "title": "Memory Usage Over Time",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "dotnet_process_memory_working_set_bytes / 1024 / 1024",
           "legendFormat": "Working Set"
         }
@@ -215,9 +238,11 @@
       "id": 11,
       "title": "Database Operations Over Time",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_database_operations_total[5m])) by (operation)",
           "legendFormat": "{{ operation }}"
         }
@@ -230,9 +255,11 @@
       "id": 12,
       "title": "File Operations Over Time",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(printfarmer_file_operations_total[5m])) by (operation)",
           "legendFormat": "{{ operation }}"
         }
@@ -245,9 +272,11 @@
       "id": 13,
       "title": "Request Rate by Endpoint",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "topk(5, sum by (endpoint) (rate(printfarmer_api_calls_total[5m])))",
           "legendFormat": "{{ endpoint }}"
         }
@@ -260,17 +289,21 @@
       "id": 14,
       "title": "API Latency Percentiles Over Time",
       "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.50, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
           "legendFormat": "p50"
         },
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
           "legendFormat": "p95"
         },
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
           "legendFormat": "p99"
         }
@@ -286,9 +319,11 @@
       "id": 15,
       "title": "Slowest Endpoints (P95)",
       "type": "bargauge",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "topk(10, histogram_quantile(0.95, sum by (endpoint, le) (rate(printfarmer_api_call_duration_seconds_bucket[5m]))) * 1000)",
           "legendFormat": "{{ endpoint }}",
           "instant": true
@@ -316,5 +351,5 @@
     }
   ],
   "schemaVersion": 39,
-  "version": 4
+  "version": 5
 }
