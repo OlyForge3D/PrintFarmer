@@ -14,19 +14,27 @@ namespace Farm.Infrastructure.Logging;
 /// ILoggerProvider that writes all application logs to the SystemLog database table.
 /// Uses a background queue to batch writes asynchronously.
 /// Automatically captures X-Correlation-Id from HTTP context for tracing.
+/// Respects SystemLogSettings for dynamic enable/disable and minimum level.
 /// </summary>
 public class SystemLogLoggerProvider : ILoggerProvider
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly LogLevel _minimumLevel;
+    private readonly LogLevel _initialMinimumLevel;
     private readonly BlockingCollection<SystemLog> _logQueue;
     private readonly CancellationTokenSource _cts;
     private readonly Task _processingTask;
 
+    // Dynamic settings — refreshed periodically from ISettingsService
+    private volatile bool _enabled = true;
+    private volatile LogLevel _currentMinimumLevel;
+    private DateTime _lastSettingsRefresh = DateTime.MinValue;
+    private static readonly TimeSpan SettingsRefreshInterval = TimeSpan.FromSeconds(30);
+
     public SystemLogLoggerProvider(IServiceProvider serviceProvider, LogLevel minimumLevel = LogLevel.Information)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        _minimumLevel = minimumLevel;
+        _initialMinimumLevel = minimumLevel;
+        _currentMinimumLevel = minimumLevel;
         _logQueue = new BlockingCollection<SystemLog>(1000);
         _cts = new CancellationTokenSource();
 
@@ -37,7 +45,46 @@ public class SystemLogLoggerProvider : ILoggerProvider
     public ILogger CreateLogger(string categoryName)
     {
         IHttpContextAccessor? httpContextAccessor = _serviceProvider.GetService<IHttpContextAccessor>();
-        return new SystemLogLogger(categoryName, _logQueue, _minimumLevel, httpContextAccessor);
+        return new SystemLogLogger(categoryName, _logQueue, this, httpContextAccessor);
+    }
+
+    /// <summary>
+    /// Returns the current effective minimum level, refreshing from settings periodically.
+    /// </summary>
+    internal bool IsEnabledForLevel(LogLevel logLevel)
+    {
+        RefreshSettingsIfNeeded();
+        return _enabled && logLevel >= _currentMinimumLevel;
+    }
+
+    private void RefreshSettingsIfNeeded()
+    {
+        if (DateTime.UtcNow - _lastSettingsRefresh < SettingsRefreshInterval)
+        {
+            return;
+        }
+
+        _lastSettingsRefresh = DateTime.UtcNow;
+
+        try
+        {
+            using IServiceScope scope = _serviceProvider.CreateScope();
+            var settingsService = scope.ServiceProvider.GetService<Farm.Infrastructure.Settings.ISettingsService>();
+            if (settingsService is null)
+            {
+                return;
+            }
+
+            var settings = settingsService.Get<Farm.Infrastructure.Settings.SystemLogSettings>();
+            _enabled = settings.Enabled;
+            _currentMinimumLevel = Enum.TryParse<LogLevel>(settings.MinimumLevel, ignoreCase: true, out LogLevel parsed)
+                ? parsed
+                : _initialMinimumLevel;
+        }
+        catch
+        {
+            // Settings not available yet during startup — use initial values
+        }
     }
 
     /// <summary>
@@ -192,11 +239,11 @@ public class SystemLogLoggerProvider : ILoggerProvider
 /// Logger that queues log messages for batch processing.
 /// Extracts correlation ID from HTTP context for distributed tracing.
 /// </summary>
-internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog> logQueue, LogLevel minimumLevel, IHttpContextAccessor? httpContextAccessor = null) : ILogger
+internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog> logQueue, SystemLogLoggerProvider provider, IHttpContextAccessor? httpContextAccessor = null) : ILogger
 {
     private readonly string _categoryName = categoryName;
     private readonly BlockingCollection<SystemLog> _logQueue = logQueue;
-    private readonly LogLevel _minimumLevel = minimumLevel;
+    private readonly SystemLogLoggerProvider _provider = provider;
     private readonly IHttpContextAccessor? _httpContextAccessor = httpContextAccessor;
 
     public IDisposable? BeginScope<TState>(TState state)
@@ -207,7 +254,7 @@ internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog
 
     public bool IsEnabled(LogLevel logLevel)
     {
-        return logLevel >= _minimumLevel;
+        return _provider.IsEnabledForLevel(logLevel);
     }
 
     public void Log<TState>(

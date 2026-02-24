@@ -89,16 +89,13 @@ public class EfSystemLogRepository(AppDbContext db) : ISystemLogRepository
 
     public async Task<int> DeleteLogsOlderThanAsync(DateTime cutoff, CancellationToken ct)
     {
-        List<SystemLog> oldLogs = await _db.SystemLogs
+        return await _db.SystemLogs
             .Where(l => l.Timestamp < cutoff)
-            .ToListAsync(ct);
+            .ExecuteDeleteAsync(ct);
+    }
 
-        if (oldLogs.Count > 0)
-        {
-            _db.SystemLogs.RemoveRange(oldLogs);
-            _ = await _db.SaveChangesAsync(ct);
-        }
-
-        return oldLogs.Count;
+    public async Task<int> GetRowCountAsync(CancellationToken ct)
+    {
+        return await _db.SystemLogs.CountAsync(ct);
     }
 }

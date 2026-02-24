@@ -38,4 +38,8 @@ public interface ISystemLogRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Number of logs deleted.</returns>
     Task<int> DeleteLogsOlderThanAsync(DateTime cutoff, CancellationToken ct);
+
+    /// <summary>Returns the total number of log entries.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<int> GetRowCountAsync(CancellationToken ct);
 }
