@@ -45,7 +45,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.3">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Refit.HttpClientFactory" Version="9.0.2" />
+    <PackageReference Include="Refit.HttpClientFactory" Version="10.0.1" />
     <PackageReference Include="Microsoft.AspNetCore.SpaServices.Extensions" Version="10.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
