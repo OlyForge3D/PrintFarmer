@@ -61,13 +61,13 @@ public class ConsoleRedirectionService(ILogger<ConsoleRedirectionService> unifie
 
     public void WriteLine(string message)
     {
-        _unifiedLogger.LogInformation(message);
+        _unifiedLogger.LogInformation("{Message}", message);
         _originalOut.WriteLine(message); // Also write to original console for debugging
     }
 
     public void WriteError(string message)
     {
-        _unifiedLogger.LogError(message);
+        _unifiedLogger.LogError("{Message}", message);
         _originalError.WriteLine(message); // Also write to original console for debugging
     }
 
@@ -122,7 +122,7 @@ internal class UnifiedConsoleWriter(ILogger<ConsoleRedirectionService> unifiedLo
             string message = _buffer.ToString();
             _ = _buffer.Clear();
 
-            _unifiedLogger.Log(_logLevel, message);
+            _unifiedLogger.Log(_logLevel, "{Message}", message);
         }
     }
 

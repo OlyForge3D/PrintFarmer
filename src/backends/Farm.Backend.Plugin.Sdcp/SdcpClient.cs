@@ -400,8 +400,10 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         public const int SetCameraEnabled = 386;
     }
 
+#pragma warning disable CA2254 // Intentional wrapper — callers pass constant templates
     private void LogSdcp(LogLevel level, string message, Exception? exception = null)
         => _logger.Log(level, exception, message);
+#pragma warning restore CA2254
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -465,7 +467,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         { 20, "printing" }
     };
 
+#pragma warning disable S1172 // Parameters reserved for future diagnostic logging
     private async Task<string?> ReceiveTextMessageAsync(ClientWebSocket ws, string operation, string correlationId, CancellationToken ct)
+#pragma warning restore S1172
     {
         byte[] rented = ArrayPool<byte>.Shared.Rent(8192);
         try
@@ -580,11 +584,13 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         return candidates;
     }
 
+#pragma warning disable S1172 // Parameters reserved for future diagnostic logging
     private async Task<(ClientWebSocket ws, Uri wsUri)> ConnectWebSocketAsync(
         string baseUrl,
         string operation,
         string correlationId,
         CancellationToken ct)
+#pragma warning restore S1172
     {
         List<Uri> candidates = GetWebSocketCandidateUris(baseUrl);
         Exception? lastException = null;

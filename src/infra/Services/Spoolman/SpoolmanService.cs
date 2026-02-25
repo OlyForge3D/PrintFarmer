@@ -908,7 +908,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         List<string> ips = networkRanges
-            .SelectMany(r => NetworkRangeHelper.ExpandNetworkRange(r, msg => logger.LogWarning(msg)))
+            .SelectMany(r => NetworkRangeHelper.ExpandNetworkRange(r, msg => logger.LogWarning("{Message}", msg)))
             .Distinct()
             .ToList();
         Task<SpoolmanDiscoveryResult>[] tasks = ips.Select(ip => ScanIpForSpoolmanAsync(ip, ct)).ToArray();

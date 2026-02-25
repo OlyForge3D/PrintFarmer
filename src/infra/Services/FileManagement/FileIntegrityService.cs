@@ -81,7 +81,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
             if (!File.Exists(filePath))
             {
                 string msg = $"File not found: {filePath}";
-                _logger.LogWarning(msg);
+                _logger.LogWarning("File not found: {FilePath}", filePath);
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
@@ -93,7 +93,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
             if (actualSize != expectedSizeBytes)
             {
                 string msg = $"File size mismatch. Expected: {expectedSizeBytes} bytes, Actual: {actualSize} bytes";
-                _logger.LogWarning(msg);
+                _logger.LogWarning("File size mismatch. Expected: {ExpectedSize} bytes, Actual: {ActualSize} bytes", expectedSizeBytes, actualSize);
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
@@ -105,7 +105,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
             if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
             {
                 string msg = $"File hash mismatch. Expected: {expectedHash}, Actual: {actualHash}";
-                _logger.LogWarning(msg);
+                _logger.LogWarning("File hash mismatch. Expected: {ExpectedHash}, Actual: {ActualHash}", expectedHash, actualHash);
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
@@ -120,7 +120,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         catch (UnauthorizedAccessException)
         {
             string msg = $"Permission denied accessing file: {filePath}";
-            _logger.LogWarning(msg);
+            _logger.LogWarning("Permission denied accessing file: {FilePath}", filePath);
             return new FileIntegrityCheckResult(
                 IsValid: false,
                 ErrorMessage: msg,
@@ -129,7 +129,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         catch (Exception ex)
         {
             string msg = $"Unexpected error during integrity check: {ex.Message}";
-            _logger.LogError(msg);
+            _logger.LogError("Unexpected error during integrity check: {Message}", ex.Message);
             return new FileIntegrityCheckResult(
                 IsValid: false,
                 ErrorMessage: msg,

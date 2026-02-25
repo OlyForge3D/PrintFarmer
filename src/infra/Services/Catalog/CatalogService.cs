@@ -41,7 +41,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetManufacturersAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetManufacturersAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -503,7 +503,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetHotendModelsAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetHotendModelsAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -527,7 +527,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetExtruderModelsAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetExtruderModelsAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -552,7 +552,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetToolheadModelsAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetToolheadModelsAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -579,7 +579,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetNozzleModelsAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetNozzleModelsAsync failed: {Message}", ex.Message);
             throw;
         }
     }

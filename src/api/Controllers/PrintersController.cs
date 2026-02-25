@@ -23,8 +23,8 @@ using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 using Microsoft.Extensions.Logging;
+using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -996,8 +996,8 @@ public class PrintersController(
             try
             {
                 _logger.LogInformation(
-                    "Processing discovered printer: {DiscoveredName} ", discovered.Name +
-                    $"({discovered.IpAddress}:{discovered.BackendPort}) - Backend: {discovered.Backend}");
+                    "Processing discovered printer: {DiscoveredName} ({IpAddress}:{Port}) - Backend: {Backend}",
+                    discovered.Name, discovered.IpAddress, discovered.BackendPort, discovered.Backend);
 
                 // Check if printer already exists by IP address
                 Printer? existing = await _printersService.FindByServerUrlAsync(discovered.ServerUrl, ct);

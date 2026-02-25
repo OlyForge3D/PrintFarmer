@@ -200,8 +200,8 @@ public class GcodeHarvestController(
             if (result.FailedFileIds?.Length > 0)
             {
                 _logger.LogWarning(
-                    "Import operation {RequestHarvestOperationId} completed with {Length} failures. ", request.HarvestOperationId, result.FailedFileIds.Length +
-                    $"Imported: {result.ImportedFiles}, Skipped: {result.SkippedFileIds?.Length ?? 0}, Failed: {result.FailedFileIds.Length}");
+                    "Import operation {RequestHarvestOperationId} completed with {Length} failures. Imported: {Imported}, Skipped: {Skipped}, Failed: {Failed}",
+                    request.HarvestOperationId, result.FailedFileIds.Length, result.ImportedFiles, result.SkippedFileIds?.Length ?? 0, result.FailedFileIds.Length);
             }
 
             return Ok(result);

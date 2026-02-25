@@ -554,8 +554,8 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
             };
 
             _logger.LogInformation(
-                "Returning profiles for '{NormalizedModel}': {MachineProfilesCount} machines, ", normalizedModel, machineProfiles.Count +
-                $"{compatibleProcesses.Count} processes, {compatibleFilaments.Count} filaments");
+                "Returning profiles for '{NormalizedModel}': {MachineCount} machines, {ProcessCount} processes, {FilamentCount} filaments",
+                normalizedModel, machineProfiles.Count, compatibleProcesses.Count, compatibleFilaments.Count);
 
             return Ok(result);
         }

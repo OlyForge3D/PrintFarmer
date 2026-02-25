@@ -422,8 +422,8 @@ public sealed class OctoPrintPollingService(
                     if (state.ConsecutiveFailures >= 3 && state.LastKnownIsOnline)
                     {
                         _logger.LogWarning(
-                            "OctoPrint printer {PrinterId} marked offline after {StateConsecutiveFailures} HTTP fallback failures ", printerId, state.ConsecutiveFailures +
-                            $"(apiState={apiState})");
+                            "OctoPrint printer {PrinterId} marked offline after {StateConsecutiveFailures} HTTP fallback failures (apiState={ApiState})",
+                            printerId, state.ConsecutiveFailures, apiState);
                         state.LastKnownIsOnline = false;
 
                         // Create cache update (PrinterStatusDto - no HomedAxes)

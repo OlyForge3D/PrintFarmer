@@ -310,8 +310,8 @@ public sealed class OctoPrintWebSocketAdapter(
             _consecutiveFailures = 0;
 
             _logger.LogDebug(
-                "OctoPrint HTTP Fallback {PrinterId}: Got status - Online={IsOnline}, State={CurrentState}, ", _printerId, isOnline, currentState +
-                $"Progress={currentProgress}, JobName={jobStatus.Filename}");
+                "OctoPrint HTTP Fallback {PrinterId}: Got status - Online={IsOnline}, State={CurrentState}, Progress={Progress}, JobName={JobName}",
+                _printerId, isOnline, currentState, currentProgress, jobStatus.Filename);
 
             return new OctoPrintStatusData
             {

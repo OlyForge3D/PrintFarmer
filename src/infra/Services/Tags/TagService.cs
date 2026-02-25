@@ -892,8 +892,8 @@ namespace Farm.Infrastructure.Services.Tags
                 }
 
                 _logger.LogDebug(
-                    "Complex filter returned {ResultObjectsCount} {ObjectType} objects ", resultObjects.Count, objectType +
-                    $"(includeAll: {includeAllList.Count}, includeAny: {includeAnyList.Count}, exclude: {excludeList.Count})");
+                    "Complex filter returned {ResultObjectsCount} {ObjectType} objects (includeAll: {IncludeAll}, includeAny: {IncludeAny}, exclude: {Exclude})",
+                    resultObjects.Count, objectType, includeAllList.Count, includeAnyList.Count, excludeList.Count);
 
                 return resultObjects;
             }

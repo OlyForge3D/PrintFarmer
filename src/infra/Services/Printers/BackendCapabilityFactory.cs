@@ -483,10 +483,8 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                 }
 
                 _logger.LogWarning(
-                    "[DIAGNOSTIC] TryGetClientWithCapability({Backend}, {RequiredCapability}) => ", backend, requiredCapability +
-                    $"Type: {clientFullName}, " +
-                    $"Implements {requiredCapability} Interface: {implementsRequiredInterface}, " +
-                    $"All Interfaces: [{string.Join(", ", interfaces)}]");
+                    "[DIAGNOSTIC] TryGetClientWithCapability({Backend}, {RequiredCapability}) => Type: {ClientType}, Implements Interface: {ImplementsInterface}, All Interfaces: [{Interfaces}]",
+                    backend, requiredCapability, clientFullName, implementsRequiredInterface, string.Join(", ", interfaces));
             }
             else
             {

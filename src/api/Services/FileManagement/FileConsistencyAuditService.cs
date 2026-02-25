@@ -244,7 +244,7 @@ public class FileConsistencyAuditService(
         }
 
         results.SummaryMessage = $"Model3D audit: Valid={results.ValidCount}, Missing={results.MissingCount}, Corrupted={results.CorruptedCount}";
-        _logger.LogInformation(results.SummaryMessage);
+        _logger.LogInformation("Model3D audit: Valid={ValidCount}, Missing={MissingCount}, Corrupted={CorruptedCount}", results.ValidCount, results.MissingCount, results.CorruptedCount);
 
         return results;
     }
@@ -303,7 +303,7 @@ public class FileConsistencyAuditService(
         }
 
         results.SummaryMessage = $"GcodeFile audit: Valid={results.ValidCount}, Missing={results.MissingCount}, Corrupted={results.CorruptedCount}";
-        _logger.LogInformation(results.SummaryMessage);
+        _logger.LogInformation("GcodeFile audit: Valid={ValidCount}, Missing={MissingCount}, Corrupted={CorruptedCount}", results.ValidCount, results.MissingCount, results.CorruptedCount);
 
         return results;
     }
@@ -375,7 +375,7 @@ public class FileConsistencyAuditService(
         results.SummaryMessage = $"Orphaned files audit: Found {results.OrphanedCount} orphaned files";
         if (results.OrphanedCount > 0)
         {
-            _logger.LogInformation(results.SummaryMessage);
+            _logger.LogInformation("Orphaned files audit: Found {OrphanedCount} orphaned files", results.OrphanedCount);
         }
 
         return results;

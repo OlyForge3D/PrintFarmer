@@ -250,7 +250,9 @@ public class WorkersController(
                 // Flatten all string arrays from the object
                 return doc.RootElement.EnumerateObject()
                     .Where(p => p.Value.ValueKind == JsonValueKind.Array)
+#pragma warning disable IDISP005 // ArrayEnumerator is a struct with no-op Dispose
                     .SelectMany(p => p.Value.EnumerateArray())
+#pragma warning restore IDISP005
                     .Where(e => e.ValueKind == JsonValueKind.String)
                     .Select(e => e.GetString()!)
                     .ToArray();
