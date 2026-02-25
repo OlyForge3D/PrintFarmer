@@ -473,6 +473,19 @@ public interface IPrintersService
     Task<bool> UploadGcodeAsync(Guid id, string filename, Stream stream, CancellationToken ct);
 
     /// <summary>
+    /// Uploads a gcode file to the printer and starts printing it in a single backend operation.
+    /// Each backend handles any required delays, path resolution, or protocol-specific steps
+    /// between upload and print start.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="filename">The desired filename on printer storage</param>
+    /// <param name="stream">The file stream to upload (not closed by this method)</param>
+    /// <param name="progress">Optional progress reporter for stage transitions (Uploading → Processing → StartingPrint → Completed/Failed)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>An <see cref="UploadAndPrintResult"/> indicating success or which stage failed, or a failure result if the capability is not supported</returns>
+    Task<UploadAndPrintResult> UploadAndStartPrintAsync(Guid id, string filename, Stream stream, IProgress<UploadAndPrintStage>? progress = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Retrieves the list of gcode files stored on the printer.
     /// </summary>
     /// <param name="id">The printer ID</param>

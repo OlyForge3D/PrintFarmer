@@ -20,6 +20,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     ISupportsFileUpload,
     ISupportsFileDelete,
     ISupportsStartPrint,
+    ISupportsUploadAndPrint,
     ISupportsControlOperations,
     ISupportsCamera,
     ISupportsConfiguredCameraDetection,
@@ -2580,6 +2581,37 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
         => await StartPrintAsync(baseUrl, fileName, ct);
+
+    /// <summary>
+    /// Uploads a G-code file and immediately starts printing it on a Moonraker printer.
+    /// Moonraker does not require a delay between upload and start.
+    /// </summary>
+    async Task<UploadAndPrintResult> ISupportsUploadAndPrint.UploadAndStartPrintAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential, IProgress<UploadAndPrintStage>? progress, CancellationToken ct)
+    {
+        progress?.Report(UploadAndPrintStage.Uploading);
+
+        bool uploaded = await UploadGcodeAsync(baseUrl, fileName, fileContent, ct);
+        if (!uploaded)
+        {
+            _logger.LogWarning("[Moonraker] UploadAndStartPrint: upload failed for {FileName}", fileName);
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload {fileName} to printer");
+        }
+
+        _logger.LogInformation("[Moonraker] UploadAndStartPrint: upload succeeded for {FileName}, starting print", fileName);
+        progress?.Report(UploadAndPrintStage.StartingPrint);
+
+        bool started = await StartPrintAsync(baseUrl, fileName, ct);
+        if (!started)
+        {
+            _logger.LogWarning("[Moonraker] UploadAndStartPrint: start print failed for {FileName} after successful upload", fileName);
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of {fileName} after successful upload");
+        }
+
+        progress?.Report(UploadAndPrintStage.Completed);
+        return UploadAndPrintResult.Ok();
+    }
 
     /// <summary>
     /// ISupportsControlOperations implementations - pause, resume, and cancel operations.

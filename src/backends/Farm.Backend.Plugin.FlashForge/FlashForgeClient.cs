@@ -14,7 +14,8 @@ namespace Farm.Backend.Plugin.FlashForge;
 /// Communicates over raw TCP sockets using G-code-like commands (~Mxxx).
 /// Protocol reference: OrcaSlicer Flashforge.cpp implementation.
 /// </summary>
-public sealed partial class FlashForgeClient : IFlashForgeClient
+public sealed partial class FlashForgeClient : IFlashForgeClient,
+    ISupportsUploadAndPrint
 {
     private readonly ILogger<FlashForgeClient> _logger;
     private readonly BackendTimeoutSettings _timeouts;
@@ -283,6 +284,41 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
             _logger.LogWarning(ex, "FlashForge start print failed for {BaseUrl}/{FileName}", baseUrl, fileName);
             return false;
         }
+    }
+
+    #endregion
+
+    #region ISupportsUploadAndPrint
+
+    /// <summary>
+    /// Uploads a G-code file and starts printing it on a FlashForge printer.
+    /// FlashForge uses TCP protocol for both operations with the 0:/user/ path prefix.
+    /// </summary>
+    public async Task<UploadAndPrintResult> UploadAndStartPrintAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, IProgress<UploadAndPrintStage>? progress = null, CancellationToken ct = default)
+    {
+        progress?.Report(UploadAndPrintStage.Uploading);
+
+        bool uploaded = await UploadGcodeAsync(baseUrl, fileName, fileContent, credential, ct);
+        if (!uploaded)
+        {
+            _logger.LogWarning("FlashForge: UploadAndStartPrint upload failed for {FileName}", fileName);
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload {fileName} to printer");
+        }
+
+        _logger.LogInformation("FlashForge: UploadAndStartPrint upload succeeded for {FileName}, starting print", fileName);
+        progress?.Report(UploadAndPrintStage.StartingPrint);
+
+        bool started = await StartPrintAsync(baseUrl, fileName, credential, ct);
+        if (!started)
+        {
+            _logger.LogWarning("FlashForge: UploadAndStartPrint start print failed for {FileName} after successful upload", fileName);
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of {fileName} after successful upload");
+        }
+
+        progress?.Report(UploadAndPrintStage.Completed);
+        return UploadAndPrintResult.Ok();
     }
 
     #endregion

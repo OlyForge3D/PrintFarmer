@@ -19,6 +19,19 @@ public sealed record DispatchUploadProgressDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsFailed { get; init; }
 
+    /// <summary>
+    /// Current stage of the upload-and-print workflow.
+    /// Values: "uploading", "processing", "startingPrint", "completed", "failed".
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Stage { get; init; }
+
+    /// <summary>
+    /// Human-readable error message when <see cref="IsFailed"/> is true.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ErrorMessage { get; init; }
+
     public int Percentage => TotalBytes > 0
         ? (int)Math.Min(100, Math.Round((double)BytesSent / TotalBytes * 100))
         : 0;

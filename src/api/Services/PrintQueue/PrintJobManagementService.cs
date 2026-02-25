@@ -553,6 +553,14 @@ public class PrintJobManagementService(
                     var reportInterval = TimeSpan.FromMilliseconds(500);
                     const long ReportEveryBytes = 512 * 1024; // 512KB
 
+                    // Stage progress: backends report which step they're on (uploading, processing, starting).
+                    string? currentStage = null;
+                    var stageProgress = new Progress<UploadAndPrintStage>(stage =>
+                    {
+                        currentStage = stage.ToString();
+                        _logger.LogDebug("Print job {JobId} stage: {Stage}", jobId, currentStage);
+                    });
+
                     async Task ReportProgressAsync(long bytesSent, bool force)
                     {
                         if (totalBytes <= 0)
@@ -582,6 +590,7 @@ public class PrintJobManagementService(
                             TotalBytes = totalBytes,
                             IsCompleted = force && bytesSent >= totalBytes,
                             IsFailed = false,
+                            Stage = currentStage,
                         };
 
                         // Broadcast to all clients (queue dashboard listeners)
@@ -598,17 +607,33 @@ public class PrintJobManagementService(
                         fileStream,
                         bytesSent => ReportProgressAsync(bytesSent, force: false));
 
-                    bool uploadSuccess = await _printersService.UploadGcodeAsync(
+                    // All backends implement ISupportsUploadAndPrint, handling protocol-specific
+                    // delays, path resolution, and retries internally.
+                    var result = await _printersService.UploadAndStartPrintAsync(
                         job.AssignedPrinterId.Value,
                         printerFileName,
                         progressStream,
+                        stageProgress,
                         cancellationToken);
 
-                    if (!uploadSuccess)
+                    if (result.Success)
+                    {
+                        // Emit a forced 100% snapshot.
+                        if (totalBytes > 0)
+                        {
+                            await ReportProgressAsync(totalBytes, force: true);
+                        }
+
+                        job.Status = PrintJobStatus.Printing;
+                        _logger.LogInformation("Print job {JobId} successfully uploaded and started on printer {PrinterId}", jobId, job.AssignedPrinterId);
+                    }
+                    else
                     {
                         job.Status = PrintJobStatus.Assigned;
-                        job.FailureReason = "Failed to upload G-code file to printer";
-                        _logger.LogWarning("Failed to upload G-code to printer for job {JobId}", jobId);
+                        job.FailureReason = result.ErrorMessage ?? $"Failed at stage: {result.FailedStage}";
+                        _logger.LogWarning(
+                            "Failed to upload and start print job {JobId} on printer {PrinterId} at stage {Stage}: {Error}",
+                            jobId, job.AssignedPrinterId, result.FailedStage, result.ErrorMessage);
 
                         // Best-effort: notify completion state so UI can stop showing upload progress.
                         if (totalBytes > 0)
@@ -624,39 +649,10 @@ public class PrintJobManagementService(
                                     TotalBytes = totalBytes,
                                     IsCompleted = true,
                                     IsFailed = true,
+                                    Stage = result.FailedStage.ToString(),
+                                    ErrorMessage = result.ErrorMessage,
                                 },
                                 cancellationToken);
-                        }
-                    }
-                    else
-                    {
-                        // Emit a forced 100% snapshot.
-                        if (totalBytes > 0)
-                        {
-                            await ReportProgressAsync(totalBytes, force: true);
-                        }
-
-                        _logger.LogInformation(
-                            "Successfully uploaded {FileName} to printer {PrinterId}",
-                            printerFileName, job.AssignedPrinterId);
-
-                        // Step 2: Start the print on the printer using the uploaded filename
-                        bool startSuccess = await _printersService.StartPrintFromFileAsync(
-                            job.AssignedPrinterId.Value,
-                            printerFileName,
-                            cancellationToken);
-
-                        if (startSuccess)
-                        {
-                            job.Status = PrintJobStatus.Printing;
-                            _logger.LogInformation("Print job {JobId} successfully started on printer {PrinterId}", jobId, job.AssignedPrinterId);
-                        }
-                        else
-                        {
-                            // Revert to Assigned status if start failed
-                            job.Status = PrintJobStatus.Assigned;
-                            job.FailureReason = "Failed to start print on printer after upload";
-                            _logger.LogWarning("Failed to start print job {JobId} on printer {PrinterId} after successful upload", jobId, job.AssignedPrinterId);
                         }
                     }
                 }

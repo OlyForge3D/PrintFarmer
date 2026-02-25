@@ -70,6 +70,76 @@ public interface ISupportsStartPrint
 }
 
 /// <summary>
+/// Stages of the combined upload-and-start-print workflow, reported via IProgress.
+/// </summary>
+public enum UploadAndPrintStage
+{
+    /// <summary>File upload in progress.</summary>
+    Uploading,
+
+    /// <summary>Backend-specific processing after upload (e.g., firmware file indexing).</summary>
+    Processing,
+
+    /// <summary>Sending start-print command to the printer.</summary>
+    StartingPrint,
+
+    /// <summary>Both upload and start-print completed successfully.</summary>
+    Completed,
+
+    /// <summary>The operation failed at some step.</summary>
+    Failed
+}
+
+/// <summary>
+/// Result of a combined upload-and-start-print operation.
+/// </summary>
+/// <param name="Success">Whether both upload and start-print succeeded.</param>
+/// <param name="FailedStage">The stage at which the operation failed, or <see cref="UploadAndPrintStage.Completed"/> on success.</param>
+/// <param name="ErrorMessage">Human-readable error message when <paramref name="Success"/> is false.</param>
+public sealed record UploadAndPrintResult(
+    bool Success,
+    UploadAndPrintStage FailedStage = UploadAndPrintStage.Completed,
+    string? ErrorMessage = null)
+{
+    /// <summary>Creates a successful result.</summary>
+    public static UploadAndPrintResult Ok() => new(true);
+
+    /// <summary>Creates a failure result indicating which stage failed.</summary>
+    public static UploadAndPrintResult Fail(UploadAndPrintStage stage, string? message = null)
+        => new(false, stage, message);
+}
+
+/// <summary>
+/// Capability marker interface for backend clients that support combined upload-and-start-print workflow.
+/// Backends implementing this interface handle the full sequence of uploading a G-code file
+/// and starting it in a single operation, allowing backend-specific delays, retries, or path
+/// resolution between upload and start.
+/// </summary>
+public interface ISupportsUploadAndPrint
+{
+    /// <summary>
+    /// Uploads a G-code file to the printer and starts printing it.
+    /// Each backend implementation handles any required delays, path resolution,
+    /// or protocol-specific steps between upload and print start.
+    /// Progress is reported via <paramref name="progress"/> so callers can relay stage updates to the UI.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
+    /// <param name="fileName">The name for the uploaded file (e.g., "model.gcode")</param>
+    /// <param name="fileContent">The file content stream to upload</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
+    /// <param name="progress">Optional progress reporter for stage transitions (Uploading → Processing → StartingPrint → Completed/Failed)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>An <see cref="UploadAndPrintResult"/> indicating success or which stage failed</returns>
+    Task<UploadAndPrintResult> UploadAndStartPrintAsync(
+        string baseUrl,
+        string fileName,
+        Stream fileContent,
+        PrinterCredential? credential = null,
+        IProgress<UploadAndPrintStage>? progress = null,
+        CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backend clients that support printer control operations.
 /// Provides pause, resume, and cancel operations for managing active print jobs.
 /// </summary>

@@ -1613,6 +1613,10 @@ export interface DispatchUploadProgressDto {
   percentage: number;
   isCompleted: boolean;
   isFailed?: boolean;
+  /** Current stage of the upload-and-print workflow. */
+  stage?: string;
+  /** Error message when isFailed is true. */
+  errorMessage?: string;
 }
 
 // Printer control types

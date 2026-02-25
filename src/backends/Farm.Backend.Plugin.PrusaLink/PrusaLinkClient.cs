@@ -17,6 +17,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsFileUpload,
     ISupportsFileDelete,
     ISupportsStartPrint,
+    ISupportsUploadAndPrint,
     ISupportsCamera,
     ISupportsPrinterInformation,
     ISupportsControlOperations,
@@ -344,6 +345,41 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         return StartPrintAsync(baseUrl.ToString().TrimEnd('/'), fileName, credential, ct);
+    }
+
+    /// <summary>
+    /// Uploads a G-code file and starts printing it on PrusaLink in a single API call.
+    /// PrusaLink natively supports the "printAfterUpload" parameter, making this atomic.
+    /// </summary>
+    public async Task<UploadAndPrintResult> UploadAndStartPrintAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, IProgress<UploadAndPrintStage>? progress = null, CancellationToken ct = default)
+    {
+        try
+        {
+            ArgumentNullException.ThrowIfNull(fileName);
+            ArgumentNullException.ThrowIfNull(fileContent);
+
+            // PrusaLink supports upload+print as a single atomic operation via printAfterUpload.
+            progress?.Report(UploadAndPrintStage.Uploading);
+
+            string filePath = new Uri(new Uri("http://localhost/"), fileName).LocalPath;
+            string storagePath = await ResolveStoragePathAsync(baseUrl, credential, ct);
+            bool success = await _apiClient.UploadFileAsync(baseUrl, storagePath, filePath, fileContent, credential, printAfterUpload: true, overwrite: true, ct);
+
+            if (!success)
+            {
+                progress?.Report(UploadAndPrintStage.Failed);
+                return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"PrusaLink atomic upload+print failed for {fileName}");
+            }
+
+            progress?.Report(UploadAndPrintStage.Completed);
+            return UploadAndPrintResult.Ok();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to upload and start print of {FileName} on {BaseUrl}", fileName, baseUrl);
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, ex.Message);
+        }
     }
 
     public async Task<string[]> GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)

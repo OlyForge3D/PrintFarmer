@@ -21,6 +21,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     ISupportsFileUpload,
     ISupportsFileDelete,
     ISupportsStartPrint,
+    ISupportsUploadAndPrint,
     ISupportsCamera,
     ISupportsPrinterInformation,
     ISupportsHistory,
@@ -1824,6 +1825,40 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         using var memoryStream = new MemoryStream();
         await fileContent.CopyToAsync(memoryStream, ct);
         return await UploadFileAsync(baseUrl, credential, memoryStream.ToArray(), fileName, null, false);
+    }
+
+    // ========== ISupportsUploadAndPrint ==========
+
+    /// <summary>
+    /// Uploads a G-code file and starts printing it on OctoPrint in a single API call.
+    /// OctoPrint natively supports the "print" parameter on its upload endpoint,
+    /// making this an atomic operation.
+    /// </summary>
+    public async Task<UploadAndPrintResult> UploadAndStartPrintAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, IProgress<UploadAndPrintStage>? progress = null, CancellationToken ct = default)
+    {
+        // OctoPrint supports upload+start as a single atomic operation via the "print" form param.
+        progress?.Report(UploadAndPrintStage.Uploading);
+
+        bool success;
+        if (fileContent is MemoryStream ms)
+        {
+            success = await UploadFileAsync(baseUrl, credential, ms.ToArray(), fileName, null, startPrint: true);
+        }
+        else
+        {
+            using var memoryStream = new MemoryStream();
+            await fileContent.CopyToAsync(memoryStream, ct);
+            success = await UploadFileAsync(baseUrl, credential, memoryStream.ToArray(), fileName, null, startPrint: true);
+        }
+
+        if (!success)
+        {
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"OctoPrint atomic upload+print failed for {fileName}");
+        }
+
+        progress?.Report(UploadAndPrintStage.Completed);
+        return UploadAndPrintResult.Ok();
     }
 
     // ========== ISupportsCamera ==========

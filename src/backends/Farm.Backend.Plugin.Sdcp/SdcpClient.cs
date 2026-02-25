@@ -364,6 +364,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     ISupportsFileList,
     ISupportsFileUpload,
     ISupportsStartPrint,
+    ISupportsUploadAndPrint,
     ISupportsControlOperations,
     ISupportsCamera,
     ISupportsHistory,
@@ -1053,7 +1054,12 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             ? fileName
             : $"/local/{fileName}";
 
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint, new { Filename = sdcpPath, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 }, ct);
+        LogSdcp(LogLevel.Information, $"SDCP starting print: {sdcpPath}");
+
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint,
+            new { Filename = sdcpPath, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 },
+            timeout: _timeouts.PrintControlTimeout,
+            ct: ct);
     }
 
     public Task<bool> StartPrintAsync(Uri baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -1065,7 +1071,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
     public async Task<bool> PauseAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.PausePrint, new { }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.PausePrint, new { }, timeout: _timeouts.PrintControlTimeout, ct: ct);
     }
 
     public Task<bool> PauseAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -1076,7 +1082,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
     public async Task<bool> CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.CancelPrint, new { }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.CancelPrint, new { }, timeout: _timeouts.PrintControlTimeout, ct: ct);
     }
 
     public Task<bool> CancelAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -1087,7 +1093,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
     public async Task<bool> ResumeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.ResumePrint, new { }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.ResumePrint, new { }, timeout: _timeouts.PrintControlTimeout, ct: ct);
     }
 
     public Task<bool> ResumeAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -1213,7 +1219,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
     public async Task<bool> EnableCameraAsync(string baseUrl, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.SetCameraEnabled, new { Enable = 1 }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.SetCameraEnabled, new { Enable = 1 }, ct: ct);
     }
 
     public Task<bool> EnableCameraAsync(Uri baseUrl, CancellationToken ct = default)
@@ -1224,7 +1230,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
     public async Task<bool> DisableCameraAsync(string baseUrl, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.SetCameraEnabled, new { Enable = 0 }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.SetCameraEnabled, new { Enable = 0 }, ct: ct);
     }
 
     public Task<bool> DisableCameraAsync(Uri baseUrl, CancellationToken ct = default)
@@ -1317,12 +1323,12 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         return GetFileListAsync(baseUrl.ToString(), ct);
     }
 
-    private async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, CancellationToken ct = default)
+    private async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, TimeSpan? timeout = null, CancellationToken ct = default)
     {
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(_timeouts.CommandTimeout);
+            cts.CancelAfter(timeout ?? _timeouts.CommandTimeout);
             string requestId = Guid.NewGuid().ToString("N");
 
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "SendCommand", correlationId: requestId, cts.Token);
@@ -1367,12 +1373,17 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
-            LogSdcp(LogLevel.Debug, "SDCP command cancelled", ex);
+            LogSdcp(LogLevel.Debug, $"SDCP command {cmd} cancelled", ex);
             throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            LogSdcp(LogLevel.Warning, $"SDCP command {cmd} timed out after {(timeout ?? _timeouts.CommandTimeout).TotalSeconds}s: {ex.Message}");
+            return false;
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP command failed", ex);
+            LogSdcp(LogLevel.Warning, $"SDCP command {cmd} failed: {ex.Message}", ex);
             return false;
         }
     }
@@ -1482,6 +1493,43 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         return UploadGcodeAsync(baseUrl.ToString(), fileName, fileContent, credential, ct);
     }
 
+    /// <summary>
+    /// Uploads a G-code file and starts printing it on an SDCP printer.
+    /// SDCP firmware needs time to index newly uploaded files before a start-print
+    /// command can reference them, so a brief delay is inserted between steps.
+    /// </summary>
+    public async Task<UploadAndPrintResult> UploadAndStartPrintAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, IProgress<UploadAndPrintStage>? progress = null, CancellationToken ct = default)
+    {
+        progress?.Report(UploadAndPrintStage.Uploading);
+
+        bool uploaded = await UploadGcodeAsync(baseUrl, fileName, fileContent, credential, ct);
+        if (!uploaded)
+        {
+            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: upload failed for {fileName}");
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload {fileName} to printer");
+        }
+
+        LogSdcp(LogLevel.Information, $"UploadAndStartPrint: upload succeeded for {fileName}, waiting for firmware indexing");
+        progress?.Report(UploadAndPrintStage.Processing);
+
+        // SDCP printers need time to index the newly uploaded file before it can be referenced.
+        await Task.Delay(TimeSpan.FromSeconds(2), ct);
+
+        progress?.Report(UploadAndPrintStage.StartingPrint);
+
+        bool started = await StartPrintAsync(baseUrl, fileName, credential, ct);
+        if (!started)
+        {
+            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: start print failed for {fileName} after successful upload");
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of {fileName} after successful upload");
+        }
+
+        progress?.Report(UploadAndPrintStage.Completed);
+        return UploadAndPrintResult.Ok();
+    }
+
     public void Dispose()
     {
         // No resources to dispose in this implementation
@@ -1520,7 +1568,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     /// </summary>
     async Task<bool> ISupportsFileDelete.DeleteFileAsync(string baseUrl, string filePath, PrinterCredential? credential, CancellationToken ct)
     {
-        bool result = await SendCommandAsync(baseUrl, SdcpCommandIds.DeleteFile, new { Url = filePath }, ct);
+        bool result = await SendCommandAsync(baseUrl, SdcpCommandIds.DeleteFile, new { Url = filePath }, ct: ct);
         if (!result)
         {
             LogSdcp(LogLevel.Warning, $"SDCP file delete failed for '{filePath}'");

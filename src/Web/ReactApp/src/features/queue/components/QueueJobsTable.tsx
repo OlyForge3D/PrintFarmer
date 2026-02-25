@@ -239,10 +239,16 @@ export function QueueJobsTable({
 
             const timeDisplay = formatDateTime(job.actualStartTimeUtc ?? job.queuedAtUtc);
             const dispatchProgress = dispatchUploadProgressByJobId?.[jobId];
-            const dispatchProgressText =
-              dispatchProgress && !dispatchProgress.isCompleted
-                ? `Uploading ${dispatchProgress.percentage}%...`
-                : "Starting...";
+            const dispatchProgressText = (() => {
+              if (!dispatchProgress || dispatchProgress.isCompleted) {
+                if (dispatchProgress?.isFailed) return "Failed";
+                return "Starting...";
+              }
+              const stage = dispatchProgress.stage;
+              if (stage === "StartingPrint") return "Starting print...";
+              if (stage === "Processing") return "Processing...";
+              return `Uploading ${dispatchProgress.percentage}%...`;
+            })();
 
             const isDragTarget = dropIndex === index && dragIndex !== index;
 

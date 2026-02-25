@@ -38,7 +38,8 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         { typeof(ISupportsPrinterInformation), BackendCapabilities.PrinterInformation },
         { typeof(ISupportsHistory), BackendCapabilities.History },
         { typeof(ISupportsFileDelete), BackendCapabilities.FileDelete },
-        { typeof(ISupportsFilamentControl), BackendCapabilities.FilamentControl }
+        { typeof(ISupportsFilamentControl), BackendCapabilities.FilamentControl },
+        { typeof(ISupportsUploadAndPrint), BackendCapabilities.UploadAndPrint }
     };
 
     // Cache of capabilities for each backend (computed once at initialization)
@@ -385,6 +386,18 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         if (TryGetStartPrintClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsStartPrint startPrintClient)
         {
             client = startPrintClient;
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryGetUploadAndPrintClientTyped(PrinterBackend backend, out ISupportsUploadAndPrint? client)
+    {
+        client = null;
+        if (TryGetClientWithCapability(backend, BackendCapabilities.UploadAndPrint, out IBackendClient? baseClient) && baseClient is ISupportsUploadAndPrint uploadAndPrintClient)
+        {
+            client = uploadAndPrintClient;
             return true;
         }
 

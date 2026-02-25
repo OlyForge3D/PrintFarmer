@@ -2625,6 +2625,34 @@ public class PrintersService(
     }
 
     /// <summary>
+    /// Uploads a gcode file to the printer and starts printing it in a single backend operation.
+    /// </summary>
+    public async Task<UploadAndPrintResult> UploadAndStartPrintAsync(Guid id, string filename, Stream stream, IProgress<UploadAndPrintStage>? progress = null, CancellationToken ct = default)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p is null)
+        {
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, "Printer not found");
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+            if (!_capabilityFactory.TryGetUploadAndPrintClientTyped(backend, out ISupportsUploadAndPrint? client))
+            {
+                return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, "Backend does not support upload and print");
+            }
+
+            return await client!.UploadAndStartPrintAsync(p.BackendUrl, filename, stream, p.Credential, progress, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to upload and start print on printer {Id}", id);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Retrieves the list of gcode files stored on the printer.
     /// </summary>
     /// <param name="id">Unique printer identifier (GUID)</param>
