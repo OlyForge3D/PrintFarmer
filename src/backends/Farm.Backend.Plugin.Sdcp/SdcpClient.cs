@@ -4,6 +4,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -111,9 +112,9 @@ public class SdcpPrintInfo
 
     public int TotalLayer { get; set; }
 
-    public long CurrentTicks { get; set; }
+    public double CurrentTicks { get; set; }
 
-    public long TotalTicks { get; set; }
+    public double TotalTicks { get; set; }
 
     public string? Filename { get; set; }
 
@@ -380,6 +381,18 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     private const int SdcpWebSocketPort = 3030;
 
     /// <summary>
+    /// Maximum chunk size for SDCP file uploads (1 MB), matching OrcaSlicer ElegooLink implementation.
+    /// The printer expects uploads chunked with MD5, UUID, offset, and total size metadata.
+    /// </summary>
+    private const int MaxUploadChunkSize = 1048576; // 1024 * 1024
+
+    /// <summary>
+    /// SDCP CurrentStatus code indicating the printer is checking/indexing a file.
+    /// After upload, the printer enters this state while it validates and indexes the file.
+    /// </summary>
+    private const int StatusFileChecking = 8;
+
+    /// <summary>
     /// Interval at which the client sends WebSocket ping frames to the printer.
     /// Keeps long-lived connections (e.g., multi-step history retrieval) alive
     /// and allows the runtime to detect unresponsive peers.
@@ -456,17 +469,77 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
     }
 
-    // SDCP status codes based on documentation
+    // SDCP PrintInfo.Status codes (print-job-level state)
+    // Note: code 9 means "complete" at the job level (all layers done, filename cleared).
+    // This is distinct from CurrentStatus[9] which means "starting" at the machine level.
     private static readonly Dictionary<int, string> StatusCodeMap = new()
     {
         { 0, "idle" },
         { 5, "idle" },
         { 8, "preparing" },
-        { 9, "starting" },
+        { 9, "complete" },
         { 10, "paused" },
         { 13, "printing" },
         { 20, "printing" }
     };
+
+    // SDCP CurrentStatus codes (machine-level state, different numbering from PrintInfo.Status)
+    // Values observed via live WebSocket and OrcaSlicer ElegooLink.cpp:
+    //   0 = idle, 1 = printing, 5 = idle/busy, 8 = file checking/preparing, 9 = starting
+    private static readonly Dictionary<int, string> MachineStatusCodeMap = new()
+    {
+        { 0, "idle" },
+        { 1, "printing" },
+        { 5, "idle" },
+        { 8, "preparing" },
+        { 9, "starting" }
+    };
+
+    // Priority for state resolution: higher value wins when merging machine + job states.
+    private static readonly Dictionary<string, int> StatePriority = new()
+    {
+        { "idle", 0 },
+        { "online", 1 },
+        { "unknown", 1 },
+        { "complete", 2 },
+        { "preparing", 2 },
+        { "starting", 3 },
+        { "paused", 4 },
+        { "printing", 5 }
+    };
+
+    /// <summary>
+    /// Resolves the best display state by combining the machine-level CurrentStatus array
+    /// with the job-level PrintInfo.Status. CurrentStatus captures transient machine states
+    /// (e.g., file checking/preparing) that PrintInfo may not reflect.
+    /// </summary>
+    private static string ResolveMachineState(SdcpStatus status)
+    {
+        string state = "online";
+
+        // Check PrintInfo.Status (job-level state)
+        if (status.PrintInfo != null)
+        {
+            state = StatusCodeMap.GetValueOrDefault(status.PrintInfo.Status, "unknown");
+        }
+
+        // If the job state is idle/online, check CurrentStatus for machine-level activity
+        // that PrintInfo doesn't reflect (e.g., file checking = "preparing")
+        if (StatePriority.GetValueOrDefault(state) <= StatePriority.GetValueOrDefault("online")
+            && status.CurrentStatus is { Length: > 0 })
+        {
+            foreach (int code in status.CurrentStatus)
+            {
+                if (MachineStatusCodeMap.TryGetValue(code, out string? mapped)
+                    && StatePriority.GetValueOrDefault(mapped) > StatePriority.GetValueOrDefault(state))
+                {
+                    state = mapped;
+                }
+            }
+        }
+
+        return state;
+    }
 
 #pragma warning disable S1172 // Parameters reserved for future diagnostic logging
     private async Task<string?> ReceiveTextMessageAsync(ClientWebSocket ws, string operation, string correlationId, CancellationToken ct)
@@ -519,6 +592,47 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         {
             ArrayPool<byte>.Shared.Return(rented);
         }
+    }
+
+    /// <summary>
+    /// Reads WebSocket messages until a status broadcast (containing a top-level Status object)
+    /// is found. SDCP printers send periodic status broadcasts on the <c>sdcp/status/...</c> topic
+    /// alongside ACK responses on <c>sdcp/response/...</c>. When we send a Cmd 0 (GetStatus),
+    /// either message may arrive first. This method skips ACK responses and returns the first
+    /// status broadcast, or null if none arrives within <paramref name="maxAttempts"/> reads.
+    /// </summary>
+    private async Task<SdcpStatusResponse?> ReceiveStatusBroadcastAsync(
+        ClientWebSocket ws, string baseUrl, string operation, string correlationId, CancellationToken ct, int maxAttempts = 3)
+    {
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            string? json = await ReceiveTextMessageAsync(ws, operation, correlationId, ct);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            try
+            {
+                SdcpStatusResponse? response = JsonSerializer.Deserialize<SdcpStatusResponse>(json, JsonOptions);
+                if (response?.Status != null)
+                {
+                    CacheMainboardId(baseUrl, response.MainboardID);
+                    return response;
+                }
+
+                // Got an ACK or non-status message; read next message
+                LogSdcp(LogLevel.Debug, $"SDCP WS skipping non-status message (attempt {i + 1})");
+            }
+            catch (JsonException ex)
+            {
+                // Malformed or unexpected type in JSON; try next message
+                LogSdcp(LogLevel.Warning, $"SDCP WS status JSON parse error (attempt {i + 1}): {ex.Message}");
+            }
+        }
+
+        LogSdcp(LogLevel.Debug, $"SDCP WS no status broadcast received after {maxAttempts} attempts");
+        return null;
     }
 
     private static List<Uri> GetWebSocketCandidateUris(string baseUrl)
@@ -732,33 +846,12 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                 LogSdcp(LogLevel.Debug, "SDCP WS status request sent");
 
-                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetStatus", correlationId: requestId, cts.Token);
-                if (!string.IsNullOrWhiteSpace(responseJson))
+                SdcpStatusResponse? statusResponse = await ReceiveStatusBroadcastAsync(ws, baseUrl, "GetStatus", requestId, cts.Token);
+                if (statusResponse?.Status != null)
                 {
-                    // Try to parse as status response
-                    try
-                    {
-                        SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
-                        CacheMainboardId(baseUrl, statusResponse?.MainboardID);
-                        if (statusResponse?.Status?.PrintInfo != null)
-                        {
-                            string state = StatusCodeMap.GetValueOrDefault(statusResponse.Status.PrintInfo.Status, "unknown");
-                            LogSdcp(LogLevel.Debug, "SDCP status parsed");
-                            return new PrinterStatus(true, state);
-                        }
-
-                        LogSdcp(LogLevel.Debug, "SDCP status response did not include printInfo");
-                    }
-                    catch (Exception ex)
-                    {
-                        // Might be an ACK response, still indicates printer is online
-                        LogSdcp(LogLevel.Debug, "SDCP status response parse failed; treating as online", ex);
-                        return new PrinterStatus(true, "online");
-                    }
-                }
-                else
-                {
-                    LogSdcp(LogLevel.Debug, "SDCP empty status response; treating as online");
+                    string state = ResolveMachineState(statusResponse.Status);
+                    LogSdcp(LogLevel.Debug, "SDCP status parsed");
+                    return new PrinterStatus(true, state);
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -813,25 +906,17 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                 LogSdcp(LogLevel.Debug, "SDCP WS job request sent");
 
-                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetJob", correlationId: requestId, cts.Token);
-                if (!string.IsNullOrWhiteSpace(responseJson))
+                SdcpStatusResponse? statusResponse = await ReceiveStatusBroadcastAsync(ws, baseUrl, "GetJob", requestId, cts.Token);
+                if (statusResponse?.Status != null)
                 {
-                    SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
-                    CacheMainboardId(baseUrl, statusResponse?.MainboardID);
+                    string state = ResolveMachineState(statusResponse.Status);
+                    SdcpPrintInfo? printInfo = statusResponse.Status.PrintInfo;
+                    double progress = printInfo != null ? printInfo.Progress / 100.0 : 0;
+                    string? jobName = printInfo != null && !string.IsNullOrWhiteSpace(printInfo.Filename)
+                        ? Path.GetFileName(printInfo.Filename) : null;
 
-                    if (statusResponse?.Status?.PrintInfo != null)
-                    {
-                        SdcpPrintInfo printInfo = statusResponse.Status.PrintInfo;
-                        string state = StatusCodeMap.GetValueOrDefault(printInfo.Status, "unknown");
-                        double progress = printInfo.Progress / 100.0; // Convert percentage to decimal
-                        string? jobName = string.IsNullOrWhiteSpace(printInfo.Filename) ? null :
-                                     Path.GetFileName(printInfo.Filename);
-
-                        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-                        return new PrinterJob(state, progress, jobName, null);
-                    }
-
-                    LogSdcp(LogLevel.Debug, "SDCP job response did not include printInfo");
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                    return new PrinterJob(state, progress, jobName, null);
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -886,99 +971,70 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                 LogSdcp(LogLevel.Debug, "SDCP WS composite status request sent");
 
-                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetCompositeStatus", correlationId: requestId, cts.Token);
-                if (!string.IsNullOrWhiteSpace(responseJson))
+                SdcpStatusResponse? statusResponse = await ReceiveStatusBroadcastAsync(ws, baseUrl, "GetCompositeStatus", requestId, cts.Token);
+                if (statusResponse?.Status != null)
                 {
-                    SdcpStatusResponse? statusResponse;
+                    SdcpStatus status = statusResponse.Status;
+                    SdcpPrintInfo? printInfo = status.PrintInfo;
+
+                    string state = ResolveMachineState(status);
+
+                    double? progress = printInfo?.Progress / 100.0;
+                    string? jobName = string.IsNullOrWhiteSpace(printInfo?.Filename) ? null :
+                                 Path.GetFileName(printInfo.Filename);
+
+                    // Parse coordinates
+                    double? x = null, y = null, z = null;
+                    if (!string.IsNullOrWhiteSpace(status.CurrenCoord))
+                    {
+                        string[] coords = status.CurrenCoord.Split(',');
+                        if (coords.Length >= 3)
+                        {
+                            if (double.TryParse(coords[0], out double xVal))
+                            {
+                                x = xVal;
+                            }
+
+                            if (double.TryParse(coords[1], out double yVal))
+                            {
+                                y = yVal;
+                            }
+
+                            if (double.TryParse(coords[2], out double zVal))
+                            {
+                                z = zVal;
+                            }
+                        }
+                    }
+
                     try
                     {
-                        statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
-                        CacheMainboardId(baseUrl, statusResponse?.MainboardID);
+                        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
                     }
-                    catch (JsonException ex)
+                    catch (Exception ex)
                     {
-                        LogSdcp(LogLevel.Debug, "SDCP composite status parse failed; treating endpoint as online", ex);
-
-                        try
-                        {
-                            if (ws.State == WebSocketState.Open)
-                            {
-                                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-                            }
-                        }
-                        catch (Exception closeEx)
-                        {
-                            LogSdcp(LogLevel.Debug, "SDCP WS close failed", closeEx);
-                        }
-
-                        return new PrinterCompositeStatus(true, "online", null, null, null, null, null);
+                        LogSdcp(LogLevel.Debug, "SDCP WS close failed", ex);
                     }
 
-                    if (statusResponse?.Status != null)
-                    {
-                        SdcpStatus status = statusResponse.Status;
-                        SdcpPrintInfo? printInfo = status.PrintInfo;
+                    // Get camera URLs if available
+                    string? cameraStreamUrl = await GetCameraUrlAsync(baseUrl, ct);
+                    string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(baseUrl, ct);
 
-                        string state = printInfo != null ? StatusCodeMap.GetValueOrDefault(printInfo.Status, "unknown") : "online";
-                        double? progress = printInfo?.Progress / 100.0;
-                        string? jobName = string.IsNullOrWhiteSpace(printInfo?.Filename) ? null :
-                                     Path.GetFileName(printInfo.Filename);
-
-                        // Parse coordinates
-                        double? x = null, y = null, z = null;
-                        if (!string.IsNullOrWhiteSpace(status.CurrenCoord))
-                        {
-                            string[] coords = status.CurrenCoord.Split(',');
-                            if (coords.Length >= 3)
-                            {
-                                if (double.TryParse(coords[0], out double xVal))
-                                {
-                                    x = xVal;
-                                }
-
-                                if (double.TryParse(coords[1], out double yVal))
-                                {
-                                    y = yVal;
-                                }
-
-                                if (double.TryParse(coords[2], out double zVal))
-                                {
-                                    z = zVal;
-                                }
-                            }
-                        }
-
-                        try
-                        {
-                            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-                        }
-                        catch (Exception ex)
-                        {
-                            LogSdcp(LogLevel.Debug, "SDCP WS close failed", ex);
-                        }
-
-                        // Get camera URLs if available
-                        string? cameraStreamUrl = await GetCameraUrlAsync(baseUrl, ct);
-                        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(baseUrl, ct);
-
-                        return new PrinterCompositeStatus(
-                            IsOnline: true,
-                            State: state,
-                            Progress: progress,
-                            JobName: jobName,
-                            ThumbnailUrl: null, // SDCP doesn't provide thumbnails directly
-                            CameraStreamUrl: cameraStreamUrl,
-                            CameraSnapshotUrl: cameraSnapshotUrl,
-                            X: x,
-                            Y: y,
-                            Z: z,
-                            HotendTemp: status.TempOfNozzle,
-                            BedTemp: status.TempOfHotbed,
-                            HotendTarget: status.TempTargetNozzle,
-                            BedTarget: status.TempTargetHotbed);
-                    }
-
-                    LogSdcp(LogLevel.Debug, "SDCP composite status response did not include status payload");
+                    return new PrinterCompositeStatus(
+                        IsOnline: true,
+                        State: state,
+                        Progress: progress,
+                        JobName: jobName,
+                        ThumbnailUrl: null, // SDCP doesn't provide thumbnails directly
+                        CameraStreamUrl: cameraStreamUrl,
+                        CameraSnapshotUrl: cameraSnapshotUrl,
+                        X: x,
+                        Y: y,
+                        Z: z,
+                        HotendTemp: status.TempOfNozzle,
+                        BedTemp: status.TempOfHotbed,
+                        HotendTarget: status.TempTargetNozzle,
+                        BedTarget: status.TempTargetHotbed);
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -1396,11 +1452,25 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(_timeouts.FileUploadTimeout);
 
-            // SDCP v3 docs show HTTP upload endpoints living on port 3030.
-            // Some printers may expose SDCP behind a reverse proxy on port 80; if the stream is seekable,
-            // we can safely retry on fallback ports.
+            // The stream must be seekable for MD5 computation and chunked upload.
+            if (!fileContent.CanSeek)
+            {
+                LogSdcp(LogLevel.Warning, "SDCP upload requires a seekable stream for MD5 and chunked upload");
+                return false;
+            }
+
+            long startPosition = fileContent.Position;
+            long fileSize = fileContent.Length - startPosition;
+
+            // Compute MD5 hash of the entire file (required by SDCP upload protocol).
+            fileContent.Position = startPosition;
+            string md5Hash = await ComputeMd5Async(fileContent, cts.Token);
+            fileContent.Position = startPosition;
+
+            // Generate a session UUID for this upload (groups chunked parts together).
+            string uploadUuid = Guid.NewGuid().ToString();
+
             Uri normalizedBaseUri = new(NormalizeBaseUrl(baseUrl, 80));
-            string requestId = Guid.NewGuid().ToString("N");
 
             List<Uri> candidates = new();
             candidates.Add(new UriBuilder
@@ -1410,8 +1480,6 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 Port = SdcpWebSocketPort,
                 Path = "/uploadFile/upload"
             }.Uri);
-
-            // Fallbacks for devices that proxy SDCP over common ports.
             candidates.Add(new UriBuilder
             {
                 Scheme = Uri.UriSchemeHttp,
@@ -1420,70 +1488,111 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 Path = "/uploadFile/upload"
             }.Uri);
 
-            // Remove duplicates while preserving order.
             List<Uri> uploadUris = candidates.Distinct().ToList();
 
-            long? startPosition = null;
-            if (fileContent.CanSeek)
+            // Calculate chunk count — OrcaSlicer uses 1 MB chunks with metadata per chunk.
+            int chunkCount = (int)((fileSize + MaxUploadChunkSize - 1) / MaxUploadChunkSize);
+            if (chunkCount == 0)
             {
-                startPosition = fileContent.Position;
-            }
-
-            MultipartFormDataContent CreateMultipartContent()
-            {
-                MultipartFormDataContent formContent = new();
-                StreamContent streamContent = new(fileContent);
-                streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-                formContent.Add(streamContent, "file", fileName);
-                return formContent;
+                chunkCount = 1;
             }
 
             foreach (Uri uploadUri in uploadUris)
             {
-                if (startPosition != null)
+                fileContent.Position = startPosition;
+                bool allChunksOk = true;
+
+                for (int i = 0; i < chunkCount; i++)
                 {
-                    fileContent.Position = startPosition.Value;
-                }
+                    long offset = (long)i * MaxUploadChunkSize;
+                    int length = (int)Math.Min(MaxUploadChunkSize, fileSize - offset);
 
-                LogSdcp(LogLevel.Debug, "SDCP HTTP upload sending");
+                    LogSdcp(LogLevel.Debug, $"SDCP HTTP upload chunk {i + 1}/{chunkCount} (offset={offset}, length={length})");
 
-                using MultipartFormDataContent formContent = CreateMultipartContent();
+                    fileContent.Position = startPosition + offset;
 
-                try
-                {
-                    using HttpResponseMessage resp = await _httpClient.PostAsync(uploadUri, formContent, cts.Token);
-                    LogSdcp(LogLevel.Debug, "SDCP HTTP upload response");
-
-                    if (resp.IsSuccessStatusCode)
+                    // Read the chunk into a memory buffer so we can wrap it in form content.
+                    byte[] chunkBuffer = new byte[length];
+                    int bytesRead = 0;
+                    while (bytesRead < length)
                     {
-                        return true;
+                        int read = await fileContent.ReadAsync(chunkBuffer.AsMemory(bytesRead, length - bytesRead), cts.Token);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+
+                        bytesRead += read;
                     }
 
-                    if (!fileContent.CanSeek)
+                    using MultipartFormDataContent formContent = new();
+                    formContent.Add(new StringContent("1"), "Check");
+                    formContent.Add(new StringContent(md5Hash), "S-File-MD5");
+                    formContent.Add(new StringContent(offset.ToString()), "Offset");
+                    formContent.Add(new StringContent(uploadUuid), "Uuid");
+                    formContent.Add(new StringContent(fileSize.ToString()), "TotalSize");
+
+                    ByteArrayContent chunkContent = new(chunkBuffer, 0, bytesRead);
+                    chunkContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                    formContent.Add(chunkContent, "File", fileName);
+
+                    try
                     {
-                        // Can't retry with a forward-only stream.
-                        return false;
+                        using HttpResponseMessage resp = await _httpClient.PostAsync(uploadUri, formContent, cts.Token);
+                        if (!resp.IsSuccessStatusCode)
+                        {
+                            string body = await resp.Content.ReadAsStringAsync(cts.Token);
+                            LogSdcp(LogLevel.Warning, $"SDCP HTTP upload chunk {i + 1}/{chunkCount} failed: HTTP {(int)resp.StatusCode} {body}");
+                            allChunksOk = false;
+                            break;
+                        }
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogSdcp(LogLevel.Debug, $"SDCP HTTP upload chunk {i + 1}/{chunkCount} failed", ex);
+                        allChunksOk = false;
+                        break;
                     }
                 }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex) when (fileContent.CanSeek)
-                {
-                    LogSdcp(LogLevel.Debug, "SDCP HTTP upload attempt failed", ex);
 
-                    // continue to next candidate
+                if (allChunksOk)
+                {
+                    LogSdcp(LogLevel.Information, $"SDCP upload completed: {chunkCount} chunks, {fileSize} bytes, MD5={md5Hash}");
+                    return true;
                 }
+
+                // Try next candidate URI if this one failed.
             }
 
             return false;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Warning, "SDCP upload failed", ex);
             return false;
         }
     }
+
+    /// <summary>
+    /// Computes the MD5 hash of a stream as a lowercase hex string.
+    /// MD5 is required by the SDCP upload protocol for file integrity verification — not used for security.
+    /// </summary>
+#pragma warning disable CA5351 // MD5 required by SDCP protocol, not used for security
+    private static async Task<string> ComputeMd5Async(Stream stream, CancellationToken ct)
+    {
+        using MD5 md5 = MD5.Create();
+        byte[] hash = await md5.ComputeHashAsync(stream, ct);
+        return Convert.ToHexStringLower(hash);
+    }
+#pragma warning restore CA5351
 
     public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {
@@ -1495,9 +1604,10 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
     /// <summary>
     /// Uploads a G-code file and starts printing it on an SDCP printer.
-    /// After upload, polls the printer's file list until the file is indexed
-    /// (up to <see cref="FileIndexingMaxWait"/>), then starts the print using the
-    /// actual path returned by the printer to avoid "file not found" (ACK=2) errors.
+    /// After upload, polls the printer status until the file-checking phase completes
+    /// (CurrentStatus no longer contains 8), then starts the print.
+    /// This mirrors the OrcaSlicer ElegooLink implementation which uses status polling
+    /// rather than file list polling to determine when the printer is ready.
     /// </summary>
     public async Task<UploadAndPrintResult> UploadAndStartPrintAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, IProgress<UploadAndPrintStage>? progress = null, CancellationToken ct = default)
     {
@@ -1511,31 +1621,36 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload {fileName} to printer");
         }
 
-        LogSdcp(LogLevel.Information, $"UploadAndStartPrint: upload succeeded for {fileName}, waiting for firmware indexing");
+        LogSdcp(LogLevel.Information, $"UploadAndStartPrint: upload succeeded for {fileName}, waiting for printer to finish file checking");
         progress?.Report(UploadAndPrintStage.Processing);
 
-        // Poll the file list until the uploaded file appears. The firmware may need
-        // several seconds to index a newly uploaded file before it can be referenced
-        // by a start-print command.
-        string? resolvedPath = await WaitForFileIndexedAsync(baseUrl, fileName, ct);
-        if (resolvedPath is null)
+        // Wait 1 second before first status check (matches OrcaSlicer behavior).
+        await Task.Delay(TimeSpan.FromSeconds(1), ct);
+
+        // Poll printer status until CurrentStatus no longer contains 8 (file checking).
+        // OrcaSlicer waits up to 60 seconds for this phase to complete.
+        bool printerReady = await WaitForPrinterReadyAsync(baseUrl, ct);
+        if (!printerReady)
         {
-            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: file {fileName} not found in printer file list after waiting {FileIndexingMaxWait.TotalSeconds}s");
+            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: printer still in file-checking state after {FileCheckingMaxWait.TotalSeconds}s");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Processing, $"File {fileName} was uploaded but not indexed by printer within {FileIndexingMaxWait.TotalSeconds}s");
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Processing, $"Printer was still checking file after {FileCheckingMaxWait.TotalSeconds}s");
         }
 
-        LogSdcp(LogLevel.Information, $"UploadAndStartPrint: file indexed as {resolvedPath}, starting print");
+        // Wait 1 second before sending print command (matches OrcaSlicer behavior).
+        await Task.Delay(TimeSpan.FromSeconds(1), ct);
+
+        LogSdcp(LogLevel.Information, $"UploadAndStartPrint: printer ready, starting print for {fileName}");
         progress?.Report(UploadAndPrintStage.StartingPrint);
 
-        // Use the resolved path from the file list — this is the exact path the
-        // printer knows about, avoiding any filename/path mismatch.
-        bool started = await StartPrintAsync(baseUrl, resolvedPath, credential, ct);
+        // Use "/local/" + filename directly — same as OrcaSlicer.
+        string bareFileName = Path.GetFileName(fileName);
+        bool started = await StartPrintAsync(baseUrl, $"/local/{bareFileName}", credential, ct);
         if (!started)
         {
-            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: start print failed for {resolvedPath} after successful upload");
+            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: start print failed for /local/{bareFileName} after successful upload");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of {resolvedPath} after successful upload");
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of /local/{bareFileName} after successful upload");
         }
 
         progress?.Report(UploadAndPrintStage.Completed);
@@ -1543,81 +1658,93 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     }
 
     /// <summary>
-    /// Maximum time to wait for a newly uploaded file to appear in the printer's file list.
+    /// Maximum time to wait for the printer to finish file checking (status 8) after upload.
+    /// OrcaSlicer uses 60 seconds for this check.
     /// </summary>
-    private static readonly TimeSpan FileIndexingMaxWait = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan FileCheckingMaxWait = TimeSpan.FromSeconds(60);
 
     /// <summary>
-    /// Interval between file list polls while waiting for firmware indexing.
+    /// Interval between status polls while waiting for file checking to complete.
     /// </summary>
-    private static readonly TimeSpan FileIndexingPollInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan FileCheckingPollInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Number of consecutive poll failures before escalating to Warning level.
+    /// Polls the printer's CurrentStatus array via Cmd 0 (GetStatus) until it no longer
+    /// contains status code 8 (file checking). This matches the OrcaSlicer ElegooLink
+    /// checkResult() behavior which waits for the printer to finish validating/indexing
+    /// a newly uploaded file before attempting to start a print.
+    /// Returns true when the printer is ready, false if the timeout expires.
     /// </summary>
-    private const int MaxConsecutivePollFailures = 3;
-
-    /// <summary>
-    /// Polls the printer's file list until the uploaded file appears, returning the
-    /// full path as the printer knows it (e.g., "/local/model.gcode").
-    /// Uses a hard CancellationToken-based timeout so total wait never exceeds
-    /// <see cref="FileIndexingMaxWait"/> regardless of individual poll latency.
-    /// Returns null if the file is not found within the timeout.
-    /// </summary>
-    private async Task<string?> WaitForFileIndexedAsync(string baseUrl, string fileName, CancellationToken ct)
+    private async Task<bool> WaitForPrinterReadyAsync(string baseUrl, CancellationToken ct)
     {
-        string bareFileName = Path.GetFileName(fileName);
-        string expectedPath = $"/local/{bareFileName}";
+        using CancellationTokenSource readyCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        readyCts.CancelAfter(FileCheckingMaxWait);
         int consecutiveFailures = 0;
-
-        using CancellationTokenSource indexCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        indexCts.CancelAfter(FileIndexingMaxWait);
 
         try
         {
             while (true)
             {
-                // Delay first to give firmware time to begin indexing.
-                await Task.Delay(FileIndexingPollInterval, indexCts.Token);
-
                 try
                 {
-                    List<SdcpFileEntry> entries = await GetFileListEntriesAsync(baseUrl, indexCts.Token);
+                    int[]? currentStatus = await GetCurrentStatusArrayAsync(baseUrl, readyCts.Token);
                     consecutiveFailures = 0;
 
-                    // Prefer exact expected path, fall back to basename match.
-                    SdcpFileEntry? match = entries.FirstOrDefault(e =>
-                        e.Type == 1 &&
-                        e.Name.Equals(expectedPath, StringComparison.OrdinalIgnoreCase));
-
-                    match ??= entries.FirstOrDefault(e =>
-                        e.Type == 1 &&
-                        Path.GetFileName(e.Name).Equals(bareFileName, StringComparison.OrdinalIgnoreCase));
-
-                    if (match is not null)
+                    if (currentStatus is null || !currentStatus.Contains(StatusFileChecking))
                     {
-                        LogSdcp(LogLevel.Debug, $"File {bareFileName} found in file list as {match.Name}");
-                        return match.Name;
+                        string statusStr = currentStatus is not null ? string.Join(",", currentStatus) : "null";
+                        LogSdcp(LogLevel.Debug, $"Printer ready (CurrentStatus=[{statusStr}], no file-checking state)");
+                        return true;
                     }
 
-                    if (_logger.IsEnabled(LogLevel.Debug))
-                    {
-                        int fileCount = entries.Count(e => e.Type == 1);
-                        LogSdcp(LogLevel.Debug, $"File {bareFileName} not yet indexed ({fileCount} files on printer)");
-                    }
+                    LogSdcp(LogLevel.Debug, $"Printer still checking file (CurrentStatus=[{string.Join(",", currentStatus)}])");
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     consecutiveFailures++;
-                    LogLevel level = consecutiveFailures >= MaxConsecutivePollFailures ? LogLevel.Warning : LogLevel.Debug;
-                    LogSdcp(level, $"File list poll failed (attempt {consecutiveFailures}): {ex.Message}");
+                    LogLevel level = consecutiveFailures >= 3 ? LogLevel.Warning : LogLevel.Debug;
+                    LogSdcp(level, $"Status poll failed (attempt {consecutiveFailures}): {ex.Message}");
                 }
+
+                await Task.Delay(FileCheckingPollInterval, readyCts.Token);
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // Indexing timeout expired — not caller cancellation.
-            return null;
+            // Timeout expired — not caller cancellation.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Queries the printer status via Cmd 0 and returns the raw CurrentStatus array.
+    /// Returns null if the response doesn't contain a Status/CurrentStatus field.
+    /// </summary>
+    private async Task<int[]?> GetCurrentStatusArrayAsync(string baseUrl, CancellationToken ct)
+    {
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(_timeouts.CommandTimeout);
+        string requestId = Guid.NewGuid().ToString("N");
+
+        var (ws, _) = await ConnectWebSocketAsync(baseUrl, operation: "CheckFileStatus", correlationId: requestId, cts.Token);
+        using (ws)
+        {
+            SdcpMessage<object> statusRequest = new(
+                string.Empty,
+                new SdcpData<object>(
+                    Cmd: SdcpCommandIds.GetStatus,
+                    Data: new { },
+                    RequestID: requestId,
+                    MainboardID: GetCachedMainboardId(baseUrl),
+                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                string.Empty);
+
+            string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
+            byte[] bytes = Encoding.UTF8.GetBytes(json);
+            await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+            SdcpStatusResponse? statusResponse = await ReceiveStatusBroadcastAsync(ws, baseUrl, "CheckFileStatus", requestId, cts.Token);
+            return statusResponse?.Status?.CurrentStatus;
         }
     }
 
