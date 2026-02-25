@@ -26,3 +26,30 @@ export type {
   ComponentMaintenanceData,
   ComponentReplacement 
 } from './useComponentMaintenance';
+
+// Hierarchical plan hooks
+export {
+  useMaintenancePlans,
+  useMaintenancePlan,
+  usePlansForPrinter,
+  useCreatePlan,
+  useUpdatePlan,
+  useDeletePlan,
+  useCreateTask,
+  useUpdateTask,
+  useDeleteTask,
+  useAddTaskComponent,
+  useRemoveTaskComponent,
+  planKeys,
+} from './useMaintenancePlans';
+
+// Parts inventory hooks
+export {
+  useMaintenanceComponents,
+  useComponentCategories,
+  useLowStockComponents,
+  useCreateComponent,
+  useUpdateComponent,
+  useDeleteComponent,
+  componentKeys,
+} from './useMaintenanceComponents';

@@ -245,3 +245,153 @@ export interface MaintenanceCompletedEvent {
   performedAt: string;
   performedBy?: string | null;
 }
+
+// ============================================================================
+// Hierarchical Maintenance Plan Types (new architecture)
+// Plan → Task → Component
+// ============================================================================
+
+/**
+ * A maintenance plan groups related tasks for a printer, model, manufacturer, or motion type.
+ */
+export interface MaintenancePlanDto {
+  id: string;
+  name: string;
+  description?: string | null;
+  printerId?: string | null;
+  printerModelId?: string | null;
+  manufacturerId?: string | null;
+  motionType?: number | null;
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+  tasks: MaintenanceTaskDto[];
+}
+
+/**
+ * An individual maintenance task within a plan.
+ */
+export interface MaintenanceTaskDto {
+  id: string;
+  maintenancePlanId: string;
+  taskName: string;
+  description?: string | null;
+  intervalHours?: number | null;
+  intervalDays?: number | null;
+  estimatedDurationMinutes?: number | null;
+  priority: number;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  taskComponents: MaintenanceTaskComponentDto[];
+}
+
+/**
+ * Junction linking a task to a component with quantity.
+ */
+export interface MaintenanceTaskComponentDto {
+  id: string;
+  maintenanceTaskId: string;
+  maintenanceComponentId: string;
+  quantity: number;
+  notes?: string | null;
+  maintenanceComponent?: MaintenanceComponentDto | null;
+}
+
+/**
+ * A physical component/part in the global inventory.
+ */
+export interface MaintenanceComponentDto {
+  id: string;
+  name: string;
+  sku?: string | null;
+  description?: string | null;
+  category: string;
+  unitCost?: number | null;
+  supplier?: string | null;
+  url?: string | null;
+  inStock: number;
+  minimumStock: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================================
+// Request DTOs for hierarchical maintenance plans
+// ============================================================================
+
+export interface CreateMaintenancePlanDto {
+  name: string;
+  description?: string | null;
+  printerId?: string | null;
+  printerModelId?: string | null;
+  manufacturerId?: string | null;
+  motionType?: number | null;
+  isActive?: boolean;
+  isDefault?: boolean;
+}
+
+export interface UpdateMaintenancePlanDto {
+  name: string;
+  description?: string | null;
+  printerId?: string | null;
+  printerModelId?: string | null;
+  manufacturerId?: string | null;
+  motionType?: number | null;
+  isActive?: boolean;
+  isDefault?: boolean;
+}
+
+export interface CreateMaintenanceTaskDto {
+  taskName: string;
+  description?: string | null;
+  intervalHours?: number | null;
+  intervalDays?: number | null;
+  estimatedDurationMinutes?: number | null;
+  priority?: number;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+export interface UpdateMaintenanceTaskDto {
+  taskName: string;
+  description?: string | null;
+  intervalHours?: number | null;
+  intervalDays?: number | null;
+  estimatedDurationMinutes?: number | null;
+  priority?: number;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+export interface AddTaskComponentDto {
+  componentId: string;
+  quantity?: number;
+  notes?: string | null;
+}
+
+export interface CreateMaintenanceComponentDto {
+  name: string;
+  category: string;
+  sku?: string | null;
+  description?: string | null;
+  unitCost?: number | null;
+  supplier?: string | null;
+  url?: string | null;
+  inStock?: number;
+  minimumStock?: number;
+}
+
+export interface UpdateMaintenanceComponentDto {
+  name: string;
+  category: string;
+  sku?: string | null;
+  description?: string | null;
+  unitCost?: number | null;
+  supplier?: string | null;
+  url?: string | null;
+  inStock?: number;
+  minimumStock?: number;
+}

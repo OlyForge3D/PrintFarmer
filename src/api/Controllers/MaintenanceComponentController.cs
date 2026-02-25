@@ -1,6 +1,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
+using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,23 +22,28 @@ public class MaintenanceComponentController(
     private readonly ILogger<MaintenanceComponentController> _logger = logger;
     private readonly IMaintenanceComponentRepository _componentRepository = componentRepository;
 
+    private static MaintenanceComponentResponse ToResponse(MaintenanceComponent c) => new(
+        c.Id, c.Name, c.Category, c.Sku, c.Description,
+        c.UnitCost, c.Supplier, c.Url,
+        c.InStock, c.MinimumStock, c.CreatedAt, c.UpdatedAt);
+
     /// <summary>
     /// Gets all components. Optionally filter by category.
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<List<MaintenanceComponent>>> GetAllAsync(
+    public async Task<ActionResult<List<MaintenanceComponentResponse>>> GetAllAsync(
         [FromQuery] string? category,
         CancellationToken ct)
     {
         List<MaintenanceComponent> components = await _componentRepository.GetAllAsync(category, ct);
-        return Ok(components);
+        return Ok(components.Select(ToResponse).ToList());
     }
 
     /// <summary>
     /// Gets a component by ID.
     /// </summary>
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<MaintenanceComponent>> GetByIdAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<MaintenanceComponentResponse>> GetByIdAsync(Guid id, CancellationToken ct)
     {
         MaintenanceComponent? component = await _componentRepository.GetByIdAsync(id, ct);
         if (component == null)
@@ -45,7 +51,7 @@ public class MaintenanceComponentController(
             return NotFound();
         }
 
-        return Ok(component);
+        return Ok(ToResponse(component));
     }
 
     /// <summary>
@@ -62,17 +68,17 @@ public class MaintenanceComponentController(
     /// Gets components that are below their minimum stock level.
     /// </summary>
     [HttpGet("low-stock")]
-    public async Task<ActionResult<List<MaintenanceComponent>>> GetLowStockAsync(CancellationToken ct)
+    public async Task<ActionResult<List<MaintenanceComponentResponse>>> GetLowStockAsync(CancellationToken ct)
     {
         List<MaintenanceComponent> components = await _componentRepository.GetLowStockAsync(ct);
-        return Ok(components);
+        return Ok(components.Select(ToResponse).ToList());
     }
 
     /// <summary>
     /// Creates a new component.
     /// </summary>
     [HttpPost]
-    public async Task<ActionResult<MaintenanceComponent>> CreateAsync(
+    public async Task<ActionResult<MaintenanceComponentResponse>> CreateAsync(
         [FromBody] CreateMaintenanceComponentRequest request,
         CancellationToken ct)
     {
@@ -95,14 +101,14 @@ public class MaintenanceComponentController(
         await _componentRepository.AddAsync(component, ct);
         _logger.LogInformation("Created maintenance component {ComponentId} '{ComponentName}'", component.Id, component.Name);
 
-        return Created($"/api/maintenance/components/{component.Id}", component);
+        return Created($"/api/maintenance/components/{component.Id}", ToResponse(component));
     }
 
     /// <summary>
     /// Updates an existing component.
     /// </summary>
     [HttpPut("{id:guid}")]
-    public async Task<ActionResult<MaintenanceComponent>> UpdateAsync(
+    public async Task<ActionResult<MaintenanceComponentResponse>> UpdateAsync(
         Guid id,
         [FromBody] UpdateMaintenanceComponentRequest request,
         CancellationToken ct)
@@ -127,7 +133,7 @@ public class MaintenanceComponentController(
         await _componentRepository.UpdateAsync(component, ct);
         _logger.LogInformation("Updated maintenance component {ComponentId} '{ComponentName}'", component.Id, component.Name);
 
-        return Ok(component);
+        return Ok(ToResponse(component));
     }
 
     /// <summary>

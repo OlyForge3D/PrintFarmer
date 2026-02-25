@@ -10,10 +10,14 @@ public record CreateMaintenanceTaskRequest(
     string TaskName,
     [MaxLength(1000)]
     string? Description = null,
+    [Range(0.1, double.MaxValue)]
     double? IntervalHours = null,
+    [Range(1, int.MaxValue)]
     int? IntervalDays = null,
+    [Range(1, int.MaxValue)]
     int? EstimatedDurationMinutes = null,
-    int Priority = 0,
+    [Range(1, 4)]
+    int Priority = 2,
     bool IsActive = true,
     int SortOrder = 0);
 
@@ -25,10 +29,14 @@ public record UpdateMaintenanceTaskRequest(
     string TaskName,
     [MaxLength(1000)]
     string? Description = null,
+    [Range(0.1, double.MaxValue)]
     double? IntervalHours = null,
+    [Range(1, int.MaxValue)]
     int? IntervalDays = null,
+    [Range(1, int.MaxValue)]
     int? EstimatedDurationMinutes = null,
-    int Priority = 0,
+    [Range(1, 4)]
+    int Priority = 2,
     bool IsActive = true,
     int SortOrder = 0);
 

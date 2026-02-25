@@ -15,9 +15,11 @@ public class EfMaintenancePlanRepository(AppDbContext context) : IMaintenancePla
     {
         IQueryable<MaintenancePlan> query = _context.MaintenancePlans
             .AsNoTracking()
-            .Include(p => p.Printer)
             .Include(p => p.PrinterModel)
-            .Include(p => p.Manufacturer);
+            .Include(p => p.Manufacturer)
+            .Include(p => p.Tasks.OrderBy(t => t.SortOrder))
+                .ThenInclude(t => t.TaskComponents)
+                    .ThenInclude(tc => tc.MaintenanceComponent);
 
         if (activeOnly == true)
         {
@@ -32,7 +34,6 @@ public class EfMaintenancePlanRepository(AppDbContext context) : IMaintenancePla
     public async Task<MaintenancePlan?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         return await _context.MaintenancePlans
-            .Include(p => p.Printer)
             .Include(p => p.PrinterModel)
             .Include(p => p.Manufacturer)
             .Include(p => p.Tasks.OrderBy(t => t.SortOrder))
@@ -48,22 +49,22 @@ public class EfMaintenancePlanRepository(AppDbContext context) : IMaintenancePla
             .Include(p => p.Model)
             .FirstOrDefaultAsync(p => p.Id == printerId, ct);
 
-        if (printer?.Model == null)
+        if (printer == null)
         {
             return [];
         }
 
-        Guid modelId = printer.ModelId;
-        Guid manufacturerId = printer.Model.ManufacturerId;
-        int? motionType = printer.Model.MotionType;
+        Guid? modelId = printer.Model != null ? printer.ModelId : null;
+        Guid? manufacturerId = printer.Model?.ManufacturerId;
+        int? motionType = printer.Model?.MotionType;
 
         return await _context.MaintenancePlans
             .AsNoTracking()
             .Include(p => p.Tasks.OrderBy(t => t.SortOrder))
             .Where(p => p.IsActive &&
                 (p.PrinterId == printerId ||
-                 p.PrinterModelId == modelId ||
-                 p.ManufacturerId == manufacturerId ||
+                 (modelId != null && p.PrinterModelId == modelId) ||
+                 (manufacturerId != null && p.ManufacturerId == manufacturerId) ||
                  (motionType != null && p.MotionType == motionType) ||
                  (p.PrinterId == null && p.PrinterModelId == null && p.ManufacturerId == null && p.MotionType == null)))
             .OrderBy(p => p.Name)
@@ -78,7 +79,7 @@ public class EfMaintenancePlanRepository(AppDbContext context) : IMaintenancePla
 
     public async Task UpdateAsync(MaintenancePlan plan, CancellationToken ct = default)
     {
-        _context.MaintenancePlans.Update(plan);
+        // Entity is already tracked from GetByIdAsync — rely on change tracking
         await _context.SaveChangesAsync(ct);
     }
 

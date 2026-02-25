@@ -17,7 +17,8 @@ import {
   ListIcon, 
   GearIcon,
   ChartIcon,
-  TableIcon
+  TableIcon,
+  PackageIcon
 } from '@/common/components/icons/MdiIcons';
 import { Button, Tabs } from '@/common/components/ui';
 import { usePrintersFast } from '@/common/hooks/useApi';
@@ -31,7 +32,8 @@ import { CreateScheduleModal } from '../components/CreateScheduleModal';
 import { ComponentMaintenanceTracker } from '../components/ComponentMaintenanceTracker';
 import { ComponentReplacementHistory } from '../components/ComponentReplacementHistory';
 import { FleetStatisticsTable } from '../components/FleetStatisticsTable';
-import { MaintenancePlansTab } from '../components/MaintenancePlansTab';
+import { MaintenancePlansTab } from '../components/MaintenancePlansTabV2';
+import { PartsInventoryTab } from '../components/PartsInventoryTab';
 import { useMaintenanceStats } from '../hooks/useMaintenanceStats';
 import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
@@ -239,6 +241,9 @@ export function MaintenanceDashboardPage() {
           </Tabs.Tab>
           <Tabs.Tab id="components" icon={<GearIcon className="h-4 w-4" />}>
             Components
+          </Tabs.Tab>
+          <Tabs.Tab id="parts" icon={<PackageIcon className="h-4 w-4" />}>
+            Parts Inventory
           </Tabs.Tab>
         </Tabs.List>
 
@@ -522,6 +527,30 @@ export function MaintenanceDashboardPage() {
                   </div>
                   <div className="p-5">
                     <MaintenancePlansTab />
+                  </div>
+                </div>
+              </section>
+            </div>
+          </Tabs.Panel>
+
+          {/* Parts Inventory Tab - Spare parts and consumables management */}
+          <Tabs.Panel id="parts">
+            <div className="space-y-6">
+              <section aria-labelledby="parts-inventory-heading">
+                <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-pf-border">
+                    <h2
+                      id="parts-inventory-heading"
+                      className="text-lg font-semibold text-pf-text-primary"
+                    >
+                      Parts Inventory
+                    </h2>
+                    <p className="text-sm text-pf-text-tertiary mt-1">
+                      Manage spare parts, consumables, and replacement components
+                    </p>
+                  </div>
+                  <div className="p-5">
+                    <PartsInventoryTab />
                   </div>
                 </div>
               </section>

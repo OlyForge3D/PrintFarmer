@@ -14,12 +14,15 @@ public record CreateMaintenanceComponentRequest(
     string? Sku = null,
     [MaxLength(1000)]
     string? Description = null,
+    [Range(0, (double)decimal.MaxValue)]
     decimal? UnitCost = null,
     [MaxLength(200)]
     string? Supplier = null,
     [Url, MaxLength(500)]
     string? Url = null,
+    [Range(0, int.MaxValue)]
     int InStock = 0,
+    [Range(0, int.MaxValue)]
     int MinimumStock = 0);
 
 /// <summary>
@@ -34,10 +37,13 @@ public record UpdateMaintenanceComponentRequest(
     string? Sku = null,
     [MaxLength(1000)]
     string? Description = null,
+    [Range(0, (double)decimal.MaxValue)]
     decimal? UnitCost = null,
     [MaxLength(200)]
     string? Supplier = null,
     [Url, MaxLength(500)]
     string? Url = null,
+    [Range(0, int.MaxValue)]
     int InStock = 0,
+    [Range(0, int.MaxValue)]
     int MinimumStock = 0);
