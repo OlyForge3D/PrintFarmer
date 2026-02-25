@@ -1495,8 +1495,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
     /// <summary>
     /// Uploads a G-code file and starts printing it on an SDCP printer.
-    /// SDCP firmware needs time to index newly uploaded files before a start-print
-    /// command can reference them, so a brief delay is inserted between steps.
+    /// After upload, polls the printer's file list until the file is indexed
+    /// (up to <see cref="FileIndexingMaxWait"/>), then starts the print using the
+    /// actual path returned by the printer to avoid "file not found" (ACK=2) errors.
     /// </summary>
     public async Task<UploadAndPrintResult> UploadAndStartPrintAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, IProgress<UploadAndPrintStage>? progress = null, CancellationToken ct = default)
     {
@@ -1513,21 +1514,111 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         LogSdcp(LogLevel.Information, $"UploadAndStartPrint: upload succeeded for {fileName}, waiting for firmware indexing");
         progress?.Report(UploadAndPrintStage.Processing);
 
-        // SDCP printers need time to index the newly uploaded file before it can be referenced.
-        await Task.Delay(TimeSpan.FromSeconds(2), ct);
+        // Poll the file list until the uploaded file appears. The firmware may need
+        // several seconds to index a newly uploaded file before it can be referenced
+        // by a start-print command.
+        string? resolvedPath = await WaitForFileIndexedAsync(baseUrl, fileName, ct);
+        if (resolvedPath is null)
+        {
+            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: file {fileName} not found in printer file list after waiting {FileIndexingMaxWait.TotalSeconds}s");
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Processing, $"File {fileName} was uploaded but not indexed by printer within {FileIndexingMaxWait.TotalSeconds}s");
+        }
 
+        LogSdcp(LogLevel.Information, $"UploadAndStartPrint: file indexed as {resolvedPath}, starting print");
         progress?.Report(UploadAndPrintStage.StartingPrint);
 
-        bool started = await StartPrintAsync(baseUrl, fileName, credential, ct);
+        // Use the resolved path from the file list — this is the exact path the
+        // printer knows about, avoiding any filename/path mismatch.
+        bool started = await StartPrintAsync(baseUrl, resolvedPath, credential, ct);
         if (!started)
         {
-            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: start print failed for {fileName} after successful upload");
+            LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: start print failed for {resolvedPath} after successful upload");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of {fileName} after successful upload");
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of {resolvedPath} after successful upload");
         }
 
         progress?.Report(UploadAndPrintStage.Completed);
         return UploadAndPrintResult.Ok();
+    }
+
+    /// <summary>
+    /// Maximum time to wait for a newly uploaded file to appear in the printer's file list.
+    /// </summary>
+    private static readonly TimeSpan FileIndexingMaxWait = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Interval between file list polls while waiting for firmware indexing.
+    /// </summary>
+    private static readonly TimeSpan FileIndexingPollInterval = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>
+    /// Number of consecutive poll failures before escalating to Warning level.
+    /// </summary>
+    private const int MaxConsecutivePollFailures = 3;
+
+    /// <summary>
+    /// Polls the printer's file list until the uploaded file appears, returning the
+    /// full path as the printer knows it (e.g., "/local/model.gcode").
+    /// Uses a hard CancellationToken-based timeout so total wait never exceeds
+    /// <see cref="FileIndexingMaxWait"/> regardless of individual poll latency.
+    /// Returns null if the file is not found within the timeout.
+    /// </summary>
+    private async Task<string?> WaitForFileIndexedAsync(string baseUrl, string fileName, CancellationToken ct)
+    {
+        string bareFileName = Path.GetFileName(fileName);
+        string expectedPath = $"/local/{bareFileName}";
+        int consecutiveFailures = 0;
+
+        using CancellationTokenSource indexCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        indexCts.CancelAfter(FileIndexingMaxWait);
+
+        try
+        {
+            while (true)
+            {
+                // Delay first to give firmware time to begin indexing.
+                await Task.Delay(FileIndexingPollInterval, indexCts.Token);
+
+                try
+                {
+                    List<SdcpFileEntry> entries = await GetFileListEntriesAsync(baseUrl, indexCts.Token);
+                    consecutiveFailures = 0;
+
+                    // Prefer exact expected path, fall back to basename match.
+                    SdcpFileEntry? match = entries.FirstOrDefault(e =>
+                        e.Type == 1 &&
+                        e.Name.Equals(expectedPath, StringComparison.OrdinalIgnoreCase));
+
+                    match ??= entries.FirstOrDefault(e =>
+                        e.Type == 1 &&
+                        Path.GetFileName(e.Name).Equals(bareFileName, StringComparison.OrdinalIgnoreCase));
+
+                    if (match is not null)
+                    {
+                        LogSdcp(LogLevel.Debug, $"File {bareFileName} found in file list as {match.Name}");
+                        return match.Name;
+                    }
+
+                    if (_logger.IsEnabled(LogLevel.Debug))
+                    {
+                        int fileCount = entries.Count(e => e.Type == 1);
+                        LogSdcp(LogLevel.Debug, $"File {bareFileName} not yet indexed ({fileCount} files on printer)");
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    consecutiveFailures++;
+                    LogLevel level = consecutiveFailures >= MaxConsecutivePollFailures ? LogLevel.Warning : LogLevel.Debug;
+                    LogSdcp(level, $"File list poll failed (attempt {consecutiveFailures}): {ex.Message}");
+                }
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Indexing timeout expired — not caller cancellation.
+            return null;
+        }
     }
 
     public void Dispose()
