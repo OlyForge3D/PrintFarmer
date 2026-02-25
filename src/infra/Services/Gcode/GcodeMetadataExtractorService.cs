@@ -66,7 +66,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                 ExtractThumbnail(allLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: Thumbnail extraction complete, ThumbnailData={HasData}", metadata.ThumbnailData != null ? $"{metadata.ThumbnailData.Length} bytes" : "null");
 
-                _logger.LogInformation($"ExtractMetadataAsync: Extracted metadata - Slicer={metadata.SlicerName ?? "(unknown)"} {metadata.SlicerVersion ?? string.Empty}, Material={metadata.Material ?? "(unknown)"}, NozzleDiameter={metadata.NozzleDiameter?.ToString("F1") ?? "0"}, PrintTime={metadata.EstimatedPrintTimeMinutes?.ToString("F0") ?? "0"}min, Filament={metadata.FilamentWeightGrams?.ToString("F1") ?? "0"}g, LayerHeight={metadata.LayerHeight?.ToString("F2") ?? "0"}, BedTemp={metadata.BedTemperature?.ToString("F0") ?? "0"}°C, PrintTemp={metadata.PrintTemperature?.ToString("F0") ?? "0"}°C");
+                _logger.LogInformation("ExtractMetadataAsync: Extracted metadata - Slicer={MetadataSlicerName} {MetadataSlicerVersion}, Material={MetadataMaterial}, NozzleDiameter={MetadataNozzleDiameter}, PrintTime={MetadataEstimatedPrintTimeMinutes}min, Filament={MetadataFilamentWeightGrams}g, LayerHeight={MetadataLayerHeight}, BedTemp={MetadataBedTemperature}°C, PrintTemp={MetadataPrintTemperature}°C", metadata.SlicerName ?? "(unknown)", metadata.SlicerVersion ?? string.Empty, metadata.Material ?? "(unknown)", metadata.NozzleDiameter?.ToString("F1") ?? "0", metadata.EstimatedPrintTimeMinutes?.ToString("F0") ?? "0", metadata.FilamentWeightGrams?.ToString("F1") ?? "0", metadata.LayerHeight?.ToString("F2") ?? "0", metadata.BedTemperature?.ToString("F0") ?? "0", metadata.PrintTemperature?.ToString("F0") ?? "0");
 
                 return metadata;
             }
@@ -404,7 +404,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
 
                             inThumbnail = true;
                             currentThumbnailLines = new List<string>();
-                            _logger.LogDebug($"ExtractThumbnail: {currentThumbnailFormat} thumbnail block started ({currentWidth}x{currentHeight})");
+                            _logger.LogDebug("ExtractThumbnail: {CurrentThumbnailFormat} thumbnail block started ({CurrentWidth}x{CurrentHeight})", currentThumbnailFormat, currentWidth, currentHeight);
                             continue;
                         }
 
@@ -414,7 +414,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                             {
                                 // Store this thumbnail block with all its metadata
                                 thumbnailBlocks.Add((currentThumbnailFormat!, currentWidth, currentHeight, new List<string>(currentThumbnailLines)));
-                                _logger.LogDebug($"ExtractThumbnail: {currentThumbnailFormat} thumbnail block ended ({currentWidth}x{currentHeight}), collected {currentThumbnailLines.Count} lines");
+                                _logger.LogDebug("ExtractThumbnail: {CurrentThumbnailFormat} thumbnail block ended ({CurrentWidth}x{CurrentHeight}), collected {CurrentThumbnailLinesCount} lines", currentThumbnailFormat, currentWidth, currentHeight, currentThumbnailLines.Count);
                                 inThumbnail = false;
                                 currentThumbnailFormat = null;
                                 currentWidth = 0;
@@ -447,7 +447,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
             {
                 var largest = pngThumbnails.OrderByDescending(t => t.Width * t.Height).First();
                 selectedThumbnail = largest;
-                _logger.LogInformation($"ExtractThumbnail: Selected largest PNG thumbnail ({largest.Width}x{largest.Height}) from {pngThumbnails.Count} PNG options");
+                _logger.LogInformation("ExtractThumbnail: Selected largest PNG thumbnail ({LargestWidth}x{LargestHeight}) from {PngThumbnailsCount} PNG options", largest.Width, largest.Height, pngThumbnails.Count);
             }
             else
             {
@@ -457,21 +457,21 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                 {
                     var largest = qoiThumbnails.OrderByDescending(t => t.Width * t.Height).First();
                     selectedThumbnail = largest;
-                    _logger.LogInformation($"ExtractThumbnail: Selected largest QOI thumbnail ({largest.Width}x{largest.Height}) from {qoiThumbnails.Count} QOI options (no PNG found)");
+                    _logger.LogInformation("ExtractThumbnail: Selected largest QOI thumbnail ({LargestWidth}x{LargestHeight}) from {QoiThumbnailsCount} QOI options (no PNG found)", largest.Width, largest.Height, qoiThumbnails.Count);
                 }
                 else if (thumbnailBlocks.Count > 0)
                 {
                     // Fallback: use largest available thumbnail of any format
                     var largest = thumbnailBlocks.OrderByDescending(t => t.Width * t.Height).First();
                     selectedThumbnail = largest;
-                    _logger.LogInformation($"ExtractThumbnail: Selected largest {largest.Format} thumbnail ({largest.Width}x{largest.Height}) as fallback");
+                    _logger.LogInformation("ExtractThumbnail: Selected largest {LargestFormat} thumbnail ({LargestWidth}x{LargestHeight}) as fallback", largest.Format, largest.Width, largest.Height);
                 }
             }
 
             if (selectedThumbnail.Lines != null && selectedThumbnail.Lines.Count > 0)
             {
                 string base64Data = string.Concat(selectedThumbnail.Lines);
-                _logger.LogInformation($"ExtractThumbnail: Attempting to decode {selectedThumbnail.Format ?? "Unknown"} thumbnail ({selectedThumbnail.Width}x{selectedThumbnail.Height}) with {base64Data.Length} base64 chars");
+                _logger.LogInformation("ExtractThumbnail: Attempting to decode {SelectedThumbnailFormat} thumbnail ({SelectedThumbnailWidth}x{SelectedThumbnailHeight}) with {Base64DataLength} base64 chars", selectedThumbnail.Format ?? "Unknown", selectedThumbnail.Width, selectedThumbnail.Height, base64Data.Length);
 
                 // Log first and last lines for debugging
                 if (selectedThumbnail.Lines.Count > 0)
@@ -496,7 +496,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                     if (IsValidBase64(base64Data))
                     {
                         metadata.ThumbnailData = Convert.FromBase64String(base64Data);
-                        _logger.LogInformation($"ExtractThumbnail: Successfully decoded {metadata.ThumbnailData.Length} bytes of {selectedThumbnail.Format ?? "Unknown"} thumbnail data ({selectedThumbnail.Width}x{selectedThumbnail.Height})");
+                        _logger.LogInformation("ExtractThumbnail: Successfully decoded {Length} bytes of {SelectedThumbnailFormat} thumbnail data ({SelectedThumbnailWidth}x{SelectedThumbnailHeight})", metadata.ThumbnailData.Length, selectedThumbnail.Format ?? "Unknown", selectedThumbnail.Width, selectedThumbnail.Height);
                     }
                     else
                     {
@@ -608,7 +608,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         // PrusaSlicer: "; perimeters = 2"
         // OrcaSlicer: "; wall_loops = 2"
         // CRITICAL: Must avoid matching compound names like "avoid_crossing_perimeters"!
-        _logger.LogInformation($"ExtractPerimeters: Searching through {lines.Count} lines for perimeters/wall_loops");
+        _logger.LogInformation("ExtractPerimeters: Searching through {LinesCount} lines for perimeters/wall_loops", lines.Count);
 
         foreach (string line in lines)
         {
@@ -616,12 +616,12 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
             Match match = Regex.Match(line, @";\s*wall_loops\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase);
             if (match.Success)
             {
-                _logger.LogInformation($"ExtractPerimeters: Matched wall_loops - Group[1]='{match.Groups[1].Value}'");
+                _logger.LogInformation("ExtractPerimeters: Matched wall_loops - Group[1]='{Value}'", match.Groups[1].Value);
 
                 if (int.TryParse(match.Groups[1].Value, out int wallLoops))
                 {
                     metadata.Perimeters = wallLoops;
-                    _logger.LogInformation($"ExtractPerimeters: Parsed wall_loops='{wallLoops}'. metadata.Perimeters={metadata.Perimeters}");
+                    _logger.LogInformation("ExtractPerimeters: Parsed wall_loops='{WallLoops}'. metadata.Perimeters={MetadataPerimeters}", wallLoops, metadata.Perimeters);
                     break;
                 }
             }
@@ -631,12 +631,12 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
             match = Regex.Match(line, @";\s*perimeters\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase);
             if (match.Success)
             {
-                _logger.LogInformation($"ExtractPerimeters: Matched perimeters - Group[1]='{match.Groups[1].Value}'");
+                _logger.LogInformation("ExtractPerimeters: Matched perimeters - Group[1]='{Value}'", match.Groups[1].Value);
 
                 if (int.TryParse(match.Groups[1].Value, out int perimeters))
                 {
                     metadata.Perimeters = perimeters;
-                    _logger.LogInformation($"ExtractPerimeters: Parsed perimeters='{perimeters}'. metadata.Perimeters={metadata.Perimeters}");
+                    _logger.LogInformation("ExtractPerimeters: Parsed perimeters='{Perimeters}'. metadata.Perimeters={MetadataPerimeters}", perimeters, metadata.Perimeters);
                     break;
                 }
             }
@@ -644,7 +644,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
 
         if (metadata.Perimeters == null)
         {
-            _logger.LogInformation($"ExtractPerimeters: No perimeters/wall_loops found in {lines.Count} lines");
+            _logger.LogInformation("ExtractPerimeters: No perimeters/wall_loops found in {LinesCount} lines", lines.Count);
         }
     }
 }

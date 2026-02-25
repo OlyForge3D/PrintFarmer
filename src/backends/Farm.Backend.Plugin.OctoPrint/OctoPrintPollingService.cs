@@ -165,7 +165,7 @@ public sealed class OctoPrintPollingService(
                 {
                     // Get list of OctoPrint printers from database
                     List<Guid> printerIds = await GetOctoPrintPrinterIdsAsync(ct);
-                    _logger.LogDebug($"OctoPrintPollingService: Found {printerIds.Count} OctoPrint printers");
+                    _logger.LogDebug("OctoPrintPollingService: Found {PrinterIdsCount} OctoPrint printers", printerIds.Count);
 
                     // Ensure WebSocket adapters and polling loops exist for all OctoPrint printers.
                     // Also detect credential changes (ServerUrl, API key) and recreate adapters when needed.
@@ -185,7 +185,7 @@ public sealed class OctoPrintPollingService(
 
                                 if (credentialsChanged)
                                 {
-                                    _logger.LogInformation($"OctoPrint {id}: Credentials changed, recreating adapter");
+                                    _logger.LogInformation("OctoPrint {Id}: Credentials changed, recreating adapter", id);
 
                                     // Tear down old adapter
                                     if (_webSocketAdapters.TryRemove(id, out OctoPrintWebSocketAdapter? oldAdapter))
@@ -230,7 +230,7 @@ public sealed class OctoPrintPollingService(
                                 state.CreatedWithServerUrl = printer.ServerUrl;
                                 state.CreatedWithApiKey = printer.Credential?.ApiKey;
 
-                                _logger.LogDebug($"Created WebSocket adapter for OctoPrint printer {id}");
+                                _logger.LogDebug("Created WebSocket adapter for OctoPrint printer {Id}", id);
 
                                 // Attempt WebSocket connection in background
                                 _ = Task.Run(
@@ -242,7 +242,7 @@ public sealed class OctoPrintPollingService(
                                     }
                                     catch (Exception ex)
                                     {
-                                        _logger.LogDebug(ex, $"WebSocket connection failed for {id}, will use HTTP polling");
+                                        _logger.LogDebug(ex, "WebSocket connection failed for {Id}, will use HTTP polling", id);
                                     }
                                 }, ct);
                             }
@@ -255,7 +255,7 @@ public sealed class OctoPrintPollingService(
                             var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
 #pragma warning restore S6612
                             _pollingLoops.TryAdd(id, pollingLoop);
-                            _logger.LogDebug($"Started HTTP polling fallback loop for OctoPrint printer {id}");
+                            _logger.LogDebug("Started HTTP polling fallback loop for OctoPrint printer {Id}", id);
                         }
                     }
 
@@ -267,7 +267,7 @@ public sealed class OctoPrintPollingService(
                         adapter?.Dispose();
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
-                        _logger.LogDebug($"Stopped WebSocket and polling for OctoPrint printer {printerId}");
+                        _logger.LogDebug("Stopped WebSocket and polling for OctoPrint printer {PrinterId}", printerId);
                     }
 
                     // Check every 30 seconds for printer list changes
@@ -328,7 +328,7 @@ public sealed class OctoPrintPollingService(
                 // Get WebSocket adapter for this printer
                 if (!_webSocketAdapters.TryGetValue(printerId, out OctoPrintWebSocketAdapter? wsAdapter) || wsAdapter == null)
                 {
-                    _logger.LogWarning($"OctoPrint {printerId}: WebSocket adapter not found");
+                    _logger.LogWarning("OctoPrint {PrinterId}: WebSocket adapter not found", printerId);
                     await Task.Delay(PollingInterval, ct);
                     continue;
                 }
@@ -336,7 +336,7 @@ public sealed class OctoPrintPollingService(
                 // Skip polling if WebSocket is connected (primary transport)
                 if (wsAdapter.IsConnected)
                 {
-                    _logger.LogDebug($"OctoPrint {printerId}: WebSocket connected, skipping HTTP fallback poll");
+                    _logger.LogDebug("OctoPrint {PrinterId}: WebSocket connected, skipping HTTP fallback poll", printerId);
                     await Task.Delay(PollingInterval, ct);
                     continue;
                 }
@@ -416,13 +416,13 @@ public sealed class OctoPrintPollingService(
                     string apiState = DetermineApiState(ex);
                     state.LastApiState = apiState;
 
-                    _logger.LogDebug(ex, $"Failed to poll OctoPrint printer {printerId} via HTTP fallback (attempt {state.ConsecutiveFailures}, apiState={apiState})");
+                    _logger.LogDebug(ex, "Failed to poll OctoPrint printer {PrinterId} via HTTP fallback (attempt {StateConsecutiveFailures}, apiState={ApiState})", printerId, state.ConsecutiveFailures, apiState);
 
                     // After 3 consecutive failures, mark as offline
                     if (state.ConsecutiveFailures >= 3 && state.LastKnownIsOnline)
                     {
                         _logger.LogWarning(
-                            $"OctoPrint printer {printerId} marked offline after {state.ConsecutiveFailures} HTTP fallback failures " +
+                            "OctoPrint printer {PrinterId} marked offline after {StateConsecutiveFailures} HTTP fallback failures ", printerId, state.ConsecutiveFailures +
                             $"(apiState={apiState})");
                         state.LastKnownIsOnline = false;
 
@@ -480,7 +480,7 @@ public sealed class OctoPrintPollingService(
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Unexpected error in HTTP polling fallback for OctoPrint printer {printerId}");
+                _logger.LogError(ex, "Unexpected error in HTTP polling fallback for OctoPrint printer {PrinterId}", printerId);
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
             }
         }
@@ -537,7 +537,7 @@ public sealed class OctoPrintPollingService(
                 return;
             }
 
-            _logger.LogInformation($"[OctoPrintPollingService] Detected state transition for printer {printerId}: {previousState} -> {newState}");
+            _logger.LogInformation("[OctoPrintPollingService] Detected state transition for printer {PrinterId}: {PreviousState} -> {NewState}", printerId, previousState, newState);
 
             // Create a new scope to get the scoped service
             using IServiceScope scope = _scopeFactory.CreateScope();
@@ -549,7 +549,7 @@ public sealed class OctoPrintPollingService(
                 bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
                 if (marked)
                 {
-                    _logger.LogInformation($"[OctoPrintPollingService] Print job marked as completed for printer {printerId}");
+                    _logger.LogInformation("[OctoPrintPollingService] Print job marked as completed for printer {PrinterId}", printerId);
                 }
             }
             else if (PrintJobCompletionService.IsFailureState(newState))
@@ -558,13 +558,13 @@ public sealed class OctoPrintPollingService(
                 bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
                 if (marked)
                 {
-                    _logger.LogWarning($"[OctoPrintPollingService] Print job marked as failed for printer {printerId} (state: {newState})");
+                    _logger.LogWarning("[OctoPrintPollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[OctoPrintPollingService] Failed to sync job completion for printer {printerId}");
+            _logger.LogError(ex, "[OctoPrintPollingService] Failed to sync job completion for printer {PrinterId}", printerId);
         }
     }
 }

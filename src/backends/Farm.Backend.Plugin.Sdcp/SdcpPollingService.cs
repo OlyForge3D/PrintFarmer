@@ -118,7 +118,7 @@ public sealed class SdcpPollingService(
                 {
                     // Get list of SDCP printers from database
                     List<Guid> printerIds = await GetSdcpPrinterIdsAsync(ct);
-                    _logger.LogDebug($"SdcpPollingService: Found {printerIds.Count} SDCP printers");
+                    _logger.LogDebug("SdcpPollingService: Found {PrinterIdsCount} SDCP printers", printerIds.Count);
 
                     // Ensure polling loops exist for all SDCP printers
                     foreach (Guid id in printerIds)
@@ -129,7 +129,7 @@ public sealed class SdcpPollingService(
                             var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
 #pragma warning restore S6612
                             _pollingLoops.TryAdd(id, pollingLoop);
-                            _logger.LogDebug($"Started polling loop for SDCP printer {id}");
+                            _logger.LogDebug("Started polling loop for SDCP printer {Id}", id);
                         }
                     }
 
@@ -139,7 +139,7 @@ public sealed class SdcpPollingService(
                     {
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
-                        _logger.LogDebug($"Stopped polling for printer {printerId}");
+                        _logger.LogDebug("Stopped polling for printer {PrinterId}", printerId);
                     }
 
                     // Check every 30 seconds for printer list changes
@@ -213,7 +213,7 @@ public sealed class SdcpPollingService(
                             printerId, printer.BackendUrl, previousFailures);
                     }
 
-                    _logger.LogDebug($"SDCP {printerId}: Got status - Online={status.IsOnline}, State={status.State}, Progress={status.Progress}, JobName={status.JobName}");
+                    _logger.LogDebug("SDCP {PrinterId}: Got status - Online={StatusIsOnline}, State={StatusState}, Progress={StatusProgress}, JobName={StatusJobName}", printerId, status.IsOnline, status.State, status.Progress, status.JobName);
 
                     // Check if any values changed
                     // Use tolerance for float progress comparison
@@ -280,7 +280,7 @@ public sealed class SdcpPollingService(
                 catch (Exception ex)
                 {
                     state.ConsecutiveFailures++;
-                    _logger.LogDebug(ex, $"Failed to poll SDCP printer {printerId} (attempt {state.ConsecutiveFailures})");
+                    _logger.LogDebug(ex, "Failed to poll SDCP printer {PrinterId} (attempt {StateConsecutiveFailures})", printerId, state.ConsecutiveFailures);
 
                     _logger.LogDebug(ex, "SDCP poll failed. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Attempt={Attempt}",
                         printerId, printer?.BackendUrl, state.ConsecutiveFailures);
@@ -294,7 +294,7 @@ public sealed class SdcpPollingService(
                     // After 3 consecutive failures, mark as offline
                     if (state.ConsecutiveFailures >= 3 && state.LastKnownIsOnline)
                     {
-                        _logger.LogWarning($"SDCP printer {printerId} marked offline after {state.ConsecutiveFailures} failures");
+                        _logger.LogWarning("SDCP printer {PrinterId} marked offline after {StateConsecutiveFailures} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
 
                         _logger.LogWarning("SDCP printer marked Offline after consecutive failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Failures={Failures}",
@@ -336,7 +336,7 @@ public sealed class SdcpPollingService(
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Unexpected error polling SDCP printer {printerId}");
+                _logger.LogError(ex, "Unexpected error polling SDCP printer {PrinterId}", printerId);
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
             }
         }
@@ -377,7 +377,7 @@ public sealed class SdcpPollingService(
                 return;
             }
 
-            _logger.LogInformation($"[SdcpPollingService] Detected state transition for printer {printerId}: {previousState} -> {newState}");
+            _logger.LogInformation("[SdcpPollingService] Detected state transition for printer {PrinterId}: {PreviousState} -> {NewState}", printerId, previousState, newState);
 
             // Create a new scope to get the scoped service
             using IServiceScope scope = _scopeFactory.CreateScope();
@@ -389,7 +389,7 @@ public sealed class SdcpPollingService(
                 bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
                 if (marked)
                 {
-                    _logger.LogInformation($"[SdcpPollingService] Print job marked as completed for printer {printerId}");
+                    _logger.LogInformation("[SdcpPollingService] Print job marked as completed for printer {PrinterId}", printerId);
                 }
             }
             else if (PrintJobCompletionService.IsFailureState(newState))
@@ -398,13 +398,13 @@ public sealed class SdcpPollingService(
                 bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
                 if (marked)
                 {
-                    _logger.LogWarning($"[SdcpPollingService] Print job marked as failed for printer {printerId} (state: {newState})");
+                    _logger.LogWarning("[SdcpPollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[SdcpPollingService] Failed to sync job completion for printer {printerId}");
+            _logger.LogError(ex, "[SdcpPollingService] Failed to sync job completion for printer {PrinterId}", printerId);
         }
     }
 

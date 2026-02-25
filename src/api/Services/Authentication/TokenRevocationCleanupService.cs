@@ -61,7 +61,7 @@ public class TokenRevocationCleanupService(
 
             if (deletedCount > 0)
             {
-                _logger.LogInformation($"Token revocation cleanup completed - removed {deletedCount} expired records");
+                _logger.LogInformation("Token revocation cleanup completed - removed {DeletedCount} expired records", deletedCount);
             }
             else
             {

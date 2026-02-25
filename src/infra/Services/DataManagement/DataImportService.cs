@@ -41,7 +41,7 @@ public class DataImportService : IDataImportService
 
     public async Task<ImportResponseDto> ImportCatalogAsync(CatalogExportDto catalog, ImportMode mode = ImportMode.Merge, CancellationToken ct = default)
     {
-        _logger.LogInformation($"[DataImport] Starting catalog import in mode: {mode}");
+        _logger.LogInformation("[DataImport] Starting catalog import in mode: {Mode}", mode);
         Stopwatch sw = Stopwatch.StartNew();
 
         ImportResponseDto response = new() { Success = true };
@@ -73,12 +73,12 @@ public class DataImportService : IDataImportService
             stats.Duration = sw.Elapsed;
             response.Statistics = stats;
 
-            _logger.LogInformation($"[DataImport] Catalog import complete: {stats.TotalItemsImported} items imported in {sw.ElapsedMilliseconds}ms");
+            _logger.LogInformation("[DataImport] Catalog import complete: {StatsTotalItemsImported} items imported in {SwElapsedMilliseconds}ms", stats.TotalItemsImported, sw.ElapsedMilliseconds);
 
             if (response.Errors.Count > 0)
             {
                 response.Success = false;
-                _logger.LogWarning($"[DataImport] Import completed with {response.Errors.Count} errors");
+                _logger.LogWarning("[DataImport] Import completed with {Count} errors", response.Errors.Count);
             }
         }
         catch (Exception ex)
@@ -88,7 +88,7 @@ public class DataImportService : IDataImportService
             response.Statistics = stats;
             response.Success = false;
             response.Errors.Add($"Critical error during import: {ex.Message}");
-            _logger.LogError(ex, $"[DataImport] Critical error during catalog import: {ex.Message}");
+            _logger.LogError(ex, "[DataImport] Critical error during catalog import: {Message}", ex.Message);
         }
 
         return response;
@@ -96,7 +96,7 @@ public class DataImportService : IDataImportService
 
     public async Task<ImportResponseDto> ImportFullBackupAsync(FullBackupExportDto backup, ImportMode mode = ImportMode.Merge, CancellationToken ct = default)
     {
-        _logger.LogInformation($"[DataImport] Starting full backup import in mode: {mode}");
+        _logger.LogInformation("[DataImport] Starting full backup import in mode: {Mode}", mode);
         Stopwatch sw = Stopwatch.StartNew();
 
         ImportResponseDto response = new() { Success = true };
@@ -141,12 +141,12 @@ public class DataImportService : IDataImportService
             stats.Duration = sw.Elapsed;
             response.Statistics = stats;
 
-            _logger.LogInformation($"[DataImport] Full backup import complete: {stats.TotalItemsImported} items imported in {sw.ElapsedMilliseconds}ms");
+            _logger.LogInformation("[DataImport] Full backup import complete: {StatsTotalItemsImported} items imported in {SwElapsedMilliseconds}ms", stats.TotalItemsImported, sw.ElapsedMilliseconds);
 
             if (response.Errors.Count > 0)
             {
                 response.Success = false;
-                _logger.LogWarning($"[DataImport] Import completed with {response.Errors.Count} errors");
+                _logger.LogWarning("[DataImport] Import completed with {Count} errors", response.Errors.Count);
             }
         }
         catch (Exception ex)

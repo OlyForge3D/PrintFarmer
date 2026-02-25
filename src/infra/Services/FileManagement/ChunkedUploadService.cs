@@ -339,7 +339,7 @@ public sealed class ChunkedUploadService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Failed to rehydrate upload session {uploadId}: {ex.Message}");
+            _logger.LogDebug("Failed to rehydrate upload session {UploadId}: {Message}", uploadId, ex.Message);
         }
 
         return null;
@@ -508,7 +508,7 @@ public sealed class ChunkedUploadService(
             }
             catch (Exception ex)
             {
-                _logger.LogDebug($"Failed to clean up temp files for {uploadId}: {ex.Message}");
+                _logger.LogDebug("Failed to clean up temp files for {UploadId}: {Message}", uploadId, ex.Message);
             }
         }
     }
@@ -593,7 +593,7 @@ public sealed class ChunkedUploadService(
         if (finalPath.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) ||
             finalPath.EndsWith(".bgcode", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogInformation($"FinalizeUploadAsync: File is GCODE, attempting thumbnail extraction for {state.FinalSafeName}");
+            _logger.LogInformation("FinalizeUploadAsync: File is GCODE, attempting thumbnail extraction for {StateFinalSafeName}", state.FinalSafeName);
             try
             {
                 using (var fileStream = new FileStream(finalPath, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -601,24 +601,24 @@ public sealed class ChunkedUploadService(
                     thumbnailPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(fileStream, CancellationToken.None);
                     if (thumbnailPath != null)
                     {
-                        _logger.LogInformation($"Extracted thumbnail for {state.FinalSafeName}: {thumbnailPath}");
+                        _logger.LogInformation("Extracted thumbnail for {StateFinalSafeName}: {ThumbnailPath}", state.FinalSafeName, thumbnailPath);
                     }
                     else
                     {
-                        _logger.LogWarning($"Thumbnail extraction returned null for {state.FinalSafeName}");
+                        _logger.LogWarning("Thumbnail extraction returned null for {StateFinalSafeName}", state.FinalSafeName);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug($"Failed to extract thumbnail for {finalPath}: {ex.Message}");
+                _logger.LogDebug("Failed to extract thumbnail for {FinalPath}: {Message}", finalPath, ex.Message);
 
                 // Continue anyway - thumbnail extraction is optional
             }
         }
         else
         {
-            _logger.LogWarning($"FinalizeUploadAsync: File is NOT GCODE (path={finalPath}), skipping thumbnail extraction");
+            _logger.LogWarning("FinalizeUploadAsync: File is NOT GCODE (path={FinalPath}), skipping thumbnail extraction", finalPath);
         }
 
         // Clean up metadata file
@@ -713,7 +713,7 @@ public sealed class ChunkedUploadService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Failed to persist state for {state.Id}: {ex.Message}");
+            _logger.LogDebug("Failed to persist state for {StateId}: {Message}", state.Id, ex.Message);
         }
     }
 

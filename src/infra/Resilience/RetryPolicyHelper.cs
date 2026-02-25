@@ -38,7 +38,7 @@ public static class RetryPolicyHelper
                 {
                     // Calculate exponential backoff delay
                     int delay = initialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                    logger?.LogInformation($"Retry {retryCount}/{maxRetries} for {operationName} after {delay}ms");
+                    logger?.LogInformation("Retry {RetryCount}/{MaxRetries} for {OperationName} after {Delay}ms", retryCount, maxRetries, operationName, delay);
                     await Task.Delay(delay);
                 }
 
@@ -52,11 +52,11 @@ public static class RetryPolicyHelper
 
                 if (retryCount <= maxRetries)
                 {
-                    logger?.LogWarning(ex, $"{operationName} failed (attempt {retryCount}/{maxRetries}): {ex.Message}");
+                    logger?.LogWarning(ex, "{OperationName} failed (attempt {RetryCount}/{MaxRetries}): {Message}", operationName, retryCount, maxRetries, ex.Message);
                 }
                 else
                 {
-                    logger?.LogError(ex, $"{operationName} failed after {maxRetries} attempts: {ex.Message}");
+                    logger?.LogError(ex, "{OperationName} failed after {MaxRetries} attempts: {Message}", operationName, maxRetries, ex.Message);
                 }
             }
         }
@@ -93,7 +93,7 @@ public static class RetryPolicyHelper
                 {
                     // Calculate exponential backoff delay
                     int delay = initialDelayMs * (int)Math.Pow(2, retryCount - 1);
-                    logger?.LogInformation($"Retry {retryCount}/{maxRetries} for {operationName} after {delay}ms");
+                    logger?.LogInformation("Retry {RetryCount}/{MaxRetries} for {OperationName} after {Delay}ms", retryCount, maxRetries, operationName, delay);
                     await Task.Delay(delay);
                 }
 
@@ -108,11 +108,11 @@ public static class RetryPolicyHelper
 
                 if (retryCount <= maxRetries)
                 {
-                    logger?.LogWarning(ex, $"{operationName} failed (attempt {retryCount}/{maxRetries}): {ex.Message}");
+                    logger?.LogWarning(ex, "{OperationName} failed (attempt {RetryCount}/{MaxRetries}): {Message}", operationName, retryCount, maxRetries, ex.Message);
                 }
                 else
                 {
-                    logger?.LogError(ex, $"{operationName} failed after {maxRetries} attempts: {ex.Message}");
+                    logger?.LogError(ex, "{OperationName} failed after {MaxRetries} attempts: {Message}", operationName, maxRetries, ex.Message);
                 }
             }
         }

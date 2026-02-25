@@ -25,7 +25,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error checking file existence: {ex.Message}");
+            _logger.LogDebug("Error checking file existence: {Message}", ex.Message);
             return Task.FromResult(false);
         }
     }
@@ -44,7 +44,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error verifying file hash: {ex.Message}");
+            _logger.LogDebug("Error verifying file hash: {Message}", ex.Message);
             return false;
         }
     }
@@ -63,7 +63,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error verifying file size: {ex.Message}");
+            _logger.LogDebug("Error verifying file size: {Message}", ex.Message);
             return false;
         }
     }
@@ -145,7 +145,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error recomputing file hash: {ex.Message}");
+            _logger.LogDebug("Error recomputing file hash: {Message}", ex.Message);
             return null;
         }
     }
@@ -164,7 +164,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error getting file size: {ex.Message}");
+            _logger.LogDebug("Error getting file size: {Message}", ex.Message);
             return null;
         }
     }

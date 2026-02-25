@@ -89,7 +89,7 @@ public class AuthController(IAuthenticationService authService, ILogger<AuthCont
     {
         // For JWT tokens, logout is typically handled client-side by removing the token
         // In the future, we could implement a token blacklist for enhanced security
-        _logger.LogInformation($"User {User.FindFirstValue(ClaimTypes.NameIdentifier)} logged out");
+        _logger.LogInformation("User {UserFindFirstValue} logged out", User.FindFirstValue(ClaimTypes.NameIdentifier));
 
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
@@ -99,7 +99,7 @@ public class AuthController(IAuthenticationService authService, ILogger<AuthCont
     [Authorize]
     public Task<IActionResult> LogoutGetAsync()
     {
-        _logger.LogInformation($"User {User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)} logged out (GET)");
+        _logger.LogInformation("User {UserFindFirstValue} logged out (GET)", User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier));
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
 

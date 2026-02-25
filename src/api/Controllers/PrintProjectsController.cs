@@ -57,7 +57,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error retrieving project {id}");
+            logger.LogError(ex, "Error retrieving project {Id}", id);
             return Problem("An error occurred while retrieving the project", statusCode: 500);
         }
     }
@@ -107,7 +107,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error updating project {id}");
+            logger.LogError(ex, "Error updating project {Id}", id);
             return Problem("An error occurred while updating the project", statusCode: 500);
         }
     }
@@ -129,7 +129,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error deleting project {id}");
+            logger.LogError(ex, "Error deleting project {Id}", id);
             return Problem("An error occurred while deleting the project", statusCode: 500);
         }
     }
@@ -164,7 +164,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error adding files to project {id}");
+            logger.LogError(ex, "Error adding files to project {Id}", id);
             return Problem("An error occurred while adding files to the project", statusCode: 500);
         }
     }
@@ -187,7 +187,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error removing file {fileId} from project {id}");
+            logger.LogError(ex, "Error removing file {FileId} from project {Id}", fileId, id);
             return Problem("An error occurred while removing the file", statusCode: 500);
         }
     }
@@ -214,7 +214,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error updating file {fileId} in project {id}");
+            logger.LogError(ex, "Error updating file {FileId} in project {Id}", fileId, id);
             return Problem("An error occurred while updating the file", statusCode: 500);
         }
     }
@@ -241,7 +241,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error marking file {fileId} as printed in project {id}");
+            logger.LogError(ex, "Error marking file {FileId} as printed in project {Id}", fileId, id);
             return Problem("An error occurred while marking the file as printed", statusCode: 500);
         }
     }
@@ -263,7 +263,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error retrieving progress for project {id}");
+            logger.LogError(ex, "Error retrieving progress for project {Id}", id);
             return Problem("An error occurred while retrieving project progress", statusCode: 500);
         }
     }
@@ -300,7 +300,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error queuing project {id}");
+            logger.LogError(ex, "Error queuing project {Id}", id);
             return Problem("An error occurred while queuing the project", statusCode: 500);
         }
     }

@@ -105,7 +105,7 @@ public class PrintProjectService(
             {
                 if (!existingFiles.Contains(fileRequest.GcodeFileId))
                 {
-                    logger.LogWarning($"Skipping non-existent gcode file {fileRequest.GcodeFileId} when creating project");
+                    logger.LogWarning("Skipping non-existent gcode file {FileRequestGcodeFileId} when creating project", fileRequest.GcodeFileId);
                     continue;
                 }
 
@@ -227,13 +227,13 @@ public class PrintProjectService(
             // Skip if file doesn't exist or already in project
             if (!existingGcodeFiles.ContainsKey(fileRequest.GcodeFileId))
             {
-                logger.LogWarning($"Skipping non-existent gcode file {fileRequest.GcodeFileId}");
+                logger.LogWarning("Skipping non-existent gcode file {FileRequestGcodeFileId}", fileRequest.GcodeFileId);
                 continue;
             }
 
             if (existingProjectFileIds.Contains(fileRequest.GcodeFileId))
             {
-                logger.LogWarning($"Skipping duplicate gcode file {fileRequest.GcodeFileId} already in project");
+                logger.LogWarning("Skipping duplicate gcode file {FileRequestGcodeFileId} already in project", fileRequest.GcodeFileId);
                 continue;
             }
 
@@ -411,7 +411,7 @@ public class PrintProjectService(
 
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation($"Marked file {fileId} as printed ({projectFile.PrintedCount}/{projectFile.PrintCount}) in project {projectId}");
+        logger.LogInformation("Marked file {FileId} as printed ({ProjectFilePrintedCount}/{ProjectFilePrintCount}) in project {ProjectId}", fileId, projectFile.PrintedCount, projectFile.PrintCount, projectId);
 
         return MapToFileDto(projectFile);
     }
@@ -450,7 +450,7 @@ public class PrintProjectService(
             }
             catch (Exception ex)
             {
-                logger.LogWarning($"Could not fetch Spoolman filaments for project queue ordering: {ex.Message}");
+                logger.LogWarning("Could not fetch Spoolman filaments for project queue ordering: {Message}", ex.Message);
             }
         }
 
@@ -507,7 +507,7 @@ public class PrintProjectService(
                 }
                 else
                 {
-                    logger.LogWarning($"Could not queue file {file.GcodeFileId} (no compatible printer available)");
+                    logger.LogWarning("Could not queue file {FileGcodeFileId} (no compatible printer available)", file.GcodeFileId);
                 }
             }
         }
@@ -524,7 +524,7 @@ public class PrintProjectService(
             .Where(f => f.EstimatedPrintTimeMinutes.HasValue)
             .Sum(f => f.EstimatedPrintTimeMinutes!.Value);
 
-        logger.LogInformation($"Queued {queuedFiles.Count} jobs from project {projectId} ({project.Name})");
+        logger.LogInformation("Queued {QueuedFilesCount} jobs from project {ProjectId} ({ProjectName})", queuedFiles.Count, projectId, project.Name);
 
         return new QueueProjectResultDto(
             projectId,

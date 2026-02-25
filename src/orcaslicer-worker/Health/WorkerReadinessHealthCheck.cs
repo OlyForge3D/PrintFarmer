@@ -13,7 +13,7 @@ public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, 
         {
             WorkerState state = workerStateService.GetWorkerState();
             bool isReady = state.IsInitialized && !state.IsShuttingDown && state.ActiveJobs < state.MaxConcurrentJobs;
-            logger.LogDebug($"Readiness - Ready {isReady} Active {state.ActiveJobs}/{state.MaxConcurrentJobs}");
+            logger.LogDebug("Readiness - Ready {IsReady} Active {StateActiveJobs}/{StateMaxConcurrentJobs}", isReady, state.ActiveJobs, state.MaxConcurrentJobs);
             Dictionary<string, object> data = new Dictionary<string, object>
             {
                 ["initialized"] = state.IsInitialized,

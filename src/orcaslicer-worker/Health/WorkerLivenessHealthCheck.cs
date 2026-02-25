@@ -11,7 +11,7 @@ public class WorkerLivenessHealthCheck(ILogger<WorkerLivenessHealthCheck> logger
         try
         {
             TimeSpan uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
-            logger.LogDebug($"Liveness check - Worker up {uptime}");
+            logger.LogDebug("Liveness check - Worker up {Uptime}", uptime);
             return Task.FromResult(HealthCheckResult.Healthy("Worker process alive", new Dictionary<string, object>
             {
                 ["uptime"] = uptime.ToString(),

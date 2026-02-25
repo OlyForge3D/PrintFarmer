@@ -28,7 +28,7 @@ public sealed class MailjetEmailService : IEmailService
         if (string.IsNullOrWhiteSpace(_options.Mailjet?.ApiKey) || string.IsNullOrWhiteSpace(_options.Mailjet?.ApiSecret))
         {
             _logger.LogWarning("Mailjet API keys missing. Email logged only.");
-            _logger.LogInformation($"[EMAIL:FALLBACK] To={message.To} Subject={message.Subject}");
+            _logger.LogInformation("[EMAIL:FALLBACK] To={MessageTo} Subject={MessageSubject}", message.To, message.Subject);
             return new EmailDispatchResult(Success: true, ProviderMessage: "Missing API keys - logged only");
         }
 
@@ -67,19 +67,19 @@ public sealed class MailjetEmailService : IEmailService
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation($"Email sent successfully to {message.To}");
+                _logger.LogInformation("Email sent successfully to {MessageTo}", message.To);
                 return new EmailDispatchResult(Success: true, ProviderMessage: "Email sent");
             }
             else
             {
                 string errorContent = await response.Content.ReadAsStringAsync(ct);
-                _logger.LogError($"Mailjet API error: {response.StatusCode} - {errorContent}", null, null);
+                _logger.LogError("Mailjet API error: {StatusCode} - {ErrorContent}", response.StatusCode, errorContent);
                 return new EmailDispatchResult(Success: false, Error: $"API error: {response.StatusCode}");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to send email to {message.To}: {ex.Message}");
+            _logger.LogError(ex, "Failed to send email to {MessageTo}: {Message}", message.To, ex.Message);
             return new EmailDispatchResult(Success: false, Error: $"Exception: {ex.Message}");
         }
     }

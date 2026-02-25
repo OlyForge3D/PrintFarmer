@@ -29,7 +29,7 @@ public class GracefulShutdownService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _ = _lifetime.ApplicationStopping.Register(OnStopping);
-        _logger.LogInformation($"Graceful shutdown service active (grace={_grace.TotalSeconds}s)");
+        _logger.LogInformation("Graceful shutdown service active (grace={TotalSeconds}s)", _grace.TotalSeconds);
         try
         {
             await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -42,7 +42,7 @@ public class GracefulShutdownService : BackgroundService
 
     private void OnStopping()
     {
-        _logger.LogInformation($"Termination requested; entering graceful shutdown window ({_grace.TotalSeconds}s)");
+        _logger.LogInformation("Termination requested; entering graceful shutdown window ({TotalSeconds}s)", _grace.TotalSeconds);
         _state.SetShuttingDown();
         _ = Task.Run(async () =>
         {
@@ -52,11 +52,11 @@ public class GracefulShutdownService : BackgroundService
                 WorkerState snapshot = _state.GetWorkerState();
                 if (snapshot.ActiveJobs == 0)
                 {
-                    _logger.LogInformation($"All jobs complete after {(DateTime.UtcNow - start).TotalMilliseconds}ms");
+                    _logger.LogInformation("All jobs complete after {TotalMilliseconds}ms", (DateTime.UtcNow - start).TotalMilliseconds);
                     break;
                 }
 
-                _logger.LogInformation($"Waiting on {snapshot.ActiveJobs} active jobs... {(_grace - (DateTime.UtcNow - start)).TotalSeconds}s left");
+                _logger.LogInformation("Waiting on {SnapshotActiveJobs} active jobs... {TotalSeconds}s left", snapshot.ActiveJobs, (_grace - (DateTime.UtcNow - start)).TotalSeconds);
                 await Task.Delay(TimeSpan.FromSeconds(1));
             }
 

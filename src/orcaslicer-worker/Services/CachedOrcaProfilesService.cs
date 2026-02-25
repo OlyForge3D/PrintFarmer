@@ -73,7 +73,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
             if (await _cacheDb.IsCacheValidAsync(profilesHash, ct))
             {
                 (int m, int f, int p) = await _cacheDb.GetCountsAsync(ct);
-                _logger.LogInformation($"SQLite cache is valid. Loaded {m} machines, {f} filaments, {p} processes in {sw.ElapsedMilliseconds}ms");
+                _logger.LogInformation("SQLite cache is valid. Loaded {M} machines, {F} filaments, {P} processes in {SwElapsedMilliseconds}ms", m, f, p, sw.ElapsedMilliseconds);
                 _cacheInitialized = true;
                 _cacheReadyTcs.TrySetResult();
                 return;
@@ -95,7 +95,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
             IList<ProcessProfileDto> processes = await _innerService.ListAvailableProcessProfilesAsync(ct);
             long processTime = parseWatch.ElapsedMilliseconds - filamentTime - machineTime;
 
-            _logger.LogInformation($"Parsed JSON profiles in {parseWatch.ElapsedMilliseconds}ms: machines={machineTime}ms, filaments={filamentTime}ms, processes={processTime}ms");
+            _logger.LogInformation("Parsed JSON profiles in {ParseWatchElapsedMilliseconds}ms: machines={MachineTime}ms, filaments={FilamentTime}ms, processes={ProcessTime}ms", parseWatch.ElapsedMilliseconds, machineTime, filamentTime, processTime);
 
             // Store in SQLite
             Stopwatch storeWatch = Stopwatch.StartNew();
@@ -106,11 +106,11 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
             await _cacheDb.SetMetadataAsync("profiles_hash", profilesHash, ct);
             await _cacheDb.SetMetadataAsync("cached_at", DateTime.UtcNow.ToString("O"), ct);
 
-            _logger.LogInformation($"Stored {machines.Count} machines, {filaments.Count} filaments, {processes.Count} processes in SQLite in {storeWatch.ElapsedMilliseconds}ms");
+            _logger.LogInformation("Stored {MachinesCount} machines, {FilamentsCount} filaments, {ProcessesCount} processes in SQLite in {StoreWatchElapsedMilliseconds}ms", machines.Count, filaments.Count, processes.Count, storeWatch.ElapsedMilliseconds);
 
             _cacheInitialized = true;
 
-            _logger.LogInformation($"Total cache initialization: {sw.ElapsedMilliseconds}ms");
+            _logger.LogInformation("Total cache initialization: {SwElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
 
             // Signal that the cache is ready for requests
             _cacheReadyTcs.TrySetResult();
@@ -150,7 +150,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to calculate profiles hash: {ex.Message}");
+            _logger.LogWarning("Failed to calculate profiles hash: {Message}", ex.Message);
             return Guid.NewGuid().ToString(); // Force rebuild on error
         }
     }

@@ -60,7 +60,7 @@ public class GcodeHarvestController(
 
         try
         {
-            _logger.LogInformation($"Queueing harvest operation for printer {request.PrinterId}");
+            _logger.LogInformation("Queueing harvest operation for printer {RequestPrinterId}", request.PrinterId);
 
             // Queue the harvest operation for background processing
             Farm.Infrastructure.Domain.GcodeHarvestQueueItem queueItem = await _harvestQueue.EnqueueAsync(request.PrinterId, request);
@@ -74,7 +74,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to queue harvest for printer {request.PrinterId}: {ex.Message}");
+            _logger.LogError(ex, "Failed to queue harvest for printer {RequestPrinterId}: {Message}", request.PrinterId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to queue harvest operation");
         }
     }
@@ -101,7 +101,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get harvest operation {operationId}: {ex.Message}");
+            _logger.LogError("Failed to get harvest operation {OperationId}: {Message}", operationId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve harvest operation");
         }
     }
@@ -128,7 +128,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get discovered files for operation {operationId}: {ex.Message}");
+            _logger.LogError("Failed to get discovered files for operation {OperationId}: {Message}", operationId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve discovered files");
         }
     }
@@ -165,7 +165,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get paged discovered files for operation {operationId}: {ex.Message}");
+            _logger.LogError("Failed to get paged discovered files for operation {OperationId}: {Message}", operationId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve discovered files (paged)");
         }
     }
@@ -200,7 +200,7 @@ public class GcodeHarvestController(
             if (result.FailedFileIds?.Length > 0)
             {
                 _logger.LogWarning(
-                    $"Import operation {request.HarvestOperationId} completed with {result.FailedFileIds.Length} failures. " +
+                    "Import operation {RequestHarvestOperationId} completed with {Length} failures. ", request.HarvestOperationId, result.FailedFileIds.Length +
                     $"Imported: {result.ImportedFiles}, Skipped: {result.SkippedFileIds?.Length ?? 0}, Failed: {result.FailedFileIds.Length}");
             }
 
@@ -208,7 +208,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to import selected files for operation {request.HarvestOperationId}");
+            _logger.LogError(ex, "Failed to import selected files for operation {RequestHarvestOperationId}", request.HarvestOperationId);
 
             // Log inner exceptions for better debugging
             if (ex.InnerException != null)
@@ -258,7 +258,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to cancel harvest operation {operationId}: {ex.Message}");
+            _logger.LogError("Failed to cancel harvest operation {OperationId}: {Message}", operationId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to cancel harvest operation");
         }
     }
@@ -286,7 +286,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to restart discovery for harvest operation {operationId}: {ex.Message}");
+            _logger.LogError("Failed to restart discovery for harvest operation {OperationId}: {Message}", operationId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to restart discovery");
         }
     }
@@ -311,7 +311,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get active harvest for printer {printerId}: {ex.Message}");
+            _logger.LogError("Failed to get active harvest for printer {PrinterId}: {Message}", printerId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve active harvest");
         }
     }
@@ -338,7 +338,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get recent harvests for printer {printerId}: {ex.Message}");
+            _logger.LogError("Failed to get recent harvests for printer {PrinterId}: {Message}", printerId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve recent harvests");
         }
     }
@@ -360,7 +360,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get active harvest operations: {ex.Message}");
+            _logger.LogError("Failed to get active harvest operations: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve active harvest operations");
         }
     }
@@ -391,7 +391,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get harvest operations: {ex.Message}");
+            _logger.LogError("Failed to get harvest operations: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve harvest operations");
         }
     }
@@ -417,7 +417,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to skip file {fileId} in operation {operationId}: {ex.Message}");
+            _logger.LogError("Failed to skip file {FileId} in operation {OperationId}: {Message}", fileId, operationId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to skip file");
         }
     }
@@ -443,7 +443,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to retry file {fileId} in operation {operationId}: {ex.Message}");
+            _logger.LogError("Failed to retry file {FileId} in operation {OperationId}: {Message}", fileId, operationId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retry file");
         }
     }
@@ -489,7 +489,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get queue items: {ex.Message}");
+            _logger.LogError("Failed to get queue items: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve queue");
         }
     }
@@ -528,7 +528,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get pending operations for printer {printerId}: {ex.Message}");
+            _logger.LogError("Failed to get pending operations for printer {PrinterId}: {Message}", printerId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve pending operations");
         }
     }
@@ -559,24 +559,24 @@ public class GcodeHarvestController(
 
         try
         {
-            _logger.LogInformation($"Harvesting single file '{filename}' on printer {printerId}");
+            _logger.LogInformation("Harvesting single file '{Filename}' on printer {PrinterId}", filename, printerId);
 
             // Call the harvest service to download, process, and add file to library
             GcodeHarvestResultDto result = await _harvestService.HarvestSingleFileDirectAsync(printerId, filename, ct);
 
             if (!result.Success)
             {
-                _logger.LogWarning($"Failed to harvest file '{filename}': {result.Message}");
+                _logger.LogWarning("Failed to harvest file '{Filename}': {Message}", filename, result.Message);
                 return BadRequest(result);
             }
 
-            _logger.LogInformation($"Successfully harvested file '{filename}' with ID {result.ImportedFileIds.FirstOrDefault()}");
+            _logger.LogInformation("Successfully harvested file '{Filename}' with ID {FirstOrDefault}", filename, result.ImportedFileIds.FirstOrDefault());
 
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to harvest file '{filename}' on printer {printerId}: {ex.Message}");
+            _logger.LogError(ex, "Failed to harvest file '{Filename}' on printer {PrinterId}: {Message}", filename, printerId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to harvest file");
         }
     }
@@ -603,7 +603,7 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to cancel queue item {queueItemId}: {ex.Message}");
+            _logger.LogError("Failed to cancel queue item {QueueItemId}: {Message}", queueItemId, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to cancel operation");
         }
     }

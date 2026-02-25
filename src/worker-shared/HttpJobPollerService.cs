@@ -62,8 +62,8 @@ public abstract class HttpJobPollerService(
         int pollIntervalSeconds = int.Parse(_configuration["Worker:PollIntervalSeconds"] ?? "5");
         int leaseDurationSeconds = int.Parse(_configuration["Worker:LeaseDurationSeconds"] ?? "300"); // 5 minutes default
 
-        _logger.LogInformation($"Worker {_workerId} HTTP job poller starting. API={apiBaseUrl} PollInterval={pollIntervalSeconds}s Lease={leaseDurationSeconds}s");
-        _logger.LogInformation($"Worker capabilities: {string.Join(", ", GetWorkerCapabilities())}");
+        _logger.LogInformation("Worker {WorkerId} HTTP job poller starting. API={ApiBaseUrl} PollInterval={PollIntervalSeconds}s Lease={LeaseDurationSeconds}s", _workerId, apiBaseUrl, pollIntervalSeconds, leaseDurationSeconds);
+        _logger.LogInformation("Worker capabilities: {Value0}", string.Join(", ", GetWorkerCapabilities()));
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -92,7 +92,7 @@ public abstract class HttpJobPollerService(
 
                 if (!claimResponse.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning($"Failed to claim job: {claimResponse.StatusCode}");
+                    _logger.LogWarning("Failed to claim job: {ClaimResponseStatusCode}", claimResponse.StatusCode);
                     await Task.Delay(TimeSpan.FromSeconds(pollIntervalSeconds), stoppingToken);
                     continue;
                 }
@@ -121,7 +121,7 @@ public abstract class HttpJobPollerService(
                 };
 
                 _workerState.IncrementActiveJobs();
-                _logger.LogInformation($"Claimed job {job.Id}, starting processing");
+                _logger.LogInformation("Claimed job {JobId}, starting processing", job.Id);
 
                 // Emit initial progress (0%)
                 await TrySendProgressAsync(httpClient, job.Id, 0, "Starting slicing", stoppingToken);
@@ -140,7 +140,7 @@ public abstract class HttpJobPollerService(
             }
         }
 
-        _logger.LogInformation($"Worker {_workerId} HTTP job poller stopped");
+        _logger.LogInformation("Worker {WorkerId} HTTP job poller stopped", _workerId);
     }
 
     private async Task HandleJobAsync(DistributedSlicingJob job, HttpClient httpClient, CancellationToken ct)
@@ -169,7 +169,7 @@ public abstract class HttpJobPollerService(
                             HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew", renewReq, localLinkedCts.Token);
                             if (!resp.IsSuccessStatusCode)
                             {
-                                _logger.LogDebug($"Lease renew for job {job.Id} returned {resp.StatusCode}");
+                                _logger.LogDebug("Lease renew for job {JobId} returned {RespStatusCode}", job.Id, resp.StatusCode);
                             }
                         }
                         catch (OperationCanceledException)
@@ -178,7 +178,7 @@ public abstract class HttpJobPollerService(
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogDebug(ex, $"Failed to renew lease for job {job.Id}");
+                            _logger.LogDebug(ex, "Failed to renew lease for job {JobId}", job.Id);
                         }
 
                         await Task.Delay(TimeSpan.FromSeconds(renewIntervalSeconds), localLinkedCts.Token);
@@ -187,7 +187,7 @@ public abstract class HttpJobPollerService(
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, $"Failed to start lease renew loop for job {job.Id}");
+                _logger.LogDebug(ex, "Failed to start lease renew loop for job {JobId}", job.Id);
                 localLinkedCts?.Dispose();
                 localLinkedCts = null;
             }
@@ -203,7 +203,7 @@ public abstract class HttpJobPollerService(
             // Use heuristic progress since SlicingResult doesn't expose granular percentage yet.
             await TrySendProgressAsync(httpClient, job.Id, 85, "Slicing complete, uploading artifacts", ct);
 
-            _logger.LogInformation($"Job {job.Id} slicing completed in {(DateTime.UtcNow - start).TotalSeconds:F1}s");
+            _logger.LogInformation("Job {JobId} slicing completed in {TotalSeconds:F1}s", job.Id, (DateTime.UtcNow - start).TotalSeconds);
 
             // Upload artifacts (G-code file and any metadata)
             List<Guid> artifactIds = await UploadArtifactsAsync(job, result, httpClient, ct);
@@ -226,17 +226,17 @@ public abstract class HttpJobPollerService(
                 throw new InvalidOperationException($"Failed to complete job: {completeResponse.StatusCode} - {errorContent}");
             }
 
-            _logger.LogInformation($"Job {job.Id} completed successfully with {artifactIds.Count} artifacts");
+            _logger.LogInformation("Job {JobId} completed successfully with {ArtifactIdsCount} artifacts", job.Id, artifactIds.Count);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning($"Job {job.Id} cancelled");
+            _logger.LogWarning("Job {JobId} cancelled", job.Id);
 
             // Job will timeout and be reassigned by the API's error recovery system
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Job {job.Id} failed: {ex.Message}");
+            _logger.LogError(ex, "Job {JobId} failed: {Message}", job.Id, ex.Message);
 
             // Job will timeout and be reassigned by the API's error recovery system
         }
@@ -271,12 +271,12 @@ public abstract class HttpJobPollerService(
             HttpResponseMessage resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/progress", progressReq, ct);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogDebug($"Progress update for job {jobId} returned {resp.StatusCode}");
+                _logger.LogDebug("Progress update for job {JobId} returned {RespStatusCode}", jobId, resp.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, $"Failed to send progress update for job {jobId}");
+            _logger.LogDebug(ex, "Failed to send progress update for job {JobId}", jobId);
         }
     }
 
@@ -309,7 +309,7 @@ public abstract class HttpJobPollerService(
             throw new InvalidOperationException($"G-code file not found at expected path: {gcodeFilePath}");
         }
 
-        _logger.LogInformation($"Uploading G-code artifact from {gcodeFilePath}");
+        _logger.LogInformation("Uploading G-code artifact from {GcodeFilePath}", gcodeFilePath);
 
         // Upload the primary G-code file
         using MultipartFormDataContent gcodeContent = new MultipartFormDataContent();
@@ -335,7 +335,7 @@ public abstract class HttpJobPollerService(
         }
 
         artifactIds.Add(artifactResponse.Id);
-        _logger.LogInformation($"Uploaded G-code artifact: {artifactResponse.Id} ({gcodeBytes.Length} bytes)");
+        _logger.LogInformation("Uploaded G-code artifact: {ArtifactResponseId} ({GcodeBytesLength} bytes)", artifactResponse.Id, gcodeBytes.Length);
 
         // TODO: Upload additional artifacts (thumbnails, metadata, etc.) if present in result.Metadata
         return artifactIds;

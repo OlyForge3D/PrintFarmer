@@ -376,7 +376,6 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     private readonly ILogger<SdcpClient> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly BackendTimeoutSettings _timeouts = timeouts ?? throw new ArgumentNullException(nameof(timeouts));
 
-    private const string SdcpLogCategory = "SDCP";
     private const int SdcpWebSocketPort = 3030;
 
     /// <summary>
@@ -401,7 +400,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         public const int SetCameraEnabled = 386;
     }
 
-    private void LogSdcp(LogLevel level, string message, string? correlationId = null, object? metadata = null, Exception? exception = null)
+    private void LogSdcp(LogLevel level, string message, Exception? exception = null)
         => _logger.Log(level, exception, message);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -474,7 +473,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             ArrayBufferWriter<byte> writer = new();
 
             long startedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            LogSdcp(LogLevel.Debug, "SDCP WS receive started", correlationId, new { operation });
+            LogSdcp(LogLevel.Debug, "SDCP WS receive started");
 
             while (true)
             {
@@ -482,11 +481,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    LogSdcp(
-                        LogLevel.Debug,
-                        "SDCP WS received close frame",
-                        correlationId,
-                        new { operation, closeStatus = ws.CloseStatus?.ToString(), closeStatusDescription = ws.CloseStatusDescription });
+                    LogSdcp(LogLevel.Debug, "SDCP WS received close frame");
                     return null;
                 }
 
@@ -498,11 +493,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     // binary frames should be silently consumed.
                     if (result.EndOfMessage)
                     {
-                        LogSdcp(
-                            LogLevel.Debug,
-                            "SDCP WS skipping non-text frame",
-                            correlationId,
-                            new { operation, messageType = result.MessageType.ToString() });
+                        LogSdcp(LogLevel.Debug, "SDCP WS skipping non-text frame");
                     }
 
                     continue;
@@ -514,11 +505,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 {
                     string text = Encoding.UTF8.GetString(writer.WrittenSpan);
                     long endedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                    LogSdcp(
-                        LogLevel.Debug,
-                        "SDCP WS receive completed",
-                        correlationId,
-                        new { operation, bytes = writer.WrittenCount, durationMs = endedAt - startedAt });
+                    LogSdcp(LogLevel.Debug, "SDCP WS receive completed");
                     return text;
                 }
             }
@@ -608,9 +595,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             ws.Options.KeepAliveInterval = WebSocketKeepAliveInterval;
             try
             {
-                LogSdcp(LogLevel.Debug, "SDCP WS connecting", correlationId, new { operation, wsUrl = candidate.ToString(), host = candidate.Host, port = candidate.Port });
+                LogSdcp(LogLevel.Debug, "SDCP WS connecting");
                 await ws.ConnectAsync(candidate, ct);
-                LogSdcp(LogLevel.Debug, "SDCP WS connected", correlationId, new { operation, wsUrl = candidate.ToString(), host = candidate.Host, port = candidate.Port });
+                LogSdcp(LogLevel.Debug, "SDCP WS connected");
                 return (ws, candidate);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -621,7 +608,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             catch (Exception ex)
             {
                 lastException = ex;
-                LogSdcp(LogLevel.Debug, "SDCP WS connect attempt failed", correlationId, new { operation, wsUrl = candidate.ToString(), host = candidate.Host, port = candidate.Port }, ex);
+                LogSdcp(LogLevel.Debug, "SDCP WS connect attempt failed", ex);
                 ws.Dispose();
             }
         }
@@ -656,7 +643,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
 
-                LogSdcp(LogLevel.Debug, "SDCP WS test request sent", requestId, new { operation = "TestConnection", cmd = SdcpCommandIds.GetStatus, bytes = bytes.Length, wsUrl });
+                LogSdcp(LogLevel.Debug, "SDCP WS test request sent");
 
                 string? responseJson = await ReceiveTextMessageAsync(ws, operation: "TestConnection", correlationId: requestId, cts.Token);
 
@@ -669,7 +656,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 }
                 catch (Exception ex)
                 {
-                    LogSdcp(LogLevel.Debug, "SDCP WS close failed", requestId, new { operation = "TestConnection", wsUrl }, ex);
+                    LogSdcp(LogLevel.Debug, "SDCP WS close failed", ex);
                 }
 
                 bool responded = !string.IsNullOrWhiteSpace(responseJson);
@@ -686,18 +673,18 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     }
                 }
 
-                LogSdcp(LogLevel.Debug, responded ? "SDCP test connection succeeded" : "SDCP test connection got no response", requestId, new { operation = "TestConnection", wsUrl });
+                LogSdcp(LogLevel.Debug, responded ? "SDCP test connection succeeded" : "SDCP test connection got no response");
                 return responded;
             }
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
-            LogSdcp(LogLevel.Debug, "SDCP test connection cancelled", correlationId: null, exception: ex);
+            LogSdcp(LogLevel.Debug, "SDCP test connection cancelled", ex);
             throw;
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP test connection failed", correlationId: null, new { operation = "TestConnection" }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP test connection failed", ex);
             return false;
         }
     }
@@ -736,7 +723,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
 
-                LogSdcp(LogLevel.Debug, "SDCP WS status request sent", requestId, new { operation = "GetStatus", cmd = SdcpCommandIds.GetStatus, bytes = bytes.Length, wsUrl });
+                LogSdcp(LogLevel.Debug, "SDCP WS status request sent");
 
                 string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetStatus", correlationId: requestId, cts.Token);
                 if (!string.IsNullOrWhiteSpace(responseJson))
@@ -749,37 +736,22 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         if (statusResponse?.Status?.PrintInfo != null)
                         {
                             string state = StatusCodeMap.GetValueOrDefault(statusResponse.Status.PrintInfo.Status, "unknown");
-                            LogSdcp(
-                                LogLevel.Debug,
-                                "SDCP status parsed",
-                                requestId,
-                                new
-                                {
-                                    operation = "GetStatus",
-                                    statusCode = statusResponse.Status.PrintInfo.Status,
-                                    state,
-                                    hasPrintInfo = true
-                                });
+                            LogSdcp(LogLevel.Debug, "SDCP status parsed");
                             return new PrinterStatus(true, state);
                         }
 
-                        LogSdcp(LogLevel.Debug, "SDCP status response did not include printInfo", requestId, new { operation = "GetStatus", hasStatus = statusResponse?.Status != null, wsUrl });
+                        LogSdcp(LogLevel.Debug, "SDCP status response did not include printInfo");
                     }
                     catch (Exception ex)
                     {
                         // Might be an ACK response, still indicates printer is online
-                        LogSdcp(
-                            LogLevel.Debug,
-                            "SDCP status response parse failed; treating as online",
-                            requestId,
-                            new { operation = "GetStatus", responseLength = responseJson.Length, wsUrl },
-                            ex);
+                        LogSdcp(LogLevel.Debug, "SDCP status response parse failed; treating as online", ex);
                         return new PrinterStatus(true, "online");
                     }
                 }
                 else
                 {
-                    LogSdcp(LogLevel.Debug, "SDCP empty status response; treating as online", requestId, new { operation = "GetStatus", wsUrl });
+                    LogSdcp(LogLevel.Debug, "SDCP empty status response; treating as online");
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -788,12 +760,12 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
-            LogSdcp(LogLevel.Debug, "SDCP status cancelled", correlationId: null, exception: ex);
+            LogSdcp(LogLevel.Debug, "SDCP status cancelled", ex);
             throw;
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP status failed", correlationId: null, new { operation = "GetStatus" }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP status failed", ex);
             return new PrinterStatus(false, null);
         }
     }
@@ -832,7 +804,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
 
-                LogSdcp(LogLevel.Debug, "SDCP WS job request sent", requestId, new { operation = "GetJob", cmd = SdcpCommandIds.GetStatus, bytes = bytes.Length, wsUrl });
+                LogSdcp(LogLevel.Debug, "SDCP WS job request sent");
 
                 string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetJob", correlationId: requestId, cts.Token);
                 if (!string.IsNullOrWhiteSpace(responseJson))
@@ -852,7 +824,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         return new PrinterJob(state, progress, jobName, null);
                     }
 
-                    LogSdcp(LogLevel.Debug, "SDCP job response did not include printInfo", requestId, new { operation = "GetJob", hasStatus = statusResponse?.Status != null, wsUrl });
+                    LogSdcp(LogLevel.Debug, "SDCP job response did not include printInfo");
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -861,12 +833,12 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
-            LogSdcp(LogLevel.Debug, "SDCP job cancelled", correlationId: null, exception: ex);
+            LogSdcp(LogLevel.Debug, "SDCP job cancelled", ex);
             throw;
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP job failed", correlationId: null, new { operation = "GetJob" }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP job failed", ex);
             return new PrinterJob(null, null, null, null);
         }
     }
@@ -905,7 +877,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
 
-                LogSdcp(LogLevel.Debug, "SDCP WS composite status request sent", requestId, new { operation = "GetCompositeStatus", cmd = SdcpCommandIds.GetStatus, bytes = bytes.Length, wsUrl });
+                LogSdcp(LogLevel.Debug, "SDCP WS composite status request sent");
 
                 string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetCompositeStatus", correlationId: requestId, cts.Token);
                 if (!string.IsNullOrWhiteSpace(responseJson))
@@ -918,12 +890,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     }
                     catch (JsonException ex)
                     {
-                        LogSdcp(
-                            LogLevel.Debug,
-                            "SDCP composite status parse failed; treating endpoint as online",
-                            requestId,
-                            new { operation = "GetCompositeStatus", responseLength = responseJson.Length, wsUrl },
-                            ex);
+                        LogSdcp(LogLevel.Debug, "SDCP composite status parse failed; treating endpoint as online", ex);
 
                         try
                         {
@@ -934,7 +901,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         }
                         catch (Exception closeEx)
                         {
-                            LogSdcp(LogLevel.Debug, "SDCP WS close failed", requestId, new { operation = "GetCompositeStatus" }, closeEx);
+                            LogSdcp(LogLevel.Debug, "SDCP WS close failed", closeEx);
                         }
 
                         return new PrinterCompositeStatus(true, "online", null, null, null, null, null);
@@ -980,7 +947,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         }
                         catch (Exception ex)
                         {
-                            LogSdcp(LogLevel.Debug, "SDCP WS close failed", requestId, new { operation = "GetCompositeStatus" }, ex);
+                            LogSdcp(LogLevel.Debug, "SDCP WS close failed", ex);
                         }
 
                         // Get camera URLs if available
@@ -1004,7 +971,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                             BedTarget: status.TempTargetHotbed);
                     }
 
-                    LogSdcp(LogLevel.Debug, "SDCP composite status response did not include status payload", requestId, new { operation = "GetCompositeStatus" });
+                    LogSdcp(LogLevel.Debug, "SDCP composite status response did not include status payload");
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -1013,12 +980,12 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
-            LogSdcp(LogLevel.Debug, "SDCP composite status cancelled", correlationId: null, exception: ex);
+            LogSdcp(LogLevel.Debug, "SDCP composite status cancelled", ex);
             throw;
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP composite status failed", correlationId: null, new { operation = "GetCompositeStatus" }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP composite status failed", ex);
             throw;  // Let callers (polling service) handle failure counting
         }
     }
@@ -1169,7 +1136,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogSdcp(LogLevel.Debug, "Failed to get camera URL", correlationId: null, new { baseUrl }, ex);
+            LogSdcp(LogLevel.Debug, "Failed to get camera URL", ex);
         }
 
         return null;
@@ -1226,7 +1193,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogSdcp(LogLevel.Debug, "Failed to get camera snapshot URL", correlationId: null, new { baseUrl }, ex);
+            LogSdcp(LogLevel.Debug, "Failed to get camera snapshot URL", ex);
         }
 
         return null;
@@ -1293,11 +1260,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
 
-                LogSdcp(
-                    LogLevel.Debug,
-                    "SDCP WS file list request sent",
-                    requestId,
-                    new { operation = "GetFileList", cmd = SdcpCommandIds.GetFileList, bytes = bytes.Length, wsUrl });
+                LogSdcp(LogLevel.Debug, "SDCP WS file list request sent");
 
                 string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetFileList", correlationId: requestId, cts.Token);
                 if (!string.IsNullOrWhiteSpace(responseJson))
@@ -1307,13 +1270,13 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                     if (result is null || result.Ack != 0)
                     {
-                        LogSdcp(LogLevel.Warning, $"SDCP file list returned Ack={result?.Ack ?? -1}", requestId);
+                        LogSdcp(LogLevel.Warning, $"SDCP file list returned Ack={result?.Ack ?? -1}");
                         return [];
                     }
 
                     List<SdcpFileEntry> entries = result.FileList ?? [];
                     int fileCount = entries.Count(e => e.Type == 1);
-                    LogSdcp(LogLevel.Debug, $"SDCP file list: {fileCount} files, {entries.Count - fileCount} folders", requestId);
+                    LogSdcp(LogLevel.Debug, $"SDCP file list: {fileCount} files, {entries.Count - fileCount} folders");
                     return entries;
                 }
 
@@ -1323,12 +1286,12 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
-            LogSdcp(LogLevel.Debug, "SDCP file list cancelled", correlationId: null, exception: ex);
+            LogSdcp(LogLevel.Debug, "SDCP file list cancelled", ex);
             throw;
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP file list failed", correlationId: null, new { operation = "GetFileList" }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP file list failed", ex);
             return [];
         }
     }
@@ -1375,11 +1338,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
 
-                LogSdcp(
-                    LogLevel.Debug,
-                    "SDCP WS command sent",
-                    requestId,
-                    new { operation = "SendCommand", cmd, bytes = bytes.Length, wsUrl });
+                LogSdcp(LogLevel.Debug, "SDCP WS command sent");
 
                 string? responseJson = await ReceiveTextMessageAsync(ws, operation: "SendCommand", correlationId: requestId, cts.Token);
                 if (!string.IsNullOrWhiteSpace(responseJson))
@@ -1390,19 +1349,11 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                     // ACK code 0 = success, 1 = error, 2 = file not found
                     int? ack = ackResponse?.Data?.Data?.Ack;
-                    LogSdcp(
-                        ack == 0 ? LogLevel.Debug : LogLevel.Warning,
-                        ack == 0 ? "SDCP WS command ack received" : $"SDCP WS command rejected (Ack={ack})",
-                        requestId,
-                        new { operation = "SendCommand", cmd, ack, wsUrl });
+                    LogSdcp(ack == 0 ? LogLevel.Debug : LogLevel.Warning, ack == 0 ? "SDCP WS command ack received" : $"SDCP WS command rejected (Ack={ack})");
                     return ack == 0;
                 }
 
-                LogSdcp(
-                    LogLevel.Debug,
-                    "SDCP WS command returned empty response",
-                    requestId,
-                    new { operation = "SendCommand", cmd, wsUrl });
+                LogSdcp(LogLevel.Debug, "SDCP WS command returned empty response");
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
                 return false;
@@ -1410,12 +1361,12 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
-            LogSdcp(LogLevel.Debug, "SDCP command cancelled", correlationId: null, new { operation = "SendCommand", cmd }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP command cancelled", ex);
             throw;
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP command failed", correlationId: null, new { operation = "SendCommand", cmd }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP command failed", ex);
             return false;
         }
     }
@@ -1477,14 +1428,14 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     fileContent.Position = startPosition.Value;
                 }
 
-                LogSdcp(LogLevel.Debug, "SDCP HTTP upload sending", requestId, new { operation = "UploadGcode", uploadUrl = uploadUri.ToString(), fileName, canSeek = fileContent.CanSeek });
+                LogSdcp(LogLevel.Debug, "SDCP HTTP upload sending");
 
                 using MultipartFormDataContent formContent = CreateMultipartContent();
 
                 try
                 {
                     using HttpResponseMessage resp = await _httpClient.PostAsync(uploadUri, formContent, cts.Token);
-                    LogSdcp(LogLevel.Debug, "SDCP HTTP upload response", requestId, new { operation = "UploadGcode", uploadUrl = uploadUri.ToString(), statusCode = (int)resp.StatusCode });
+                    LogSdcp(LogLevel.Debug, "SDCP HTTP upload response");
 
                     if (resp.IsSuccessStatusCode)
                     {
@@ -1503,7 +1454,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 }
                 catch (Exception ex) when (fileContent.CanSeek)
                 {
-                    LogSdcp(LogLevel.Debug, "SDCP HTTP upload attempt failed", requestId, new { operation = "UploadGcode", uploadUrl = uploadUri.ToString() }, ex);
+                    LogSdcp(LogLevel.Debug, "SDCP HTTP upload attempt failed", ex);
 
                     // continue to next candidate
                 }
@@ -1641,7 +1592,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
 
-                LogSdcp(LogLevel.Debug, $"SDCP history: {jobs.Count} jobs from {taskIds.Count} total", requestId);
+                LogSdcp(LogLevel.Debug, $"SDCP history: {jobs.Count} jobs from {taskIds.Count} total");
                 return new HistoryListResponse { Count = taskIds.Count, Jobs = jobs.ToArray() };
             }
         }
@@ -1651,7 +1602,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP history list failed", correlationId: null, new { operation = "GetHistoryList" }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP history list failed", ex);
             return null;
         }
     }
@@ -1711,7 +1662,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         catch (JsonException ex)
         {
             // Tolerate unknown fields per acceptance criteria
-            LogSdcp(LogLevel.Debug, $"Failed to parse history detail for {taskId}", correlationId, exception: ex);
+            LogSdcp(LogLevel.Debug, $"Failed to parse history detail for {taskId}", ex);
             return null;
         }
     }
@@ -1773,7 +1724,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, $"SDCP history job detail failed for {jobId}", correlationId: null, exception: ex);
+            LogSdcp(LogLevel.Debug, $"SDCP history job detail failed for {jobId}", ex);
             return null;
         }
     }
@@ -1823,8 +1774,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
 
-                LogSdcp(LogLevel.Debug, "SDCP WS attributes request sent", requestId,
-                    new { operation = "GetAttributes", cmd = SdcpCommandIds.GetAttributes, bytes = bytes.Length, wsUrl });
+                LogSdcp(LogLevel.Debug, "SDCP WS attributes request sent");
 
                 // Read up to 3 messages looking for the attributes response.
                 // Cmd 1 triggers an ack first, then the actual attributes message.
@@ -1843,8 +1793,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         CacheMainboardId(baseUrl, attrResponse.MainboardID);
                         SdcpAttributes attrs = attrResponse.Attributes;
 
-                        LogSdcp(LogLevel.Debug, "SDCP attributes parsed", requestId,
-                            new { operation = "GetAttributes", name = attrs.Name, model = attrs.MachineName, brand = attrs.BrandName, firmware = attrs.FirmwareVersion });
+                        LogSdcp(LogLevel.Debug, "SDCP attributes parsed");
 
                         try
                         {
@@ -1866,8 +1815,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     }
 
                     // Not the attributes message (likely the ack); try reading the next one
-                    LogSdcp(LogLevel.Debug, "SDCP received non-attributes message, reading next", requestId,
-                        new { operation = "GetAttributes", attempt, responseLength = responseJson.Length });
+                    LogSdcp(LogLevel.Debug, "SDCP received non-attributes message, reading next");
                 }
 
                 // Exhausted attempts without getting attributes
@@ -1880,8 +1828,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     // best-effort close
                 }
 
-                LogSdcp(LogLevel.Warning, "SDCP attributes not received after multiple reads", requestId,
-                    new { operation = "GetAttributes", wsUrl });
+                LogSdcp(LogLevel.Warning, "SDCP attributes not received after multiple reads");
                 return new StandardPrinterInfo();
             }
         }
@@ -1891,8 +1838,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (Exception ex)
         {
-            LogSdcp(LogLevel.Debug, "SDCP get printer information failed", correlationId: null,
-                new { operation = "GetAttributes" }, ex);
+            LogSdcp(LogLevel.Debug, "SDCP get printer information failed", ex);
             return new StandardPrinterInfo();
         }
     }

@@ -42,7 +42,7 @@ public class PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, ILogge
         }
 
         _cache.UpdateStatus(status);
-        _logger.LogDebug($"[StatusCache] Updated printer {status.Id}: IsOnline={status.IsOnline}, State={status.State}");
+        _logger.LogDebug("[StatusCache] Updated printer {StatusId}: IsOnline={StatusIsOnline}, State={StatusState}", status.Id, status.IsOnline, status.State);
     }
 
     public void ReceiveStatusUpdates(IEnumerable<PrinterStatusDto> statuses)

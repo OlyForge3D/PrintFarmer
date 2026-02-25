@@ -47,18 +47,18 @@ public class PrinterStatusFallbackService(
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // External cancellation request - propagate up
-            _logger.LogInformation($"Operation cancelled for printer {printer.Name} ({printer.Id})");
+            _logger.LogInformation("Operation cancelled for printer {PrinterName} ({PrinterId})", printer.Name, printer.Id);
             throw;
         }
         catch (OperationCanceledException)
         {
             // Timeout occurred
-            _logger.LogWarning($"Operation timeout for printer {printer.Name} ({printer.Id}) after {timeout.TotalSeconds:F1}s");
+            _logger.LogWarning("Operation timeout for printer {PrinterName} ({PrinterId}) after {TimeoutTotalSeconds:F1}s", printer.Name, printer.Id, timeout.TotalSeconds);
             return fallbackFactory();
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Operation failed for printer {printer.Name} ({printer.Id}): {ex.Message}");
+            _logger.LogError("Operation failed for printer {PrinterName} ({PrinterId}): {Message}", printer.Name, printer.Id, ex.Message);
             return fallbackFactory();
         }
     }
@@ -99,7 +99,7 @@ public class PrinterStatusFallbackService(
         // Check if circuit is already open
         if (breaker.State == CircuitState.Open)
         {
-            _logger.LogWarning($"Circuit breaker open for {circuitBreakerKey}; returning fallback for printer {printer.Name}");
+            _logger.LogWarning("Circuit breaker open for {CircuitBreakerKey}; returning fallback for printer {PrinterName}", circuitBreakerKey, printer.Name);
             return fallbackFactory();
         }
 
@@ -118,18 +118,18 @@ public class PrinterStatusFallbackService(
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // External cancellation request - propagate up
-            _logger.LogInformation($"Operation cancelled for printer {printer.Name} ({printer.Id}) with key {circuitBreakerKey}");
+            _logger.LogInformation("Operation cancelled for printer {PrinterName} ({PrinterId}) with key {CircuitBreakerKey}", printer.Name, printer.Id, circuitBreakerKey);
             throw;
         }
         catch (OperationCanceledException)
         {
             // Timeout occurred
-            _logger.LogWarning($"Circuit breaker timeout for {circuitBreakerKey} (printer {printer.Name}) after {timeout.TotalSeconds:F1}s");
+            _logger.LogWarning("Circuit breaker timeout for {CircuitBreakerKey} (printer {PrinterName}) after {TimeoutTotalSeconds:F1}s", circuitBreakerKey, printer.Name, timeout.TotalSeconds);
             return fallbackFactory();
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Circuit breaker operation failed for {circuitBreakerKey} (printer {printer.Name}): {ex.Message}");
+            _logger.LogError("Circuit breaker operation failed for {CircuitBreakerKey} (printer {PrinterName}): {Message}", circuitBreakerKey, printer.Name, ex.Message);
             return fallbackFactory();
         }
     }
@@ -174,6 +174,6 @@ public class PrinterStatusFallbackService(
         CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker(circuitBreakerKey);
 
         // Reset by getting a fresh instance - depends on ICircuitBreakerService implementation
-        _logger.LogInformation($"Resetting circuit breaker {circuitBreakerKey}");
+        _logger.LogInformation("Resetting circuit breaker {CircuitBreakerKey}", circuitBreakerKey);
     }
 }

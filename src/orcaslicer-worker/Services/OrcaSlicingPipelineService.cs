@@ -41,7 +41,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _ = Directory.CreateDirectory(jobWorkDir);
         try
         {
-            _logger.LogInformation($"Starting slicing pipeline for job {job.Id}");
+            _logger.LogInformation("Starting slicing pipeline for job {JobId}", job.Id);
             await _progressReporter.ReportProgressAsync(job.Id, 10, "Downloading STL file", cancellationToken);
             string stlFilePath = await FetchStlFileAsync(job, jobWorkDir, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 20, "Preparing slicer configuration", cancellationToken);
@@ -75,7 +75,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"Failed cleanup {jobWorkDir}");
+                _logger.LogWarning(ex, "Failed cleanup {JobWorkDir}", jobWorkDir);
             }
         }
     }
@@ -214,7 +214,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Error monitoring slicing progress for job {jobId}");
+            _logger.LogWarning(ex, "Error monitoring slicing progress for job {JobId}", jobId);
         }
     }
 

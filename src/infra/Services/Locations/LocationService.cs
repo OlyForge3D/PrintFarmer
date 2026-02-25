@@ -88,7 +88,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error finding location with ID {id}");
+            _logger.LogError(ex, "Error finding location with ID {Id}", id);
             throw;
         }
     }
@@ -111,7 +111,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error finding location with name '{name}'");
+            _logger.LogError(ex, "Error finding location with name '{Name}'", name);
             throw;
         }
     }
@@ -134,7 +134,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error checking location name existence for '{name}'");
+            _logger.LogError(ex, "Error checking location name existence for '{Name}'", name);
             throw;
         }
     }
@@ -175,7 +175,7 @@ public class LocationService : ILocationService
             await _unitOfWork.Locations.AddAsync(location, ct);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation($"Location '{location.Name}' created successfully");
+            _logger.LogInformation("Location '{LocationName}' created successfully", location.Name);
 
             return _mapper.Map<LocationDto>(location);
         }
@@ -232,13 +232,13 @@ public class LocationService : ILocationService
             await _unitOfWork.Locations.UpdateAsync(location, ct);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation($"Location '{location.Name}' updated successfully");
+            _logger.LogInformation("Location '{LocationName}' updated successfully", location.Name);
 
             return _mapper.Map<LocationDto>(location);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error updating location with ID {id}");
+            _logger.LogError(ex, "Error updating location with ID {Id}", id);
             throw;
         }
     }
@@ -269,13 +269,13 @@ public class LocationService : ILocationService
             await _unitOfWork.Locations.UpdateAsync(location, ct);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation($"Location '{location.Name}' deleted (soft delete)");
+            _logger.LogInformation("Location '{LocationName}' deleted (soft delete)", location.Name);
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error deleting location with ID {id}");
+            _logger.LogError(ex, "Error deleting location with ID {Id}", id);
             throw;
         }
     }
@@ -327,7 +327,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error retrieving location details for ID {id}");
+            _logger.LogError(ex, "Error retrieving location details for ID {Id}", id);
             throw;
         }
     }
@@ -350,7 +350,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error retrieving printers for location {locationId}");
+            _logger.LogError(ex, "Error retrieving printers for location {LocationId}", locationId);
             throw;
         }
     }
@@ -387,7 +387,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error assigning printer {printerId} to location {locationId}");
+            _logger.LogError(ex, "Error assigning printer {PrinterId} to location {LocationId}", printerId, locationId);
             throw;
         }
     }
@@ -415,7 +415,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error removing printer {printerId} from location");
+            _logger.LogError(ex, "Error removing printer {PrinterId} from location", printerId);
             throw;
         }
     }
@@ -446,11 +446,11 @@ public class LocationService : ILocationService
             await _unitOfWork.Locations.UpdateAsync(location, ct);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation($"Updated printer count for location '{location.Name}': {count}");
+            _logger.LogInformation("Updated printer count for location '{LocationName}': {Count}", location.Name, count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error updating printer count for location {locationId}");
+            _logger.LogError(ex, "Error updating printer count for location {LocationId}", locationId);
             throw;
         }
     }

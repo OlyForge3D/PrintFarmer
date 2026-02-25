@@ -20,7 +20,7 @@ namespace Farm.Infrastructure.Services.Users
     /// - Password hashing and validation
     /// - User authentication and identity management
     /// - Logging of all user-related operations for audit trails
-    /// All user operations are logged through ILogger<UsersService> for observability.
+    /// All user operations are logged through ILogger&lt;UsersService&gt; for observability.
     /// </remarks>
     /// <remarks>
     /// Initializes a new instance of the UsersService with required dependencies.
@@ -63,7 +63,7 @@ namespace Farm.Infrastructure.Services.Users
         /// the configured password hashing service before storage. The user is created with IsActive=true and
         /// EmailConfirmed=false by default. User roles are assigned based on the RoleIds provided in the request.
         /// Creation and update timestamps are set to current UTC time. All user creation operations are logged
-        /// through ILogger<UsersService> for audit trails.
+        /// through ILogger&lt;UsersService&gt; for audit trails.
         /// </remarks>
         public async Task<UserDto> CreateUserAsync(CreateUserRequest request, CancellationToken ct)
         {
@@ -149,7 +149,7 @@ namespace Farm.Infrastructure.Services.Users
         /// <remarks>
         /// This method permanently removes a user account from the system, including all role assignments and
         /// associated authentication data. The operation is irreversible. Deletion of active users will revoke their
-        /// access to the system. All deletion operations are logged through ILogger<UsersService> for audit trails.
+        /// access to the system. All deletion operations are logged through ILogger&lt;UsersService&gt; for audit trails.
         /// </remarks>
         public async Task<bool> DeleteUserAsync(Guid id, CancellationToken ct)
         {

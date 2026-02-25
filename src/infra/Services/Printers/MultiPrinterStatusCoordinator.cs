@@ -51,7 +51,7 @@ public class MultiPrinterStatusCoordinator : IMultiPrinterStatusCoordinator
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Parallel operation failed for printer {p.Name} ({p.Id}): {ex.Message}");
+                _logger.LogError("Parallel operation failed for printer {PName} ({PId}): {Message}", p.Name, p.Id, ex.Message);
                 onError(p, ex);
                 return null;
             }
@@ -105,19 +105,19 @@ public class MultiPrinterStatusCoordinator : IMultiPrinterStatusCoordinator
             catch (OperationCanceledException) when (timeoutCts.Token.IsCancellationRequested && !ct.IsCancellationRequested)
             {
                 // This is a timeout (not external cancellation)
-                _logger.LogWarning($"Timeout occurred for printer {p.Name} ({p.Id}) after {timeout.TotalSeconds:F1}s");
+                _logger.LogWarning("Timeout occurred for printer {PName} ({PId}) after {TimeoutTotalSeconds:F1}s", p.Name, p.Id, timeout.TotalSeconds);
                 onTimeout(p);
                 return null;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 // External cancellation
-                _logger.LogInformation($"Operation cancelled for printer {p.Name} ({p.Id})");
+                _logger.LogInformation("Operation cancelled for printer {PName} ({PId})", p.Name, p.Id);
                 throw;
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Parallel operation failed for printer {p.Name} ({p.Id}): {ex.Message}");
+                _logger.LogError("Parallel operation failed for printer {PName} ({PId}): {Message}", p.Name, p.Id, ex.Message);
                 onError(p, ex);
                 return null;
             }

@@ -84,7 +84,7 @@ public class HistorySeedingBackgroundService(
 
         _serviceMonitor.ReportEnabled(ServiceId, true);
         _logger.LogInformation(
-            $"History seeding service started. Interval: {settings.IntervalMinutes}m, Initial delay: {settings.InitialDelaySeconds}s (fetches all available history)");
+            "History seeding service started. Interval: {SettingsIntervalMinutes}m, Initial delay: {SettingsInitialDelaySeconds}s (fetches all available history)", settings.IntervalMinutes, settings.InitialDelaySeconds);
 
         // Initial delay to let the system stabilize
         await Task.Delay(TimeSpan.FromSeconds(settings.InitialDelaySeconds), stoppingToken);

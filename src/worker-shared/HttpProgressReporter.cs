@@ -39,12 +39,12 @@ public class HttpProgressReporter : IProgressReporter
             HttpResponseMessage response = await _httpClient.PutAsync($"{_apiBaseUrl}/api/workers/progress", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning($"Progress report failed {jobId} status {response.StatusCode}");
+                _logger.LogWarning("Progress report failed {JobId} status {StatusCode}", jobId, response.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error reporting progress {jobId}");
+            _logger.LogError(ex, "Error reporting progress {JobId}", jobId);
         }
     }
 
@@ -70,12 +70,12 @@ public class HttpProgressReporter : IProgressReporter
             HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/complete", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning($"Completion report failed {job.Id} status {response.StatusCode}");
+                _logger.LogWarning("Completion report failed {JobId} status {StatusCode}", job.Id, response.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error reporting completion {job.Id}");
+            _logger.LogError(ex, "Error reporting completion {JobId}", job.Id);
         }
     }
 
@@ -87,12 +87,12 @@ public class HttpProgressReporter : IProgressReporter
             HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/failure", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning($"Failure report failed {jobId} status {response.StatusCode}");
+                _logger.LogWarning("Failure report failed {JobId} status {StatusCode}", jobId, response.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error reporting failure {jobId}");
+            _logger.LogError(ex, "Error reporting failure {JobId}", jobId);
         }
     }
 }

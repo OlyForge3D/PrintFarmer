@@ -81,18 +81,18 @@ namespace Farm.Backend.Plugin.OctoPrint
                 }
                 else
                 {
-                    _logger.LogWarning($"[OctoPrint] Failed to retrieve status for printer {printer.Id}");
+                    _logger.LogWarning("[OctoPrint] Failed to retrieve status for printer {PrinterId}", printer.Id);
                     return CreateOfflineStatus(printer.Id);
                 }
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning($"[OctoPrint] Status timeout for printer {printer.Id}");
+                _logger.LogWarning("[OctoPrint] Status timeout for printer {PrinterId}", printer.Id);
                 return CreateOfflineStatus(printer.Id);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[OctoPrint] Error getting status for printer {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[OctoPrint] Error getting status for printer {PrinterId}: {Message}", printer.Id, ex.Message);
                 return CreateOfflineStatus(printer.Id);
             }
         }
@@ -149,7 +149,7 @@ namespace Farm.Backend.Plugin.OctoPrint
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[OctoPrint] Error getting printer DTO for {printer.Id}: {ex.Message}");
+                _logger.LogError("[OctoPrint] Error getting printer DTO for {PrinterId}: {Message}", printer.Id, ex.Message);
                 throw;
             }
         }
@@ -159,7 +159,7 @@ namespace Farm.Backend.Plugin.OctoPrint
             ArgumentNullException.ThrowIfNull(printer);
 
             // OctoPrint camera support would be implemented here
-            _logger.LogWarning($"[OctoPrint] Camera stream URLs not yet implemented for printer {printer.Id}");
+            _logger.LogWarning("[OctoPrint] Camera stream URLs not yet implemented for printer {PrinterId}", printer.Id);
             await Task.CompletedTask;
             return null;
         }
@@ -169,7 +169,7 @@ namespace Farm.Backend.Plugin.OctoPrint
             ArgumentNullException.ThrowIfNull(printer);
 
             // OctoPrint camera support would be implemented here
-            _logger.LogWarning($"[OctoPrint] Camera snapshot URLs not yet implemented for printer {printer.Id}");
+            _logger.LogWarning("[OctoPrint] Camera snapshot URLs not yet implemented for printer {PrinterId}", printer.Id);
             await Task.CompletedTask;
             return null;
         }

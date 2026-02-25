@@ -46,8 +46,8 @@ public class ConsoleRedirectionService(ILogger<ConsoleRedirectionService> unifie
 
     public void RedirectConsoleOutput()
     {
-        _consoleWriter = new UnifiedConsoleWriter(_unifiedLogger, LogLevel.Information, "Console");
-        _errorWriter = new UnifiedConsoleWriter(_unifiedLogger, LogLevel.Error, "Console.Error");
+        _consoleWriter = new UnifiedConsoleWriter(_unifiedLogger, LogLevel.Information);
+        _errorWriter = new UnifiedConsoleWriter(_unifiedLogger, LogLevel.Error);
 
         Console.SetOut(_consoleWriter);
         Console.SetError(_errorWriter);
@@ -85,11 +85,10 @@ public class ConsoleRedirectionService(ILogger<ConsoleRedirectionService> unifie
     }
 }
 
-internal class UnifiedConsoleWriter(ILogger<ConsoleRedirectionService> unifiedLogger, LogLevel logLevel, string category) : TextWriter
+internal class UnifiedConsoleWriter(ILogger<ConsoleRedirectionService> unifiedLogger, LogLevel logLevel) : TextWriter
 {
     private readonly ILogger<ConsoleRedirectionService> _unifiedLogger = unifiedLogger;
     private readonly LogLevel _logLevel = logLevel;
-    private readonly string _category = category;
     private readonly StringBuilder _buffer = new();
 
     public override Encoding Encoding => Encoding.UTF8;

@@ -32,7 +32,7 @@ public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, ILogger<
                 int deletedCount = await logRepository.DeleteLogsOlderThanAsync(cutoff, stoppingToken);
                 if (deletedCount > 0)
                 {
-                    _logger.LogInformation($"SystemLogCleanupService: Deleted {deletedCount} logs older than {retentionDays} days");
+                    _logger.LogInformation("SystemLogCleanupService: Deleted {DeletedCount} logs older than {RetentionDays} days", deletedCount, retentionDays);
                 }
             }
             catch (Exception ex)

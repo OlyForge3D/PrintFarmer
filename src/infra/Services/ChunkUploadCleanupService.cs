@@ -24,7 +24,7 @@ public class ChunkUploadCleanupService(ILogger<ChunkUploadCleanupService> logger
             }
             catch (Exception ex)
             {
-                _logger.LogDebug($"Chunk cleanup sweep failed: {ex.Message}");
+                _logger.LogDebug("Chunk cleanup sweep failed: {Message}", ex.Message);
             }
 
             await Task.Delay(_interval, stoppingToken);
@@ -74,7 +74,7 @@ public class ChunkUploadCleanupService(ILogger<ChunkUploadCleanupService> logger
 
         if (removed > 0)
         {
-            _logger.LogInformation($"Chunk cleanup removed {removed} stale uploads");
+            _logger.LogInformation("Chunk cleanup removed {Removed} stale uploads", removed);
         }
     }
 }

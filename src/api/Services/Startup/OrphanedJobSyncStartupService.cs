@@ -53,7 +53,7 @@ public class OrphanedJobSyncStartupService : BackgroundService
 
             if (syncedCount > 0)
             {
-                _logger.LogInformation($"[OrphanedJobSync] Startup sync completed: {syncedCount} orphaned job(s) synchronized");
+                _logger.LogInformation("[OrphanedJobSync] Startup sync completed: {SyncedCount} orphaned job(s) synchronized", syncedCount);
             }
             else
             {

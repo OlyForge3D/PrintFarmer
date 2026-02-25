@@ -27,7 +27,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
     /// <param name="delaySeconds">Delay in seconds between retry attempts.</param>
     public virtual async Task InitializeAsync(string dbProvider, int maxRetries = 10, int delaySeconds = 5)
     {
-        _logger.LogInformation($"[DB] Starting database initialization for provider: {dbProvider}");
+        _logger.LogInformation("[DB] Starting database initialization for provider: {DbProvider}", dbProvider);
 
         int retryCount = 0;
 
@@ -56,13 +56,13 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                         }
                         catch (Exception colEx)
                         {
-                            _logger.LogWarning(colEx, $"[DB] Non-fatal: automatic shadow column/index verification failed: {colEx.Message}");
+                            _logger.LogWarning(colEx, "[DB] Non-fatal: automatic shadow column/index verification failed: {ColExMessage}", colEx.Message);
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, $"[DB] EnsureCreated failed: {ex.Message}. Attempting manual schema initialization for SQLite.");
+                    _logger.LogWarning(ex, "[DB] EnsureCreated failed: {Message}. Attempting manual schema initialization for SQLite.", ex.Message);
 
                     // Fallback: very early containers (or volume permission issues) sometimes cause EnsureCreated to throw
                     // For SQLite only, attempt a minimal manual schema verification/creation of the Users table presence heuristic.
@@ -86,7 +86,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                                 }
                                 catch (Exception colEx)
                                 {
-                                    _logger.LogWarning(colEx, $"[DB] Non-fatal (fallback path): automatic shadow column/index verification failed: {colEx.Message}");
+                                    _logger.LogWarning(colEx, "[DB] Non-fatal (fallback path): automatic shadow column/index verification failed: {ColExMessage}", colEx.Message);
                                 }
                             }
                         }
@@ -97,7 +97,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                     }
                     catch (Exception inner)
                     {
-                        _logger.LogError(inner, $"[DB] Manual fallback schema initialization failed. Will retry (attempt {retryCount + 1})");
+                        _logger.LogError(inner, "[DB] Manual fallback schema initialization failed. Will retry (attempt {Value0})", retryCount + 1);
                         throw; // Bubble to retry loop
                     }
                 }
@@ -118,14 +118,14 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                     catch (Microsoft.Data.Sqlite.SqliteException sqlEx) when (sqlEx.Message?.Contains("no such table", StringComparison.OrdinalIgnoreCase) == true && seedAttempt < seedMaxAttempts)
                     {
                         seedAttempt++;
-                        _logger.LogWarning(sqlEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing table (SQLite); retrying in 2s...");
+                        _logger.LogWarning(sqlEx, "[DB] Seed attempt {SeedAttempt}/{SeedMaxAttempts} failed due to missing table (SQLite); retrying in 2s...", seedAttempt, seedMaxAttempts);
                         await Task.Delay(TimeSpan.FromSeconds(2));
                     }
                     catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P01" && seedAttempt < seedMaxAttempts)
                     {
                         // PostgreSQL error 42P01 = relation does not exist (table/view not found)
                         seedAttempt++;
-                        _logger.LogWarning(pgEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing relation (PostgreSQL); retrying in 2s...");
+                        _logger.LogWarning(pgEx, "[DB] Seed attempt {SeedAttempt}/{SeedMaxAttempts} failed due to missing relation (PostgreSQL); retrying in 2s...", seedAttempt, seedMaxAttempts);
                         await Task.Delay(TimeSpan.FromSeconds(2));
                     }
                 }
@@ -140,14 +140,14 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 {
                     _logger.LogWarning(
                         ex,
-                        $"[DB] Database initialization attempt {retryCount}/{maxRetries} failed: {ex.Message}. Retrying in {delaySeconds} seconds...");
+                        "[DB] Database initialization attempt {RetryCount}/{MaxRetries} failed: {Message}. Retrying in {DelaySeconds} seconds...", retryCount, maxRetries, ex.Message, delaySeconds);
                     await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
                 }
                 else
                 {
                     _logger.LogError(
                         ex,
-                        $"[DB] Database initialization failed after {maxRetries} attempts. Last error: {ex.Message}");
+                        "[DB] Database initialization failed after {MaxRetries} attempts. Last error: {Message}", maxRetries, ex.Message);
                     throw new InvalidOperationException(
                         $"Failed to initialize database after {maxRetries} attempts. " +
                         $"This usually indicates the database server is not ready or connection settings are incorrect. " +
@@ -464,7 +464,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"[DB] Database connection validation failed: {ex.Message}");
+            _logger.LogWarning(ex, "[DB] Database connection validation failed: {Message}", ex.Message);
             return false;
         }
     }
@@ -521,7 +521,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                     alter.Transaction = tx;
                     alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT ''";
                     _ = await alter.ExecuteNonQueryAsync();
-                    _logger.LogInformation($"[DB] Added missing column {table}.{column}");
+                    _logger.LogInformation("[DB] Added missing column {Table}.{Column}", table, column);
                 }
             }
 
@@ -544,7 +544,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 int rows = await upd.ExecuteNonQueryAsync();
                 if (rows >= 0)
                 {
-                    _logger.LogDebug($"[DB] Backfilled {rows} rows for {table}.NameLowered");
+                    _logger.LogDebug("[DB] Backfilled {Rows} rows for {Table}.NameLowered", rows, table);
                 }
             }
 
@@ -556,11 +556,11 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 try
                 {
                     _ = await cmd.ExecuteNonQueryAsync();
-                    _logger.LogInformation($"[DB] Ensured index: {description}");
+                    _logger.LogInformation("[DB] Ensured index: {Description}", description);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, $"[DB] Failed to ensure index {description}: {ex.Message}");
+                    _logger.LogWarning(ex, "[DB] Failed to ensure index {Description}: {Message}", description, ex.Message);
                 }
             }
 

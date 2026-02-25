@@ -95,12 +95,7 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
             }
 
             string endpoint = isLogin ? "login" : "register";
-            _logger.LogWarning($"Rate limit exceeded for {endpoint} from IP {ipAddress}", null, new
-            {
-                Endpoint = endpoint,
-                IpAddress = ipAddress,
-                RetryAfterSeconds = rateLimitResult.RetryAfter?.TotalSeconds
-            });
+            _logger.LogWarning("Rate limit exceeded for {Endpoint} from IP {IpAddress}", endpoint, ipAddress);
 
             await context.Response.WriteAsJsonAsync(new
             {

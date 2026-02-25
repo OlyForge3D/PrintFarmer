@@ -101,7 +101,7 @@ public class PrintProjectTemplateService(AppDbContext db, ILogger<PrintProjectTe
         }
 
         await db.SaveChangesAsync(ct);
-        logger.LogInformation($"Created project template {template.Id}: {template.Name}");
+        logger.LogInformation("Created project template {TemplateId}: {TemplateName}", template.Id, template.Name);
 
         return MapToDetailDto(template);
     }
@@ -166,7 +166,7 @@ public class PrintProjectTemplateService(AppDbContext db, ILogger<PrintProjectTe
 
         if (template.IsSystemTemplate)
         {
-            logger.LogWarning($"Cannot delete system template {templateId}");
+            logger.LogWarning("Cannot delete system template {TemplateId}", templateId);
             return false;
         }
 

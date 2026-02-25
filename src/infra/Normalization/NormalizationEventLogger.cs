@@ -54,7 +54,7 @@ public sealed class NormalizationEventLogger(ILogger<NormalizationEventLogger> l
 
         if (counter.Count <= ThresholdPerWindow)
         {
-            _logger.LogInformation($"Normalization {entityType} normalized '{original}' -> '{normalized}' source={source ?? "unknown"} count={counter.Count}");
+            _logger.LogInformation("Normalization {EntityType} normalized '{Original}' -> '{Normalized}' source={Source} count={CounterCount}", entityType, original, normalized, source ?? "unknown", counter.Count);
         }
     }
 }

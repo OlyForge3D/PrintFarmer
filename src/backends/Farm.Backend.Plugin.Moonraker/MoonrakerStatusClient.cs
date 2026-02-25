@@ -44,7 +44,7 @@ namespace Farm.Backend.Plugin.Moonraker
 
             try
             {
-                _logger.LogInformation($"[Moonraker] GetPrinterStatusAsync for {printer.Name} (ID={printer.Id}): BackendUrl={printer.BackendUrl}");
+                _logger.LogInformation("[Moonraker] GetPrinterStatusAsync for {PrinterName} (ID={PrinterId}): BackendUrl={PrinterBackendUrl}", printer.Name, printer.Id, printer.BackendUrl);
 
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
 
@@ -52,7 +52,7 @@ namespace Farm.Backend.Plugin.Moonraker
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
 
-                _logger.LogInformation($"[Moonraker] Status received for {printer.Name}: IsOnline={status.IsOnline}, State={status.State}");
+                _logger.LogInformation("[Moonraker] Status received for {PrinterName}: IsOnline={StatusIsOnline}, State={StatusState}", printer.Name, status.IsOnline, status.State);
 
                 return new PrinterStatusDto(
                     Id: printer.Id,
@@ -73,12 +73,12 @@ namespace Farm.Backend.Plugin.Moonraker
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning($"[Moonraker] Status timeout for printer {printer.Id}");
+                _logger.LogWarning("[Moonraker] Status timeout for printer {PrinterId}", printer.Id);
                 return CreateOfflineStatus(printer.Id);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[Moonraker] Error getting status for printer {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[Moonraker] Error getting status for printer {PrinterId}: {Message}", printer.Id, ex.Message);
                 return CreateOfflineStatus(printer.Id);
             }
         }
@@ -89,7 +89,7 @@ namespace Farm.Backend.Plugin.Moonraker
 
             try
             {
-                _logger.LogInformation($"[Moonraker] GetPrinterDtoAsync for {printer.Name} (ID={printer.Id}): BackendUrl={printer.BackendUrl}");
+                _logger.LogInformation("[Moonraker] GetPrinterDtoAsync for {PrinterName} (ID={PrinterId}): BackendUrl={PrinterBackendUrl}", printer.Name, printer.Id, printer.BackendUrl);
 
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
 
@@ -100,13 +100,13 @@ namespace Farm.Backend.Plugin.Moonraker
                 // Get Spoolman integration info for Moonraker
                 PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
 
-                _logger.LogInformation($"[Moonraker] DTO created for {printer.Name}: IsOnline={status.IsOnline}, State={status.State}");
+                _logger.LogInformation("[Moonraker] DTO created for {PrinterName}: IsOnline={StatusIsOnline}, State={StatusState}", printer.Name, status.IsOnline, status.State);
 
                 return await _client.CreatePrinterDtoAsync(printer, status, spoolInfo, ct);
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[Moonraker] Error getting printer DTO for {printer.Id}: {ex.Message}");
+                _logger.LogError("[Moonraker] Error getting printer DTO for {PrinterId}: {Message}", printer.Id, ex.Message);
                 throw;
             }
         }
@@ -170,13 +170,13 @@ namespace Farm.Backend.Plugin.Moonraker
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"[Moonraker] Failed to parse spool details: {ex.Message}");
+                    _logger.LogWarning("[Moonraker] Failed to parse spool details: {Message}", ex.Message);
                     return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug($"[Moonraker] Error getting spool info: {ex.Message}");
+                _logger.LogDebug("[Moonraker] Error getting spool info: {Message}", ex.Message);
                 return null;
             }
         }
@@ -191,7 +191,7 @@ namespace Farm.Backend.Plugin.Moonraker
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[Moonraker] Error getting camera stream URL for {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[Moonraker] Error getting camera stream URL for {PrinterId}: {Message}", printer.Id, ex.Message);
                 return null;
             }
         }
@@ -206,7 +206,7 @@ namespace Farm.Backend.Plugin.Moonraker
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[Moonraker] Error getting camera snapshot URL for {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[Moonraker] Error getting camera snapshot URL for {PrinterId}: {Message}", printer.Id, ex.Message);
                 return null;
             }
         }
@@ -223,7 +223,7 @@ namespace Farm.Backend.Plugin.Moonraker
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[Moonraker] Error checking camera availability for {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[Moonraker] Error checking camera availability for {PrinterId}: {Message}", printer.Id, ex.Message);
                 return false;
             }
         }

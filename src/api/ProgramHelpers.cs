@@ -49,7 +49,7 @@ namespace Farm.Web.Api
                 {
                     if (uls != null)
                     {
-                        uls.LogWarning($"[UnifiedLogging] Deferred console redirection failed: {ex.Message}");
+                        uls.LogWarning("[UnifiedLogging] Deferred console redirection failed: {Message}", ex.Message);
                     }
                     else if (lg != null)
                     {
@@ -164,7 +164,7 @@ namespace Farm.Web.Api
                         string presence = !string.IsNullOrEmpty(auth) ? "present" : "missing";
                         if (startupUls != null)
                         {
-                            startupUls.LogDebug($"[JWT][OnMessageReceived] Authorization header: {presence} tokenSnippet={snippet}");
+                            startupUls.LogDebug("[JWT][OnMessageReceived] Authorization header: {Presence} tokenSnippet={Snippet}", presence, snippet);
                         }
                         else
                         {
@@ -185,7 +185,7 @@ namespace Farm.Web.Api
                         string exMessage = context.Exception.Message;
                         if (startupUls != null)
                         {
-                            startupUls.LogError(context.Exception, $"[JWT][OnAuthenticationFailed] {exType}: {exMessage}");
+                            startupUls.LogError(context.Exception, "[JWT][OnAuthenticationFailed] {ExType}: {ExMessage}", exType, exMessage);
                         }
                         else
                         {
@@ -206,7 +206,7 @@ namespace Farm.Web.Api
                     {
                         if (startupUls != null)
                         {
-                            startupUls.LogInformation($"[JWT][OnTokenValidated] user: {sub}, roles: [{roles}]");
+                            startupUls.LogInformation("[JWT][OnTokenValidated] user: {Sub}, roles: [{Roles}]", sub, roles);
                         }
                         else
                         {
@@ -240,7 +240,7 @@ namespace Farm.Web.Api
                                 {
                                     if (startupUls != null)
                                     {
-                                        startupUls.LogWarning($"[JWT][OnTokenValidated] Token revoked for user: {sub}");
+                                        startupUls.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {Sub}", sub);
                                     }
                                     else
                                     {
@@ -264,7 +264,7 @@ namespace Farm.Web.Api
                         string desc = context.ErrorDescription ?? "<none>";
                         if (startupUls != null)
                         {
-                            startupUls.LogWarning($"[JWT][OnChallenge] Error={error} Desc={desc}");
+                            startupUls.LogWarning("[JWT][OnChallenge] Error={Error} Desc={Desc}", error, desc);
                         }
                         else
                         {

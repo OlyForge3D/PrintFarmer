@@ -42,7 +42,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogDebug($"FlashForge connection test failed for {baseUrl}: {ex.Message}");
+            _logger.LogDebug("FlashForge connection test failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
         }
     }
@@ -113,7 +113,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogDebug($"FlashForge status check failed for {baseUrl}: {ex.Message}");
+            _logger.LogDebug("FlashForge status check failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return new PrinterStatus(false, null);
         }
     }
@@ -160,7 +160,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogDebug($"FlashForge composite status failed for {baseUrl}: {ex.Message}");
+            _logger.LogDebug("FlashForge composite status failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return new PrinterCompositeStatus(false, null, null, null, null, null, null);
         }
     }
@@ -183,7 +183,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogWarning($"FlashForge device info failed for {baseUrl}: {ex.Message}");
+            _logger.LogWarning("FlashForge device info failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return new StandardPrinterInfo { Name = "FlashForge", Firmware = "Unknown", Model = "Unknown" };
         }
     }
@@ -220,7 +220,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
             string beginResponse = await SendAndReadAsync(stream, beginCommand, ct).ConfigureAwait(false);
             if (!beginResponse.Contains("ok", StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning($"FlashForge upload begin rejected: {beginResponse}");
+                _logger.LogWarning("FlashForge upload begin rejected: {BeginResponse}", beginResponse);
                 return false;
             }
 
@@ -238,16 +238,16 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
             string saveResponse = await SendAndReadAsync(stream, "~M29\n", ct).ConfigureAwait(false);
             if (!saveResponse.Contains("ok", StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning($"FlashForge upload save failed: {saveResponse}");
+                _logger.LogWarning("FlashForge upload save failed: {SaveResponse}", saveResponse);
                 return false;
             }
 
-            _logger.LogInformation($"FlashForge: Uploaded {fileName} ({fileBytes.Length} bytes) to {host}:{port}");
+            _logger.LogInformation("FlashForge: Uploaded {FileName} ({FileBytesLength} bytes) to {Host}:{Port}", fileName, fileBytes.Length, host, port);
             return true;
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or IOException)
         {
-            _logger.LogWarning(ex, $"FlashForge upload failed for {baseUrl}/{fileName}", null, null);
+            _logger.LogWarning(ex, "FlashForge upload failed for {BaseUrl}/{FileName}", baseUrl, fileName);
             return false;
         }
     }
@@ -271,16 +271,16 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
 
             if (response.Contains("ok", StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogInformation($"FlashForge: Started print {remotePath} on {host}:{port}");
+                _logger.LogInformation("FlashForge: Started print {RemotePath} on {Host}:{Port}", remotePath, host, port);
                 return true;
             }
 
-            _logger.LogWarning($"FlashForge start print rejected for {remotePath}: {response}");
+            _logger.LogWarning("FlashForge start print rejected for {RemotePath}: {Response}", remotePath, response);
             return false;
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogWarning(ex, $"FlashForge start print failed for {baseUrl}/{fileName}", null, null);
+            _logger.LogWarning(ex, "FlashForge start print failed for {BaseUrl}/{FileName}", baseUrl, fileName);
             return false;
         }
     }
@@ -339,7 +339,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogWarning(ex, $"FlashForge set temperatures failed for {baseUrl}", null, null);
+            _logger.LogWarning(ex, "FlashForge set temperatures failed for {BaseUrl}", baseUrl);
             return false;
         }
     }
@@ -362,7 +362,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogDebug($"FlashForge command {command} failed for {baseUrl}: {ex.Message}");
+            _logger.LogDebug("FlashForge command {Command} failed for {BaseUrl}: {Message}", command, baseUrl, ex.Message);
             return false;
         }
     }

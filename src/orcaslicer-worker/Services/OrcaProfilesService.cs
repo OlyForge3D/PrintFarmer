@@ -100,7 +100,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             if (_allMachineModelProfilesCache != null)
             {
-                _logger.LogInformation($"Returning {_allMachineModelProfilesCache.Count} machine model profiles from cache");
+                _logger.LogInformation("Returning {Count} machine model profiles from cache", _allMachineModelProfilesCache.Count);
                 return _allMachineModelProfilesCache;
             }
         }
@@ -109,11 +109,11 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         try
         {
-            _logger.LogInformation($"Loading OrcaSlicer machine MODEL profiles (base templates) from bundles in: {_orcaProfilesPath}");
+            _logger.LogInformation("Loading OrcaSlicer machine MODEL profiles (base templates) from bundles in: {OrcaProfilesPath}", _orcaProfilesPath);
 
             if (!Directory.Exists(_orcaProfilesPath))
             {
-                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
+                _logger.LogWarning("OrcaSlicer profiles directory not found: {OrcaProfilesPath}", _orcaProfilesPath);
                 return profiles;
             }
 
@@ -122,7 +122,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 .Where(f => !Path.GetFileName(f).StartsWith('.')) // Skip hidden files
                 .ToList();
 
-            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files for machine model profiles");
+            _logger.LogInformation("Found {BundleFilesCount} manufacturer bundle files for machine model profiles", bundleFiles.Count);
 
             int successCount = 0;
             int failureCount = 0;
@@ -150,7 +150,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                     string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                     if (!File.Exists(profilePath))
                                     {
-                                        _logger.LogWarning($"Machine model profile referenced in bundle not found: {profilePath}");
+                                        _logger.LogWarning("Machine model profile referenced in bundle not found: {ProfilePath}", profilePath);
                                         failureCount++;
                                         continue;
                                     }
@@ -170,7 +170,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 }
                                 catch (Exception ex)
                                 {
-                                    _logger.LogWarning($"Failed to load machine model profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                    _logger.LogWarning("Failed to load machine model profile '{EntryName}' from bundle '{BundleName}': {Message}", entry.Name, bundle.Name, ex.Message);
                                     failureCount++;
                                 }
                             }
@@ -179,12 +179,12 @@ public class OrcaProfilesService : ISlicerProfilesService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
+                    _logger.LogWarning("Failed to parse manufacturer bundle '{PathGetFileName}': {Message}", Path.GetFileName(bundleFile), ex.Message);
                     failureCount++;
                 }
             }
 
-            _logger.LogInformation($"Loaded {successCount} machine MODEL profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            _logger.LogInformation("Loaded {SuccessCount} machine MODEL profiles ({FailureCount} failures from {BundleFilesCount} bundles)", successCount, failureCount, bundleFiles.Count);
 
             // Cache the results
             lock (_profilesCacheLock)
@@ -196,7 +196,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error loading machine model profiles: {ex.Message}");
+            _logger.LogError("Error loading machine model profiles: {Message}", ex.Message);
             return profiles;
         }
     }
@@ -212,7 +212,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             if (_allMachineProfilesCache != null)
             {
-                _logger.LogInformation($"Returning {_allMachineProfilesCache.Count} machine profiles from cache");
+                _logger.LogInformation("Returning {Count} machine profiles from cache", _allMachineProfilesCache.Count);
                 return _allMachineProfilesCache;
             }
         }
@@ -221,11 +221,11 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         try
         {
-            _logger.LogInformation($"Loading OrcaSlicer machine profiles (nozzle variants) from bundles in: {_orcaProfilesPath}");
+            _logger.LogInformation("Loading OrcaSlicer machine profiles (nozzle variants) from bundles in: {OrcaProfilesPath}", _orcaProfilesPath);
 
             if (!Directory.Exists(_orcaProfilesPath))
             {
-                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
+                _logger.LogWarning("OrcaSlicer profiles directory not found: {OrcaProfilesPath}", _orcaProfilesPath);
                 return profiles;
             }
 
@@ -234,7 +234,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 .Where(f => !Path.GetFileName(f).StartsWith('.')) // Skip hidden files
                 .ToList();
 
-            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
+            _logger.LogInformation("Found {BundleFilesCount} manufacturer bundle files", bundleFiles.Count);
 
             int successCount = 0;
             int failureCount = 0;
@@ -262,7 +262,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                     string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                     if (!File.Exists(profilePath))
                                     {
-                                        _logger.LogWarning($"Machine profile referenced in bundle not found: {profilePath}");
+                                        _logger.LogWarning("Machine profile referenced in bundle not found: {ProfilePath}", profilePath);
                                         failureCount++;
                                         continue;
                                     }
@@ -282,7 +282,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 }
                                 catch (Exception ex)
                                 {
-                                    _logger.LogWarning($"Failed to load machine profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                    _logger.LogWarning("Failed to load machine profile '{EntryName}' from bundle '{BundleName}': {Message}", entry.Name, bundle.Name, ex.Message);
                                     failureCount++;
                                 }
                             }
@@ -291,12 +291,12 @@ public class OrcaProfilesService : ISlicerProfilesService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
+                    _logger.LogWarning("Failed to parse manufacturer bundle '{PathGetFileName}': {Message}", Path.GetFileName(bundleFile), ex.Message);
                     failureCount++;
                 }
             }
 
-            _logger.LogInformation($"Loaded {successCount} machine profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            _logger.LogInformation("Loaded {SuccessCount} machine profiles ({FailureCount} failures from {BundleFilesCount} bundles)", successCount, failureCount, bundleFiles.Count);
 
             // Cache the results
             lock (_profilesCacheLock)
@@ -308,7 +308,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error loading machine profiles: {ex.Message}");
+            _logger.LogError("Error loading machine profiles: {Message}", ex.Message);
             return profiles;
         }
     }
@@ -321,7 +321,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             if (_allFilamentProfilesCache != null)
             {
-                _logger.LogInformation($"Returning {_allFilamentProfilesCache.Count} filament profiles from cache");
+                _logger.LogInformation("Returning {Count} filament profiles from cache", _allFilamentProfilesCache.Count);
                 return _allFilamentProfilesCache;
             }
         }
@@ -330,11 +330,11 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         try
         {
-            _logger.LogInformation($"Loading OrcaSlicer filament profiles from bundles in: {_orcaProfilesPath}");
+            _logger.LogInformation("Loading OrcaSlicer filament profiles from bundles in: {OrcaProfilesPath}", _orcaProfilesPath);
 
             if (!Directory.Exists(_orcaProfilesPath))
             {
-                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
+                _logger.LogWarning("OrcaSlicer profiles directory not found: {OrcaProfilesPath}", _orcaProfilesPath);
                 return profiles;
             }
 
@@ -345,7 +345,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 .Where(f => !Path.GetFileName(f).StartsWith('.'))
                 .ToList();
 
-            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
+            _logger.LogInformation("Found {BundleFilesCount} manufacturer bundle files", bundleFiles.Count);
 
             int successCount = 0;
             int failureCount = 0;
@@ -371,7 +371,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
-                                    _logger.LogWarning($"Filament profile referenced in bundle not found: {profilePath}");
+                                    _logger.LogWarning("Filament profile referenced in bundle not found: {ProfilePath}", profilePath);
                                     failureCount++;
                                     continue;
                                 }
@@ -405,7 +405,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning($"Failed to load filament profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                _logger.LogWarning("Failed to load filament profile '{EntryName}' from bundle '{BundleName}': {Message}", entry.Name, bundle.Name, ex.Message);
                                 failureCount++;
                             }
                         }
@@ -413,12 +413,12 @@ public class OrcaProfilesService : ISlicerProfilesService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
+                    _logger.LogWarning("Failed to parse manufacturer bundle '{PathGetFileName}': {Message}", Path.GetFileName(bundleFile), ex.Message);
                     failureCount++;
                 }
             }
 
-            _logger.LogInformation($"Loaded {successCount} filament profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            _logger.LogInformation("Loaded {SuccessCount} filament profiles ({FailureCount} failures from {BundleFilesCount} bundles)", successCount, failureCount, bundleFiles.Count);
 
             // Cache the results
             lock (_profilesCacheLock)
@@ -430,7 +430,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error loading filament profiles: {ex.Message}");
+            _logger.LogError("Error loading filament profiles: {Message}", ex.Message);
             return profiles;
         }
     }
@@ -442,7 +442,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             if (_allProcessProfilesCache != null)
             {
-                _logger.LogInformation($"Returning {_allProcessProfilesCache.Count} process profiles from cache");
+                _logger.LogInformation("Returning {Count} process profiles from cache", _allProcessProfilesCache.Count);
                 return _allProcessProfilesCache;
             }
         }
@@ -451,11 +451,11 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         try
         {
-            _logger.LogInformation($"Loading OrcaSlicer process profiles from bundles in: {_orcaProfilesPath}");
+            _logger.LogInformation("Loading OrcaSlicer process profiles from bundles in: {OrcaProfilesPath}", _orcaProfilesPath);
 
             if (!Directory.Exists(_orcaProfilesPath))
             {
-                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
+                _logger.LogWarning("OrcaSlicer profiles directory not found: {OrcaProfilesPath}", _orcaProfilesPath);
                 return profiles;
             }
 
@@ -466,7 +466,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 .Where(f => !Path.GetFileName(f).StartsWith('.'))
                 .ToList();
 
-            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
+            _logger.LogInformation("Found {BundleFilesCount} manufacturer bundle files", bundleFiles.Count);
 
             int successCount = 0;
             int failureCount = 0;
@@ -492,7 +492,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
-                                    _logger.LogWarning($"Process profile referenced in bundle not found: {profilePath}");
+                                    _logger.LogWarning("Process profile referenced in bundle not found: {ProfilePath}", profilePath);
                                     failureCount++;
                                     continue;
                                 }
@@ -524,7 +524,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning($"Failed to load process profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                _logger.LogWarning("Failed to load process profile '{EntryName}' from bundle '{BundleName}': {Message}", entry.Name, bundle.Name, ex.Message);
                                 failureCount++;
                             }
                         }
@@ -532,12 +532,12 @@ public class OrcaProfilesService : ISlicerProfilesService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
+                    _logger.LogWarning("Failed to parse manufacturer bundle '{PathGetFileName}': {Message}", Path.GetFileName(bundleFile), ex.Message);
                     failureCount++;
                 }
             }
 
-            _logger.LogInformation($"Loaded {successCount} process profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            _logger.LogInformation("Loaded {SuccessCount} process profiles ({FailureCount} failures from {BundleFilesCount} bundles)", successCount, failureCount, bundleFiles.Count);
 
             // Cache the results
             lock (_profilesCacheLock)
@@ -549,7 +549,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error loading process profiles: {ex.Message}");
+            _logger.LogError("Error loading process profiles: {Message}", ex.Message);
             return profiles;
         }
     }
@@ -564,7 +564,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to parse manufacturer bundle {Path.GetFileName(bundleFilePath)}: {ex.Message}");
+            _logger.LogWarning("Failed to parse manufacturer bundle {PathGetFileName}: {Message}", Path.GetFileName(bundleFilePath), ex.Message);
             return null;
         }
     }
@@ -607,7 +607,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to load profile from {filePath}: {ex.Message}");
+            _logger.LogWarning("Failed to load profile from {FilePath}: {Message}", filePath, ex.Message);
             return null;
         }
     }
@@ -634,7 +634,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to build resolved profile for {filePath}: {ex.Message}");
+            _logger.LogWarning("Failed to build resolved profile for {FilePath}: {Message}", filePath, ex.Message);
             return null;
         }
     }
@@ -679,26 +679,26 @@ public class OrcaProfilesService : ISlicerProfilesService
 
                     if (parentProfilePath != null && File.Exists(parentProfilePath))
                     {
-                        _logger.LogInformation($"Resolving inheritance: '{inheritedProfileName}' → '{parentProfilePath}'");
+                        _logger.LogInformation("Resolving inheritance: '{InheritedProfileName}' → '{ParentProfilePath}'", inheritedProfileName, parentProfilePath);
 
                         // Recursively load parent chain first (so parents are added before children)
                         if (!CollectInheritanceChainAsJson(parentProfilePath, chain, visited))
                         {
-                            _logger.LogWarning($"Failed to load parent profile '{inheritedProfileName}' for '{filePath}'");
+                            _logger.LogWarning("Failed to load parent profile '{InheritedProfileName}' for '{FilePath}'", inheritedProfileName, filePath);
 
                             // Don't fail - continue with what we have
                         }
                     }
                     else
                     {
-                        _logger.LogWarning($"Parent profile '{inheritedProfileName}' not found for '{filePath}' (resolved to: {parentProfilePath ?? "null"})");
+                        _logger.LogWarning("Parent profile '{InheritedProfileName}' not found for '{FilePath}' (resolved to: {ParentProfilePath})", inheritedProfileName, filePath, parentProfilePath ?? "null");
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to parse profile {filePath}: {ex.Message}");
+            _logger.LogWarning("Failed to parse profile {FilePath}: {Message}", filePath, ex.Message);
             return false;
         }
 
@@ -743,7 +743,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Failed to load profile from disk {filePath}: {ex.Message}");
+                _logger.LogWarning("Failed to load profile from disk {FilePath}: {Message}", filePath, ex.Message);
                 return null;
             }
         }
@@ -814,7 +814,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to merge profile JSONs: {ex.Message}");
+            _logger.LogWarning("Failed to merge profile JSONs: {Message}", ex.Message);
             return null;
         }
     }
@@ -829,7 +829,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         string? manufacturerDir = GetManufacturerDirectory(childFilePath);
         if (manufacturerDir == null)
         {
-            _logger.LogDebug($"Could not determine manufacturer directory for '{childFilePath}'");
+            _logger.LogDebug("Could not determine manufacturer directory for '{ChildFilePath}'", childFilePath);
             return null;
         }
 
@@ -839,7 +839,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         Dictionary<string, string>? lookup = GetOrBuildProfilePathLookup(manufacturerName, manufacturerDir);
         if (lookup == null)
         {
-            _logger.LogDebug($"No manifest found for manufacturer '{manufacturerName}'");
+            _logger.LogDebug("No manifest found for manufacturer '{ManufacturerName}'", manufacturerName);
             return null;
         }
 
@@ -850,7 +850,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         // Not found in manifest - this is expected for some base profiles that may be shared
-        _logger.LogDebug($"Parent profile '{parentProfileName}' not found in {manufacturerName} manifest");
+        _logger.LogDebug("Parent profile '{ParentProfileName}' not found in {ManufacturerName} manifest", parentProfileName, manufacturerName);
         return null;
     }
 
@@ -901,7 +901,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         string manifestPath = Path.Combine(_orcaProfilesPath, $"{manufacturerName}.json");
         if (!File.Exists(manifestPath))
         {
-            _logger.LogDebug($"Manifest file not found: {manifestPath}");
+            _logger.LogDebug("Manifest file not found: {ManifestPath}", manifestPath);
             return null;
         }
 
@@ -924,7 +924,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             _profilePathLookupCache[manufacturerName] = lookup;
         }
 
-        _logger.LogDebug($"Built profile path lookup for {manufacturerName}: {lookup.Count} entries");
+        _logger.LogDebug("Built profile path lookup for {ManufacturerName}: {LookupCount} entries", manufacturerName, lookup.Count);
         return lookup;
     }
 
@@ -988,7 +988,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         else
         {
-            _logger.LogWarning($"Machine profile '{profile.Name}' missing required 'nozzle_diameter' property in {filePath}");
+            _logger.LogWarning("Machine profile '{ProfileName}' missing required 'nozzle_diameter' property in {FilePath}", profile.Name, filePath);
             return null; // Reject profiles without nozzle_diameter
         }
 

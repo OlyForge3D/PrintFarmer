@@ -505,7 +505,7 @@ namespace Farm.Web.Api.Services.Gcode
                 // Duplicate detected - delete the newly uploaded file and return existing record
                 string hashPrefix = fileHash.Length > 12 ? fileHash[..12] : fileHash;
                 _logger.LogInformation(
-                    $"File {originalName} already exists (hash {hashPrefix}), returning existing record {existingFile.Id}");
+                    "File {OriginalName} already exists (hash {HashPrefix}), returning existing record {ExistingFileId}", originalName, hashPrefix, existingFile.Id);
 
                 TryDeleteFile(fullTarget, "duplicate file");
 
@@ -741,7 +741,7 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Track the folder in the database (virtual organization, not physical directories)
             FolderNode folder = await _folderService.GetOrCreateFolderAsync(folderPath, "gcode", ct);
-            _logger.LogInformation($"[MakeDirectory] Created virtual folder in database: {folderPath}");
+            _logger.LogInformation("[MakeDirectory] Created virtual folder in database: {FolderPath}", folderPath);
 
             GcodeFileEntryDto dto = new(
                 Path: folderPath,
@@ -772,7 +772,7 @@ namespace Farm.Web.Api.Services.Gcode
                 GcodeFile? gcodeFile = await _gcodeRepo.GetByIdWithIncludesAsync(fileId, ct);
                 if (gcodeFile == null)
                 {
-                    _logger.LogWarning($"[MoveToFolder] File not found: {fileId}");
+                    _logger.LogWarning("[MoveToFolder] File not found: {FileId}", fileId);
                     return false;
                 }
 
@@ -785,12 +785,12 @@ namespace Farm.Web.Api.Services.Gcode
                 // Save changes to database
                 await _gcodeRepo.SaveChangesAsync(ct);
 
-                _logger.LogInformation($"[MoveToFolder] Moved file {gcodeFile.FileName} to folder {targetFolderPath}");
+                _logger.LogInformation("[MoveToFolder] Moved file {GcodeFileFileName} to folder {TargetFolderPath}", gcodeFile.FileName, targetFolderPath);
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[MoveToFolder] Failed to move file {fileId}: {ex.Message}");
+                _logger.LogError("[MoveToFolder] Failed to move file {FileId}: {Message}", fileId, ex.Message);
                 return false;
             }
         }
@@ -810,7 +810,7 @@ namespace Farm.Web.Api.Services.Gcode
         {
             List<Guid> fileIdsList = fileIds.ToList();
 
-            _logger.LogInformation($"[DeleteFilesAsync] Starting deletion of {fileIdsList.Count} file(s) by ID");
+            _logger.LogInformation("[DeleteFilesAsync] Starting deletion of {FileIdsListCount} file(s) by ID", fileIdsList.Count);
 
             // Step 1: Get all file records from database by ID
             List<GcodeFile> filesToDelete = new();
@@ -824,16 +824,16 @@ namespace Farm.Web.Api.Services.Gcode
                     if (file != null)
                     {
                         filesToDelete.Add(file);
-                        _logger.LogInformation($"[DeleteFilesAsync] Found file {file.FileName} (ID: {fileId})");
+                        _logger.LogInformation("[DeleteFilesAsync] Found file {FileFileName} (ID: {FileId})", file.FileName, fileId);
                     }
                     else
                     {
-                        _logger.LogWarning($"[DeleteFilesAsync] File not found in database: {fileId}");
+                        _logger.LogWarning("[DeleteFilesAsync] File not found in database: {FileId}", fileId);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"[DeleteFilesAsync] Failed to retrieve file {fileId}: {ex.Message}");
+                    _logger.LogWarning("[DeleteFilesAsync] Failed to retrieve file {FileId}: {Message}", fileId, ex.Message);
                 }
             }
 
@@ -864,16 +864,16 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             // Step 4: Delete database records first (before deleting physical files)
-            _logger.LogInformation($"[DeleteFilesAsync] Deleting {filesToDelete.Count} record(s) from database");
+            _logger.LogInformation("[DeleteFilesAsync] Deleting {FilesToDeleteCount} record(s) from database", filesToDelete.Count);
 
             foreach (GcodeFile file in filesToDelete)
             {
-                _logger.LogInformation($"[DeleteFilesAsync]   - Removing from DB: {file.FileName} (ID: {file.Id})");
+                _logger.LogInformation("[DeleteFilesAsync]   - Removing from DB: {FileFileName} (ID: {FileId})", file.FileName, file.Id);
                 await _unitOfWork.GcodeFiles.RemoveAsync(file, ct);
             }
 
             await _unitOfWork.SaveChangesAsync(ct);
-            _logger.LogInformation($"[DeleteFilesAsync] Successfully saved database changes, {filesToDelete.Count} record(s) deleted from DB");
+            _logger.LogInformation("[DeleteFilesAsync] Successfully saved database changes, {FilesToDeleteCount} record(s) deleted from DB", filesToDelete.Count);
 
             // Step 5: Delete physical files (gcode + thumbnails)
             // If a physical file is missing, we still count it as deleted since the DB record was removed
@@ -886,35 +886,35 @@ namespace Farm.Web.Api.Services.Gcode
 
                     if (File.Exists(fullPath))
                     {
-                        _logger.LogInformation($"[DeleteFilesAsync] Deleting file from disk: {fullPath}");
+                        _logger.LogInformation("[DeleteFilesAsync] Deleting file from disk: {FullPath}", fullPath);
                         File.Delete(fullPath);
                         deleted++;
-                        _logger.LogInformation($"[DeleteFilesAsync] ✓ Successfully deleted file from disk: {file.FileName}");
+                        _logger.LogInformation("[DeleteFilesAsync] ✓ Successfully deleted file from disk: {FileFileName}", file.FileName);
                     }
                     else
                     {
                         deleted++;
-                        _logger.LogInformation($"[DeleteFilesAsync] ✓ File not on disk (DB record already deleted): {file.FileName}");
+                        _logger.LogInformation("[DeleteFilesAsync] ✓ File not on disk (DB record already deleted): {FileFileName}", file.FileName);
                     }
 
                     // Delete associated thumbnail if it exists
                     if (!string.IsNullOrEmpty(file.ThumbnailFileName))
                     {
                         string thumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
-                        _logger.LogInformation($"[DeleteFilesAsync] Checking for thumbnail: {thumbnailPath}");
+                        _logger.LogInformation("[DeleteFilesAsync] Checking for thumbnail: {ThumbnailPath}", thumbnailPath);
                         if (TryDeleteFile(thumbnailPath, "thumbnail"))
                         {
-                            _logger.LogInformation($"[DeleteFilesAsync] ✓ Deleted thumbnail: {thumbnailPath}");
+                            _logger.LogInformation("[DeleteFilesAsync] ✓ Deleted thumbnail: {ThumbnailPath}", thumbnailPath);
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"[DeleteFilesAsync] ✗ Exception while deleting {file.FileName} (ID: {file.Id}): {ex.GetType().Name}: {ex.Message}");
+                    _logger.LogWarning("[DeleteFilesAsync] ✗ Exception while deleting {FileFileName} (ID: {FileId}): {Name}: {Message}", file.FileName, file.Id, ex.GetType().Name, ex.Message);
                 }
             }
 
-            _logger.LogInformation($"[DeleteFilesAsync] Deletion complete: {deleted}/{filesToDelete.Count} file(s) successfully processed, returning {deleted > 0}");
+            _logger.LogInformation("[DeleteFilesAsync] Deletion complete: {Deleted}/{FilesToDeleteCount} file(s) successfully processed, returning {Value2}", deleted, filesToDelete.Count, deleted > 0);
             return deleted > 0;
         }
 
@@ -1096,7 +1096,7 @@ namespace Farm.Web.Api.Services.Gcode
             catch (Exception ex)
             {
                 string context = string.IsNullOrEmpty(logContext) ? "file" : logContext;
-                _logger.LogWarning(ex, $"Failed to delete {context}: {filePath}");
+                _logger.LogWarning(ex, "Failed to delete {Context}: {FilePath}", context, filePath);
                 return false;
             }
         }
@@ -1258,7 +1258,7 @@ namespace Farm.Web.Api.Services.Gcode
             CancellationToken ct,
             string? precomputedHash = null)
         {
-            _logger.LogInformation($"CreateGcodeFileRecordAsync: Starting for {originalFileName} at {filePath} with fileId {fileId}");
+            _logger.LogInformation("CreateGcodeFileRecordAsync: Starting for {OriginalFileName} at {FilePath} with fileId {FileId}", originalFileName, filePath, fileId);
 
             // Use pre-computed hash if provided, otherwise compute it
             string fileHash;
@@ -1486,7 +1486,7 @@ namespace Farm.Web.Api.Services.Gcode
             // This ensures all metadata is properly extracted from the file content and stored
             try
             {
-                _logger.LogInformation($"[GcodeUpload] Processing uploaded file: {file.FileName}");
+                _logger.LogInformation("[GcodeUpload] Processing uploaded file: {FileFileName}", file.FileName);
 
                 // Use default folder (root) for uploads - can be organized later via file organization features
                 Guid defaultFolderId = Guid.Empty; // Represents library root/default folder
@@ -1513,7 +1513,7 @@ namespace Farm.Web.Api.Services.Gcode
                 // Save merged metadata
                 await _gcodeRepo.SaveChangesAsync(ct);
 
-                _logger.LogInformation($"[GcodeUpload] File successfully processed and stored: {gcodeFile.Id}");
+                _logger.LogInformation("[GcodeUpload] File successfully processed and stored: {GcodeFileId}", gcodeFile.Id);
                 _telemetry.RecordFileOperation("upload", Path.GetExtension(file.FileName).TrimStart('.'), file.Length);
 
                 GcodeFile? saved = await _gcodeRepo.GetByIdWithIncludesAsync(gcodeFile.Id, ct);
@@ -1521,12 +1521,12 @@ namespace Farm.Web.Api.Services.Gcode
             }
             catch (DuplicateFileException)
             {
-                _logger.LogWarning($"[GcodeUpload] Duplicate file detected: {file.FileName}");
+                _logger.LogWarning("[GcodeUpload] Duplicate file detected: {FileFileName}", file.FileName);
                 throw new InvalidOperationException("duplicate");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"[GcodeUpload] Error processing uploaded file: {file.FileName} - {ex.GetType().Name}: {ex.Message}");
+                _logger.LogError(ex, "[GcodeUpload] Error processing uploaded file: {FileFileName} - {Name}: {Message}", file.FileName, ex.GetType().Name, ex.Message);
                 throw;
             }
         }
@@ -1789,7 +1789,7 @@ namespace Farm.Web.Api.Services.Gcode
             fileId ??= Guid.NewGuid();
             virtualDirectory = NormalizeVirtualPath(virtualDirectory ?? "/");
 
-            _logger.LogInformation($"ProcessAndStoreGcodeFileAsync: Starting for {originalFileName} (folderId={folderId})");
+            _logger.LogInformation("ProcessAndStoreGcodeFileAsync: Starting for {OriginalFileName} (folderId={FolderId})", originalFileName, folderId);
 
             // Step 1: Store file to disk
             string storageDir = _storagePathService.GetGcodeStorageDirectory();
@@ -1801,11 +1801,11 @@ namespace Farm.Web.Api.Services.Gcode
             try
             {
                 await System.IO.File.WriteAllBytesAsync(finalFilePath, fileContent, ct);
-                _logger.LogInformation($"[GcodeProcessing] File stored at {finalFilePath} ({fileContent.Length} bytes)");
+                _logger.LogInformation("[GcodeProcessing] File stored at {FinalFilePath} ({FileContentLength} bytes)", finalFilePath, fileContent.Length);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"[GcodeProcessing] Failed to store file to disk: {originalFileName}");
+                _logger.LogError(ex, "[GcodeProcessing] Failed to store file to disk: {OriginalFileName}", originalFileName);
                 throw new FileStorageException(originalFileName, $"Failed to write file to disk: {ex.Message}", ex);
             }
 
@@ -1818,13 +1818,13 @@ namespace Farm.Web.Api.Services.Gcode
                 fileHash = Convert.ToHexString(hashBytes);
             }
 
-            _logger.LogInformation($"Calculated file hash: {fileHash.Substring(0, 8)}...");
+            _logger.LogInformation("Calculated file hash: {FileHashSubstring}...", fileHash.Substring(0, 8));
 
             // Check for duplicates (allow if from same source/printer path, but otherwise reject)
             GcodeFile? existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
             if (existingFile != null && existingFile.Id != fileId)
             {
-                _logger.LogWarning($"[GcodeProcessing] Duplicate file detected: {originalFileName} matches existing file {existingFile.Id}");
+                _logger.LogWarning("[GcodeProcessing] Duplicate file detected: {OriginalFileName} matches existing file {ExistingFileId}", originalFileName, existingFile.Id);
 
                 // Clean up the file we just wrote
                 TryDeleteFile(finalFilePath, "duplicate file cleanup");
@@ -1837,13 +1837,13 @@ namespace Farm.Web.Api.Services.Gcode
             try
             {
                 string gcodeText = Encoding.UTF8.GetString(fileContent);
-                _logger.LogDebug($"[GcodeProcessing] Extracting metadata from {originalFileName} ({gcodeText.Length} chars)");
+                _logger.LogDebug("[GcodeProcessing] Extracting metadata from {OriginalFileName} ({GcodeTextLength} chars)", originalFileName, gcodeText.Length);
                 metadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
-                _logger.LogInformation($"[GcodeProcessing] Metadata extracted: printer={metadata?.PrinterModel}, material={metadata?.Material}, time={metadata?.EstimatedPrintTimeMinutes}m");
+                _logger.LogInformation("[GcodeProcessing] Metadata extracted: printer={MetadataPrinterModel}, material={MetadataMaterial}, time={MetadataEstimatedPrintTimeMinutes}m", metadata?.PrinterModel, metadata?.Material, metadata?.EstimatedPrintTimeMinutes);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"[GcodeProcessing] Failed to extract metadata from {originalFileName}: {ex.GetType().Name}: {ex.Message}");
+                _logger.LogWarning(ex, "[GcodeProcessing] Failed to extract metadata from {OriginalFileName}: {Name}: {Message}", originalFileName, ex.GetType().Name, ex.Message);
 
                 // Continue without metadata - it's not fatal
             }
@@ -1854,7 +1854,7 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 if (!string.IsNullOrWhiteSpace(thumbnailUrl))
                 {
-                    _logger.LogDebug($"[GcodeProcessing] Attempting thumbnail download from URL: {thumbnailUrl}");
+                    _logger.LogDebug("[GcodeProcessing] Attempting thumbnail download from URL: {ThumbnailUrl}", thumbnailUrl);
 
                     // Try to download from printer API URL
                     thumbnailPath = await ProcessThumbnailFromUrlAsync(thumbnailUrl, fileId.Value, storageDir, ct);
@@ -1869,16 +1869,16 @@ namespace Farm.Web.Api.Services.Gcode
 
                 if (!string.IsNullOrEmpty(thumbnailPath))
                 {
-                    _logger.LogInformation($"[GcodeProcessing] Thumbnail processed: {Path.GetFileName(thumbnailPath)}");
+                    _logger.LogInformation("[GcodeProcessing] Thumbnail processed: {PathGetFileName}", Path.GetFileName(thumbnailPath));
                 }
                 else
                 {
-                    _logger.LogDebug($"[GcodeProcessing] No thumbnail available for {originalFileName}");
+                    _logger.LogDebug("[GcodeProcessing] No thumbnail available for {OriginalFileName}", originalFileName);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"[GcodeProcessing] Error processing thumbnail for {originalFileName}: {ex.GetType().Name}: {ex.Message}");
+                _logger.LogWarning(ex, "[GcodeProcessing] Error processing thumbnail for {OriginalFileName}: {Name}: {Message}", originalFileName, ex.GetType().Name, ex.Message);
 
                 // Continue without thumbnail - it's not fatal
             }
@@ -1904,14 +1904,14 @@ namespace Farm.Web.Api.Services.Gcode
             // Step 6: Save to database
             try
             {
-                _logger.LogDebug($"[GcodeProcessing] Persisting GcodeFile entity to database: {fileId}");
+                _logger.LogDebug("[GcodeProcessing] Persisting GcodeFile entity to database: {FileId}", fileId);
                 await _unitOfWork.GcodeFiles.AddAsync(gcodeFile, ct);
                 await _unitOfWork.SaveChangesAsync(ct);
-                _logger.LogInformation($"[GcodeProcessing] GcodeFile {fileId} saved to database successfully");
+                _logger.LogInformation("[GcodeProcessing] GcodeFile {FileId} saved to database successfully", fileId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"[GcodeProcessing] Failed to persist GcodeFile to database: {originalFileName}");
+                _logger.LogError(ex, "[GcodeProcessing] Failed to persist GcodeFile to database: {OriginalFileName}", originalFileName);
 
                 // Clean up the stored file since database save failed
                 TryDeleteFile(finalFilePath, "cleanup after database error");
@@ -1948,7 +1948,7 @@ namespace Farm.Web.Api.Services.Gcode
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning($"Failed to download thumbnail from URL: {response.StatusCode}");
+                    _logger.LogWarning("Failed to download thumbnail from URL: {StatusCode}", response.StatusCode);
                     return null;
                 }
 

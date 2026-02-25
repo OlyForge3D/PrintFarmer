@@ -16,7 +16,7 @@ public class MonitoringController(
     /// </summary>
     [HttpPost("session")]
     [Authorize(Roles = "farm_admin")]
-    public IActionResult CreateSession()
+    public IActionResult CreateSession([FromHeader(Name = "X-Forwarded-Proto")] string? forwardedProto = null)
     {
         var username = User.Identity?.Name;
         if (string.IsNullOrEmpty(username))
@@ -29,8 +29,8 @@ public class MonitoringController(
         // Check X-Forwarded-Proto for HTTPS behind reverse proxy (e.g., nginx TLS termination)
         var isSecure = Request.IsHttps;
         if (!isSecure
-            && Request.Headers.TryGetValue("X-Forwarded-Proto", out var proto)
-            && string.Equals(proto.ToString().Split(',')[0].Trim(), "https", StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrEmpty(forwardedProto)
+            && string.Equals(forwardedProto.Split(',')[0].Trim(), "https", StringComparison.OrdinalIgnoreCase))
         {
             isSecure = true;
         }

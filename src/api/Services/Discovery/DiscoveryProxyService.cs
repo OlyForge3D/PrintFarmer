@@ -50,14 +50,14 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         bool autoRegister = false,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation($"[DISCOVERY] Forwarding discovery request to printer-discovery service at {_discoveryServiceUrl} (autoRegister={autoRegister})");
+        _logger.LogInformation("[DISCOVERY] Forwarding discovery request to printer-discovery service at {DiscoveryServiceUrl} (autoRegister={AutoRegister})", _discoveryServiceUrl, autoRegister);
 
         try
         {
             // Get network discovery settings from database
             NetworkDiscoverySettings settings = _settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
 
-            _logger.LogInformation($"[DISCOVERY] Using settings - Subnets: {string.Join(", ", settings.DiscoverySubnets)}, Timeout: {settings.ClientTimeoutMs}ms, MaxConcurrent: {settings.MaxConcurrentRequests}");
+            _logger.LogInformation("[DISCOVERY] Using settings - Subnets: {StringJoin}, Timeout: {SettingsClientTimeoutMs}ms, MaxConcurrent: {SettingsMaxConcurrentRequests}", string.Join(", ", settings.DiscoverySubnets), settings.ClientTimeoutMs, settings.MaxConcurrentRequests);
 
             // Forward to the printer-discovery microservice's streaming endpoint
             HttpClient client = _httpClientFactory.CreateClient("PrinterDiscovery");
@@ -90,7 +90,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
                     ? msgElem.GetString() ?? "Discovery started"
                     : "Discovery started";
 
-                _logger.LogInformation($"[DISCOVERY] Streaming discovery started with sessionId={sessionId}");
+                _logger.LogInformation("[DISCOVERY] Streaming discovery started with sessionId={SessionId}", sessionId);
 
                 // Cache initial progress so clients can see it when they join
                 DiscoveryProgressDto initialProgress = new(
@@ -111,13 +111,13 @@ public class DiscoveryProxyService : IDiscoveryProxyService
             else
             {
                 string errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning($"[DISCOVERY] Microservice returned {response.StatusCode}: {errorContent}");
+                _logger.LogWarning("[DISCOVERY] Microservice returned {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
                 throw new HttpRequestException($"Discovery service returned {response.StatusCode}");
             }
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, $"[DISCOVERY] Failed to reach printer-discovery service at {_discoveryServiceUrl}");
+            _logger.LogError(ex, "[DISCOVERY] Failed to reach printer-discovery service at {DiscoveryServiceUrl}", _discoveryServiceUrl);
             throw new InvalidOperationException("Discovery service is not available. Please ensure the printer-discovery container is running.", ex);
         }
         catch (TaskCanceledException ex)
@@ -131,7 +131,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         string sessionId,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation($"[DISCOVERY] Forwarding cancel request for session {sessionId}");
+        _logger.LogInformation("[DISCOVERY] Forwarding cancel request for session {SessionId}", sessionId);
 
         try
         {
@@ -146,17 +146,17 @@ public class DiscoveryProxyService : IDiscoveryProxyService
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation($"[DISCOVERY] Successfully cancelled session {sessionId}");
+                _logger.LogInformation("[DISCOVERY] Successfully cancelled session {SessionId}", sessionId);
                 return new DiscoveryCancelResponse("Discovery session cancelled");
             }
             else
             {
-                _logger.LogWarning($"[DISCOVERY] Cancel request returned {response.StatusCode}");
+                _logger.LogWarning("[DISCOVERY] Cancel request returned {StatusCode}", response.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"[DISCOVERY] Failed to forward cancel request for session {sessionId}");
+            _logger.LogWarning(ex, "[DISCOVERY] Failed to forward cancel request for session {SessionId}", sessionId);
         }
 
         // Even if we can't reach the service, update local cache

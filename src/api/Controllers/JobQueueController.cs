@@ -86,7 +86,7 @@ public class JobQueueController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error queueing print job for file {request.GcodeFileId}");
+            logger.LogError(ex, "Error queueing print job for file {RequestGcodeFileId}", request.GcodeFileId);
             return Problem("An error occurred while queueing the job", statusCode: 500);
         }
     }
@@ -109,7 +109,7 @@ public class JobQueueController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error retrieving print job {id}");
+            logger.LogError(ex, "Error retrieving print job {Id}", id);
             return Problem("An error occurred while retrieving the job", statusCode: 500);
         }
     }
@@ -144,7 +144,7 @@ public class JobQueueController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error updating print job {id}");
+            logger.LogError(ex, "Error updating print job {Id}", id);
             return Problem("An error occurred while updating the job", statusCode: 500);
         }
     }
@@ -170,12 +170,12 @@ public class JobQueueController(
         }
         catch (InvalidOperationException ex)
         {
-            logger.LogWarning($"Cannot dispatch job {id}: {ex.Message}");
+            logger.LogWarning("Cannot dispatch job {Id}: {Message}", id, ex.Message);
             return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error dispatching print job {id}");
+            logger.LogError(ex, "Error dispatching print job {Id}", id);
             return Problem("An error occurred while dispatching the job", statusCode: 500);
         }
     }
@@ -201,12 +201,12 @@ public class JobQueueController(
         }
         catch (InvalidOperationException ex)
         {
-            logger.LogWarning($"Cannot cancel job {id}: {ex.Message}");
+            logger.LogWarning("Cannot cancel job {Id}: {Message}", id, ex.Message);
             return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error cancelling print job {id}");
+            logger.LogError(ex, "Error cancelling print job {Id}", id);
             return Problem("An error occurred while cancelling the job", statusCode: 500);
         }
     }
@@ -229,7 +229,7 @@ public class JobQueueController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error deleting print job {id}");
+            logger.LogError(ex, "Error deleting print job {Id}", id);
             return Problem("An error occurred while deleting the job", statusCode: 500);
         }
     }

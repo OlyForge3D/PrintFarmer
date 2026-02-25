@@ -118,7 +118,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, $"[SPA] Proxy failure to {target}", null, null);
+                logger.LogWarning(ex, "[SPA] Proxy failure to {Target}", target);
             }
         }
 

@@ -83,7 +83,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting alert {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting alert {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -102,7 +102,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting alerts for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting alerts for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -147,7 +147,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error acknowledging alert {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error acknowledging alert {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -223,7 +223,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error resolving alert {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error resolving alert {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -269,7 +269,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error dismissing alert {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error dismissing alert {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -534,7 +534,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting logs for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting logs for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -624,7 +624,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting schedules for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting schedules for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -664,7 +664,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting schedule templates for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting schedule templates for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -736,7 +736,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error updating schedule {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error updating schedule {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -764,7 +764,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error deleting schedule {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error deleting schedule {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -1129,7 +1129,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting statistics for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting statistics for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -1162,13 +1162,13 @@ public class MaintenanceController(
 
             // The IPrintersService doesn't have UpdateAsync, so we rely on EF Core change tracking
             // No explicit call needed - changes are saved automatically
-            _logger.LogInformation($"[MaintenanceController] Printer {printerId} maintenance mode set to {request.InMaintenance}");
+            _logger.LogInformation("[MaintenanceController] Printer {PrinterId} maintenance mode set to {RequestInMaintenance}", printerId, request.InMaintenance);
 
             return NoContent();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error updating maintenance mode for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error updating maintenance mode for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }

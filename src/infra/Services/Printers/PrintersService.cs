@@ -134,11 +134,11 @@ public class PrintersService(
                 HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, since, printer.Credential, ct).ConfigureAwait(false);
                 if (response == null)
                 {
-                    _logger.LogWarning($"[History] No response from history API for printer {printerId}");
+                    _logger.LogWarning("[History] No response from history API for printer {PrinterId}", printerId);
                     return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
                 }
 
-                _logger.LogInformation($"[History] Got {response.Count} jobs from {backend}");
+                _logger.LogInformation("[History] Got {Count} jobs from {Backend}", response.Count, backend);
 
                 // Set ThumbnailUrl for each job
                 foreach (HistoryJob job in response.Jobs)
@@ -150,13 +150,13 @@ public class PrintersService(
             }
             else
             {
-                _logger.LogWarning($"[History] Printer {printerId} backend {printer.Backend} does not support history");
+                _logger.LogWarning("[History] Printer {PrinterId} backend {PrinterBackend} does not support history", printerId, printer.Backend);
                 return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"[History] Failed to retrieve history for printer {printerId}: {ex.Message}");
+            _logger.LogWarning(ex, "[History] Failed to retrieve history for printer {PrinterId}: {Message}", printerId, ex.Message);
             return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
         }
     }
@@ -196,7 +196,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"[History] Failed to retrieve job {jobId} for printer {printerId}: {ex.Message}");
+            _logger.LogWarning(ex, "[History] Failed to retrieve job {JobId} for printer {PrinterId}: {Message}", jobId, printerId, ex.Message);
             if (ex is KeyNotFoundException || ex is InvalidOperationException)
             {
                 throw;
@@ -246,7 +246,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"[History] Failed to calculate totals for printer {printerId}: {ex.Message}");
+            _logger.LogWarning(ex, "[History] Failed to calculate totals for printer {PrinterId}: {Message}", printerId, ex.Message);
             return new HistoryTotals { JobTotals = new JobTotals() };
         }
     }
@@ -417,7 +417,7 @@ public class PrintersService(
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError($"Error getting status for printer {printer.Name} ({printer.Id}): {ex.Message}");
+                    _logger.LogError("Error getting status for printer {PrinterName} ({PrinterId}): {Message}", printer.Name, printer.Id, ex.Message);
                     return CreateOfflinePrinterDto(printer);
                 }
             },
@@ -425,12 +425,12 @@ public class PrintersService(
             printer =>
             {
                 // Timeout handler
-                _logger.LogWarning($"Fast timeout occurred for printer {printer.Name} ({printer.Id})");
+                _logger.LogWarning("Fast timeout occurred for printer {PrinterName} ({PrinterId})", printer.Name, printer.Id);
             },
             (printer, ex) =>
             {
                 // Error handler
-                _logger.LogError($"Error getting status for printer {printer.Name} ({printer.Id}): {ex.Message}");
+                _logger.LogError("Error getting status for printer {PrinterName} ({PrinterId}): {Message}", printer.Name, printer.Id, ex.Message);
             },
             ct);
 
@@ -460,12 +460,12 @@ public class PrintersService(
         catch (ArgumentException)
         {
             // Unsupported backend type
-            _logger.LogWarning($"Unsupported printer backend {p.Backend} for printer {p.Id}");
+            _logger.LogWarning("Unsupported printer backend {PBackend} for printer {PId}", p.Backend, p.Id);
             return CreateOfflinePrinterDto(p);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to get DTO for printer {p.Id}: {ex.Message}");
+            _logger.LogWarning("Failed to get DTO for printer {PId}: {Message}", p.Id, ex.Message);
             return CreateOfflinePrinterDto(p);
         }
     }
@@ -497,22 +497,22 @@ public class PrintersService(
         {
             // Delegate to the appropriate backend status client
             // Each backend client is responsible for creating the PrinterStatusDto
-            _logger.LogDebug($"GetStatusDtoAsync: Getting status for printer {p.Id} ({p.Name}) with backend {p.Backend}");
+            _logger.LogDebug("GetStatusDtoAsync: Getting status for printer {PId} ({PName}) with backend {PBackend}", p.Id, p.Name, p.Backend);
             IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
-            _logger.LogDebug($"GetStatusDtoAsync: Obtained status client {statusClient.GetType().Name} for printer {p.Id}");
+            _logger.LogDebug("GetStatusDtoAsync: Obtained status client {Name} for printer {PId}", statusClient.GetType().Name, p.Id);
             PrinterStatusDto result = await statusClient.GetPrinterStatusAsync(p, ct);
-            _logger.LogDebug($"GetStatusDtoAsync: Got status for printer {p.Id}: IsOnline={result.IsOnline}, State={result.State}");
+            _logger.LogDebug("GetStatusDtoAsync: Got status for printer {PId}: IsOnline={IsOnline}, State={State}", p.Id, result.IsOnline, result.State);
             return result;
         }
         catch (ArgumentException ex)
         {
             // Unsupported backend type
-            _logger.LogWarning($"✗ Unsupported printer backend {p.Backend} for printer {p.Id} ({p.Name}): {ex.Message}");
+            _logger.LogWarning("✗ Unsupported printer backend {PBackend} for printer {PId} ({PName}): {Message}", p.Backend, p.Id, p.Name, ex.Message);
             return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Unsupported", Progress: null);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"✗ Failed to get status for printer {p.Id} ({p.Name}): {ex.GetType().Name}: {ex.Message}");
+            _logger.LogWarning("✗ Failed to get status for printer {PId} ({PName}): {Name}: {Message}", p.Id, p.Name, ex.GetType().Name, ex.Message);
             return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: null);
         }
     }
@@ -545,7 +545,7 @@ public class PrintersService(
         {
             // Log and return an offline/fallback DTO so that write operations (assign/unassign)
             // don't surface transient backend errors as 500 to the client.
-            _logger.LogWarning(ex, $"Failed to retrieve status for printer {p.Id}");
+            _logger.LogWarning(ex, "Failed to retrieve status for printer {PId}", p.Id);
             return CreateOfflinePrinterDto(p);
         }
     }
@@ -587,7 +587,7 @@ public class PrintersService(
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug($"Failed to get camera URLs for printer {p.Id}: {ex.Message}");
+                    _logger.LogDebug("Failed to get camera URLs for printer {PId}: {Message}", p.Id, ex.Message);
                 }
             }
 
@@ -690,7 +690,7 @@ public class PrintersService(
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Failed to get status for printer {p.Id}: {ex.Message}. Using offline status.");
+                _logger.LogWarning("Failed to get status for printer {PId}: {Message}. Using offline status.", p.Id, ex.Message);
 
                 // Fallback to offline status if retrieval fails
                 dtos.Add(new PrinterFastDto(
@@ -809,7 +809,7 @@ public class PrintersService(
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Failed to build complete DTO for printer {p.Id}: {ex.Message}. Using offline status.");
+                _logger.LogWarning("Failed to build complete DTO for printer {PId}: {Message}. Using offline status.", p.Id, ex.Message);
 
                 // Fallback to offline status if DTO building fails
                 dtos.Add(new CompletePrinterDto(
@@ -1292,7 +1292,7 @@ public class PrintersService(
 
         if (duplicate != null)
         {
-            _logger.LogWarning($"Duplicate printer detected: {dto.Name} at {dto.ServerUrl} - existing printer: {duplicate.Name} ({duplicate.Id})");
+            _logger.LogWarning("Duplicate printer detected: {DtoName} at {DtoServerUrl} - existing printer: {DuplicateName} ({DuplicateId})", dto.Name, dto.ServerUrl, duplicate.Name, duplicate.Id);
             throw new InvalidOperationException($"A printer already exists at this address: {duplicate.Name}");
         }
 
@@ -1310,11 +1310,11 @@ public class PrintersService(
             if (existingMfg != null)
             {
                 manufacturerId = existingMfg.Id;
-                _logger.LogInformation($"[Import] Found existing manufacturer '{name}' with ID {manufacturerId}");
+                _logger.LogInformation("[Import] Found existing manufacturer '{Name}' with ID {ManufacturerId}", name, manufacturerId);
             }
             else
             {
-                _logger.LogInformation($"[Import] Manufacturer '{name}' not found - will use Unknown manufacturer");
+                _logger.LogInformation("[Import] Manufacturer '{Name}' not found - will use Unknown manufacturer", name);
 
                 // Fall through to default catalog logic below
             }
@@ -1330,11 +1330,11 @@ public class PrintersService(
             if (existingModel != null)
             {
                 modelId = existingModel.Id;
-                _logger.LogInformation($"[Import] Found existing model '{mname}' with ID {modelId}");
+                _logger.LogInformation("[Import] Found existing model '{Mname}' with ID {ModelId}", mname, modelId);
             }
             else
             {
-                _logger.LogInformation($"[Import] Model '{mname}' not found - will use Unknown model");
+                _logger.LogInformation("[Import] Model '{Mname}' not found - will use Unknown model", mname);
 
                 // Fall through to default catalog logic below
             }
@@ -1348,13 +1348,13 @@ public class PrintersService(
             if (manufacturerId == Guid.Empty)
             {
                 manufacturerId = unknownMfgId;
-                _logger.LogInformation($"[Import] Using Unknown manufacturer (ID {manufacturerId})");
+                _logger.LogInformation("[Import] Using Unknown manufacturer (ID {ManufacturerId})", manufacturerId);
             }
 
             if (modelId == Guid.Empty)
             {
                 modelId = unknownModelId;
-                _logger.LogInformation($"[Import] Using Unknown model (ID {modelId})");
+                _logger.LogInformation("[Import] Using Unknown model (ID {ModelId})", modelId);
             }
         }
 
@@ -1392,7 +1392,7 @@ public class PrintersService(
 
         // Load the PrinterModel template to copy default values from
         PrinterModelDto? modelTemplate = await _catalogService.GetModelByIdAsync(modelId, ct);
-        _logger.LogDebug($"[CreatePrinterFromDto] Loaded PrinterModel template: {modelTemplate?.Name ?? "null"} for model ID {modelId}");
+        _logger.LogDebug("[CreatePrinterFromDto] Loaded PrinterModel template: {ModelTemplateName} for model ID {ModelId}", modelTemplate?.Name ?? "null", modelId);
 
         Printer p = new()
         {
@@ -1466,7 +1466,7 @@ public class PrintersService(
                 p.Toolheads.Add(toolhead);
             }
 
-            _logger.LogInformation($"[CreatePrinterFromDto] Imported {dto.Toolheads.Count} toolhead(s) for printer {p.Name}");
+            _logger.LogInformation("[CreatePrinterFromDto] Imported {Count} toolhead(s) for printer {PName}", dto.Toolheads.Count, p.Name);
         }
         else
         {
@@ -1500,7 +1500,7 @@ public class PrintersService(
                 p.Toolheads.Add(toolhead);
             }
 
-            _logger.LogInformation($"[CreatePrinterFromDto] Created {numExtruders} toolhead(s) from template for printer {p.Name}");
+            _logger.LogInformation("[CreatePrinterFromDto] Created {NumExtruders} toolhead(s) from template for printer {PName}", numExtruders, p.Name);
         }
 
         // Assign location if provided
@@ -1510,11 +1510,11 @@ public class PrintersService(
             if (location != null)
             {
                 p.LocationId = location.Id;
-                _logger.LogInformation($"[CreatePrinterFromDto] Assigned printer {p.Name} to location {location.Name}");
+                _logger.LogInformation("[CreatePrinterFromDto] Assigned printer {PName} to location {LocationName}", p.Name, location.Name);
             }
             else
             {
-                _logger.LogWarning($"[CreatePrinterFromDto] Location '{dto.LocationName}' not found for printer {p.Name} - printer will have no location");
+                _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", dto.LocationName, p.Name);
             }
         }
 
@@ -1537,14 +1537,14 @@ public class PrintersService(
     {
         if (printer.ModelId == Guid.Empty)
         {
-            _logger.LogDebug($"[ApplyModelTemplate] Printer {printer.Name} has no model assigned - skipping template application");
+            _logger.LogDebug("[ApplyModelTemplate] Printer {PrinterName} has no model assigned - skipping template application", printer.Name);
             return false;
         }
 
         PrinterModelDto? modelTemplate = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
         if (modelTemplate == null)
         {
-            _logger.LogWarning($"[ApplyModelTemplate] PrinterModel {printer.ModelId} not found for printer {printer.Name}");
+            _logger.LogWarning("[ApplyModelTemplate] PrinterModel {PrinterModelId} not found for printer {PrinterName}", printer.ModelId, printer.Name);
             return false;
         }
 
@@ -1637,11 +1637,11 @@ public class PrintersService(
         if (updated)
         {
             printer.LastCapabilityUpdate = DateTime.UtcNow;
-            _logger.LogInformation($"[ApplyModelTemplate] Applied template defaults from model '{modelTemplate.Name}' to printer '{printer.Name}'");
+            _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", modelTemplate.Name, printer.Name);
         }
         else
         {
-            _logger.LogDebug($"[ApplyModelTemplate] Printer '{printer.Name}' already has all values set - no changes needed");
+            _logger.LogDebug("[ApplyModelTemplate] Printer '{PrinterName}' already has all values set - no changes needed", printer.Name);
         }
 
         return updated;
@@ -1693,7 +1693,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Failed to get camera snapshot for printer {id}: {ex.Message}");
+            _logger.LogDebug("Failed to get camera snapshot for printer {Id}: {Message}", id, ex.Message);
             return null;
         }
     }
@@ -1715,7 +1715,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Failed to fetch snapshot from {url}: {ex.Message}");
+            _logger.LogDebug("Failed to fetch snapshot from {Url}: {Message}", url, ex.Message);
             return null;
         }
     }
@@ -1743,7 +1743,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Failed to get camera URLs for printer {id}: {ex.Message}");
+            _logger.LogDebug("Failed to get camera URLs for printer {Id}: {Message}", id, ex.Message);
             return (null, null);
         }
     }
@@ -1790,7 +1790,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to send home command to printer {id}");
+            _logger.LogWarning(ex, "Failed to send home command to printer {Id}", id);
             return false;
         }
     }
@@ -1837,7 +1837,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to home XY on printer {id}");
+            _logger.LogWarning(ex, "Failed to home XY on printer {Id}", id);
             return false;
         }
     }
@@ -1877,7 +1877,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to home Z on printer {id}");
+            _logger.LogWarning(ex, "Failed to home Z on printer {Id}", id);
             return false;
         }
     }
@@ -1948,7 +1948,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to set temperatures on printer {id}");
+            _logger.LogWarning(ex, "Failed to set temperatures on printer {Id}", id);
             return false;
         }
     }
@@ -1992,7 +1992,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to move printer {id}");
+            _logger.LogWarning(ex, "Failed to move printer {Id}", id);
             return false;
         }
     }
@@ -2037,7 +2037,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to move to position on printer {id}");
+            _logger.LogWarning(ex, "Failed to move to position on printer {Id}", id);
             return false;
         }
     }
@@ -2074,7 +2074,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to pause print on printer {id}");
+            _logger.LogWarning(ex, "Failed to pause print on printer {Id}", id);
             return false;
         }
     }
@@ -2110,7 +2110,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to resume print on printer {id}");
+            _logger.LogWarning(ex, "Failed to resume print on printer {Id}", id);
             return false;
         }
     }
@@ -2147,7 +2147,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to cancel print on printer {id}");
+            _logger.LogWarning(ex, "Failed to cancel print on printer {Id}", id);
             return false;
         }
     }
@@ -2187,7 +2187,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to emergency stop printer {id}");
+            _logger.LogWarning(ex, "Failed to emergency stop printer {Id}", id);
             return false;
         }
     }
@@ -2228,7 +2228,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to firmware restart printer {id}");
+            _logger.LogWarning(ex, "Failed to firmware restart printer {Id}", id);
             return false;
         }
     }
@@ -2268,7 +2268,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to disable motors on printer {id}");
+            _logger.LogWarning(ex, "Failed to disable motors on printer {Id}", id);
             return false;
         }
     }
@@ -2308,7 +2308,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to send G-code '{gcode}' to printer {id}");
+            _logger.LogWarning(ex, "Failed to send G-code '{Gcode}' to printer {Id}", gcode, id);
             return false;
         }
     }
@@ -2340,7 +2340,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to load filament on printer {p.Name} ({id})");
+            _logger.LogError(ex, "Failed to load filament on printer {PName} ({Id})", p.Name, id);
             return new CommandResult(false, $"Failed to load filament: {ex.Message}");
         }
     }
@@ -2372,7 +2372,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to unload filament on printer {p.Name} ({id})");
+            _logger.LogError(ex, "Failed to unload filament on printer {PName} ({Id})", p.Name, id);
             return new CommandResult(false, $"Failed to unload filament: {ex.Message}");
         }
     }
@@ -2404,7 +2404,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to change filament on printer {p.Name} ({id})");
+            _logger.LogError(ex, "Failed to change filament on printer {PName} ({Id})", p.Name, id);
             return new CommandResult(false, $"Failed to change filament: {ex.Message}");
         }
     }
@@ -2425,7 +2425,7 @@ public class PrintersService(
 
             if (client is not ISupportsSpoolman spoolmanClient)
             {
-                _logger.LogWarning($"SetActiveSpoolAsync: Backend {backend} ({client.GetType().Name}) does not support Spoolman");
+                _logger.LogWarning("SetActiveSpoolAsync: Backend {Backend} ({Name}) does not support Spoolman", backend, client.GetType().Name);
                 return new CommandResult(false, $"Backend '{backend}' does not support Spoolman integration");
             }
 
@@ -2434,7 +2434,7 @@ public class PrintersService(
             if (!result)
             {
                 string action = spoolId.HasValue ? $"set active spool to {spoolId}" : "clear active spool";
-                _logger.LogWarning($"SetActiveSpoolAsync: Spoolman rejected request to {action} on printer {p.Name} ({id})");
+                _logger.LogWarning("SetActiveSpoolAsync: Spoolman rejected request to {Action} on printer {PName} ({Id})", action, p.Name, id);
                 return new CommandResult(false, $"Spoolman failed to {action}. The printer may not have Spoolman configured or the spool ID may be invalid.");
             }
 
@@ -2443,7 +2443,7 @@ public class PrintersService(
         catch (Exception ex)
         {
             string action = spoolId.HasValue ? $"set active spool to {spoolId}" : "clear active spool";
-            _logger.LogError(ex, $"SetActiveSpoolAsync: Exception while attempting to {action} on printer {p.Name} ({id})");
+            _logger.LogError(ex, "SetActiveSpoolAsync: Exception while attempting to {Action} on printer {PName} ({Id})", action, p.Name, id);
             return new CommandResult(false, $"Failed to {action}: {ex.Message}");
         }
     }
@@ -2472,7 +2472,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"ListPrinterSpoolsAsync: Exception fetching spools for printer {p.Name} ({id})");
+            _logger.LogError(ex, "ListPrinterSpoolsAsync: Exception fetching spools for printer {PName} ({Id})", p.Name, id);
             return null;
         }
     }
@@ -2510,7 +2510,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to start print from file {filename} on printer {id}");
+            _logger.LogWarning(ex, "Failed to start print from file {Filename} on printer {Id}", filename, id);
             return false;
         }
     }
@@ -2619,7 +2619,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to upload file to printer {id}");
+            _logger.LogWarning(ex, "Failed to upload file to printer {Id}", id);
             return false;
         }
     }
@@ -2676,7 +2676,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to get file list for printer {id}");
+            _logger.LogWarning(ex, "Failed to get file list for printer {Id}", id);
             return Array.Empty<PrinterFileDto>();
         }
     }
@@ -2711,7 +2711,7 @@ public class PrintersService(
             // Check if backend supports file download
             if (client is not ISupportsFileDownload downloadClient)
             {
-                _logger.LogWarning($"Backend {backend} does not support file downloads");
+                _logger.LogWarning("Backend {Backend} does not support file downloads", backend);
                 return null;
             }
 
@@ -2725,7 +2725,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Failed to download file {filename} from printer {id}");
+            _logger.LogWarning(ex, "Failed to download file {Filename} from printer {Id}", filename, id);
             return null;
         }
     }
@@ -2906,14 +2906,14 @@ public class PrintersService(
                 {
                     if ((duplicateHandling ?? "skip") == "skip")
                     {
-                        _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name} (ServerUrl: {existingByIp.ServerUrl})");
+                        _logger.LogInformation("[BulkCreate] Skipping duplicate printer: {PrinterDtoName} (ServerUrl: {ExistingByIpServerUrl})", printerDto.Name, existingByIp.ServerUrl);
                         skippedCount++;
                         status = "Skipped";
                         reason = $"Printer with ServerUrl {existingByIp.ServerUrl} already exists";
                     }
                     else if ((duplicateHandling ?? "skip") == "overwrite")
                     {
-                        _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existingByIp.Name} (ServerUrl: {existingByIp.ServerUrl})");
+                        _logger.LogInformation("[BulkCreate] Removing duplicate printer: {ExistingByIpName} (ServerUrl: {ExistingByIpServerUrl})", existingByIp.Name, existingByIp.ServerUrl);
                         await RemoveAsync(existingByIp, ct);
                         await SaveChangesAsync(ct);
 
@@ -2923,7 +2923,7 @@ public class PrintersService(
                         createdPrinterId = Guid.Parse(createdDto.Id.ToString());
                         await SaveChangesAsync(ct);
                         createdPrinters.Add(createdDto);
-                        _logger.LogInformation($"[BulkCreate] Successfully created printer: {createdDto.Name}");
+                        _logger.LogInformation("[BulkCreate] Successfully created printer: {CreatedDtoName}", createdDto.Name);
                     }
                     else if ((duplicateHandling ?? "skip") == "error")
                     {
@@ -2939,7 +2939,7 @@ public class PrintersService(
                     createdPrinterId = Guid.Parse(createdDto.Id.ToString());
                     await SaveChangesAsync(ct);
                     createdPrinters.Add(createdDto);
-                    _logger.LogInformation($"[BulkCreate] Successfully created printer: {createdDto.Name}");
+                    _logger.LogInformation("[BulkCreate] Successfully created printer: {CreatedDtoName}", createdDto.Name);
                 }
 
                 // Build result with status info
@@ -2962,7 +2962,7 @@ public class PrintersService(
                 {
                     // Skip background camera discovery during bulk import to avoid DbContext threading issues
                     // Camera discovery will happen on the next status poll from the dashboard
-                    _logger.LogDebug($"[BulkCreate] Skipping background camera discovery for {printerDto.Name} - will discover on next status poll");
+                    _logger.LogDebug("[BulkCreate] Skipping background camera discovery for {PrinterDtoName} - will discover on next status poll", printerDto.Name);
                 }
             }
             catch (Exception ex)
@@ -2991,7 +2991,7 @@ public class PrintersService(
                 }
 
                 errorResults[i] = errorMessage;
-                _logger.LogWarning(ex, $"[BulkCreate] Error creating printer {printers[i].Name} at index {i}: {errorMessage}");
+                _logger.LogWarning(ex, "[BulkCreate] Error creating printer {Value0} at index {I}: {ErrorMessage}", printers[i].Name, i, errorMessage);
 
                 var result = new
                 {
@@ -3037,18 +3037,18 @@ public class PrintersService(
             Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
             if (printer == null)
             {
-                _logger.LogWarning($"[PrintJobStatus] Printer {id} not found");
+                _logger.LogWarning("[PrintJobStatus] Printer {Id} not found", id);
                 return null;
             }
 
-            _logger.LogInformation($"[PrintJobStatus] Getting print job status for printer {printer.Name} (Backend: {printer.Backend})");
+            _logger.LogInformation("[PrintJobStatus] Getting print job status for printer {PrinterName} (Backend: {PrinterBackend})", printer.Name, printer.Backend);
 
             var backend = (PrinterBackend)printer.Backend;
             IBackendClient client = GetBackendClient(backend);
 
             if (client is not ISupportsJobControl jobClient)
             {
-                _logger.LogWarning($"[PrintJobStatus] Backend {backend} does not support job control");
+                _logger.LogWarning("[PrintJobStatus] Backend {Backend} does not support job control", backend);
                 return null;
             }
 
@@ -3070,12 +3070,12 @@ public class PrintersService(
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning($"[PrintJobStatus] Timeout retrieving print job status for printer {id}");
+            _logger.LogWarning("[PrintJobStatus] Timeout retrieving print job status for printer {Id}", id);
             return null; // Return null on timeout
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[PrintJobStatus] Error getting print job status for printer {id}: {ex.Message}");
+            _logger.LogError(ex, "[PrintJobStatus] Error getting print job status for printer {Id}: {Message}", id, ex.Message);
             return null; // Return null if unable to retrieve
         }
     }
@@ -3133,7 +3133,7 @@ public class PrintersService(
                 throw new InvalidOperationException("No valid printer entries found in file");
             }
 
-            _logger.LogInformation($"[Import] Parsed {printers.Length} printers from {fileExtension} file");
+            _logger.LogInformation("[Import] Parsed {PrintersLength} printers from {FileExtension} file", printers.Length, fileExtension);
 
             // Use existing BulkCreatePrintersAsync for actual creation
             object result = await BulkCreatePrintersAsync(printers, duplicateHandling, ct);
@@ -3142,7 +3142,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[Import] Failed to import printers from stream: {ex.Message}");
+            _logger.LogError(ex, "[Import] Failed to import printers from stream: {Message}", ex.Message);
             throw;
         }
     }
@@ -3292,7 +3292,7 @@ public class PrintersService(
 
             if (errors.Count > 0)
             {
-                _logger.LogWarning($"[Import-CSV] Encountered {errors.Count} parsing errors while importing {printers.Count} valid printers");
+                _logger.LogWarning("[Import-CSV] Encountered {ErrorsCount} parsing errors while importing {PrintersCount} valid printers", errors.Count, printers.Count);
             }
 
             return printers.ToArray();
@@ -3415,16 +3415,16 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
     {
-        _logger.LogInformation($"RefreshCameraUrlsAsync: Starting refresh for printer {id}");
+        _logger.LogInformation("RefreshCameraUrlsAsync: Starting refresh for printer {Id}", id);
 
         Printer? printer = await FindByIdWithIncludesAsync(id, ct).ConfigureAwait(false);
         if (printer == null)
         {
-            _logger.LogWarning($"RefreshCameraUrlsAsync: Printer {id} not found");
+            _logger.LogWarning("RefreshCameraUrlsAsync: Printer {Id} not found", id);
             return null;
         }
 
-        _logger.LogInformation($"RefreshCameraUrlsAsync: Found printer {printer.Name}, Backend={printer.Backend}, ServerUrl={printer.ServerUrl}, FrontendPort={printer.FrontendPort}");
+        _logger.LogInformation("RefreshCameraUrlsAsync: Found printer {PrinterName}, Backend={PrinterBackend}, ServerUrl={PrinterServerUrl}, FrontendPort={PrinterFrontendPort}", printer.Name, printer.Backend, printer.ServerUrl, printer.FrontendPort);
 
         var backend = (PrinterBackend)printer.Backend;
         string? streamUrl = null;
@@ -3435,14 +3435,14 @@ public class PrintersService(
             // Try to use the configured camera detection interface which queries actual cameras
             if (_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out ISupportsConfiguredCameraDetection? detectionClient) && detectionClient != null)
             {
-                _logger.LogInformation($"RefreshCameraUrlsAsync: Using configured camera detection for backend {backend}");
+                _logger.LogInformation("RefreshCameraUrlsAsync: Using configured camera detection for backend {Backend}", backend);
 
                 // For Moonraker, use the frontend URL (not backend port 7125)
                 string baseUrlForCamera = backend == PrinterBackend.Moonraker
                     ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                     : printer.BackendUrl;
 
-                _logger.LogInformation($"RefreshCameraUrlsAsync: Using baseUrlForCamera={baseUrlForCamera}");
+                _logger.LogInformation("RefreshCameraUrlsAsync: Using baseUrlForCamera={BaseUrlForCamera}", baseUrlForCamera);
 
                 // Call the detection method - it will ONLY return URLs if cameras actually exist
                 (streamUrl, snapshotUrl) = await detectionClient.DetectConfiguredCameraUrlsAsync(
@@ -3451,12 +3451,12 @@ public class PrintersService(
                     printer.Credential,
                     ct).ConfigureAwait(false);
 
-                _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from detection - stream={streamUrl}, snapshot={snapshotUrl}");
+                _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from detection - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
             }
             else
             {
                 // Fallback: Use standard camera client (may return default URLs even if cameras don't exist)
-                _logger.LogWarning($"RefreshCameraUrlsAsync: Configured camera detection not available for backend {backend}, falling back to standard interface");
+                _logger.LogWarning("RefreshCameraUrlsAsync: Configured camera detection not available for backend {Backend}, falling back to standard interface", backend);
 
                 bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient);
                 if (gotCameraClient && cameraClient != null)
@@ -3468,21 +3468,21 @@ public class PrintersService(
                     streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
                     snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
 
-                    _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from standard interface - stream={streamUrl}, snapshot={snapshotUrl}");
+                    _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from standard interface - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"RefreshCameraUrlsAsync: Failed to refresh camera URLs for printer {id}: {ex.Message}");
+            _logger.LogWarning(ex, "RefreshCameraUrlsAsync: Failed to refresh camera URLs for printer {Id}: {Message}", id, ex.Message);
         }
 
         // Update printer in database - only set URLs if they are not null (i.e., cameras actually exist)
-        _logger.LogInformation($"RefreshCameraUrlsAsync: Updating database for printer {printer.Name}: CameraStreamUrl={streamUrl}, CameraSnapshotUrl={snapshotUrl}");
+        _logger.LogInformation("RefreshCameraUrlsAsync: Updating database for printer {PrinterName}: CameraStreamUrl={StreamUrl}, CameraSnapshotUrl={SnapshotUrl}", printer.Name, streamUrl, snapshotUrl);
         printer.CameraStreamUrl = streamUrl;
         printer.CameraSnapshotUrl = snapshotUrl;
         await SaveChangesAsync(ct).ConfigureAwait(false);
-        _logger.LogInformation($"RefreshCameraUrlsAsync: SaveChangesAsync completed - URLs saved: stream={!string.IsNullOrEmpty(streamUrl)}, snapshot={!string.IsNullOrEmpty(snapshotUrl)}");
+        _logger.LogInformation("RefreshCameraUrlsAsync: SaveChangesAsync completed - URLs saved: stream={StringIsNullOrEmpty}, snapshot={StringIsNullOrEmpty1}", !string.IsNullOrEmpty(streamUrl), !string.IsNullOrEmpty(snapshotUrl));
 
         // Return updated DTO
         return await GetPrinterDtoAsync(id, ct).ConfigureAwait(false);

@@ -76,7 +76,7 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error retrieving template {id}");
+            logger.LogError(ex, "Error retrieving template {Id}", id);
             return Problem("An error occurred while retrieving the template", statusCode: 500);
         }
     }
@@ -126,7 +126,7 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error updating template {id}");
+            logger.LogError(ex, "Error updating template {Id}", id);
             return Problem("An error occurred while updating the template", statusCode: 500);
         }
     }
@@ -160,7 +160,7 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error deleting template {id}");
+            logger.LogError(ex, "Error deleting template {Id}", id);
             return Problem("An error occurred while deleting the template", statusCode: 500);
         }
     }
@@ -193,7 +193,7 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error adding file to template {id}");
+            logger.LogError(ex, "Error adding file to template {Id}", id);
             return Problem("An error occurred while adding the file entry", statusCode: 500);
         }
     }
@@ -216,7 +216,7 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error removing file {fileId} from template {id}");
+            logger.LogError(ex, "Error removing file {FileId} from template {Id}", fileId, id);
             return Problem("An error occurred while removing the file entry", statusCode: 500);
         }
     }
@@ -243,7 +243,7 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error updating file {fileId} in template {id}");
+            logger.LogError(ex, "Error updating file {FileId} in template {Id}", fileId, id);
             return Problem("An error occurred while updating the file entry", statusCode: 500);
         }
     }

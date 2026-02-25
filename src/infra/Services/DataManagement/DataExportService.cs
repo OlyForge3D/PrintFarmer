@@ -96,7 +96,7 @@ public class DataExportService : IDataExportService
                 Password = DecryptIfNeeded(p.Password)
             }).ToList();
 
-            _logger.LogInformation($"[DataExport] Printers export complete: {exportData.Count} printers");
+            _logger.LogInformation("[DataExport] Printers export complete: {ExportDataCount} printers", exportData.Count);
             return exportData;
         }
         catch (Exception ex)

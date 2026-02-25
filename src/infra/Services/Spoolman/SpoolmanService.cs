@@ -182,7 +182,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug($"Spoolman not configured – returning empty spool list", null, null);
+            logger.LogDebug($"Spoolman not configured – returning empty spool list");
             return [];
         }
 
@@ -198,18 +198,18 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             PageFetchResult result = await FetchAllPagesAsync(url, ct, effectiveLimit);
             if (result.AttemptedPages > 1)
             {
-                logger.LogInformation($"Retrieved {result.Items.Count} spools across {result.AttemptedPages} pages", null, null);
+                logger.LogInformation("Retrieved {Count} spools across {AttemptedPages} pages", result.Items.Count, result.AttemptedPages);
             }
             else
             {
-                logger.LogDebug($"Retrieved {result.Items.Count} spools", null, null);
+                logger.LogDebug("Retrieved {Count} spools", result.Items.Count);
             }
 
             return result.Items;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, $"Failed to fetch spools from Spoolman", null, null);
+            logger.LogWarning(ex, $"Failed to fetch spools from Spoolman");
             return [];
         }
     }
@@ -220,7 +220,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug($"Spoolman not configured – returning empty filament list", null, null);
+            logger.LogDebug($"Spoolman not configured – returning empty filament list");
             return [];
         }
 
@@ -235,7 +235,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             HttpResponseMessage response = await http.GetAsync(url, cts.Token);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning($"Spoolman filament list returned status {(int)response.StatusCode}", null, null);
+                logger.LogWarning("Spoolman filament list returned status {StatusCode}", (int)response.StatusCode);
                 return [];
             }
 
@@ -244,7 +244,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
-                logger.LogWarning($"Spoolman filament endpoint did not return an array", null, null);
+                logger.LogWarning($"Spoolman filament endpoint did not return an array");
                 return [];
             }
 
@@ -254,12 +254,12 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 filaments.Add(SpoolmanJsonParser.ParseFilament(el));
             }
 
-            logger.LogDebug($"Retrieved {filaments.Count} filament types", null, null);
+            logger.LogDebug("Retrieved {FilamentsCount} filament types", filaments.Count);
             return filaments;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, $"Failed to fetch filaments from Spoolman", null, null);
+            logger.LogWarning(ex, $"Failed to fetch filaments from Spoolman");
             return [];
         }
     }
@@ -283,7 +283,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             HttpResponseMessage response = await http.GetAsync(url, cts.Token);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning($"Spoolman filament {filamentId} returned status {(int)response.StatusCode}", null, null);
+                logger.LogWarning("Spoolman filament {FilamentId} returned status {StatusCode}", filamentId, (int)response.StatusCode);
                 return null;
             }
 
@@ -293,7 +293,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, $"Exception fetching Spoolman filament {filamentId}", null, null);
+            logger.LogWarning(ex, "Exception fetching Spoolman filament {FilamentId}", filamentId);
             return null;
         }
     }
@@ -316,7 +316,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             HttpResponseMessage response = await http.GetAsync(url, cts.Token);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning($"Spoolman vendor list returned status {(int)response.StatusCode}", null, null);
+                logger.LogWarning("Spoolman vendor list returned status {StatusCode}", (int)response.StatusCode);
                 return [];
             }
 
@@ -335,7 +335,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Exception fetching Spoolman vendors", null, null);
+            logger.LogWarning(ex, "Exception fetching Spoolman vendors");
             return [];
         }
     }
@@ -601,7 +601,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug($"Spoolman not configured – returning empty material list", null, null);
+            logger.LogDebug($"Spoolman not configured – returning empty material list");
             return [];
         }
 
@@ -613,18 +613,18 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             MaterialPageFetchResult result = await FetchAllMaterialPagesAsync(url, ct);
             if (result.AttemptedPages > 1)
             {
-                logger.LogInformation($"Retrieved {result.Items.Count} materials across {result.AttemptedPages} pages", null, null);
+                logger.LogInformation("Retrieved {Count} materials across {AttemptedPages} pages", result.Items.Count, result.AttemptedPages);
             }
             else
             {
-                logger.LogDebug($"Retrieved {result.Items.Count} materials", null, null);
+                logger.LogDebug("Retrieved {Count} materials", result.Items.Count);
             }
 
             return result.Items;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, $"Failed to fetch materials from Spoolman", null, null);
+            logger.LogWarning(ex, $"Failed to fetch materials from Spoolman");
             return [];
         }
     }
@@ -660,14 +660,14 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogDebug($"Spoolman page {page} content-type {mediaType} not JSON; aborting");
+                logger.LogDebug("Spoolman page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
                 break;
             }
 
             using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
             if (doc is null)
             {
-                logger.LogDebug($"Spoolman page {page} invalid JSON; aborting");
+                logger.LogDebug("Spoolman page {Page} invalid JSON; aborting", page);
                 break;
             }
 
@@ -680,7 +680,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             }
 
             int added = collected.Count - before;
-            logger.LogDebug($"Spoolman page {page} added {added} spools (total {collected.Count})");
+            logger.LogDebug("Spoolman page {Page} added {Added} spools (total {CollectedCount})", page, added, collected.Count);
 
             if (maxItems.HasValue && maxItems.Value > 0 && collected.Count >= maxItems.Value)
             {
@@ -757,14 +757,14 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogDebug($"Spoolman material page {page} content-type {mediaType} not JSON; aborting");
+                logger.LogDebug("Spoolman material page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
                 break;
             }
 
             string json = await resp.Content.ReadAsStringAsync(ct);
             if (string.IsNullOrWhiteSpace(json))
             {
-                logger.LogDebug($"Spoolman material page {page} returned empty response; aborting");
+                logger.LogDebug("Spoolman material page {Page} returned empty response; aborting", page);
                 break;
             }
 
@@ -971,7 +971,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug("Spoolman not configured – cannot fetch external filaments", null, null);
+            logger.LogDebug("Spoolman not configured – cannot fetch external filaments");
             return [];
         }
 
@@ -987,7 +987,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             List<SpoolmanDbFilamentEntry>? filaments = await response.Content.ReadFromJsonAsync<List<SpoolmanDbFilamentEntry>>(ExternalJsonOptions, cts.Token);
             IReadOnlyList<SpoolmanDbFilamentEntry> result = filaments?.AsReadOnly() ?? (IReadOnlyList<SpoolmanDbFilamentEntry>)Array.Empty<SpoolmanDbFilamentEntry>();
 
-            logger.LogDebug($"Retrieved {result.Count} external filaments from Spoolman", null, null);
+            logger.LogDebug("Retrieved {Count} external filaments from Spoolman", result.Count);
             return result;
         }
         catch (Exception ex)
@@ -1003,7 +1003,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug("Spoolman not configured – cannot fetch external materials", null, null);
+            logger.LogDebug("Spoolman not configured – cannot fetch external materials");
             return [];
         }
 
@@ -1019,7 +1019,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             List<SpoolmanDbMaterialEntry>? materials = await response.Content.ReadFromJsonAsync<List<SpoolmanDbMaterialEntry>>(ExternalJsonOptions, cts.Token);
             IReadOnlyList<SpoolmanDbMaterialEntry> result = materials?.AsReadOnly() ?? (IReadOnlyList<SpoolmanDbMaterialEntry>)Array.Empty<SpoolmanDbMaterialEntry>();
 
-            logger.LogDebug($"Retrieved {result.Count} external materials from Spoolman", null, null);
+            logger.LogDebug("Retrieved {Count} external materials from Spoolman", result.Count);
             return result;
         }
         catch (Exception ex)

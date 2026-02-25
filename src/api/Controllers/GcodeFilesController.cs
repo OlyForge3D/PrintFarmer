@@ -118,7 +118,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Failed to hash file {path}: {ex.Message}");
+            logger.LogError("Failed to hash file {Path}: {Message}", path, ex.Message);
             return Problem("Failed to compute hash", statusCode: 500);
         }
     }
@@ -160,7 +160,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error listing G-code files (path={path}): {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}");
+            logger.LogError("Error listing G-code files (path={Path}): {Name} - {Message}\n{StackTrace}", path, ex.GetType().Name, ex.Message, ex.StackTrace);
             return Problem($"Failed to retrieve files: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
         }
     }
@@ -211,7 +211,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error querying G-code files (path={path}): {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}");
+            logger.LogError("Error querying G-code files (path={Path}): {Name} - {Message}\n{StackTrace}", path, ex.GetType().Name, ex.Message, ex.StackTrace);
             return Problem($"Failed to query files: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
         }
     }
@@ -230,7 +230,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error listing G-code folders: {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}");
+            logger.LogError("Error listing G-code folders: {Name} - {Message}\n{StackTrace}", ex.GetType().Name, ex.Message, ex.StackTrace);
             return Problem($"Failed to retrieve folders: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
         }
     }
@@ -288,7 +288,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Chunk init failure for {req.FileName}: {ex.Message}");
+            logger.LogError("Chunk init failure for {ReqFileName}: {Message}", req.FileName, ex.Message);
             return Problem("Failed to initialize chunked upload", statusCode: 500);
         }
     }
@@ -398,7 +398,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Chunk upload failure {uploadId}: {ex.Message}");
+            logger.LogError("Chunk upload failure {UploadId}: {Message}", uploadId, ex.Message);
             return Problem("Failed to append chunk", statusCode: 500);
         }
     }
@@ -442,7 +442,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogDebug($"Chunk resume failed {uploadId}: {ex.Message}");
+            logger.LogDebug("Chunk resume failed {UploadId}: {Message}", uploadId, ex.Message);
             return NotFound();
         }
     }
@@ -534,7 +534,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogDebug($"Failed to cancel upload {uploadId}: {ex.Message}");
+            logger.LogDebug("Failed to cancel upload {UploadId}: {Message}", uploadId, ex.Message);
 
             // Still return success - we tried our best to clean up
         }
@@ -565,7 +565,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error deleting G-code file {id}");
+            logger.LogError(ex, "Error deleting G-code file {Id}", id);
             return Problem("Failed to delete file", statusCode: 500);
         }
     }
@@ -597,7 +597,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error deleting G-code files: {ex.Message}");
+            logger.LogError("Error deleting G-code files: {Message}", ex.Message);
             return Problem("Failed to delete files", statusCode: 500);
         }
     }
@@ -630,7 +630,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error downloading G-code file {path}: {ex.Message}");
+            logger.LogError("Error downloading G-code file {Path}: {Message}", path, ex.Message);
             return Problem("Failed to download file", statusCode: 500);
         }
     }
@@ -647,14 +647,14 @@ public class GcodeFilesController(
     {
         try
         {
-            logger.LogInformation($"Attempting to download GCode file {id}");
+            logger.LogInformation("Attempting to download GCode file {Id}", id);
 
             // Get file path and original filename from service
             (string FilePath, string OriginalFileName)? fileInfo = await gcodeFilesService.GetFilePathAndNameAsync(id, HttpContext.RequestAborted);
 
             if (fileInfo == null)
             {
-                logger.LogWarning($"GCode file {id} not found in database");
+                logger.LogWarning("GCode file {Id} not found in database", id);
                 return NotFound(new { message = "File not found in database", fileId = id });
             }
 
@@ -664,12 +664,12 @@ public class GcodeFilesController(
             string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
             string fullPath = ResolveGcodePath(filePath);
 
-            logger.LogInformation($"GCode file {id} resolved path: {fullPath}");
+            logger.LogInformation("GCode file {Id} resolved path: {FullPath}", id, fullPath);
 
             // Validate file safety and existence using consolidated service
             if (!storedFileOperationsService.FileExistsAndIsSafe(fullPath, gcodeRoot))
             {
-                logger.LogWarning($"GCode file {id} is unsafe or does not exist: {fullPath}");
+                logger.LogWarning("GCode file {Id} is unsafe or does not exist: {FullPath}", id, fullPath);
                 return NotFound(new { message = "File not found or unsafe path", fileId = id });
             }
 
@@ -682,7 +682,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error retrieving GCode file {id}: {ex.Message}");
+            logger.LogError("Error retrieving GCode file {Id}: {Message}", id, ex.Message);
             return Problem("Failed to retrieve file", statusCode: 500);
         }
     }
@@ -700,33 +700,33 @@ public class GcodeFilesController(
     {
         try
         {
-            logger.LogInformation($"[Thumbnail] Retrieving thumbnail for GCode file {id}");
+            logger.LogInformation("[Thumbnail] Retrieving thumbnail for GCode file {Id}", id);
 
             string? thumbnailPath = await gcodeFilesService.GetThumbnailPathAsync(id, HttpContext.RequestAborted);
 
             if (thumbnailPath == null)
             {
-                logger.LogWarning($"[Thumbnail] GCode file {id} not found or no thumbnail available");
+                logger.LogWarning("[Thumbnail] GCode file {Id} not found or no thumbnail available", id);
                 return NotFound("Thumbnail not available");
             }
 
             string absolutePath = ResolveGcodePath(thumbnailPath);
             string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
 
-            logger.LogInformation($"[Thumbnail] Resolved absolute path: {absolutePath}");
+            logger.LogInformation("[Thumbnail] Resolved absolute path: {AbsolutePath}", absolutePath);
 
             bool fileExists = System.IO.File.Exists(absolutePath);
-            logger.LogInformation($"[Thumbnail] File exists at '{absolutePath}': {fileExists}");
+            logger.LogInformation("[Thumbnail] File exists at '{AbsolutePath}': {FileExists}", absolutePath, fileExists);
 
             if (!fileExists)
             {
-                logger.LogWarning($"[Thumbnail] Thumbnail file not found at {absolutePath} for GCode file {id}");
+                logger.LogWarning("[Thumbnail] Thumbnail file not found at {AbsolutePath} for GCode file {Id}", absolutePath, id);
                 return NotFound("Thumbnail file not found on disk");
             }
 
             if (!fileManagementService.IsSafePath(absolutePath, gcodeRoot))
             {
-                logger.LogWarning($"[Thumbnail] Unsafe path detected for thumbnail: {absolutePath}");
+                logger.LogWarning("[Thumbnail] Unsafe path detected for thumbnail: {AbsolutePath}", absolutePath);
                 return NotFound("Invalid thumbnail path");
             }
 
@@ -739,12 +739,12 @@ public class GcodeFilesController(
                 _ => "image/png"
             };
 
-            logger.LogInformation($"[Thumbnail] Returning thumbnail for GCode file {id} with content type {contentType}");
+            logger.LogInformation("[Thumbnail] Returning thumbnail for GCode file {Id} with content type {ContentType}", id, contentType);
             return PhysicalFile(absolutePath, contentType);
         }
         catch (Exception ex)
         {
-            logger.LogError($"[Thumbnail] Error retrieving thumbnail for GCode file {id}: {ex.Message}");
+            logger.LogError("[Thumbnail] Error retrieving thumbnail for GCode file {Id}: {Message}", id, ex.Message);
             return Problem("Failed to retrieve thumbnail", statusCode: 500);
         }
     }
@@ -793,7 +793,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error uploading G-code file (path={path}): {ex.Message}");
+            logger.LogError("Error uploading G-code file (path={Path}): {Message}", path, ex.Message);
             return Problem("Failed to upload file", statusCode: 500);
         }
     }
@@ -832,36 +832,36 @@ public class GcodeFilesController(
                 return BadRequest(new FolderOperationResultDto { Success = false, Message = "Folder path cannot be empty. Please provide a folder name." });
             }
 
-            logger.LogDebug($"[CreateFolder] Input: '{request.Path}' -> path='{path}', name='{name}'");
+            logger.LogDebug("[CreateFolder] Input: '{RequestPath}' -> path='{Path}', name='{Name}'", request.Path, path, name);
 
             GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, ct);
 
-            logger.LogInformation($"[CreateFolder] Successfully created virtual folder: '{request.Path}'");
+            logger.LogInformation("[CreateFolder] Successfully created virtual folder: '{RequestPath}'", request.Path);
             return StatusCode(StatusCodes.Status201Created, new FolderOperationResultDto { Success = true, Message = "Folder created successfully" });
         }
         catch (ArgumentException ex)
         {
-            logger.LogWarning($"[CreateFolder] Invalid argument: {ex.Message}");
+            logger.LogWarning("[CreateFolder] Invalid argument: {Message}", ex.Message);
             return BadRequest(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (DirectoryNotFoundException ex)
         {
-            logger.LogWarning($"[CreateFolder] Parent directory not found: {ex.Message}");
+            logger.LogWarning("[CreateFolder] Parent directory not found: {Message}", ex.Message);
             return NotFound(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
         {
-            logger.LogInformation($"[CreateFolder] Folder already exists at: {request.Path}");
+            logger.LogInformation("[CreateFolder] Folder already exists at: {RequestPath}", request.Path);
             return Conflict(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
-            logger.LogWarning($"[CreateFolder] Invalid operation: {ex.Message}");
+            logger.LogWarning("[CreateFolder] Invalid operation: {Message}", ex.Message);
             return BadRequest(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (Exception ex)
         {
-            logger.LogError($"[CreateFolder] Unexpected error (path={path}, name={name}): {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            logger.LogError("[CreateFolder] Unexpected error (path={Path}, name={Name}): {Name1}: {Message}\n{StackTrace}", path, name, ex.GetType().Name, ex.Message, ex.StackTrace);
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto { Success = false, Message = $"Failed to create folder: {ex.GetType().Name}" });
         }
     }
@@ -974,7 +974,7 @@ public class GcodeFilesController(
             // Use the directory ID (virtual path) exactly as provided by the frontend
             // Frontend is responsible for constructing valid directory IDs
             string targetDirectoryPath = request.TargetDirectoryId;
-            logger.LogDebug($"[MoveFiles] Moving {request.ModelIds.Count} G-code file(s) to virtual directory: '{targetDirectoryPath}'");
+            logger.LogDebug("[MoveFiles] Moving {Count} G-code file(s) to virtual directory: '{TargetDirectoryPath}'", request.ModelIds.Count, targetDirectoryPath);
 
             int movedCount = 0;
             int failedCount = 0;
@@ -992,7 +992,7 @@ public class GcodeFilesController(
 
                     if (!Guid.TryParse(fileIdStr, out Guid fileId))
                     {
-                        logger.LogWarning($"[MoveFiles] Invalid file ID format: '{fileIdStr}'. Expected GUID from GcodeFileId field, not Path.");
+                        logger.LogWarning("[MoveFiles] Invalid file ID format: '{FileIdStr}'. Expected GUID from GcodeFileId field, not Path.", fileIdStr);
                         failedFiles.Add((fileIdStr, "Invalid file ID format - use GcodeFileId, not Path"));
                         failedCount++;
                         continue;
@@ -1004,36 +1004,36 @@ public class GcodeFilesController(
                     if (moved)
                     {
                         movedCount++;
-                        logger.LogDebug($"[MoveFiles] Successfully moved file: {fileId}");
+                        logger.LogDebug("[MoveFiles] Successfully moved file: {FileId}", fileId);
                     }
                     else
                     {
-                        logger.LogWarning($"[MoveFiles] File not found or failed to move: {fileId}");
+                        logger.LogWarning("[MoveFiles] File not found or failed to move: {FileId}", fileId);
                         failedFiles.Add((fileIdStr, "File not found or failed to move"));
                         failedCount++;
                     }
                 }
                 catch (ArgumentException ex)
                 {
-                    logger.LogWarning($"[MoveFiles] Invalid argument for file {fileIdStr}: {ex.Message}");
+                    logger.LogWarning("[MoveFiles] Invalid argument for file {FileIdStr}: {Message}", fileIdStr, ex.Message);
                     failedFiles.Add((fileIdStr, $"Invalid argument: {ex.Message}"));
                     failedCount++;
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    logger.LogWarning($"[MoveFiles] Access denied for file {fileIdStr}: {ex.Message}");
+                    logger.LogWarning("[MoveFiles] Access denied for file {FileIdStr}: {Message}", fileIdStr, ex.Message);
                     failedFiles.Add((fileIdStr, "Access denied"));
                     failedCount++;
                 }
                 catch (IOException ex)
                 {
-                    logger.LogWarning($"[MoveFiles] IO error for file {fileIdStr}: {ex.Message}");
+                    logger.LogWarning("[MoveFiles] IO error for file {FileIdStr}: {Message}", fileIdStr, ex.Message);
                     failedFiles.Add((fileIdStr, $"IO error: {ex.Message}"));
                     failedCount++;
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning($"[MoveFiles] Unexpected error for file {fileIdStr}: {ex.GetType().Name}: {ex.Message}");
+                    logger.LogWarning("[MoveFiles] Unexpected error for file {FileIdStr}: {Name}: {Message}", fileIdStr, ex.GetType().Name, ex.Message);
                     failedFiles.Add((fileIdStr, $"{ex.GetType().Name}: {ex.Message}"));
                     failedCount++;
                 }
@@ -1053,27 +1053,27 @@ public class GcodeFilesController(
                 }
             }
 
-            logger.LogInformation($"[MoveFiles] Completed: {movedCount} succeeded, {failedCount} failed");
+            logger.LogInformation("[MoveFiles] Completed: {MovedCount} succeeded, {FailedCount} failed", movedCount, failedCount);
             return Ok(new FolderOperationResultDto { Success = failedCount == 0, Message = message });
         }
         catch (ArgumentException ex)
         {
-            logger.LogError($"[MoveFiles] Invalid argument: {ex.Message}");
+            logger.LogError("[MoveFiles] Invalid argument: {Message}", ex.Message);
             return BadRequest(new FolderOperationResultDto { Success = false, Message = $"Invalid request: {ex.Message}" });
         }
         catch (UnauthorizedAccessException ex)
         {
-            logger.LogError($"[MoveFiles] Access denied: {ex.Message}");
+            logger.LogError("[MoveFiles] Access denied: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status403Forbidden, new FolderOperationResultDto { Success = false, Message = "Access denied: insufficient permissions" });
         }
         catch (IOException ex)
         {
-            logger.LogError($"[MoveFiles] IO error: {ex.Message}");
+            logger.LogError("[MoveFiles] IO error: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto { Success = false, Message = $"I/O error: {ex.Message}" });
         }
         catch (Exception ex)
         {
-            logger.LogError($"[MoveFiles] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            logger.LogError("[MoveFiles] Unexpected error: {Name}: {Message}\n{StackTrace}", ex.GetType().Name, ex.Message, ex.StackTrace);
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto { Success = false, Message = $"Failed to move files: {ex.GetType().Name}" });
         }
     }

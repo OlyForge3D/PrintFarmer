@@ -65,7 +65,7 @@ public sealed class OctoPrintWebSocketAdapter(
     {
         try
         {
-            _logger.LogInformation($"OctoPrint WebSocket {_printerId}: Attempting connection to {_printer.ServerUrl}");
+            _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Attempting connection to {ServerUrl}", _printerId, _printer.ServerUrl);
             _socketState = "connecting";
 
             // Get session token first via HTTP
@@ -73,14 +73,14 @@ public sealed class OctoPrintWebSocketAdapter(
 
             // Convert HTTP URL to WebSocket URL
             string wsUrl = ConvertToWebSocketUrl(_printer.ServerUrl);
-            _logger.LogDebug($"OctoPrint WebSocket {_printerId}: Connecting to {wsUrl}");
+            _logger.LogDebug("OctoPrint WebSocket {PrinterId}: Connecting to {WsUrl}", _printerId, wsUrl);
 
             // Create WebSocket connection
             _webSocket = new ClientWebSocket();
             _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
 
             await _webSocket.ConnectAsync(new Uri(wsUrl), ct);
-            _logger.LogInformation($"OctoPrint WebSocket {_printerId}: Connected");
+            _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Connected", _printerId);
             _socketState = "connecting";
 
             // Authenticate
@@ -90,14 +90,14 @@ public sealed class OctoPrintWebSocketAdapter(
             _apiState = "responding";
             _consecutiveFailures = 0;
 
-            _logger.LogInformation($"OctoPrint WebSocket {_printerId}: Authenticated");
+            _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Authenticated", _printerId);
 
             // Start receive loop
             _receiveLoopTask = Task.Run(() => ReceiveLoopAsync(_cts.Token), _cts.Token);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"OctoPrint WebSocket {_printerId}: Connection failed, will use HTTP polling fallback");
+            _logger.LogError(ex, "OctoPrint WebSocket {PrinterId}: Connection failed, will use HTTP polling fallback", _printerId);
             _socketState = "error";
             _apiState = "noResponse";
             _isAuthenticated = false;
@@ -127,7 +127,7 @@ public sealed class OctoPrintWebSocketAdapter(
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        _logger.LogInformation($"OctoPrint WebSocket {_printerId}: Received close frame");
+                        _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Received close frame", _printerId);
                         _socketState = "closed";
                         break;
                     }
@@ -135,7 +135,7 @@ public sealed class OctoPrintWebSocketAdapter(
                     if (result.Count > 0)
                     {
                         string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        _logger.LogDebug($"OctoPrint WebSocket {_printerId}: Received message: {message.Substring(0, Math.Min(100, message.Length))}...");
+                        _logger.LogDebug("OctoPrint WebSocket {PrinterId}: Received message: {Value1}...", _printerId, message.Substring(0, Math.Min(100, message.Length)));
 
                         await HandleWebSocketMessageAsync(message, ct);
                         _lastSuccessfulUpdate = DateTime.UtcNow;
@@ -148,13 +148,13 @@ public sealed class OctoPrintWebSocketAdapter(
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, $"OctoPrint WebSocket {_printerId}: Error receiving message");
+                    _logger.LogError(ex, "OctoPrint WebSocket {PrinterId}: Error receiving message", _printerId);
                     _consecutiveFailures++;
                     _apiState = "noResponse";
 
                     if (_consecutiveFailures >= 3)
                     {
-                        _logger.LogWarning($"OctoPrint WebSocket {_printerId}: Too many failures, switching to HTTP polling fallback");
+                        _logger.LogWarning("OctoPrint WebSocket {PrinterId}: Too many failures, switching to HTTP polling fallback", _printerId);
                         _socketState = "error";
                         break;
                     }
@@ -163,11 +163,11 @@ public sealed class OctoPrintWebSocketAdapter(
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            _logger.LogInformation($"OctoPrint WebSocket {_printerId}: Receive loop cancelled");
+            _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Receive loop cancelled", _printerId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"OctoPrint WebSocket {_printerId}: Receive loop failed");
+            _logger.LogError(ex, "OctoPrint WebSocket {PrinterId}: Receive loop failed", _printerId);
         }
         finally
         {
@@ -200,14 +200,14 @@ public sealed class OctoPrintWebSocketAdapter(
             }
             else if (root.TryGetProperty("reauthRequired", out _))
             {
-                _logger.LogWarning($"OctoPrint WebSocket {_printerId}: Re-authentication required");
+                _logger.LogWarning("OctoPrint WebSocket {PrinterId}: Re-authentication required", _printerId);
                 _isAuthenticated = false;
                 await SendAuthMessageAsync(ct);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"OctoPrint WebSocket {_printerId}: Failed to parse message");
+            _logger.LogError(ex, "OctoPrint WebSocket {PrinterId}: Failed to parse message", _printerId);
         }
     }
 
@@ -265,7 +265,7 @@ public sealed class OctoPrintWebSocketAdapter(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"OctoPrint WebSocket {_printerId}: Failed to broadcast status");
+            _logger.LogError(ex, "OctoPrint WebSocket {PrinterId}: Failed to broadcast status", _printerId);
         }
     }
 
@@ -286,7 +286,7 @@ public sealed class OctoPrintWebSocketAdapter(
         {
             if (_printer.Credential == null || !_printer.Credential.HasApiKey)
             {
-                _logger.LogWarning($"OctoPrint HTTP Fallback {_printerId}: No API key configured");
+                _logger.LogWarning("OctoPrint HTTP Fallback {PrinterId}: No API key configured", _printerId);
                 _apiState = "authFail";
                 return null;
             }
@@ -297,7 +297,7 @@ public sealed class OctoPrintWebSocketAdapter(
             if (printerState == null || jobStatus == null)
             {
                 _consecutiveFailures++;
-                _logger.LogWarning($"OctoPrint HTTP Fallback {_printerId}: Failed to retrieve status (attempt {_consecutiveFailures})");
+                _logger.LogWarning("OctoPrint HTTP Fallback {PrinterId}: Failed to retrieve status (attempt {ConsecutiveFailures})", _printerId, _consecutiveFailures);
                 return null;
             }
 
@@ -310,7 +310,7 @@ public sealed class OctoPrintWebSocketAdapter(
             _consecutiveFailures = 0;
 
             _logger.LogDebug(
-                $"OctoPrint HTTP Fallback {_printerId}: Got status - Online={isOnline}, State={currentState}, " +
+                "OctoPrint HTTP Fallback {PrinterId}: Got status - Online={IsOnline}, State={CurrentState}, ", _printerId, isOnline, currentState +
                 $"Progress={currentProgress}, JobName={jobStatus.Filename}");
 
             return new OctoPrintStatusData
@@ -339,7 +339,7 @@ public sealed class OctoPrintWebSocketAdapter(
                 : "noResponse";
 
             _apiState = errorType;
-            _logger.LogDebug(ex, $"OctoPrint HTTP Fallback {_printerId}: Failed (apiState={errorType})");
+            _logger.LogDebug(ex, "OctoPrint HTTP Fallback {PrinterId}: Failed (apiState={ErrorType})", _printerId, errorType);
 
             return null;
         }
@@ -365,12 +365,12 @@ public sealed class OctoPrintWebSocketAdapter(
             if (doc.RootElement.TryGetProperty("session", out JsonElement sessionProp))
             {
                 _sessionToken = sessionProp.GetString();
-                _logger.LogDebug($"OctoPrint WebSocket {_printerId}: Acquired session token");
+                _logger.LogDebug("OctoPrint WebSocket {PrinterId}: Acquired session token", _printerId);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"OctoPrint WebSocket {_printerId}: Failed to acquire session token");
+            _logger.LogError(ex, "OctoPrint WebSocket {PrinterId}: Failed to acquire session token", _printerId);
             _apiState = "authFail";
             throw;
         }
@@ -401,12 +401,12 @@ public sealed class OctoPrintWebSocketAdapter(
                     true,
                     ct);
 
-                _logger.LogDebug($"OctoPrint WebSocket {_printerId}: Sent auth message");
+                _logger.LogDebug("OctoPrint WebSocket {PrinterId}: Sent auth message", _printerId);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"OctoPrint WebSocket {_printerId}: Failed to send auth message");
+            _logger.LogError(ex, "OctoPrint WebSocket {PrinterId}: Failed to send auth message", _printerId);
             _apiState = "authFail";
             throw;
         }
