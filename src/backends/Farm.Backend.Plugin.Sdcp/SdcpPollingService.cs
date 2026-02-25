@@ -204,12 +204,14 @@ public sealed class SdcpPollingService(
 
                     if (!wasOnline && status.IsOnline)
                     {
-                        _logger.LogInformation("SDCP printer recovered to Online. PrinterId={PrinterId}, BackendUrl={BackendUrl}, PreviousFailures={PreviousFailures}",
+                        _logger.LogInformation(
+                            "SDCP printer recovered to Online. PrinterId={PrinterId}, BackendUrl={BackendUrl}, PreviousFailures={PreviousFailures}",
                             printerId, printer.BackendUrl, previousFailures);
                     }
                     else if (previousFailures > 0)
                     {
-                        _logger.LogDebug("SDCP poll succeeded after failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, PreviousFailures={PreviousFailures}",
+                        _logger.LogDebug(
+                            "SDCP poll succeeded after failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, PreviousFailures={PreviousFailures}",
                             printerId, printer.BackendUrl, previousFailures);
                     }
 
@@ -297,7 +299,8 @@ public sealed class SdcpPollingService(
                         _logger.LogWarning("SDCP printer {PrinterId} marked offline after {StateConsecutiveFailures} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
 
-                        _logger.LogWarning("SDCP printer marked Offline after consecutive failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Failures={Failures}",
+                        _logger.LogWarning(
+                            "SDCP printer marked Offline after consecutive failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Failures={Failures}",
                             printerId, printer?.BackendUrl, state.ConsecutiveFailures);
 
                         RecordHealthTransition(printerId, printer?.Name ?? printerId.ToString(), PrinterConnectionState.Offline, $"Failed {state.ConsecutiveFailures} consecutive times");

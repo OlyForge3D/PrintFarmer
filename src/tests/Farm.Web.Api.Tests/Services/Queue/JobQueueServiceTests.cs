@@ -9,9 +9,9 @@ using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Web.Api.Tests.Builders;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services.Queue;
 

@@ -7,8 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
-using ManufacturerDto = Farm.Infrastructure.ManufacturerDto;
 using Microsoft.Extensions.Logging;
+using ManufacturerDto = Farm.Infrastructure.ManufacturerDto;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 

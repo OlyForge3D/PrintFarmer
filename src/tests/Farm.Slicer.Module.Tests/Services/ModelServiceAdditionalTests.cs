@@ -14,10 +14,10 @@ using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 using IStoredFileOperationsService = Farm.Infrastructure.Services.FileManagement.IStoredFileOperationsService;
-using Microsoft.Extensions.Logging;
 
 
 namespace Farm.Slicer.Module.Tests.Services

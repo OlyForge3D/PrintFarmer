@@ -4,9 +4,9 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Controllers;
 

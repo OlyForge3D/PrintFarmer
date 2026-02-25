@@ -7,9 +7,9 @@ using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Controllers;
 

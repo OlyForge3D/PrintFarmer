@@ -7,7 +7,6 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Authentication;
@@ -29,6 +28,7 @@ using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Extensions;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Authentication;
@@ -38,8 +38,8 @@ using Farm.Web.Api.Services.Startup;
 using Farm.Web.Api.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
-using StackExchange.Redis;
 using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 
 namespace Farm.Web.Api.Infrastructure;
 

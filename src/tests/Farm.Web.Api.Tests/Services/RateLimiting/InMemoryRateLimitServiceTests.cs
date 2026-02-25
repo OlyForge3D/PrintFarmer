@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Services.RateLimiting;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services.RateLimiting;
 

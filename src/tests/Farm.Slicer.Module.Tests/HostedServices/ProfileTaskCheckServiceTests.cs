@@ -10,8 +10,8 @@ using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Moq;
 using Microsoft.Extensions.Logging;
+using Moq;
 
 namespace Farm.Slicer.Module.Tests.HostedServices;
 

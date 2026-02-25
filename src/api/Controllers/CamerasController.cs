@@ -7,8 +7,8 @@ using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Startup;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Camera = Farm.Infrastructure.Domain.Camera;
 using Microsoft.Extensions.Logging;
+using Camera = Farm.Infrastructure.Domain.Camera;
 
 namespace Farm.Web.Api.Controllers;
 

@@ -11,9 +11,9 @@ using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Discovery;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services;
 

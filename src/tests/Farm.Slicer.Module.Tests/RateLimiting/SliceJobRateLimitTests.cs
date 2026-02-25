@@ -2,9 +2,9 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.RateLimiting;
-using Xunit;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace Farm.Slicer.Module.Tests.RateLimiting;
 

@@ -9,11 +9,11 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Services.Rendering;
 

@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using ChangePasswordRequest = Farm.Infrastructure.Contracts.Auth.ChangePasswordRequest;
 using ConfirmEmailRequest = Farm.Infrastructure.ConfirmEmailRequest;
 using ForgotPasswordRequest = Farm.Infrastructure.Contracts.Auth.ForgotPasswordRequest;
@@ -12,7 +13,6 @@ using LoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
 using RegisterRequest = Farm.Infrastructure.Contracts.Auth.RegisterRequest;
 using ResetPasswordRequest = Farm.Infrastructure.Contracts.Auth.ResetPasswordRequest;
 using UserDto = Farm.Infrastructure.Contracts.Auth.UserDto;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 

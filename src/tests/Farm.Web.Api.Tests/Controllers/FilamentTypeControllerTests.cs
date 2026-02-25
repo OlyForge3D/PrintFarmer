@@ -7,9 +7,9 @@ using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Controllers
 {

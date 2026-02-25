@@ -2,8 +2,8 @@
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.Workers;
 

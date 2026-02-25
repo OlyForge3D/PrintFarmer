@@ -9,9 +9,9 @@ using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.Rendering;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services
 {

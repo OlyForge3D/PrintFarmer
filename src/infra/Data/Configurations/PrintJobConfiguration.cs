@@ -79,6 +79,7 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         // Composite index for queue overview batch queries (AssignedPrinterId + Status)
         builder.HasIndex(pj => new { pj.AssignedPrinterId, pj.Status })
             .HasDatabaseName("IX_PrintJobs_AssignedPrinterId_Status");
+
         // Prevents duplicate jobs when seeding from the same printer
         // Note: PostgreSQL syntax differs from SQL Server - using provider-agnostic approach
         // The partial unique index ensures uniqueness only when both fields are NOT NULL

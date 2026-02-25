@@ -1,12 +1,12 @@
 ﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Resilience;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Resilience;
 using Farm.Infrastructure.Services.Printers;
 using FluentAssertions;
-using Moq;
-using Xunit;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.Printers
 {

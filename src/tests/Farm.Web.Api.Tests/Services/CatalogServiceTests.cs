@@ -7,10 +7,10 @@ using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
 using Farm.Web.Api.Services.Catalog;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services
 {

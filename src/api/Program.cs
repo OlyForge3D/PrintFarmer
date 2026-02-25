@@ -25,8 +25,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using OpenTelemetry.Metrics;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry.Metrics;
 
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);

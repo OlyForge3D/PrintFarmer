@@ -4,9 +4,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.FileManagement;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services.FileManagement;
 

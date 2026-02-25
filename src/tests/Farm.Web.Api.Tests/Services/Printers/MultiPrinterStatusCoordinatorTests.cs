@@ -2,9 +2,9 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services.Printers
 {

@@ -7,8 +7,8 @@ using Farm.Web.Api.Health;
 using Farm.Web.Api.Services;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
-using Moq;
 using Microsoft.Extensions.Logging;
+using Moq;
 
 namespace Farm.Web.Api.Tests;
 

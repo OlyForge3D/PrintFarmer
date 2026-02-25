@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Services.RateLimiting;
-using Microsoft.Extensions.Primitives;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;
 
