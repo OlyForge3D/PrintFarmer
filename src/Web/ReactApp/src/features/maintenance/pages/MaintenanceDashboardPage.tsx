@@ -43,7 +43,8 @@ import {
   MaintenanceTrendsChart,
   ComponentLifespanChart,
   MaintenanceCostAnalysis,
-  PrinterUptimeChart
+  PrinterUptimeChart,
+  MaintenanceTemplateManager
 } from '../components';
 import { MaintenanceReport } from '../components/MaintenanceReport';
 
@@ -395,6 +396,9 @@ export function MaintenanceDashboardPage() {
                       <Tabs.Tab id="timeline" icon={<ListIcon className="h-4 w-4" />}>
                         Timeline
                       </Tabs.Tab>
+                      <Tabs.Tab id="templates" icon={<GearIcon className="h-4 w-4" />}>
+                        Templates
+                      </Tabs.Tab>
                     </Tabs.List>
                     
                     <Tabs.Panels>
@@ -450,6 +454,12 @@ export function MaintenanceDashboardPage() {
                             onTaskClick={handleTaskClick}
                             maxVisible={15}
                           />
+                        </div>
+                      </Tabs.Panel>
+
+                      <Tabs.Panel id="templates">
+                        <div className="p-5">
+                          <MaintenanceTemplateManager />
                         </div>
                       </Tabs.Panel>
                     </Tabs.Panels>

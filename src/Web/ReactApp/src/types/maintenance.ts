@@ -54,11 +54,14 @@ export interface MaintenanceSchedule {
   id: string;
   printerId?: string | null;
   printerModelId?: string | null;
+  manufacturerId?: string | null;
+  motionType?: number | null;
   taskName: string;
   description?: string | null;
   component?: string | null; // e.g., "Hotend", "Bed", "Belts", "Bearings", "Fans"
   intervalHours?: number | null; // Maintenance interval in print hours
   intervalDays?: number | null; // Maintenance interval in calendar days
+  estimatedDurationMinutes?: number | null;
   priority: number; // 1=Low, 2=Medium, 3=High, 4=Critical
   isActive: boolean;
   isDefault: boolean; // Seeded for all printers of this model
