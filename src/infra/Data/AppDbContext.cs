@@ -128,6 +128,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<MaintenanceAlert> MaintenanceAlerts => Set<MaintenanceAlert>();
 
+    // Maintenance Plans (hierarchical: Plan → Task → Component)
+    public DbSet<MaintenancePlan> MaintenancePlans => Set<MaintenancePlan>();
+
+    public DbSet<MaintenanceTask> MaintenanceTasks => Set<MaintenanceTask>();
+
+    public DbSet<MaintenanceComponent> MaintenanceComponents => Set<MaintenanceComponent>();
+
+    public DbSet<MaintenanceTaskComponent> MaintenanceTaskComponents => Set<MaintenanceTaskComponent>();
+
     // Cameras (standalone webcams not attached to printers)
     public DbSet<Camera> Cameras => Set<Camera>();
 

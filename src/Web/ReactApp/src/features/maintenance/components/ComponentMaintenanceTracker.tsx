@@ -185,7 +185,7 @@ function ComponentDetailPanel({ data }: ComponentDetailPanelProps) {
             Active Schedules ({data.schedules.length})
           </h4>
           <div className="space-y-2">
-            {data.schedules.slice(0, 5).map((schedule) => (
+            {data.schedules.map((schedule) => (
               <div
                 key={schedule.id}
                 className="flex items-center justify-between p-3 bg-pf-bg-2 rounded-lg"
@@ -218,11 +218,6 @@ function ComponentDetailPanel({ data }: ComponentDetailPanelProps) {
                 </div>
               </div>
             ))}
-            {data.schedules.length > 5 && (
-              <p className="text-xs text-pf-text-tertiary text-center py-2">
-                +{data.schedules.length - 5} more schedules
-              </p>
-            )}
           </div>
         </div>
       )}

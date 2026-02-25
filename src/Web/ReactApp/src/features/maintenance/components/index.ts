@@ -38,4 +38,6 @@ export type { FleetStatisticsTableProps } from './FleetStatisticsTable';
 
 export { LogMaintenanceModal } from './LogMaintenanceModal';
 export { CreateScheduleModal } from './CreateScheduleModal';
+export { EditScheduleModal } from './EditScheduleModal';
+export { MaintenancePlansTab } from './MaintenancePlansTab';
 export { MaintenanceTemplateManager } from './MaintenanceTemplateManager';

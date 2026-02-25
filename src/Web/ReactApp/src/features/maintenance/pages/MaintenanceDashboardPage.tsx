@@ -31,6 +31,7 @@ import { CreateScheduleModal } from '../components/CreateScheduleModal';
 import { ComponentMaintenanceTracker } from '../components/ComponentMaintenanceTracker';
 import { ComponentReplacementHistory } from '../components/ComponentReplacementHistory';
 import { FleetStatisticsTable } from '../components/FleetStatisticsTable';
+import { MaintenancePlansTab } from '../components/MaintenancePlansTab';
 import { useMaintenanceStats } from '../hooks/useMaintenanceStats';
 import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
@@ -220,7 +221,7 @@ export function MaintenanceDashboardPage() {
     >
       {/* Top-level navigation tabs */}
       <Tabs defaultTab="overview" className="space-y-6">
-        <Tabs.List className="border-b border-pf-border bg-pf-bg-2 -mx-6 px-6 mb-6">
+        <Tabs.List className="border-b border-pf-border bg-pf-bg-2 -mx-4 px-4 mb-6 overflow-x-auto">
           <Tabs.Tab id="overview" icon={<WrenchIcon className="h-4 w-4" />}>
             Overview
           </Tabs.Tab>
@@ -232,6 +233,9 @@ export function MaintenanceDashboardPage() {
           </Tabs.Tab>
           <Tabs.Tab id="analytics" icon={<ChartIcon className="h-4 w-4" />}>
             Analytics
+          </Tabs.Tab>
+          <Tabs.Tab id="plans" icon={<ListIcon className="h-4 w-4" />}>
+            Plans
           </Tabs.Tab>
           <Tabs.Tab id="components" icon={<GearIcon className="h-4 w-4" />}>
             Components
@@ -497,6 +501,30 @@ export function MaintenanceDashboardPage() {
 
               {/* Maintenance Report Section */}
               <MaintenanceReport />
+            </div>
+          </Tabs.Panel>
+
+          {/* Plans Tab - All maintenance plans with full CRUD */}
+          <Tabs.Panel id="plans">
+            <div className="space-y-6">
+              <section aria-labelledby="maintenance-plans-heading">
+                <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-pf-border">
+                    <h2
+                      id="maintenance-plans-heading"
+                      className="text-lg font-semibold text-pf-text-primary"
+                    >
+                      Maintenance Plans
+                    </h2>
+                    <p className="text-sm text-pf-text-tertiary mt-1">
+                      View, create, edit, and delete all maintenance schedules
+                    </p>
+                  </div>
+                  <div className="p-5">
+                    <MaintenancePlansTab />
+                  </div>
+                </div>
+              </section>
             </div>
           </Tabs.Panel>
 
