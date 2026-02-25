@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
+    <PackageReference Include="Refit.HttpClientFactory" Version="10.0.1" />
     <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
   </ItemGroup>
 
