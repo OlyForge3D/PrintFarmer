@@ -128,7 +128,9 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     };
 
     /// <summary>
-    /// Gets capabilities from the plugin registry by examining the plugin's supported capability types.
+    /// Gets capabilities from the plugin registry, preferring reflection on the plugin's
+    /// ClientType so capabilities are declared in exactly one place: the client class definition.
+    /// Falls back to GetCapabilities() when ClientType is unavailable (e.g., in mock-based tests).
     /// </summary>
     private BackendCapabilities GetCapabilitiesFromPlugin(string backendType)
     {
@@ -138,8 +140,15 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             return BackendCapabilities.None;
         }
 
+        // Prefer reflection on the concrete client type — this is the single source of truth.
+        if (plugin.ClientType is { } clientType)
+        {
+            return DetectCapabilitiesFromInterfaces(clientType);
+        }
+
+        // Fallback for mocks or plugins that don't set ClientType.
         BackendCapabilities capabilities = BackendCapabilities.None;
-        IEnumerable<Type> pluginCapabilities = plugin.GetCapabilities();
+        HashSet<Type> pluginCapabilities = new(plugin.GetCapabilities());
 
         foreach ((Type? interfaceType, BackendCapabilities capabilityFlag) in CapabilityInterfaceMap)
         {
@@ -159,11 +168,11 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     private static BackendCapabilities DetectCapabilitiesFromInterfaces(Type clientType)
     {
         BackendCapabilities capabilities = BackendCapabilities.None;
+        HashSet<Type> interfaces = new(clientType.GetInterfaces());
 
         foreach ((Type? interfaceType, BackendCapabilities capabilityFlag) in CapabilityInterfaceMap)
         {
-            // Check if the client type implements this capability interface
-            if (clientType.GetInterfaces().Contains(interfaceType))
+            if (interfaces.Contains(interfaceType))
             {
                 capabilities |= capabilityFlag;
             }

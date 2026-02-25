@@ -97,26 +97,6 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
     }
 
     /// <summary>
-    /// Gets the capabilities supported by this backend client.
-    /// </summary>
-    /// <returns>An enumerable of capability interface types.</returns>
-    public IEnumerable<Type> GetCapabilities()
-    {
-        return new[]
-        {
-            typeof(ISupportsFileList),
-            typeof(ISupportsFileUpload),
-            typeof(ISupportsFileDelete),
-            typeof(ISupportsStartPrint),
-            typeof(ISupportsCamera),
-            typeof(ISupportsPrinterInformation),
-            typeof(ISupportsControlOperations),
-            typeof(ISupportsMovement),
-            typeof(ISupportsTemperatureControl)
-        };
-    }
-
-    /// <summary>
     /// Gets optional configuration sections that this backend requires.
     /// </summary>
     /// <returns>An enumerable of configuration section names this backend uses.</returns>

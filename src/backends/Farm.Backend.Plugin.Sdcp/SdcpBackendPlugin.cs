@@ -96,27 +96,6 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
     }
 
     /// <summary>
-    /// Gets the capabilities supported by this backend client.
-    /// </summary>
-    /// <returns>An enumerable of capability interface types.</returns>
-    public IEnumerable<Type> GetCapabilities()
-    {
-        return new[]
-        {
-            typeof(ISupportsFileList),
-            typeof(ISupportsFileUpload),
-            typeof(ISupportsStartPrint),
-            typeof(ISupportsControlOperations),
-            typeof(ISupportsCamera),
-            typeof(ISupportsHistory),
-            typeof(ISupportsFileDelete),
-            typeof(ISupportsPrinterInformation),
-            typeof(ISupportsStatus),
-            typeof(ISupportsCompositeStatus)
-        };
-    }
-
-    /// <summary>
     /// Gets optional configuration sections that this backend requires.
     /// </summary>
     /// <returns>An enumerable of configuration section names this backend uses.</returns>

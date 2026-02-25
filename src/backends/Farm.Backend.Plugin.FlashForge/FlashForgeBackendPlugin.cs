@@ -1,5 +1,4 @@
 ﻿using Farm.Backend.Plugin.Core;
-using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -54,21 +53,6 @@ public class FlashForgeBackendPlugin : IExtendedBackendPlugin
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
             return new FlashForgeClient(logger, timeouts);
         });
-    }
-
-    /// <inheritdoc />
-    public IEnumerable<Type> GetCapabilities()
-    {
-        return
-        [
-            typeof(ISupportsFileUpload),
-            typeof(ISupportsStartPrint),
-            typeof(ISupportsControlOperations),
-            typeof(ISupportsStatus),
-            typeof(ISupportsCompositeStatus),
-            typeof(ISupportsPrinterInformation),
-            typeof(ISupportsTemperatureControl)
-        ];
     }
 
     /// <inheritdoc />

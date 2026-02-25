@@ -45,7 +45,15 @@ public interface IBackendClientPlugin
 
     /// <summary>
     /// Gets the capabilities supported by this backend client.
+    /// Default implementation reflects on <see cref="ClientType"/> to discover
+    /// all ISupports* interfaces, so capabilities are declared in exactly one place.
     /// </summary>
     /// <returns>An enumerable of capability interface types.</returns>
-    IEnumerable<Type> GetCapabilities();
+    IEnumerable<Type> GetCapabilities()
+    {
+        return ClientType?
+            .GetInterfaces()
+            .Where(i => i.Name.StartsWith("ISupports", StringComparison.Ordinal))
+            ?? Enumerable.Empty<Type>();
+    }
 }

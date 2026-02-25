@@ -1,4 +1,5 @@
-﻿using Farm.Backend.Plugin.FlashForge;
+﻿using Farm.Backend.Plugin.Core;
+using Farm.Backend.Plugin.FlashForge;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using FluentAssertions;
@@ -420,12 +421,14 @@ public sealed class FlashForgeClientTests
     [Fact]
     public void BackendPlugin_DeclaresExpectedCapabilities()
     {
-        var plugin = new FlashForgeBackendPlugin();
+        // Cast required: default interface methods dispatch only via interface reference.
+        IBackendClientPlugin plugin = new FlashForgeBackendPlugin();
 
         IEnumerable<Type> capabilities = plugin.GetCapabilities();
 
         capabilities.Should().Contain(typeof(ISupportsFileUpload));
         capabilities.Should().Contain(typeof(ISupportsStartPrint));
+        capabilities.Should().Contain(typeof(ISupportsUploadAndPrint));
         capabilities.Should().Contain(typeof(ISupportsControlOperations));
         capabilities.Should().Contain(typeof(ISupportsStatus));
         capabilities.Should().Contain(typeof(ISupportsCompositeStatus));

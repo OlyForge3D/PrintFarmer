@@ -1,5 +1,4 @@
-﻿using System;
-using Farm.Backend.Plugin.Core;
+﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -95,46 +94,6 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
         services.AddSingleton<MoonrakerSubscriptionService>();
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<MoonrakerSubscriptionService>());
         services.AddSingleton<IPrinterConnectionHealthProvider>(sp => sp.GetRequiredService<MoonrakerSubscriptionService>());
-    }
-
-    /// <summary>
-    /// Gets the capabilities supported by this backend client.
-    /// </summary>
-    /// <returns>An enumerable of capability interface types.</returns>
-    public IEnumerable<Type> GetCapabilities()
-    {
-        string[] capabilityNames = new[]
-        {
-            "ISupportsFileList",
-            "ISupportsFileDownload",
-            "ISupportsFileUpload",
-            "ISupportsFileDelete",
-            "ISupportsStartPrint",
-            "ISupportsHistory",
-            "ISupportsTemperatureControl",
-            "ISupportsMovement",
-            "ISupportsControlOperations",
-            "ISupportsCamera",
-            "ISupportsConfiguredCameraDetection",
-            "ISupportsFileMetadata",
-            "ISupportsPrinterInformation",
-            "ISupportsFilamentControl",
-            "ISupportsSpoolman",
-            "ISupportsStatus",
-            "ISupportsCompositeStatus",
-            "ISupportsControlRestart",
-            "ISupportsGcodeExecution"
-        };
-
-        return capabilityNames
-            .Select(name =>
-            {
-                Type? type = typeof(ISupportsFileList).Assembly.GetType($"Farm.Infrastructure.Services.Printers.{name}");
-                return type;
-            })
-            .Where(t => t != null)
-            .Cast<Type>()
-            .ToList();
     }
 
     /// <summary>

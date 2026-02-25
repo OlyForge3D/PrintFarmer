@@ -132,6 +132,29 @@ namespace Farm.Web.Api.Tests.Services.Printers
             Assert.True(sdcp is ISupportsFileList);
         }
 
+        [Fact]
+        public void ClientTypeReflection_TakesPriorityOver_StaleGetCapabilities()
+        {
+            // Arrange — plugin whose ClientType implements ISupportsFileList
+            // but GetCapabilities() returns only ISupportsCamera (simulating stale list).
+            // The factory should use ClientType reflection and find FileList.
+            var plugin = new Mock<IBackendClientPlugin>();
+            plugin.Setup(p => p.BackendType).Returns("moonraker");
+            plugin.Setup(p => p.ClientType).Returns(typeof(IMoonrakerClient));
+            plugin.Setup(p => p.GetCapabilities()).Returns(new[] { typeof(ISupportsCamera) });
+
+            var registry = new Mock<IBackendPluginRegistry>();
+            registry.Setup(r => r.GetPlugin("moonraker")).Returns(plugin.Object);
+            registry.Setup(r => r.GetAllPlugins()).Returns(new[] { plugin.Object });
+
+            var factory = new BackendCapabilityFactory(_clientFactory, _mockLogger.Object, registry.Object);
+
+            // Act & Assert — ClientType (IMoonrakerClient) implements ISupportsFileList,
+            // so factory should find it even though GetCapabilities() didn't declare it.
+            Assert.True(factory.TryGetFileListClient(PrinterBackend.Moonraker, out _),
+                "Factory should discover FileList from ClientType reflection, ignoring stale GetCapabilities()");
+        }
+
         #endregion
 
         #region Helper Methods
