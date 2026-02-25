@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Models;
 using Farm.Slicer.Module.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Host;
 
@@ -29,7 +30,7 @@ public static class StubServiceRegistrations
         // Real implementation — moved from API project to Farm.Slicer.Module.
         services.AddScoped<IModel3DFileService, Model3DFileService>();
 
-        // Real implementation — self-contained in Farm.Infrastructure, only needs IUnifiedLoggingService.
+        // Real implementation — self-contained in Farm.Infrastructure, only needs ILogger<StubServiceRegistrations>.
         services.AddScoped<I3MfToStlConversionService, ThreeMfToStlConversionService>();
 
         return services;

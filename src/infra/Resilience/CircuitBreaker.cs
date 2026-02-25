@@ -1,14 +1,15 @@
 ﻿using System.Collections.Concurrent;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Infrastructure;
 
-public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, TimeSpan? retryDelay = null, IUnifiedLoggingService? logger = null)
+public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, TimeSpan? retryDelay = null, ILogger? logger = null)
 {
     private readonly int _failureThreshold = failureThreshold;
     private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromMinutes(1);
     private readonly TimeSpan _retryDelay = retryDelay ?? TimeSpan.FromSeconds(30);
-    private readonly IUnifiedLoggingService _logger = logger ?? new NullLoggingService();
+    private readonly ILogger _logger = logger ?? NullLogger<CircuitBreaker>.Instance;
 
     private readonly Lock _lock = new();
     private int _failureCount;
@@ -28,7 +29,7 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
         {
             if (DateTime.UtcNow - _lastFailureTime < _retryDelay)
             {
-                _logger.LogWarning($"Circuit breaker {Name} is OPEN. Request blocked");
+                _logger.LogWarning("Circuit breaker {Name} is OPEN. Request blocked", Name);
                 throw new CircuitBreakerOpenException($"Circuit breaker {Name} is open");
             }
 
@@ -37,7 +38,7 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
                 if (DateTime.UtcNow - _lastFailureTime >= _retryDelay)
                 {
                     _state = CircuitState.HalfOpen;
-                    _logger.LogInformation($"Circuit breaker {Name} moved to HALF-OPEN");
+                    _logger.LogInformation("Circuit breaker {Name} moved to HALF-OPEN", Name);
                 }
             }
         }
@@ -77,7 +78,7 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
         {
             if (_state == CircuitState.HalfOpen || _failureCount > 0)
             {
-                _logger.LogInformation($"Circuit breaker {Name} reset after successful operation");
+                _logger.LogInformation("Circuit breaker {Name} reset after successful operation", Name);
             }
 
             _failureCount = 0;
@@ -92,12 +93,12 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
             _failureCount++;
             _lastFailureTime = DateTime.UtcNow;
 
-            _logger.LogWarning($"Circuit breaker {Name} recorded failure {_failureCount}/{_failureThreshold}: {ex.Message}");
+            _logger.LogWarning("Circuit breaker {Name} recorded failure {FailureCount}/{FailureThreshold}: {Message}", Name, _failureCount, _failureThreshold, ex.Message);
 
             if (_failureCount >= _failureThreshold)
             {
                 _state = CircuitState.Open;
-                _logger.LogError($"Circuit breaker {Name} is now OPEN after {_failureCount} consecutive failures");
+                _logger.LogError("Circuit breaker {Name} is now OPEN after {FailureCount} consecutive failures", Name, _failureCount);
             }
         }
     }
@@ -117,7 +118,7 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
         {
             _failureCount = 0;
             _state = CircuitState.Closed;
-            _logger.LogInformation($"Circuit breaker {Name} manually reset");
+            _logger.LogInformation("Circuit breaker {Name} manually reset", Name);
         }
     }
 

@@ -10,11 +10,11 @@ using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, BackendTimeoutSettings timeouts) : PrinterClientBase, IMoonrakerClient,
+public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, BackendTimeoutSettings timeouts) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -36,7 +36,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
     ISupportsGcodeExecution
 {
     private readonly HttpClient _http = http;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
@@ -47,11 +47,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
             cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "printer/info");
-            _logger.LogDebug($"[Moonraker] Querying status at: {uri}");
+            _logger.LogDebug("[Moonraker] Querying status at: {Uri}", uri);
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogDebug($"[Moonraker] Status query failed with status {resp.StatusCode} at {uri}");
+                _logger.LogDebug("[Moonraker] Status query failed with status {RespStatusCode} at {Uri}", resp.StatusCode, uri);
                 return new PrinterStatus(false, null);
             }
 
@@ -69,7 +69,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
                 state = s2.GetString();
             }
 
-            _logger.LogDebug($"[Moonraker] Status retrieved: state={state}");
+            _logger.LogDebug("[Moonraker] Status retrieved: state={State}", state);
             return new PrinterStatus(true, state);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -79,22 +79,22 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug(ex, $"[Moonraker] HTTP request failed for {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "[Moonraker] HTTP request failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return new PrinterStatus(false, null);
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug(ex, $"[Moonraker] Timeout getting status from {baseUrl}");
+            _logger.LogDebug(ex, "[Moonraker] Timeout getting status from {BaseUrl}", baseUrl);
             return new PrinterStatus(false, null);
         }
         catch (JsonException ex)
         {
-            _logger.LogDebug(ex, $"[Moonraker] JSON parse error from {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "[Moonraker] JSON parse error from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return new PrinterStatus(false, null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, $"[Moonraker] Unexpected error getting status from {baseUrl}: {ex.GetType().Name}: {ex.Message}");
+            _logger.LogDebug(ex, "[Moonraker] Unexpected error getting status from {BaseUrl}: {Name}: {Message}", baseUrl, ex.GetType().Name, ex.Message);
             return new PrinterStatus(false, null);
         }
     }
@@ -133,22 +133,22 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
+            _logger.LogDebug(ex, "Failed to get printer info from {BaseUrl}", baseUrl);
             return null;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
+            _logger.LogDebug(ex, "Failed to get printer info from {BaseUrl}", baseUrl);
             return null;
         }
         catch (JsonException ex)
         {
-            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
+            _logger.LogDebug(ex, "Failed to get printer info from {BaseUrl}", baseUrl);
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
+            _logger.LogDebug(ex, "Failed to get printer info from {BaseUrl}", baseUrl);
             return null;
         }
     }
@@ -386,9 +386,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
 
     public async Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default)
     {
-        _logger.LogDebug($"[Moonraker] GetCompositeStatusAsync: baseUrl={baseUrl}");
+        _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: baseUrl={BaseUrl}", baseUrl);
         PrinterStatus status = await GetStatusAsync(baseUrl, ct);
-        _logger.LogDebug($"[Moonraker] GetCompositeStatusAsync: status.IsOnline={status.IsOnline}, status.State={status.State}");
+        _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: status.IsOnline={StatusIsOnline}, status.State={StatusState}", status.IsOnline, status.State);
         PrinterJob? job = await GetJobAsync(baseUrl, ct);
 
         // Try to read current position
@@ -949,19 +949,19 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
+            _logger.LogDebug(ex, "Failed to get camera URLs from {BaseUrl}", baseUrl);
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
+            _logger.LogDebug(ex, "Failed to get camera URLs from {BaseUrl}", baseUrl);
         }
         catch (JsonException ex)
         {
-            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
+            _logger.LogDebug(ex, "Failed to get camera URLs from {BaseUrl}", baseUrl);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
+            _logger.LogDebug(ex, "Failed to get camera URLs from {BaseUrl}", baseUrl);
         }
 
         return (stream, snapshot);
@@ -976,7 +976,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
             Uri uri = new(baseUri, "server/files/upload");
 
             long streamLength = fileContent.CanSeek ? fileContent.Length : -1;
-            _logger.LogInformation($"[Moonraker] Uploading G-code file {fileName} to {uri}, stream length: {streamLength}");
+            _logger.LogInformation("[Moonraker] Uploading G-code file {FileName} to {Uri}, stream length: {StreamLength}", fileName, uri, streamLength);
 
             using MultipartFormDataContent formContent = new();
             using StreamContent streamContent = new(fileContent);
@@ -991,11 +991,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
             if (!resp.IsSuccessStatusCode)
             {
                 string responseBody = await resp.Content.ReadAsStringAsync(ct);
-                _logger.LogWarning($"[Moonraker] Upload failed with status {resp.StatusCode}: {responseBody}");
+                _logger.LogWarning("[Moonraker] Upload failed with status {RespStatusCode}: {ResponseBody}", resp.StatusCode, responseBody);
             }
             else
             {
-                _logger.LogInformation($"[Moonraker] Upload succeeded for {fileName}");
+                _logger.LogInformation("[Moonraker] Upload succeeded for {FileName}", fileName);
             }
 
             return resp.IsSuccessStatusCode;
@@ -1006,7 +1006,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (Exception ex)
         {
-            _logger.LogError($"[Moonraker] Exception during G-code upload for {fileName} to {baseUrl}: {ex.Message}");
+            _logger.LogError("[Moonraker] Exception during G-code upload for {FileName} to {BaseUrl}: {Message}", fileName, baseUrl, ex.Message);
             return false;
         }
     }
@@ -1211,7 +1211,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
                 }
                 catch (JsonException ex)
                 {
-                    _logger.LogDebug($"Error parsing directory info from REST API: {ex.Message}");
+                    _logger.LogDebug("Error parsing directory info from REST API: {Message}", ex.Message);
 
                     // Continue to fallback method
                 }
@@ -1247,7 +1247,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
 
                 if (jsonRpcResponse?.Error != null)
                 {
-                    _logger.LogDebug($"JSON-RPC error for {jsonRpcRequest.Method}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+                    _logger.LogDebug("JSON-RPC error for {JsonRpcRequestMethod}: {Message} (Code: {Code})", jsonRpcRequest.Method, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
 
                     // Special handling for URL parameter error
                     if (jsonRpcResponse.Error.Message.Contains("No data for argument: url", StringComparison.OrdinalIgnoreCase) ||
@@ -1275,7 +1275,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
 
                         if (jsonRpcResponse?.Error != null)
                         {
-                            _logger.LogDebug($"JSON-RPC error for {jsonRpcRequest.Method}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+                            _logger.LogDebug("JSON-RPC error for {JsonRpcRequestMethod}: {Message} (Code: {Code})", jsonRpcRequest.Method, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
                             return null;
                         }
                     }
@@ -1297,7 +1297,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
             }
             catch (JsonException jex)
             {
-                _logger.LogDebug(jex, $"Failed to parse JSON response: {jex.Message}");
+                _logger.LogDebug(jex, "Failed to parse JSON response: {JexMessage}", jex.Message);
                 return null;
             }
         }
@@ -1308,18 +1308,18 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "Failed to get directory from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return null;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "Failed to get directory from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Catch any remaining exceptions (JSON serialization errors, etc.) to ensure method resilience
-            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "Failed to get directory from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return null;
         }
     }
@@ -1526,17 +1526,17 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
+            _logger.LogDebug(ex, "Failed to start metadata scan for {Filename} at {BaseUrl}", filename, baseUrl);
             return false;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
+            _logger.LogDebug(ex, "Failed to start metadata scan for {Filename} at {BaseUrl}", filename, baseUrl);
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
+            _logger.LogDebug(ex, "Failed to start metadata scan for {Filename} at {BaseUrl}", filename, baseUrl);
             return false;
         }
     }
@@ -1622,7 +1622,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
     /// </remarks>
     public async Task<byte[]?> DownloadFileAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
-        _logger.LogInformation($"[Moonraker] DownloadFileAsync starting: filename='{filename}', baseUrl='{baseUrl}'");
+        _logger.LogInformation("[Moonraker] DownloadFileAsync starting: filename='{Filename}', baseUrl='{BaseUrl}'", filename, baseUrl);
 
         try
         {
@@ -1637,13 +1637,13 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
 
-            _logger.LogDebug($"[Moonraker] Downloading file from URL: {uri}");
+            _logger.LogDebug("[Moonraker] Downloading file from URL: {Uri}", uri);
 
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
 
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning($"[Moonraker] Download failed: StatusCode={resp.StatusCode}, ReasonPhrase='{resp.ReasonPhrase}', URL='{uri}'");
+                _logger.LogWarning("[Moonraker] Download failed: StatusCode={RespStatusCode}, ReasonPhrase='{RespReasonPhrase}', URL='{Uri}'", resp.StatusCode, resp.ReasonPhrase, uri);
                 return null;
             }
 
@@ -1651,26 +1651,26 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
 
             if (content == null || content.Length == 0)
             {
-                _logger.LogWarning($"[Moonraker] Download returned empty content for file '{filename}'. StatusCode={resp.StatusCode}, ContentLength={resp.Content.Headers.ContentLength}, ContentType={resp.Content.Headers.ContentType}");
+                _logger.LogWarning("[Moonraker] Download returned empty content for file '{Filename}'. StatusCode={RespStatusCode}, ContentLength={ContentLength}, ContentType={ContentType}", filename, resp.StatusCode, resp.Content.Headers.ContentLength, resp.Content.Headers.ContentType);
                 return null;
             }
 
-            _logger.LogInformation($"[Moonraker] Successfully downloaded file '{filename}': {content.Length} bytes");
+            _logger.LogInformation("[Moonraker] Successfully downloaded file '{Filename}': {ContentLength} bytes", filename, content.Length);
             return content;
         }
         catch (OperationCanceledException ex)
         {
-            _logger.LogWarning(ex, $"[Moonraker] Download timeout for file '{filename}' after 30 seconds");
+            _logger.LogWarning(ex, "[Moonraker] Download timeout for file '{Filename}' after 30 seconds", filename);
             return null;
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, $"[Moonraker] HTTP error downloading file '{filename}': {ex.Message}");
+            _logger.LogWarning(ex, "[Moonraker] HTTP error downloading file '{Filename}': {Message}", filename, ex.Message);
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[Moonraker] Unexpected error downloading file '{filename}': {ex.GetType().Name}: {ex.Message}");
+            _logger.LogError(ex, "[Moonraker] Unexpected error downloading file '{Filename}': {Name}: {Message}", filename, ex.GetType().Name, ex.Message);
             return null;
         }
     }
@@ -1912,16 +1912,16 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
             }
 
             Uri uri = new(baseUri, relative);
-            _logger.LogInformation($"[Moonraker] Fetching history from {uri}");
+            _logger.LogInformation("[Moonraker] Fetching history from {Uri}", uri);
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning($"[Moonraker] History API returned {resp.StatusCode} from {uri}");
+                _logger.LogWarning("[Moonraker] History API returned {RespStatusCode} from {Uri}", resp.StatusCode, uri);
                 return null;
             }
 
             string content = await resp.Content.ReadAsStringAsync(cts.Token);
-            _logger.LogDebug($"[Moonraker] History response: {content.Substring(0, Math.Min(200, content.Length))}...");
+            _logger.LogDebug("[Moonraker] History response: {Value0}...", content.Substring(0, Math.Min(200, content.Length)));
             MoonrakerResponse<HistoryListResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
             if (response?.Result == null)
             {
@@ -1929,7 +1929,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
                 return null;
             }
 
-            _logger.LogInformation($"[Moonraker] Successfully fetched {response.Result.Count} history items");
+            _logger.LogInformation("[Moonraker] Successfully fetched {Count} history items", response.Result.Count);
             return response.Result;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1939,12 +1939,12 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogWarning(ex, $"[Moonraker] History request timed out for {baseUrl}");
+            _logger.LogWarning(ex, "[Moonraker] History request timed out for {BaseUrl}", baseUrl);
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[Moonraker] Failed to get history list from {baseUrl}: {ex.Message}");
+            _logger.LogError(ex, "[Moonraker] Failed to get history list from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return null;
         }
     }
@@ -1975,7 +1975,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, $"Failed to get history job {jobId} from {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "Failed to get history job {JobId} from {BaseUrl}: {Message}", jobId, baseUrl, ex.Message);
             return null;
         }
     }
@@ -2000,7 +2000,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, $"Failed to delete history job {jobId} from {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "Failed to delete history job {JobId} from {BaseUrl}: {Message}", jobId, baseUrl, ex.Message);
             return false;
         }
     }
@@ -2030,7 +2030,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, $"Failed to get history totals from {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "Failed to get history totals from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return null;
         }
     }
@@ -2054,7 +2054,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, $"Failed to reset history totals from {baseUrl}: {ex.Message}");
+            _logger.LogDebug(ex, "Failed to reset history totals from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
         }
     }
@@ -2145,14 +2145,14 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
             if (!resp.IsSuccessStatusCode)
             {
                 string body = await resp.Content.ReadAsStringAsync(cts.Token);
-                _logger.LogWarning($"SetSpoolmanActiveSpoolAsync: Moonraker returned {(int)resp.StatusCode} for spool_id={spoolId} on {uri}. Body: {body}");
+                _logger.LogWarning("SetSpoolmanActiveSpoolAsync: Moonraker returned {RespStatusCode} for spool_id={SpoolId} on {Uri}. Body: {Body}", (int)resp.StatusCode, spoolId, uri, body);
             }
 
             return resp.IsSuccessStatusCode;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"SetSpoolmanActiveSpoolAsync: Exception for spool_id={spoolId} on {baseUrl}");
+            _logger.LogError(ex, "SetSpoolmanActiveSpoolAsync: Exception for spool_id={SpoolId} on {BaseUrl}", spoolId, baseUrl);
             return false;
         }
     }

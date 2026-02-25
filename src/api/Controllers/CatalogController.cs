@@ -7,6 +7,7 @@ using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -18,10 +19,10 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Catalog")]
 [Authorize]
 public class CatalogController(
-    Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService,
+    ILogger<CatalogController> unifiedLoggingService,
     Services.Catalog.ICatalogService catalogService) : ControllerBase
 {
-    private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService = unifiedLoggingService;
+    private readonly ILogger<CatalogController> _unifiedLoggingService = unifiedLoggingService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
 
     /// <summary>
@@ -43,7 +44,7 @@ public class CatalogController(
         catch (Exception ex)
         {
             // Log the error with as much context as possible via injected unified logging service
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetManufacturersAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] GetManufacturersAsync failed: {Message}", ex.Message);
 
             // Optionally, include more context in the error response
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve manufacturers", details = ex.ToString() });
@@ -173,7 +174,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateModelAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] UpdateModelAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -195,7 +196,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteModelAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] DeleteModelAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete model" });
         }
     }
@@ -225,7 +226,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetModelAliasesAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] GetModelAliasesAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve model aliases" });
         }
     }
@@ -256,7 +257,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateModelAliasesAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] UpdateModelAliasesAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update model aliases" });
         }
     }
@@ -280,7 +281,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetHotendsAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] GetHotendsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve hotend models" });
         }
     }
@@ -302,7 +303,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetExtrudersAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] GetExtrudersAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve extruder models" });
         }
     }
@@ -324,7 +325,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetToolheadsAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] GetToolheadsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve toolhead models" });
         }
     }
@@ -346,7 +347,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetNozzlesAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] GetNozzlesAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve nozzle models" });
         }
     }
@@ -379,7 +380,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] CreateHotendAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] CreateHotendAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create hotend model" });
         }
     }
@@ -400,7 +401,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateHotendAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] UpdateHotendAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update hotend model" });
         }
     }
@@ -420,7 +421,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteHotendAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] DeleteHotendAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete hotend model" });
         }
     }
@@ -454,7 +455,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] CreateExtruderAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] CreateExtruderAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create extruder model" });
         }
     }
@@ -475,7 +476,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateExtruderAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] UpdateExtruderAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update extruder model" });
         }
     }
@@ -495,7 +496,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteExtruderAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] DeleteExtruderAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete extruder model" });
         }
     }
@@ -529,7 +530,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] CreateToolheadAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] CreateToolheadAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create toolhead model" });
         }
     }
@@ -550,7 +551,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateToolheadAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] UpdateToolheadAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update toolhead model" });
         }
     }
@@ -570,7 +571,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteToolheadAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] DeleteToolheadAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete toolhead model" });
         }
     }
@@ -604,7 +605,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] CreateNozzleAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] CreateNozzleAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create nozzle model" });
         }
     }
@@ -625,7 +626,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateNozzleAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] UpdateNozzleAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update nozzle model" });
         }
     }
@@ -645,7 +646,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteNozzleAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] DeleteNozzleAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete nozzle model" });
         }
     }
@@ -677,7 +678,7 @@ public class CatalogController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetManufacturersByContextAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] GetManufacturersByContextAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve manufacturers by context" });
         }
     }

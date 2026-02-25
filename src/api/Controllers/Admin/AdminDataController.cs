@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers.Admin;
 
@@ -16,13 +16,13 @@ public class AdminDataController : ControllerBase
     private readonly IDataExportService _exportService;
     private readonly IDataImportService _importService;
     private readonly IDataSeedService _seedService;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<AdminDataController> _logger;
 
     public AdminDataController(
         IDataExportService exportService,
         IDataImportService importService,
         IDataSeedService seedService,
-        IUnifiedLoggingService logger)
+        ILogger<AdminDataController> logger)
     {
         _exportService = exportService;
         _importService = importService;

@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Services.RateLimiting;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;
@@ -8,10 +8,10 @@ namespace Farm.Web.Api.Middleware;
 /// Middleware that enforces rate limiting on authentication endpoints (login and register).
 /// Limits are applied per IP address to prevent brute force attacks.
 /// </summary>
-public class AuthenticationRateLimitMiddleware(RequestDelegate next, IUnifiedLoggingService logger)
+public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<AuthenticationRateLimitMiddleware> logger)
 {
     private readonly RequestDelegate _next = next;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<AuthenticationRateLimitMiddleware> _logger = logger;
 
     public async Task InvokeAsync(HttpContext context, IRateLimitService rateLimitService)
     {
@@ -95,12 +95,7 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, IUnifiedLog
             }
 
             string endpoint = isLogin ? "login" : "register";
-            _logger.LogWarning($"Rate limit exceeded for {endpoint} from IP {ipAddress}", null, new
-            {
-                Endpoint = endpoint,
-                IpAddress = ipAddress,
-                RetryAfterSeconds = rateLimitResult.RetryAfter?.TotalSeconds
-            });
+            _logger.LogWarning("Rate limit exceeded for {Endpoint} from IP {IpAddress}", endpoint, ipAddress);
 
             await context.Response.WriteAsJsonAsync(new
             {

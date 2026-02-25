@@ -1,10 +1,11 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Health;
 
-public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, IUnifiedLoggingService logger) : IHealthCheck
+public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, ILogger<WorkerReadinessHealthCheck> logger) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
@@ -12,7 +13,7 @@ public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, 
         {
             WorkerState state = workerStateService.GetWorkerState();
             bool isReady = state.IsInitialized && !state.IsShuttingDown && state.ActiveJobs < state.MaxConcurrentJobs;
-            logger.LogDebug($"Readiness - Ready {isReady} Active {state.ActiveJobs}/{state.MaxConcurrentJobs}");
+            logger.LogDebug("Readiness - Ready {IsReady} Active {StateActiveJobs}/{StateMaxConcurrentJobs}", isReady, state.ActiveJobs, state.MaxConcurrentJobs);
             Dictionary<string, object> data = new Dictionary<string, object>
             {
                 ["initialized"] = state.IsInitialized,

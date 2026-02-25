@@ -6,11 +6,11 @@ using System.Text.Json;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -467,7 +467,7 @@ public sealed class SdcpClientParsingTests
         try
         {
             string baseUrl = $"http://127.0.0.1:{port}";
-            var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
             using var httpClient = new HttpClient();
             var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
@@ -605,7 +605,7 @@ public sealed class SdcpClientParsingTests
         await app.StartAsync();
 
         string baseUrl = $"http://127.0.0.1:{port}";
-        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
         using var httpClient = new HttpClient();
         var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
@@ -686,7 +686,7 @@ public sealed class SdcpClientParsingTests
         await app.StartAsync();
 
         string baseUrl = $"http://127.0.0.1:{port}";
-        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
         using var httpClient = new HttpClient();
         var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 

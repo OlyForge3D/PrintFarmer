@@ -5,8 +5,8 @@ using System.Reflection;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -23,12 +23,12 @@ public class BackendClientFactory : IBackendClientFactory
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly Dictionary<PrinterBackend, Type> _clientTypeMap;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<BackendClientFactory> _logger;
 
     public BackendClientFactory(
         IServiceProvider serviceProvider,
         IBackendPluginRegistry pluginRegistry,
-        IUnifiedLoggingService logger)
+        ILogger<BackendClientFactory> logger)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
         ArgumentNullException.ThrowIfNull(pluginRegistry);
@@ -62,7 +62,7 @@ public class BackendClientFactory : IBackendClientFactory
 
                 if (typeForDi == null)
                 {
-                    _logger.LogDebug($"Plugin {plugin.BackendType} has no client interface type or client type, skipping.");
+                    _logger.LogDebug("Plugin {PluginBackendType} has no client interface type or client type, skipping.", plugin.BackendType);
                     continue;
                 }
 
@@ -75,7 +75,7 @@ public class BackendClientFactory : IBackendClientFactory
 
                     if (backendAttr == null)
                     {
-                        _logger.LogWarning($"Plugin {plugin.BackendType} assembly is missing BackendPluginAttribute, skipping.");
+                        _logger.LogWarning("Plugin {PluginBackendType} assembly is missing BackendPluginAttribute, skipping.", plugin.BackendType);
                         continue;
                     }
 
@@ -84,7 +84,7 @@ public class BackendClientFactory : IBackendClientFactory
                     // Check for duplicate BackendId
                     if (_clientTypeMap.ContainsKey(backendId))
                     {
-                        _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.BackendType} has BackendId={backendAttr.BackendId} but it's already registered. This will cause incorrect backend routing.");
+                        _logger.LogError("DUPLICATE BackendId detected! Plugin {PluginBackendType} has BackendId={BackendAttrBackendId} but it's already registered. This will cause incorrect backend routing.", plugin.BackendType, backendAttr.BackendId);
                         duplicateIds.Add(backendAttr.BackendId);
                         continue;
                     }
@@ -93,11 +93,11 @@ public class BackendClientFactory : IBackendClientFactory
                     // Plugins register services by interface (e.g., IMoonrakerClient), not implementation
                     _clientTypeMap[backendId] = typeForDi;
                     discoveredCount++;
-                    _logger.LogInformation($"✓ Registered backend client type: {plugin.BackendType} (BackendId={backendAttr.BackendId}, InterfaceType={typeForDi.Name})");
+                    _logger.LogInformation("✓ Registered backend client type: {PluginBackendType} (BackendId={BackendAttrBackendId}, InterfaceType={TypeForDiName})", plugin.BackendType, backendAttr.BackendId, typeForDi.Name);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to discover client type for plugin {plugin.BackendType}: {ex.Message}");
+                    _logger.LogWarning("Failed to discover client type for plugin {PluginBackendType}: {Message}", plugin.BackendType, ex.Message);
                 }
             }
 
@@ -107,7 +107,7 @@ public class BackendClientFactory : IBackendClientFactory
             }
             else
             {
-                _logger.LogInformation($"BackendClientFactory discovered {discoveredCount} backend client type(s): {string.Join(", ", _clientTypeMap.Keys)}");
+                _logger.LogInformation("BackendClientFactory discovered {DiscoveredCount} backend client type(s): {StringJoin}", discoveredCount, string.Join(", ", _clientTypeMap.Keys));
             }
 
             if (duplicateIds.Count > 0)
@@ -117,7 +117,7 @@ public class BackendClientFactory : IBackendClientFactory
         }
         catch (Exception ex) when (ex is not InvalidOperationException)
         {
-            _logger.LogError($"Error discovering backend client types from plugins: {ex.Message}");
+            _logger.LogError("Error discovering backend client types from plugins: {Message}", ex.Message);
             throw;
         }
     }
@@ -126,7 +126,7 @@ public class BackendClientFactory : IBackendClientFactory
     {
         if (!_clientTypeMap.TryGetValue(backend, out Type? clientType))
         {
-            _logger.LogError($"✗ Unsupported printer backend requested: {backend}. Available backends: {string.Join(", ", _clientTypeMap.Keys)}");
+            _logger.LogError("✗ Unsupported printer backend requested: {Backend}. Available backends: {StringJoin}", backend, string.Join(", ", _clientTypeMap.Keys));
             throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
         }
 
@@ -140,16 +140,16 @@ public class BackendClientFactory : IBackendClientFactory
 
             if (client == null)
             {
-                _logger.LogError($"✗ Failed to resolve backend client for {backend} (type: {clientType.Name}). rawService was: {rawService?.GetType().FullName ?? "NULL"}");
+                _logger.LogError("✗ Failed to resolve backend client for {Backend} (type: {ClientTypeName}). rawService was: {FullName}", backend, clientType.Name, rawService?.GetType().FullName ?? "NULL");
                 throw new InvalidOperationException($"Could not resolve backend client for backend {backend} (type: {clientType.Name}). Ensure you are calling this from within a scoped context (e.g., from a scoped service or HTTP request). The plugin may not have registered it correctly.");
             }
 
-            _logger.LogDebug($"✓ Resolved backend client for {backend}: {clientType.Name}");
+            _logger.LogDebug("✓ Resolved backend client for {Backend}: {ClientTypeName}", backend, clientType.Name);
             return client;
         }
         catch (Exception ex) when (ex is not ArgumentException and not InvalidOperationException)
         {
-            _logger.LogError($"✗ Error resolving backend client for {backend} (type: {clientType.Name}): {ex.Message}");
+            _logger.LogError("✗ Error resolving backend client for {Backend} (type: {ClientTypeName}): {Message}", backend, clientType.Name, ex.Message);
             throw new InvalidOperationException($"Error resolving backend client for {backend}: {ex.Message}", ex);
         }
     }

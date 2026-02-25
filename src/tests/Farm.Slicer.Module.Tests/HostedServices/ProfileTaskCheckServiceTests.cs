@@ -3,7 +3,6 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Tasks;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Api.HostedServices;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -11,6 +10,7 @@ using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace Farm.Slicer.Module.Tests.HostedServices;
@@ -25,7 +25,7 @@ public sealed class ProfileTaskCheckServiceTests
     private readonly Mock<IServiceScopeFactory> _scopeFactory = new();
     private readonly Mock<IServiceScope> _scope = new();
     private readonly Mock<IServiceProvider> _scopeProvider = new();
-    private readonly Mock<IUnifiedLoggingService> _logger = new();
+    private readonly Mock<ILogger<ProfileTaskCheckService>> _logger = new();
     private readonly Mock<ISlicersService> _slicersService = new();
     private readonly Mock<IPrintersService> _printersService = new();
     private readonly Mock<IMachineModelProfileRepository> _machineModelProfileRepo = new();

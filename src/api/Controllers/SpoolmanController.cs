@@ -4,10 +4,10 @@ using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -21,10 +21,10 @@ namespace Farm.Web.Api.Controllers;
 public class SpoolmanController(
     ISpoolmanService spoolman,
     ISettingsService settingsService,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<SpoolmanController> logger) : ControllerBase
 {
     private readonly ISettingsService _settingsService = settingsService;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<SpoolmanController> _logger = logger;
 
     /// <summary>
     /// Tests connectivity to an arbitrary Spoolman base URL without persisting configuration.
@@ -218,7 +218,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error creating filament: {ex.Message}");
+            _logger.LogError(ex, "Error creating filament: {Message}", ex.Message);
             return BadRequest(new { message = $"Create failed: {ex.Message}" });
         }
     }
@@ -253,7 +253,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error bulk-updating filaments: {ex.Message}");
+            _logger.LogError(ex, "Error bulk-updating filaments: {Message}", ex.Message);
             return BadRequest(new { message = $"Bulk update failed: {ex.Message}" });
         }
     }
@@ -284,7 +284,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error updating filament {id}: {ex.Message}");
+            _logger.LogError(ex, "Error updating filament {Id}: {Message}", id, ex.Message);
             return BadRequest(new { message = $"Update failed: {ex.Message}" });
         }
     }
@@ -309,7 +309,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error deleting filament {id}: {ex.Message}");
+            _logger.LogError(ex, "Error deleting filament {Id}: {Message}", id, ex.Message);
             return BadRequest(new { message = $"Delete failed: {ex.Message}" });
         }
     }
@@ -342,7 +342,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error bulk-deleting filaments: {ex.Message}");
+            _logger.LogError(ex, "Error bulk-deleting filaments: {Message}", ex.Message);
             return BadRequest(new { message = $"Bulk delete failed: {ex.Message}" });
         }
     }
@@ -400,7 +400,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error exporting Spoolman filaments to CSV: {ex.Message}");
+            _logger.LogError(ex, "Error exporting Spoolman filaments to CSV: {Message}", ex.Message);
             return BadRequest(new { message = $"Export failed: {ex.Message}" });
         }
     }
@@ -544,7 +544,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error importing Spoolman filaments from CSV: {ex.Message}");
+            _logger.LogError(ex, "Error importing Spoolman filaments from CSV: {Message}", ex.Message);
             return BadRequest(new { message = $"Import failed: {ex.Message}" });
         }
     }

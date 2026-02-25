@@ -2,7 +2,7 @@
 using System.Text.Json;
 using System.Xml;
 using Farm.Infrastructure.Services;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Models;
 
@@ -14,9 +14,9 @@ namespace Farm.Infrastructure.Services.Models;
 /// 3. Applying transformations to vertices
 /// 4. Merging into a single coherent mesh
 /// </summary>
-public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3MfToStlConversionService
+public class ThreeMfToStlConversionService(ILogger<ThreeMfToStlConversionService> logger) : I3MfToStlConversionService
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ThreeMfToStlConversionService> _logger = logger;
 
     /// <inheritdoc/>
     public async Task<byte[]?> ConvertToSTLAsync(byte[] threeMfBytes, CancellationToken cancellationToken = default)
@@ -54,7 +54,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
             namespaceManager.AddNamespace("p", "http://schemas.microsoft.com/3dmanufacturing/production/2015/06");
 
             XmlNodeList? componentNodes = mainModelXml.SelectNodes("//model:component", namespaceManager);
-            _logger.LogInformation($"Found {componentNodes?.Count ?? 0} components in assembly");
+            _logger.LogInformation("Found {ComponentNodesCount} components in assembly", componentNodes?.Count ?? 0);
 
             if (componentNodes?.Count == 0)
             {
@@ -75,13 +75,13 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
 
                 if (pathAttr == null)
                 {
-                    _logger.LogWarning($"Component {componentIndex} missing path attribute");
+                    _logger.LogWarning("Component {ComponentIndex} missing path attribute", componentIndex);
                     componentIndex++;
                     continue;
                 }
 
                 string refPath = pathAttr.Value.TrimStart('/');
-                _logger.LogInformation($"Processing component {componentIndex}: {refPath}");
+                _logger.LogInformation("Processing component {ComponentIndex}: {RefPath}", componentIndex, refPath);
 
                 // Find the referenced object file in the archive
                 ZipArchiveEntry? refEntry = zipArchive.Entries.FirstOrDefault(e =>
@@ -89,7 +89,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
 
                 if (refEntry == null)
                 {
-                    _logger.LogWarning($"Component reference not found: {refPath}");
+                    _logger.LogWarning("Component reference not found: {RefPath}", refPath);
                     componentIndex++;
                     continue;
                 }
@@ -106,12 +106,12 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
 
                 if (vertices.Count == 0)
                 {
-                    _logger.LogWarning($"Component {componentIndex} has no vertices");
+                    _logger.LogWarning("Component {ComponentIndex} has no vertices", componentIndex);
                     componentIndex++;
                     continue;
                 }
 
-                _logger.LogInformation($"Component {componentIndex}: {vertices.Count} vertices, {triangles.Count} triangles");
+                _logger.LogInformation("Component {ComponentIndex}: {VerticesCount} vertices, {TrianglesCount} triangles", componentIndex, vertices.Count, triangles.Count);
 
                 // Parse and apply original transform matrix if present
                 List<(float X, float Y, float Z)> transformedVertices = ApplyTransform(vertices, transformAttr?.Value);
@@ -162,16 +162,16 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
                     (t.V1 + vertexOffset, t.V2 + vertexOffset, t.V3 + vertexOffset)));
             }
 
-            _logger.LogInformation($"Combined mesh (grid layout): {allVertices.Count} total vertices, {allTriangles.Count} total triangles");
+            _logger.LogInformation("Combined mesh (grid layout): {AllVerticesCount} total vertices, {AllTrianglesCount} total triangles", allVertices.Count, allTriangles.Count);
 
             // Generate STL from the combined mesh
             byte[] stlResult = GenerateBinarySTL(allVertices, allTriangles);
-            _logger.LogInformation($"3MF to STL conversion completed, output size: {stlResult.Length} bytes");
+            _logger.LogInformation("3MF to STL conversion completed, output size: {StlResultLength} bytes", stlResult.Length);
             return stlResult;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to convert 3MF to STL: {ex.GetType().Name}: {ex.Message}");
+            _logger.LogError("Failed to convert 3MF to STL: {Name}: {Message}", ex.GetType().Name, ex.Message);
             return null;
         }
     }
@@ -202,7 +202,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to parse vertex: {ex.Message}");
+                    _logger.LogWarning("Failed to parse vertex: {Message}", ex.Message);
                 }
             }
         }
@@ -222,7 +222,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to parse triangle: {ex.Message}");
+                    _logger.LogWarning("Failed to parse triangle: {Message}", ex.Message);
                 }
             }
         }
@@ -248,7 +248,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
             string[] parts = transformStr.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 12)
             {
-                _logger.LogWarning($"Invalid transform matrix: expected at least 12 values, got {parts.Length}");
+                _logger.LogWarning("Invalid transform matrix: expected at least 12 values, got {PartsLength}", parts.Length);
                 return vertices;
             }
 
@@ -258,7 +258,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
             {
                 if (!float.TryParse(parts[i], System.Globalization.CultureInfo.InvariantCulture, out float val))
                 {
-                    _logger.LogWarning($"Failed to parse transform matrix value at index {i}: {parts[i]}");
+                    _logger.LogWarning("Failed to parse transform matrix value at index {I}: {Value1}", i, parts[i]);
                     return vertices;
                 }
 
@@ -283,7 +283,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to apply transform: {ex.Message}");
+            _logger.LogWarning("Failed to apply transform: {Message}", ex.Message);
             return vertices;
         }
     }
@@ -303,12 +303,12 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
                 return null;
             }
 
-            _logger.LogInformation($"Direct mesh: {vertices.Count} vertices, {triangles.Count} triangles");
+            _logger.LogInformation("Direct mesh: {VerticesCount} vertices, {TrianglesCount} triangles", vertices.Count, triangles.Count);
             return await Task.Run(() => GenerateBinarySTL(vertices, triangles), cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to parse 3MF mesh data: {ex.Message}");
+            _logger.LogError("Failed to parse 3MF mesh data: {Message}", ex.Message);
             return null;
         }
     }
@@ -448,7 +448,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
         int gridCols = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(sortedComponents.Count)));
         int gridRows = (sortedComponents.Count + gridCols - 1) / gridCols;
 
-        _logger.LogInformation($"Grid layout: {gridRows} rows × {gridCols} columns");
+        _logger.LogInformation("Grid layout: {GridRows} rows × {GridCols} columns", gridRows, gridCols);
 
         // Calculate column widths and row heights for better packing
         float[] colWidths = new float[gridCols];
@@ -492,7 +492,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
             sortedComponents[i].GridOffsetX = colPositions[col] - sortedComponents[i].MinX;
             sortedComponents[i].GridOffsetY = rowPositions[row] - sortedComponents[i].MinY;
 
-            _logger.LogInformation($"Component {i}: grid position ({row}, {col}) → offset ({sortedComponents[i].GridOffsetX:F1}, {sortedComponents[i].GridOffsetY:F1})");
+            _logger.LogInformation("Component {I}: grid position ({Row}, {Col}) → offset ({Value3:F1}, {Value4:F1})", i, row, col, sortedComponents[i].GridOffsetX, sortedComponents[i].GridOffsetY);
         }
 
         // Re-sync back to original components list

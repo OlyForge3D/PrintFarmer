@@ -82,4 +82,12 @@ public interface IQueueDataService
     /// <param name="gcodeFileId">The unique identifier of the gcode file.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     Task<int> CountActiveJobsUsingGcodeAsync(Guid gcodeFileId, CancellationToken ct);
+
+    /// <summary>
+    /// Get all print jobs assigned to any of the specified printers, ordered by priority and queue time.
+    /// Single query replaces N per-printer queries for batch operations like queue overview.
+    /// </summary>
+    /// <param name="printerIds">The printer IDs to get jobs for</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<List<PrintJob>> GetPrintJobsForPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct);
 }

@@ -5,7 +5,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -23,16 +24,16 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsTemperatureControl
 {
     private readonly IPrusaLinkApiClient _apiClient;
-    private readonly IUnifiedLoggingService? _logger;
+    private readonly ILogger<PrusaLinkClient>? _logger;
 
-    public PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = null)
+    public PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger = null)
     {
-        _apiClient = new PrusaLinkApiClient(http, logger ?? new NullLoggingService());
+        _apiClient = new PrusaLinkApiClient(http, NullLogger<PrusaLinkApiClient>.Instance);
         _logger = logger;
     }
 
     // For testability: allow injection of mock API client
-    internal PrusaLinkClient(IPrusaLinkApiClient apiClient, IUnifiedLoggingService? logger = null)
+    internal PrusaLinkClient(IPrusaLinkApiClient apiClient, ILogger<PrusaLinkClient>? logger = null)
     {
         _apiClient = apiClient;
         _logger = logger;
@@ -370,7 +371,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         {
             // Fallback to legacy /api/files endpoint (OctoPrint compatibility)
             // This endpoint also requires authentication
-            _logger?.LogWarning($"Failed to get file list from v1 API, trying legacy endpoint: {ex.Message}");
+            _logger?.LogWarning("Failed to get file list from v1 API, trying legacy endpoint: {Message}", ex.Message);
             try
             {
                 List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, credential, ct);
@@ -426,7 +427,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         catch (Exception ex)
         {
             // Fallback to legacy /api/files endpoint
-            _logger?.LogWarning($"Failed to get file details from v1 API, trying legacy endpoint: {ex.Message}");
+            _logger?.LogWarning("Failed to get file details from v1 API, trying legacy endpoint: {Message}", ex.Message);
             try
             {
                 List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, credential, ct);
@@ -692,7 +693,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         catch (Exception ex)
         {
             // Fallback to legacy /api/files endpoint (OctoPrint compatibility)
-            _logger?.LogWarning($"Failed to get file list from v1 API, trying legacy endpoint: {ex.Message}");
+            _logger?.LogWarning("Failed to get file list from v1 API, trying legacy endpoint: {Message}", ex.Message);
             try
             {
                 List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, credential, ct);
@@ -784,7 +785,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning($"[PrusaLink] Pause requires digest auth credentials (format: username:password) at {baseUrl}");
+            _logger?.LogWarning("[PrusaLink] Pause requires digest auth credentials (format: username:password) at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -795,7 +796,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning($"[PrusaLink] Resume requires digest auth credentials (format: username:password) at {baseUrl}");
+            _logger?.LogWarning("[PrusaLink] Resume requires digest auth credentials (format: username:password) at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -814,7 +815,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning($"[PrusaLink] Home requires digest auth credentials at {baseUrl}");
+            _logger?.LogWarning("[PrusaLink] Home requires digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -824,7 +825,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
     {
         // Without credentials, we can't perform the operation
-        _logger?.LogWarning($"[PrusaLink] SendHome requires digest auth credentials at {baseUrl}");
+        _logger?.LogWarning("[PrusaLink] SendHome requires digest auth credentials at {BaseUrl}", baseUrl);
         return false;
     }
 
@@ -833,7 +834,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         // Use PrinterCredential directly
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning($"[PrusaLink] HomeXY requires digest auth credentials at {baseUrl}");
+            _logger?.LogWarning("[PrusaLink] HomeXY requires digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -845,7 +846,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         // Use PrinterCredential directly
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning($"[PrusaLink] HomeZ requires digest auth credentials at {baseUrl}");
+            _logger?.LogWarning("[PrusaLink] HomeZ requires digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -857,7 +858,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         // Use PrinterCredential directly
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning($"[PrusaLink] Move requires digest auth credentials at {baseUrl}");
+            _logger?.LogWarning("[PrusaLink] Move requires digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -867,7 +868,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // PrusaLink legacy API only supports relative jog, not absolute positioning
-        _logger?.LogWarning($"[PrusaLink] MoveToAsync (absolute positioning) not supported via legacy API at {baseUrl}");
+        _logger?.LogWarning("[PrusaLink] MoveToAsync (absolute positioning) not supported via legacy API at {BaseUrl}", baseUrl);
         return false;
     }
 
@@ -881,7 +882,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         // Use PrinterCredential directly
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning($"[PrusaLink] SetTemperatures requires digest auth credentials at {baseUrl}");
+            _logger?.LogWarning("[PrusaLink] SetTemperatures requires digest auth credentials at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -893,7 +894,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             bool toolResult = await _apiClient.SetToolTemperatureLegacyAsync(baseUrl, hotendTemp.Value, credential, toolIndex: 0, ct);
             if (!toolResult)
             {
-                _logger?.LogWarning($"[PrusaLink] Failed to set hotend temperature to {hotendTemp.Value}°C at {baseUrl}");
+                _logger?.LogWarning("[PrusaLink] Failed to set hotend temperature to {HotendTempValue}°C at {BaseUrl}", hotendTemp.Value, baseUrl);
                 success = false;
             }
         }
@@ -904,7 +905,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             bool bedResult = await _apiClient.SetBedTemperatureLegacyAsync(baseUrl, bedTemp.Value, credential, ct);
             if (!bedResult)
             {
-                _logger?.LogWarning($"[PrusaLink] Failed to set bed temperature to {bedTemp.Value}°C at {baseUrl}");
+                _logger?.LogWarning("[PrusaLink] Failed to set bed temperature to {BedTempValue}°C at {BaseUrl}", bedTemp.Value, baseUrl);
                 success = false;
             }
         }

@@ -6,8 +6,8 @@ using System.Linq;
 using System.Reflection;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -26,12 +26,12 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
 {
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly Dictionary<PrinterBackend, Type> _statusClientTypeMap;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<PrinterStatusClientFactory> _logger;
 
     public PrinterStatusClientFactory(
         IServiceProvider serviceProvider,
         IBackendPluginRegistry pluginRegistry,
-        IUnifiedLoggingService logger)
+        ILogger<PrinterStatusClientFactory> logger)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
         ArgumentNullException.ThrowIfNull(pluginRegistry);
@@ -61,7 +61,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
             }
 
             var pluginsList = plugins.ToList();
-            _logger.LogDebug($"Got {pluginsList.Count} plugins from registry");
+            _logger.LogDebug("Got {PluginsListCount} plugins from registry", pluginsList.Count);
 
             int discoveredCount = 0;
             var duplicateIds = new HashSet<int>();
@@ -76,7 +76,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
 
                 if (plugin.StatusClientType == null)
                 {
-                    _logger.LogDebug($"Plugin {plugin.DisplayName} has no status client type, skipping.");
+                    _logger.LogDebug("Plugin {PluginDisplayName} has no status client type, skipping.", plugin.DisplayName);
                     continue;
                 }
 
@@ -103,7 +103,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
                         }
                         else
                         {
-                            _logger.LogWarning($"Plugin {plugin.DisplayName} assembly is missing BackendPluginAttribute and BackendType '{plugin.BackendType}' cannot be parsed to PrinterBackend enum, skipping.");
+                            _logger.LogWarning("Plugin {PluginDisplayName} assembly is missing BackendPluginAttribute and BackendType '{PluginBackendType}' cannot be parsed to PrinterBackend enum, skipping.", plugin.DisplayName, plugin.BackendType);
                             continue;
                         }
                     }
@@ -111,7 +111,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
                     // Check for duplicate BackendId
                     if (_statusClientTypeMap.ContainsKey(backendId))
                     {
-                        _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.DisplayName} has BackendId={backendId} but it's already registered. This will cause incorrect backend routing.");
+                        _logger.LogError("DUPLICATE BackendId detected! Plugin {PluginDisplayName} has BackendId={BackendId} but it's already registered. This will cause incorrect backend routing.", plugin.DisplayName, backendId);
                         duplicateIds.Add((int)backendId);
                         continue;
                     }
@@ -121,11 +121,11 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
                     // Don't do IsAssignableFrom check due to potential assembly loading issues
                     _statusClientTypeMap[backendId] = plugin.StatusClientType;
                     discoveredCount++;
-                    _logger.LogInformation($"✓ Registered status client type: {plugin.DisplayName} (BackendId={backendId}, Type={plugin.StatusClientType.Name})");
+                    _logger.LogInformation("✓ Registered status client type: {PluginDisplayName} (BackendId={BackendId}, Type={Name})", plugin.DisplayName, backendId, plugin.StatusClientType.Name);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to discover status client type for plugin {plugin.DisplayName}: {ex.Message}");
+                    _logger.LogWarning("Failed to discover status client type for plugin {PluginDisplayName}: {Message}", plugin.DisplayName, ex.Message);
                 }
             }
 
@@ -135,7 +135,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
             }
             else
             {
-                _logger.LogInformation($"PrinterStatusClientFactory discovered {discoveredCount} status client type(s): {string.Join(", ", _statusClientTypeMap.Keys)}");
+                _logger.LogInformation("PrinterStatusClientFactory discovered {DiscoveredCount} status client type(s): {StringJoin}", discoveredCount, string.Join(", ", _statusClientTypeMap.Keys));
             }
 
             if (duplicateIds.Count > 0)
@@ -145,7 +145,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
         }
         catch (Exception ex) when (ex is not InvalidOperationException)
         {
-            _logger.LogError($"Error discovering status client types from plugins: {ex.Message}");
+            _logger.LogError("Error discovering status client types from plugins: {Message}", ex.Message);
             throw;
         }
     }
@@ -154,7 +154,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
     {
         if (!_statusClientTypeMap.TryGetValue(backend, out Type? statusClientType))
         {
-            _logger.LogError($"✗ Unsupported printer backend requested: {backend}. Available status client backends: {string.Join(", ", _statusClientTypeMap.Keys)}");
+            _logger.LogError("✗ Unsupported printer backend requested: {Backend}. Available status client backends: {StringJoin}", backend, string.Join(", ", _statusClientTypeMap.Keys));
             throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
         }
 
@@ -182,12 +182,12 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
 
             // Cast is safe now - we verified it
             var typedClient = (IPrinterStatusClient)statusClient;
-            _logger.LogDebug($"✓ Instantiated status client for {backend}: {statusClientType.Name}");
+            _logger.LogDebug("✓ Instantiated status client for {Backend}: {StatusClientTypeName}", backend, statusClientType.Name);
             return typedClient;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"✗ Failed to instantiate status client for {backend} (type: {statusClientType?.Name}): {ex.Message}");
+            _logger.LogError("✗ Failed to instantiate status client for {Backend} (type: {StatusClientTypeName}): {Message}", backend, statusClientType?.Name, ex.Message);
             throw new InvalidOperationException($"Could not instantiate status client for backend {backend}: {ex.Message}", ex);
         }
     }

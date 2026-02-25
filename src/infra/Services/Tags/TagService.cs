@@ -8,8 +8,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Tags
 {
@@ -30,10 +30,10 @@ namespace Farm.Infrastructure.Services.Tags
     /// </remarks>
     public class TagService(
         ITagRepository tagRepository,
-        IUnifiedLoggingService logger) : ITagService
+        ILogger<TagService> logger) : ITagService
     {
         private readonly ITagRepository _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
-        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly ILogger<TagService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         /// <summary>
         /// Retrieves all tags in the system.
@@ -55,7 +55,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get all tags: {ex.Message}");
+                _logger.LogError("Failed to get all tags: {Message}", ex.Message);
                 throw;
             }
         }
@@ -83,7 +83,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get tag {tagId}: {ex.Message}");
+                _logger.LogError("Failed to get tag {TagId}: {Message}", tagId, ex.Message);
                 throw;
             }
         }
@@ -168,7 +168,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to create tag: {ex.Message}\n{ex.StackTrace}");
+                _logger.LogError("Failed to create tag: {Message}\n{StackTrace}", ex.Message, ex.StackTrace);
                 throw;
             }
         }
@@ -195,11 +195,11 @@ namespace Farm.Infrastructure.Services.Tags
                 await _tagRepository.RemoveAsync(tag, ct);
                 await _tagRepository.SaveChangesAsync(ct);
 
-                _logger.LogInformation($"Deleted tag '{tag.Name}' (ID: {tagId})");
+                _logger.LogInformation("Deleted tag '{TagName}' (ID: {TagId})", tag.Name, tagId);
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to delete tag {tagId}: {ex.Message}");
+                _logger.LogError("Failed to delete tag {TagId}: {Message}", tagId, ex.Message);
                 throw;
             }
         }
@@ -235,7 +235,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to assign tag {tagId} to object {objectId}: {ex.Message}");
+                _logger.LogError("Failed to assign tag {TagId} to object {ObjectId}: {Message}", tagId, objectId, ex.Message);
                 throw;
             }
         }
@@ -257,7 +257,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to remove tag {tagId} from object {objectId}: {ex.Message}");
+                _logger.LogError("Failed to remove tag {TagId} from object {ObjectId}: {Message}", tagId, objectId, ex.Message);
                 throw;
             }
         }
@@ -285,7 +285,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get tags for object {objectId}: {ex.Message}");
+                _logger.LogError("Failed to get tags for object {ObjectId}: {Message}", objectId, ex.Message);
                 throw;
             }
         }
@@ -316,7 +316,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to assign tags to object {objectId}: {ex.Message}");
+                _logger.LogError("Failed to assign tags to object {ObjectId}: {Message}", objectId, ex.Message);
                 throw;
             }
         }
@@ -352,7 +352,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to bulk assign tags to objects ({objectType}): {ex.Message}");
+                _logger.LogError("Failed to bulk assign tags to objects ({ObjectType}): {Message}", objectType, ex.Message);
                 throw;
             }
         }
@@ -403,7 +403,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to search tags for query '{query}': {ex.Message}");
+                _logger.LogError("Failed to search tags for query '{Query}': {Message}", query, ex.Message);
                 throw;
             }
         }
@@ -454,7 +454,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get popular tags (count={count}): {ex.Message}");
+                _logger.LogError("Failed to get popular tags (count={Count}): {Message}", count, ex.Message);
                 throw;
             }
         }
@@ -534,7 +534,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get tag analytics: {ex.Message}");
+                _logger.LogError("Failed to get tag analytics: {Message}", ex.Message);
                 throw;
             }
         }
@@ -566,7 +566,7 @@ namespace Farm.Infrastructure.Services.Tags
                     throw new KeyNotFoundException($"Target tag {targetTagId} not found");
                 }
 
-                _logger.LogInformation($"Merging tag '{sourceTag.Name}' into '{targetTag.Name}'");
+                _logger.LogInformation("Merging tag '{SourceTagName}' into '{TargetTagName}'", sourceTag.Name, targetTag.Name);
 
                 // Get all objects using source tag
                 IReadOnlyList<Guid> sourceObjectIds = await _tagRepository.GetObjectsByTagAsync(sourceTagId, string.Empty, ct);
@@ -592,11 +592,11 @@ namespace Farm.Infrastructure.Services.Tags
                 await _tagRepository.RemoveAsync(sourceTag, ct);
                 await _tagRepository.SaveChangesAsync(ct);
 
-                _logger.LogInformation($"Successfully merged tag '{sourceTag.Name}' into '{targetTag.Name}'");
+                _logger.LogInformation("Successfully merged tag '{SourceTagName}' into '{TargetTagName}'", sourceTag.Name, targetTag.Name);
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to merge tag {sourceTagId} into {targetTagId}: {ex.Message}");
+                _logger.LogError("Failed to merge tag {SourceTagId} into {TargetTagId}: {Message}", sourceTagId, targetTagId, ex.Message);
                 throw;
             }
         }
@@ -622,7 +622,7 @@ namespace Farm.Infrastructure.Services.Tags
                 List<Guid> includeTagList = includeTags?.ToList() ?? [];
                 List<Guid> excludeTagList = excludeTags?.ToList() ?? [];
 
-                _logger.LogInformation($"Filtering {objectType} objects - IncludeTags: {includeTagList.Count}, ExcludeTags: {excludeTagList.Count}, RequireAllTags: {requireAllTags}");
+                _logger.LogInformation("Filtering {ObjectType} objects - IncludeTags: {IncludeTagListCount}, ExcludeTags: {ExcludeTagListCount}, RequireAllTags: {RequireAllTags}", objectType, includeTagList.Count, excludeTagList.Count, requireAllTags);
 
                 // Get objects for include tags
                 HashSet<Guid> objectSet;
@@ -683,12 +683,12 @@ namespace Farm.Infrastructure.Services.Tags
                 }
 
                 var results = objectSet.ToList();
-                _logger.LogInformation($"Filter returned {results.Count} {objectType} objects");
+                _logger.LogInformation("Filter returned {ResultsCount} {ObjectType} objects", results.Count, objectType);
                 return results;
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to filter {objectType} objects by tags: {ex.Message}");
+                _logger.LogError("Failed to filter {ObjectType} objects by tags: {Message}", objectType, ex.Message);
                 throw;
             }
         }
@@ -730,7 +730,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get tag suggestions for '{partialName}': {ex.Message}");
+                _logger.LogError("Failed to get tag suggestions for '{PartialName}': {Message}", partialName, ex.Message);
                 throw;
             }
         }
@@ -766,7 +766,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get objects with all tags ({objectType}): {ex.Message}");
+                _logger.LogError("Failed to get objects with all tags ({ObjectType}): {Message}", objectType, ex.Message);
                 throw;
             }
         }
@@ -795,7 +795,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get objects with any tag ({objectType}): {ex.Message}");
+                _logger.LogError("Failed to get objects with any tag ({ObjectType}): {Message}", objectType, ex.Message);
                 throw;
             }
         }
@@ -831,7 +831,7 @@ namespace Farm.Infrastructure.Services.Tags
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to get objects excluding tags ({objectType}): {ex.Message}");
+                _logger.LogError("Failed to get objects excluding tags ({ObjectType}): {Message}", objectType, ex.Message);
                 throw;
             }
         }
@@ -892,14 +892,14 @@ namespace Farm.Infrastructure.Services.Tags
                 }
 
                 _logger.LogDebug(
-                    $"Complex filter returned {resultObjects.Count} {objectType} objects " +
-                    $"(includeAll: {includeAllList.Count}, includeAny: {includeAnyList.Count}, exclude: {excludeList.Count})");
+                    "Complex filter returned {ResultObjectsCount} {ObjectType} objects (includeAll: {IncludeAll}, includeAny: {IncludeAny}, exclude: {Exclude})",
+                    resultObjects.Count, objectType, includeAllList.Count, includeAnyList.Count, excludeList.Count);
 
                 return resultObjects;
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to apply complex filter to {objectType} objects: {ex.Message}");
+                _logger.LogError("Failed to apply complex filter to {ObjectType} objects: {Message}", objectType, ex.Message);
                 throw;
             }
         }
@@ -930,7 +930,7 @@ namespace Farm.Infrastructure.Services.Tags
                 List<Guid> includeTagList = includeTags?.ToList() ?? [];
                 List<Guid> excludeTagList = excludeTags?.ToList() ?? [];
 
-                _logger.LogInformation($"Filtering {objectType} objects - IncludeTags: {includeTagList.Count}, ExcludeTags: {excludeTagList.Count}, RequireAllTags: {requireAllTags}");
+                _logger.LogInformation("Filtering {ObjectType} objects - IncludeTags: {IncludeTagListCount}, ExcludeTags: {ExcludeTagListCount}, RequireAllTags: {RequireAllTags}", objectType, includeTagList.Count, excludeTagList.Count, requireAllTags);
 
                 // Get objects for include tags
                 HashSet<Guid> objectSet;
@@ -991,12 +991,12 @@ namespace Farm.Infrastructure.Services.Tags
                 }
 
                 var results = objectSet.ToList();
-                _logger.LogInformation($"Filter returned {results.Count} {objectType} objects");
+                _logger.LogInformation("Filter returned {ResultsCount} {ObjectType} objects", results.Count, objectType);
                 return results;
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to filter {objectType} objects by tags: {ex.Message}");
+                _logger.LogError("Failed to filter {ObjectType} objects by tags: {Message}", objectType, ex.Message);
                 throw;
             }
         }

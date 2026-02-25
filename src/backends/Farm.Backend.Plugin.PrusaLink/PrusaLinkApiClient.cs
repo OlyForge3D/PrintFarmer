@@ -7,7 +7,7 @@ using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -23,13 +23,13 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<PrusaLinkApiClient> _logger;
 
     // Cache for digest auth clients - keyed by username:password hash
     private readonly Dictionary<string, HttpClient> _digestAuthClients = new();
     private readonly object _clientLock = new();
 
-    public PrusaLinkApiClient(HttpClient httpClient, IUnifiedLoggingService logger)
+    public PrusaLinkApiClient(HttpClient httpClient, ILogger<PrusaLinkApiClient> logger)
     {
         _httpClient = httpClient;
         _logger = logger;
@@ -142,17 +142,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API call failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API call failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
         catch (JsonException ex)
         {
-            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API deserialization failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
     }
@@ -178,17 +178,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API call failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API call failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
         catch (JsonException ex)
         {
-            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API deserialization failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
     }
@@ -212,17 +212,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API call failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API call failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
         catch (JsonException ex)
         {
-            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API deserialization failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
     }
@@ -246,17 +246,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API call failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogDebug($"PrusaLink API call failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API call failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
         catch (JsonException ex)
         {
-            _logger.LogDebug($"PrusaLink API deserialization failed for {url}: {ex.Message}");
+            _logger.LogDebug("PrusaLink API deserialization failed for {Url}: {Message}", url, ex.Message);
             throw;
         }
     }
@@ -371,7 +371,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode)
         {
-            _logger?.LogError($"PrusaLink API returned {response.StatusCode} for {url}");
+            _logger?.LogError("PrusaLink API returned {StatusCode} for {Url}", response.StatusCode, url);
             throw new HttpRequestException($"PrusaLink API error: {response.StatusCode}", null, response.StatusCode);
         }
 
@@ -410,14 +410,14 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         request.Headers.Add("Print-After-Upload", printAfterUpload ? "?1" : "?0");
         request.Headers.Add("Overwrite", overwrite ? "?1" : "?0");
 
-        _logger.LogInformation($"Uploading {fileStream.Length} bytes to PrusaLink: PUT {uploadUrl} (timeout={client.Timeout.TotalSeconds}s)");
+        _logger.LogInformation("Uploading {FileStreamLength} bytes to PrusaLink: PUT {UploadUrl} (timeout={TotalSeconds}s)", fileStream.Length, uploadUrl, client.Timeout.TotalSeconds);
 
         using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         if (!response.IsSuccessStatusCode)
         {
             string body = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogWarning($"PrusaLink upload failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase} - {body}");
+            _logger.LogWarning("PrusaLink upload failed: HTTP {StatusCode} {ReasonPhrase} - {Body}", (int)response.StatusCode, response.ReasonPhrase, body);
         }
 
         return response.IsSuccessStatusCode;
@@ -638,7 +638,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger?.LogError($"PrusaLink legacy files API returned {response.StatusCode} for {url}");
+            _logger?.LogError("PrusaLink legacy files API returned {StatusCode} for {Url}", response.StatusCode, url);
             throw new HttpRequestException($"PrusaLink legacy API error: {response.StatusCode}", null, response.StatusCode);
         }
 
@@ -720,7 +720,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"[PrusaLink] PausePrintLegacy failed for {baseUrl}: {ex.Message}");
+            _logger?.LogError("[PrusaLink] PausePrintLegacy failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
         }
     }
@@ -750,7 +750,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"[PrusaLink] ResumePrintLegacy failed for {baseUrl}: {ex.Message}");
+            _logger?.LogError("[PrusaLink] ResumePrintLegacy failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
         }
     }
@@ -784,7 +784,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"[PrusaLink] SetToolTemperatureLegacy failed for {baseUrl}: {ex.Message}");
+            _logger?.LogError("[PrusaLink] SetToolTemperatureLegacy failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
         }
     }
@@ -814,7 +814,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"[PrusaLink] SetBedTemperatureLegacy failed for {baseUrl}: {ex.Message}");
+            _logger?.LogError("[PrusaLink] SetBedTemperatureLegacy failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
         }
     }
@@ -851,7 +851,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"[PrusaLink] JogPrintHeadLegacy failed for {baseUrl}: {ex.Message}");
+            _logger?.LogError("[PrusaLink] JogPrintHeadLegacy failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
         }
     }
@@ -902,7 +902,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"[PrusaLink] HomePrintHeadLegacy failed for {baseUrl}: {ex.Message}");
+            _logger?.LogError("[PrusaLink] HomePrintHeadLegacy failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
             return false;
         }
     }

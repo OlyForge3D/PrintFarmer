@@ -7,10 +7,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -20,14 +20,14 @@ namespace Farm.Web.Api.Tests.Controllers
     {
         private readonly Mock<ISpoolmanService> _spoolmanServiceMock;
         private readonly Mock<ISettingsService> _settingsServiceMock;
-        private readonly Mock<IUnifiedLoggingService> _loggerMock;
+        private readonly Mock<ILogger<SpoolmanController>> _loggerMock;
         private readonly SpoolmanController _controller;
 
         public SpoolmanControllerTests()
         {
             _spoolmanServiceMock = new Mock<ISpoolmanService>();
             _settingsServiceMock = new Mock<ISettingsService>();
-            _loggerMock = new Mock<IUnifiedLoggingService>();
+            _loggerMock = new Mock<ILogger<SpoolmanController>>();
             _controller = new SpoolmanController(
                 _spoolmanServiceMock.Object,
                 _settingsServiceMock.Object,

@@ -3,8 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace Farm.Infrastructure.Services.Authentication;
@@ -14,11 +14,11 @@ namespace Farm.Infrastructure.Services.Authentication;
 /// </summary>
 public class TokenRevocationService(
     AppDbContext context,
-    IUnifiedLoggingService logging,
+    ILogger<TokenRevocationService> logging,
     IAuthAuditService authAuditService) : ITokenRevocationService
 {
     private readonly AppDbContext _context = context;
-    private readonly IUnifiedLoggingService _logging = logging;
+    private readonly ILogger<TokenRevocationService> _logging = logging;
     private readonly IAuthAuditService _authAuditService = authAuditService;
 
     public async Task<bool> RevokeTokenAsync(
@@ -39,7 +39,7 @@ public class TokenRevocationService(
 
             if (existingRevocation != null)
             {
-                _logging.LogWarning($"[TokenRevocation] Token already revoked for UserId: {userId}");
+                _logging.LogWarning("[TokenRevocation] Token already revoked for UserId: {UserId}", userId);
                 return false;
             }
 
@@ -64,12 +64,12 @@ public class TokenRevocationService(
             // Audit log the revocation
             await _authAuditService.LogTokenRevokedAsync(userId, revokedByUserId, reason, ipAddress);
 
-            _logging.LogInformation($"[TokenRevocation] Token revoked for UserId: {userId} by Admin: {revokedByUserId}. Reason: {reason}");
+            _logging.LogInformation("[TokenRevocation] Token revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, reason);
             return true;
         }
         catch (Exception ex)
         {
-            _logging.LogError(ex, $"[TokenRevocation] Error revoking token for UserId: {userId}");
+            _logging.LogError(ex, "[TokenRevocation] Error revoking token for UserId: {UserId}", userId);
             return false;
         }
     }
@@ -126,12 +126,12 @@ public class TokenRevocationService(
                 $"All tokens revoked ({revokedCount} refresh tokens). {reason}",
                 ipAddress);
 
-            _logging.LogWarning($"[TokenRevocation] All tokens revoked for UserId: {userId} by Admin: {revokedByUserId}. Count: {revokedCount}. Reason: {reason}");
+            _logging.LogWarning("[TokenRevocation] All tokens revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Count: {RevokedCount}. Reason: {Reason}", userId, revokedByUserId, revokedCount, reason);
             return revokedCount + 1; // Include the marker
         }
         catch (Exception ex)
         {
-            _logging.LogError(ex, $"[TokenRevocation] Error revoking all tokens for UserId: {userId}");
+            _logging.LogError(ex, "[TokenRevocation] Error revoking all tokens for UserId: {UserId}", userId);
             return 0;
         }
     }
@@ -190,7 +190,7 @@ public class TokenRevocationService(
             _context.RevokedTokens.RemoveRange(expiredRevocations);
             _ = await _context.SaveChangesAsync(cancellationToken);
 
-            _logging.LogInformation($"[TokenRevocation] Cleaned up {expiredRevocations.Count} expired revoked tokens");
+            _logging.LogInformation("[TokenRevocation] Cleaned up {ExpiredRevocationsCount} expired revoked tokens", expiredRevocations.Count);
             return expiredRevocations.Count;
         }
         catch (Exception ex)

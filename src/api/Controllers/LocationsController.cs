@@ -5,9 +5,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Locations;
 using Farm.Infrastructure.Services.Startup;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -22,11 +22,11 @@ namespace Farm.Web.Api.Controllers;
 public class LocationsController(
     ILocationService locationService,
     IStartupStatus startupStatus,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<LocationsController> logger) : ControllerBase
 {
     private readonly ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
     private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<LocationsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Gets all printer locations.

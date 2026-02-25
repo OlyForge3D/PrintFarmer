@@ -5,9 +5,9 @@ using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Tests.TestHelpers;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -24,7 +24,7 @@ public class SpoolmanServiceTests
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(() => (SpoolmanSettings?)null);
 #pragma warning restore CS8603 // Possible null reference return
 
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
         using FakeHttpMessageHandler _handler = new FakeHttpMessageHandler();
         using HttpClient http = new HttpClient(_handler);
 
@@ -33,7 +33,6 @@ public class SpoolmanServiceTests
         IReadOnlyList<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(CancellationToken.None);
 
         Assert.Empty(result);
-        logger.Verify(l => l.LogDebug(It.Is<string>(m => m.Contains("Spoolman not configured")), null, null), Times.Once);
     }
 
     [Fact]
@@ -41,7 +40,7 @@ public class SpoolmanServiceTests
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
         // First page returns a 'next' field pointing to second page; second page returns final array
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
@@ -83,7 +82,7 @@ public class SpoolmanServiceTests
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
         // Handler will respond to material endpoint: first call returns string array, second call returns object array
         int call = 0;
@@ -130,12 +129,12 @@ public class SpoolmanServiceTests
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
 
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
-        // Prepare a message handler that responds to /api/v1/spools with a JSON array of one object
+        // Prepare a message handler that responds to /api/v1/spool/ (correct singular endpoint)
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
                 {
-                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
+                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spool"))
                     {
                         string json = JsonSerializer.Serialize(new[] { new { id = 42, name = "Test Spool" } });
                         return new HttpResponseMessage(HttpStatusCode.OK)
@@ -163,7 +162,7 @@ public class SpoolmanServiceTests
     public async Task ScanNetworkForSpoolmanAsync_ReturnsAvailable_WhenIpResponds()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
         // Handler that responds to /api/v1/info for one IP and times out for others
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
@@ -192,7 +191,7 @@ public class SpoolmanServiceTests
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local/root" });
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
             {
@@ -232,7 +231,7 @@ public class SpoolmanServiceTests
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
             {
@@ -257,15 +256,15 @@ public class SpoolmanServiceTests
     }
 
     [Fact]
-    public async Task ListSpoolsAsync_LogsWarnings_OnEmptySuccessfulResponses()
+    public async Task ListSpoolsAsync_ReturnsEmpty_WhenEndpointReturnsEmptyArray()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
         FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
         {
-            // Return empty successful payload to trigger warning and try next candidate
+            // Return empty successful payload
             string json = JsonSerializer.Serialize(new object[] { });
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -278,6 +277,5 @@ public class SpoolmanServiceTests
 
         IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
         Assert.Empty(items);
-        logger.Verify(l => l.LogWarning(It.Is<string>(s => s.Contains("returned 0 spools")), null, null), Times.AtLeastOnce);
     }
 }

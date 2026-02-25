@@ -2,6 +2,7 @@
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -13,7 +14,7 @@ namespace Farm.OrcaSlicer.Worker.Services;
 public class QueueConsumerService(
     IHttpClientFactory httpClientFactory,
     IServiceProvider services,
-    IUnifiedLoggingService logger,
+    ILogger<QueueConsumerService> logger,
     IWorkerStateService state,
     IConfiguration config,
     ISlicingPipelineService pipeline) : HttpJobPollerService(httpClientFactory, services, logger, state, config)

@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Gcode;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -14,10 +14,10 @@ namespace Farm.Web.Api.Controllers;
 [Tags("G-code Harvesting Diagnostics")]
 [Authorize(Roles = "farm_admin")]
 public class GcodeHarvestDiagnosticsController(
-IUnifiedLoggingService logger,
+ILogger<GcodeHarvestDiagnosticsController> logger,
 IGcodeHarvestService harvestService) : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<GcodeHarvestDiagnosticsController> _logger = logger;
     private readonly IGcodeHarvestService _harvestService = harvestService;
 
     /// <summary>
@@ -51,7 +51,7 @@ IGcodeHarvestService harvestService) : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to analyze G-code file {file.FileName}: {ex.Message}");
+            _logger.LogError(ex, "Failed to analyze G-code file {FileFileName}: {Message}", file.FileName, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to analyze G-code file");
         }
     }
@@ -74,7 +74,7 @@ IGcodeHarvestService harvestService) : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error enabling debug logs: {ex.Message}");
+            _logger.LogError(ex, "Error enabling debug logs: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message });
         }
     }

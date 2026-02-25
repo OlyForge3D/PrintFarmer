@@ -1883,6 +1883,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("Status");
 
+                    b.HasIndex("AssignedPrinterId", "Status")
+                        .HasDatabaseName("IX_PrintJobs_AssignedPrinterId_Status");
+
                     b.HasIndex("ExternalJobId", "SourcePrinterId")
                         .IsUnique()
                         .HasDatabaseName("IX_PrintJobs_ExternalJobId_SourcePrinterId")

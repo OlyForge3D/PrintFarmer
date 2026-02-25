@@ -38,6 +38,7 @@ using Farm.Web.Api.Services.Startup;
 using Farm.Web.Api.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace Farm.Web.Api.Infrastructure;
@@ -306,9 +307,6 @@ public static class ServiceCollectionExtensions
         // Telemetry service (thread-safe, manages Meter/ActivitySource lifetimes)
         _ = services.AddSingleton<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
 
-        // Unified logging service (Singleton because used by Singleton services like IHarvestQueue)
-        _ = services.AddSingleton<IUnifiedLoggingService, UnifiedLoggingService>();
-
         // Normalization event logger
         _ = services.AddScoped<Farm.Infrastructure.Normalization.INormalizationEventLogger, Farm.Infrastructure.Normalization.NormalizationEventLogger>();
     }
@@ -371,13 +369,13 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddScoped<IEmailService>(sp =>
         {
-            IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
+            ILoggerFactory loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             EmailOptions opts = sp.GetRequiredService<EmailOptions>();
             IEmailTemplateRenderer renderer = sp.GetRequiredService<IEmailTemplateRenderer>();
             IHttpClientFactory httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
             return opts.Mailjet?.ApiKey != null
-                ? new MailjetEmailService(logger, opts, renderer, httpClientFactory)
-                : new ConsoleEmailService(logger);
+                ? new MailjetEmailService(loggerFactory.CreateLogger<MailjetEmailService>(), opts, renderer, httpClientFactory)
+                : new ConsoleEmailService(loggerFactory.CreateLogger<ConsoleEmailService>());
         });
     }
 
@@ -442,9 +440,9 @@ public static class ServiceCollectionExtensions
         {
             IServiceProvider serviceProvider = provider;
             IBackendPluginRegistry pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
-            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            ILoggerFactory loggerFactory = provider.GetRequiredService<ILoggerFactory>();
 
-            return new Farm.Infrastructure.Services.Printers.BackendClientFactory(serviceProvider, pluginRegistry, logger);
+            return new Farm.Infrastructure.Services.Printers.BackendClientFactory(serviceProvider, pluginRegistry, loggerFactory.CreateLogger<Farm.Infrastructure.Services.Printers.BackendClientFactory>());
         });
 
         // Register the backend capability factory for capability-aware client retrieval
@@ -454,10 +452,10 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IBackendCapabilityFactory>(provider =>
         {
             IBackendClientFactory clientFactory = provider.GetRequiredService<Farm.Infrastructure.Services.Printers.IBackendClientFactory>();
-            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            ILoggerFactory loggerFactory = provider.GetRequiredService<ILoggerFactory>();
             IBackendPluginRegistry? pluginRegistry = provider.GetService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
 
-            return new Farm.Infrastructure.Services.Printers.BackendCapabilityFactory(clientFactory, logger, pluginRegistry);
+            return new Farm.Infrastructure.Services.Printers.BackendCapabilityFactory(clientFactory, loggerFactory.CreateLogger<Farm.Infrastructure.Services.Printers.BackendCapabilityFactory>(), pluginRegistry);
         });
 
         // Register the factory for getting printer status clients from plugins
@@ -465,9 +463,9 @@ public static class ServiceCollectionExtensions
         {
             IServiceProvider serviceProvider = provider;
             IBackendPluginRegistry pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
-            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            ILoggerFactory loggerFactory = provider.GetRequiredService<ILoggerFactory>();
 
-            return new Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
+            return new Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, loggerFactory.CreateLogger<Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory>());
         });
 
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)

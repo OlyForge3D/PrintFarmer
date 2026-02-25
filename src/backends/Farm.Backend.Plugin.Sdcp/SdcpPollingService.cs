@@ -5,7 +5,6 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,10 +20,10 @@ namespace Farm.Backend.Plugin.Sdcp;
 public sealed class SdcpPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
+    ILogger<SdcpPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<SdcpPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
@@ -119,7 +118,7 @@ public sealed class SdcpPollingService(
                 {
                     // Get list of SDCP printers from database
                     List<Guid> printerIds = await GetSdcpPrinterIdsAsync(ct);
-                    _logger.LogDebug($"SdcpPollingService: Found {printerIds.Count} SDCP printers");
+                    _logger.LogDebug("SdcpPollingService: Found {PrinterIdsCount} SDCP printers", printerIds.Count);
 
                     // Ensure polling loops exist for all SDCP printers
                     foreach (Guid id in printerIds)
@@ -130,7 +129,7 @@ public sealed class SdcpPollingService(
                             var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
 #pragma warning restore S6612
                             _pollingLoops.TryAdd(id, pollingLoop);
-                            _logger.LogDebug($"Started polling loop for SDCP printer {id}");
+                            _logger.LogDebug("Started polling loop for SDCP printer {Id}", id);
                         }
                     }
 
@@ -140,7 +139,7 @@ public sealed class SdcpPollingService(
                     {
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
-                        _logger.LogDebug($"Stopped polling for printer {printerId}");
+                        _logger.LogDebug("Stopped polling for printer {PrinterId}", printerId);
                     }
 
                     // Check every 30 seconds for printer list changes
@@ -205,24 +204,18 @@ public sealed class SdcpPollingService(
 
                     if (!wasOnline && status.IsOnline)
                     {
-                        _logger.LogWithContext(
-                            LogLevel.Information,
-                            "SDCP",
-                            "SDCP printer recovered to Online",
-                            correlationId: printerId.ToString("N"),
-                            metadata: new { printerId, backendUrl = printer.BackendUrl, previousFailures });
+                        _logger.LogInformation(
+                            "SDCP printer recovered to Online. PrinterId={PrinterId}, BackendUrl={BackendUrl}, PreviousFailures={PreviousFailures}",
+                            printerId, printer.BackendUrl, previousFailures);
                     }
                     else if (previousFailures > 0)
                     {
-                        _logger.LogWithContext(
-                            LogLevel.Debug,
-                            "SDCP",
-                            "SDCP poll succeeded after failures",
-                            correlationId: printerId.ToString("N"),
-                            metadata: new { printerId, backendUrl = printer.BackendUrl, previousFailures, isOnline = status.IsOnline, state = status.State });
+                        _logger.LogDebug(
+                            "SDCP poll succeeded after failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, PreviousFailures={PreviousFailures}",
+                            printerId, printer.BackendUrl, previousFailures);
                     }
 
-                    _logger.LogDebug($"SDCP {printerId}: Got status - Online={status.IsOnline}, State={status.State}, Progress={status.Progress}, JobName={status.JobName}");
+                    _logger.LogDebug("SDCP {PrinterId}: Got status - Online={StatusIsOnline}, State={StatusState}, Progress={StatusProgress}, JobName={StatusJobName}", printerId, status.IsOnline, status.State, status.Progress, status.JobName);
 
                     // Check if any values changed
                     // Use tolerance for float progress comparison
@@ -289,15 +282,10 @@ public sealed class SdcpPollingService(
                 catch (Exception ex)
                 {
                     state.ConsecutiveFailures++;
-                    _logger.LogDebug(ex, $"Failed to poll SDCP printer {printerId} (attempt {state.ConsecutiveFailures})");
+                    _logger.LogDebug(ex, "Failed to poll SDCP printer {PrinterId} (attempt {StateConsecutiveFailures})", printerId, state.ConsecutiveFailures);
 
-                    _logger.LogWithContext(
-                        LogLevel.Debug,
-                        "SDCP",
-                        "SDCP poll failed",
-                        correlationId: printerId.ToString("N"),
-                        metadata: new { printerId, backendUrl = printer?.BackendUrl, attempt = state.ConsecutiveFailures },
-                        exception: ex);
+                    _logger.LogDebug(ex, "SDCP poll failed. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Attempt={Attempt}",
+                        printerId, printer?.BackendUrl, state.ConsecutiveFailures);
 
                     // Track reconnecting state on first failure
                     if (state.ConsecutiveFailures == 1)
@@ -308,15 +296,12 @@ public sealed class SdcpPollingService(
                     // After 3 consecutive failures, mark as offline
                     if (state.ConsecutiveFailures >= 3 && state.LastKnownIsOnline)
                     {
-                        _logger.LogWarning($"SDCP printer {printerId} marked offline after {state.ConsecutiveFailures} failures");
+                        _logger.LogWarning("SDCP printer {PrinterId} marked offline after {StateConsecutiveFailures} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
 
-                        _logger.LogWithContext(
-                            LogLevel.Warning,
-                            "SDCP",
-                            "SDCP printer marked Offline after consecutive failures",
-                            correlationId: printerId.ToString("N"),
-                            metadata: new { printerId, backendUrl = printer?.BackendUrl, failures = state.ConsecutiveFailures });
+                        _logger.LogWarning(
+                            "SDCP printer marked Offline after consecutive failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Failures={Failures}",
+                            printerId, printer?.BackendUrl, state.ConsecutiveFailures);
 
                         RecordHealthTransition(printerId, printer?.Name ?? printerId.ToString(), PrinterConnectionState.Offline, $"Failed {state.ConsecutiveFailures} consecutive times");
 
@@ -354,7 +339,7 @@ public sealed class SdcpPollingService(
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Unexpected error polling SDCP printer {printerId}");
+                _logger.LogError(ex, "Unexpected error polling SDCP printer {PrinterId}", printerId);
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
             }
         }
@@ -395,7 +380,7 @@ public sealed class SdcpPollingService(
                 return;
             }
 
-            _logger.LogInformation($"[SdcpPollingService] Detected state transition for printer {printerId}: {previousState} -> {newState}");
+            _logger.LogInformation("[SdcpPollingService] Detected state transition for printer {PrinterId}: {PreviousState} -> {NewState}", printerId, previousState, newState);
 
             // Create a new scope to get the scoped service
             using IServiceScope scope = _scopeFactory.CreateScope();
@@ -407,7 +392,7 @@ public sealed class SdcpPollingService(
                 bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
                 if (marked)
                 {
-                    _logger.LogInformation($"[SdcpPollingService] Print job marked as completed for printer {printerId}");
+                    _logger.LogInformation("[SdcpPollingService] Print job marked as completed for printer {PrinterId}", printerId);
                 }
             }
             else if (PrintJobCompletionService.IsFailureState(newState))
@@ -416,13 +401,13 @@ public sealed class SdcpPollingService(
                 bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
                 if (marked)
                 {
-                    _logger.LogWarning($"[SdcpPollingService] Print job marked as failed for printer {printerId} (state: {newState})");
+                    _logger.LogWarning("[SdcpPollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[SdcpPollingService] Failed to sync job completion for printer {printerId}");
+            _logger.LogError(ex, "[SdcpPollingService] Failed to sync job completion for printer {PrinterId}", printerId);
         }
     }
 

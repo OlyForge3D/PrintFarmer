@@ -1,18 +1,19 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Worker.Core;
 
 public class GracefulShutdownService : BackgroundService
 {
     private readonly IWorkerStateService _state;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<GracefulShutdownService> _logger;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly TimeSpan _grace;
     private readonly CancellationTokenSource _cts = new();
 
-    public GracefulShutdownService(IWorkerStateService state, IUnifiedLoggingService logger, IHostApplicationLifetime lifetime, IConfiguration config)
+    public GracefulShutdownService(IWorkerStateService state, ILogger<GracefulShutdownService> logger, IHostApplicationLifetime lifetime, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(logger);
@@ -28,7 +29,7 @@ public class GracefulShutdownService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _ = _lifetime.ApplicationStopping.Register(OnStopping);
-        _logger.LogInformation($"Graceful shutdown service active (grace={_grace.TotalSeconds}s)");
+        _logger.LogInformation("Graceful shutdown service active (grace={TotalSeconds}s)", _grace.TotalSeconds);
         try
         {
             await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -41,7 +42,7 @@ public class GracefulShutdownService : BackgroundService
 
     private void OnStopping()
     {
-        _logger.LogInformation($"Termination requested; entering graceful shutdown window ({_grace.TotalSeconds}s)");
+        _logger.LogInformation("Termination requested; entering graceful shutdown window ({TotalSeconds}s)", _grace.TotalSeconds);
         _state.SetShuttingDown();
         _ = Task.Run(async () =>
         {
@@ -51,11 +52,11 @@ public class GracefulShutdownService : BackgroundService
                 WorkerState snapshot = _state.GetWorkerState();
                 if (snapshot.ActiveJobs == 0)
                 {
-                    _logger.LogInformation($"All jobs complete after {(DateTime.UtcNow - start).TotalMilliseconds}ms");
+                    _logger.LogInformation("All jobs complete after {TotalMilliseconds}ms", (DateTime.UtcNow - start).TotalMilliseconds);
                     break;
                 }
 
-                _logger.LogInformation($"Waiting on {snapshot.ActiveJobs} active jobs... {(_grace - (DateTime.UtcNow - start)).TotalSeconds}s left");
+                _logger.LogInformation("Waiting on {SnapshotActiveJobs} active jobs... {TotalSeconds}s left", snapshot.ActiveJobs, (_grace - (DateTime.UtcNow - start)).TotalSeconds);
                 await Task.Delay(TimeSpan.FromSeconds(1));
             }
 

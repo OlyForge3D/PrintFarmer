@@ -3,8 +3,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SignalR
 {
@@ -30,9 +30,9 @@ namespace Farm.Web.Api.Services.SignalR
     /// Allows the API to receive and cache real-time status updates from backend services.
     /// </summary>
     public sealed class PrinterStatusHubListener(
-        IUnifiedLoggingService logger) : IPrinterStatusHubListener
+        ILogger<PrinterStatusHubListener> logger) : IPrinterStatusHubListener
     {
-        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly ILogger<PrinterStatusHubListener> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         public async Task StartListeningAsync()
         {

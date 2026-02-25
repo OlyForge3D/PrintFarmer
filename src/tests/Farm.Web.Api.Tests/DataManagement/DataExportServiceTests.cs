@@ -3,7 +3,6 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Services.Security;
-using Farm.Infrastructure.Telemetry;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -14,7 +13,7 @@ namespace Farm.Web.Api.Tests.DataManagement;
 public class DataExportServiceTests
 {
     private readonly AppDbContext _context;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<DataExportService>> _loggerMock;
     private readonly Mock<ISensitiveDataProtector> _sensitiveDataProtectorMock;
     private readonly DataExportService _exportService;
 
@@ -25,7 +24,7 @@ public class DataExportServiceTests
             .Options;
         _context = new AppDbContext(options);
 
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<DataExportService>>();
         _sensitiveDataProtectorMock = new Mock<ISensitiveDataProtector>();
         _sensitiveDataProtectorMock
             .Setup(x => x.Unprotect(It.IsAny<string?>()))

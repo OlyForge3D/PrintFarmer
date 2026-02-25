@@ -3,9 +3,9 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Tasks;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.HostedServices;
 
@@ -17,14 +17,14 @@ namespace Farm.Slicer.Module.Api.HostedServices;
 public sealed class ProfileTaskCheckService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<ProfileTaskCheckService> _logger;
     private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(5);
     private readonly bool _enabled;
     private readonly bool _enablePeriodicCheck;
 
     public ProfileTaskCheckService(
         IServiceScopeFactory scopeFactory,
-        IUnifiedLoggingService logger,
+        ILogger<ProfileTaskCheckService> logger,
         IConfiguration configuration)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
@@ -152,7 +152,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
                 if (modelProfile != null || hasMachineProfiles)
                 {
                     // Model already has profiles imported, skip
-                    _logger.LogDebug($"[ProfileTaskCheck] Model {modelId} already has profiles (modelProfile: {modelProfile != null}, machineProfiles: {hasMachineProfiles}), skipping");
+                    _logger.LogDebug("[ProfileTaskCheck] Model {ModelId} already has profiles (modelProfile: {Value1}, machineProfiles: {HasMachineProfiles}), skipping", modelId, modelProfile != null, hasMachineProfiles);
                     continue;
                 }
 
@@ -172,7 +172,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
                 if (modelName.Equals("Unknown", StringComparison.OrdinalIgnoreCase) ||
                     modelName.Equals("Unknown Model", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogDebug($"[ProfileTaskCheck] Skipping Unknown model {modelId}");
+                    _logger.LogDebug("[ProfileTaskCheck] Skipping Unknown model {ModelId}", modelId);
                     continue;
                 }
 
@@ -191,16 +191,16 @@ public sealed class ProfileTaskCheckService : BackgroundService
                 if (hasExistingTask)
                 {
                     tasksUpdated++;
-                    _logger.LogDebug($"[ProfileTaskCheck] Updated task for {manufacturerName} {modelName} with {modelPrinters.Count} printers");
+                    _logger.LogDebug("[ProfileTaskCheck] Updated task for {ManufacturerName} {ModelName} with {ModelPrintersCount} printers", manufacturerName, modelName, modelPrinters.Count);
                 }
                 else
                 {
                     tasksCreated++;
-                    _logger.LogInformation($"[ProfileTaskCheck] Created task: Import profiles for {manufacturerName} {modelName} ({modelPrinters.Count} printers waiting)");
+                    _logger.LogInformation("[ProfileTaskCheck] Created task: Import profiles for {ManufacturerName} {ModelName} ({ModelPrintersCount} printers waiting)", manufacturerName, modelName, modelPrinters.Count);
                 }
             }
 
-            _logger.LogInformation($"[ProfileTaskCheck] Check complete. Tasks created: {tasksCreated}, Tasks updated: {tasksUpdated}");
+            _logger.LogInformation("[ProfileTaskCheck] Check complete. Tasks created: {TasksCreated}, Tasks updated: {TasksUpdated}", tasksCreated, tasksUpdated);
         }
         catch (Exception ex)
         {

@@ -1,16 +1,17 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Health;
 
-public class WorkerLivenessHealthCheck(IUnifiedLoggingService logger) : IHealthCheck
+public class WorkerLivenessHealthCheck(ILogger<WorkerLivenessHealthCheck> logger) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         try
         {
             TimeSpan uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
-            logger.LogDebug($"Liveness check - Worker up {uptime}");
+            logger.LogDebug("Liveness check - Worker up {Uptime}", uptime);
             return Task.FromResult(HealthCheckResult.Healthy("Worker process alive", new Dictionary<string, object>
             {
                 ["uptime"] = uptime.ToString(),

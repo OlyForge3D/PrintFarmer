@@ -3,9 +3,9 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Services.Security;
-using Farm.Infrastructure.Telemetry;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace Farm.Web.Api.Tests.DataManagement;
@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Tests.DataManagement;
 public class DataImportServiceTests
 {
     private readonly AppDbContext _context;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<DataImportService>> _loggerMock;
     private readonly Mock<ISensitiveDataProtector> _sensitiveDataProtectorMock;
     private readonly DataImportService _importService;
 
@@ -24,7 +24,7 @@ public class DataImportServiceTests
             .Options;
         _context = new AppDbContext(options);
 
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<DataImportService>>();
         _sensitiveDataProtectorMock = new Mock<ISensitiveDataProtector>();
         _sensitiveDataProtectorMock
             .Setup(x => x.Protect(It.IsAny<string?>()))

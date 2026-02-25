@@ -5,9 +5,9 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
+using Microsoft.Extensions.Logging;
 using ManufacturerDto = Farm.Infrastructure.ManufacturerDto;
 
 namespace Farm.OrcaSlicer.Worker.Services;
@@ -31,11 +31,11 @@ public interface IProfilePreloadService
 /// </summary>
 public class ProfilePreloadService(
     ISlicerProfilesService profileService,
-    IUnifiedLoggingService logger,
+    ILogger<ProfilePreloadService> logger,
     IHttpClientFactory httpClientFactory) : IProfilePreloadService
 {
     private readonly ISlicerProfilesService _profileService = profileService;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ProfilePreloadService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private static readonly JsonSerializerOptions s_jsonOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -53,7 +53,7 @@ public class ProfilePreloadService(
                 await cachedService.InitializeAsync(ct);
                 (int m, int f, int p) = await cachedService.GetCacheStatsAsync(ct);
                 stopwatch.Stop();
-                _logger.LogInformation($"SQLite cache ready in {stopwatch.ElapsedMilliseconds}ms: {m} machines, {f} filaments, {p} processes");
+                _logger.LogInformation("SQLite cache ready in {StopwatchElapsedMilliseconds}ms: {M} machines, {F} filaments, {P} processes", stopwatch.ElapsedMilliseconds, m, f, p);
                 return;
             }
 
@@ -72,7 +72,7 @@ public class ProfilePreloadService(
                 .Distinct()
                 .ToHashSet();
 
-            _logger.LogInformation($"Found {availableManufacturers.Count} manufacturers with {machines.Count} machine profiles in {machineStart.ElapsedMilliseconds}ms");
+            _logger.LogInformation("Found {AvailableManufacturersCount} manufacturers with {MachinesCount} machine profiles in {MachineStartElapsedMilliseconds}ms", availableManufacturers.Count, machines.Count, machineStart.ElapsedMilliseconds);
 
             // Load catalog manufacturers via HTTP (call the API)
             HttpClient httpClient = _httpClientFactory.CreateClient();
@@ -92,7 +92,7 @@ public class ProfilePreloadService(
                         .Select(m => m.Name)
                         .ToHashSet() ?? [];
 
-                    _logger.LogInformation($"Catalog has {catalogManufacturers.Count} manufacturers");
+                    _logger.LogInformation("Catalog has {CatalogManufacturersCount} manufacturers", catalogManufacturers.Count);
 
                     // Load filament and process profiles only for manufacturers in catalog
                     Stopwatch filamentStart = Stopwatch.StartNew();
@@ -107,17 +107,17 @@ public class ProfilePreloadService(
 
                     stopwatch.Stop();
 
-                    _logger.LogInformation($"OrcaSlicer profiles preloaded in {stopwatch.ElapsedMilliseconds}ms: {machines.Count} machines ({machineStart.ElapsedMilliseconds}ms), {catalogFilaments}/{filaments.Count} filaments for catalog ({filamentStart.ElapsedMilliseconds}ms), {processes.Count} processes ({processStart.ElapsedMilliseconds}ms)");
+                    _logger.LogInformation("OrcaSlicer profiles preloaded in {StopwatchElapsedMilliseconds}ms: {MachinesCount} machines ({MachineStartElapsedMilliseconds}ms), {CatalogFilaments}/{FilamentsCount} filaments for catalog ({FilamentStartElapsedMilliseconds}ms), {ProcessesCount} processes ({ProcessStartElapsedMilliseconds}ms)", stopwatch.ElapsedMilliseconds, machines.Count, machineStart.ElapsedMilliseconds, catalogFilaments, filaments.Count, filamentStart.ElapsedMilliseconds, processes.Count, processStart.ElapsedMilliseconds);
                 }
                 else
                 {
-                    _logger.LogWarning($"Failed to fetch catalog manufacturers: {response.StatusCode}. Skipping filtered preload.");
+                    _logger.LogWarning("Failed to fetch catalog manufacturers: {StatusCode}. Skipping filtered preload.", response.StatusCode);
                     await LoadAllProfilesFallbackAsync(stopwatch, ct).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error fetching catalog manufacturers: {ex.Message}. Loading all profiles instead.");
+                _logger.LogWarning("Error fetching catalog manufacturers: {Message}. Loading all profiles instead.", ex.Message);
                 await LoadAllProfilesFallbackAsync(stopwatch, ct).ConfigureAwait(false);
             }
         }
@@ -141,6 +141,6 @@ public class ProfilePreloadService(
 
         stopwatch.Stop();
 
-        _logger.LogInformation($"OrcaSlicer profiles preloaded (fallback) in {stopwatch.ElapsedMilliseconds}ms: {filaments.Count} filaments ({filamentStart.ElapsedMilliseconds}ms), {processes.Count} processes ({processStart.ElapsedMilliseconds}ms)");
+        _logger.LogInformation("OrcaSlicer profiles preloaded (fallback) in {StopwatchElapsedMilliseconds}ms: {FilamentsCount} filaments ({FilamentStartElapsedMilliseconds}ms), {ProcessesCount} processes ({ProcessStartElapsedMilliseconds}ms)", stopwatch.ElapsedMilliseconds, filaments.Count, filamentStart.ElapsedMilliseconds, processes.Count, processStart.ElapsedMilliseconds);
     }
 }

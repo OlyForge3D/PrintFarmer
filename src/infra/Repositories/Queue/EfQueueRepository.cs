@@ -98,6 +98,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
+            .AsSplitQuery()
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
     }
@@ -121,6 +122,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
+            .AsSplitQuery()
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
 
@@ -195,6 +197,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
         return await _db.PrintJobs
             .Include(j => j.GcodeFile)
             .Include(j => j.AssignedPrinter)
+            .AsSplitQuery()
             .Where(j => j.AssignedPrinterId == printerId)
             .OrderBy(j => j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting ? 0 : 1)
             .ThenBy(j => j.Priority)
@@ -238,7 +241,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     /// <returns>The print job with all related entities if found; otherwise null</returns>
     public async Task<PrintJob?> GetPrintJobByIdAsync(Guid id, CancellationToken ct)
     {
-        return await _db.PrintJobs.Include(j => j.GcodeFile).Include(j => j.AssignedPrinter).FirstOrDefaultAsync(j => j.Id == id, ct);
+        return await _db.PrintJobs.Include(j => j.GcodeFile).Include(j => j.AssignedPrinter).AsSplitQuery().FirstOrDefaultAsync(j => j.Id == id, ct);
     }
 
     /// <summary>
@@ -306,5 +309,23 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
         {
             job.GcodeFileId = null;
         }
+    }
+
+    /// <summary>
+    /// Retrieves all print jobs assigned to any of the specified printers in a single query.
+    /// Results are ordered by status priority (printing/starting first), then priority, then queue time.
+    /// </summary>
+    public async Task<List<PrintJob>> GetPrintJobsForPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+    {
+        List<Guid> ids = printerIds.ToList();
+        return await _db.PrintJobs
+            .Include(j => j.GcodeFile)
+            .Include(j => j.AssignedPrinter)
+            .AsSplitQuery()
+            .Where(j => j.AssignedPrinterId != null && ids.Contains(j.AssignedPrinterId.Value))
+            .OrderBy(j => j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting ? 0 : 1)
+            .ThenBy(j => j.Priority)
+            .ThenBy(j => j.QueuedAt)
+            .ToListAsync(ct);
     }
 }

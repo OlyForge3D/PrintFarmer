@@ -2,9 +2,9 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Tags;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -12,13 +12,13 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 public class TagsControllerTests
 {
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<TagsController>> _loggerMock;
     private readonly Mock<ITagService> _tagServiceMock;
     private readonly TagsController _controller;
 
     public TagsControllerTests()
     {
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<TagsController>>();
         _tagServiceMock = new Mock<ITagService>();
         _controller = new TagsController(_loggerMock.Object, _tagServiceMock.Object);
         _controller.ControllerContext = new ControllerContext

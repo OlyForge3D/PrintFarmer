@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Startup;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure;
@@ -56,9 +56,6 @@ public class SharedSqliteFixture : IDisposable
         // Register DatabaseInitializer and its dependencies similarly to startup
         // We will attempt to reuse the project's service registrations minimally.
         _ = services.AddLogging();
-        // Tests run without the full service graph; DatabaseInitializer depends on IUnifiedLoggingService.
-        // Provide a simple NoOp implementation so the initializer can be constructed for seeding.
-        _ = services.AddSingleton<IUnifiedLoggingService, NoOpUnifiedLoggingService>();
         _ = services.AddScoped<DatabaseInitializer>();
 
         ServiceProvider provider = services.BuildServiceProvider();
@@ -122,18 +119,4 @@ public class DbHeavySerialWithSharedFixtureCollection : ICollectionFixture<Share
 {
 }
 
-// Minimal no-op implementation of IUnifiedLoggingService used only in tests during
-// fixture setup to allow DatabaseInitializer construction without pulling in full telemetry stack.
-internal class NoOpUnifiedLoggingService : IUnifiedLoggingService
-{
-    public void LogCritical(string message, string? correlationId = null, object? metadata = null) { }
-    public void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-    public void LogDebug(string message, string? correlationId = null, object? metadata = null) { }
-    public void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-    public void LogError(string message, string? correlationId = null, object? metadata = null) { }
-    public void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-    public void LogInformation(string message, string? correlationId = null, object? metadata = null) { }
-    public void LogWarning(string message, string? correlationId = null, object? metadata = null) { }
-    public void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-    public void LogWithContext(Microsoft.Extensions.Logging.LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null) { }
-}
+// Minimal no-op implementation replaced with NullLogger from Microsoft.Extensions.Logging.Abstractions

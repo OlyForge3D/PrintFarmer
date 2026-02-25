@@ -1,10 +1,10 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Projects;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -13,13 +13,13 @@ namespace Farm.Web.Api.Tests.Controllers;
 public class PrintProjectsControllerTests
 {
     private readonly Mock<IPrintProjectService> _projectServiceMock;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<PrintProjectsController>> _loggerMock;
     private readonly PrintProjectsController _controller;
 
     public PrintProjectsControllerTests()
     {
         _projectServiceMock = new Mock<IPrintProjectService>();
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<PrintProjectsController>>();
         _controller = new PrintProjectsController(_projectServiceMock.Object, _loggerMock.Object);
         _controller.ControllerContext = new ControllerContext
         {

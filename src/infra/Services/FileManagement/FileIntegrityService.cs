@@ -3,7 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.FileManagement;
 
@@ -11,10 +11,10 @@ namespace Farm.Infrastructure.Services.FileManagement;
 /// Implements file integrity verification with hash and size checking.
 /// Thread-safe and reusable across requests.
 /// </summary>
-public class FileIntegrityService(IFileManagementService fileManagementService, IUnifiedLoggingService logger) : IFileIntegrityService
+public class FileIntegrityService(IFileManagementService fileManagementService, ILogger<FileIntegrityService> logger) : IFileIntegrityService
 {
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<FileIntegrityService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public Task<bool> FileExistsAsync(string filePath, CancellationToken ct = default)
     {
@@ -25,7 +25,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error checking file existence: {ex.Message}");
+            _logger.LogDebug("Error checking file existence: {Message}", ex.Message);
             return Task.FromResult(false);
         }
     }
@@ -44,7 +44,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error verifying file hash: {ex.Message}");
+            _logger.LogDebug("Error verifying file hash: {Message}", ex.Message);
             return false;
         }
     }
@@ -63,7 +63,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error verifying file size: {ex.Message}");
+            _logger.LogDebug("Error verifying file size: {Message}", ex.Message);
             return false;
         }
     }
@@ -81,7 +81,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
             if (!File.Exists(filePath))
             {
                 string msg = $"File not found: {filePath}";
-                _logger.LogWarning(msg);
+                _logger.LogWarning("File not found: {FilePath}", filePath);
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
@@ -93,7 +93,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
             if (actualSize != expectedSizeBytes)
             {
                 string msg = $"File size mismatch. Expected: {expectedSizeBytes} bytes, Actual: {actualSize} bytes";
-                _logger.LogWarning(msg);
+                _logger.LogWarning("File size mismatch. Expected: {ExpectedSize} bytes, Actual: {ActualSize} bytes", expectedSizeBytes, actualSize);
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
@@ -105,7 +105,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
             if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
             {
                 string msg = $"File hash mismatch. Expected: {expectedHash}, Actual: {actualHash}";
-                _logger.LogWarning(msg);
+                _logger.LogWarning("File hash mismatch. Expected: {ExpectedHash}, Actual: {ActualHash}", expectedHash, actualHash);
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
@@ -120,7 +120,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         catch (UnauthorizedAccessException)
         {
             string msg = $"Permission denied accessing file: {filePath}";
-            _logger.LogWarning(msg);
+            _logger.LogWarning("Permission denied accessing file: {FilePath}", filePath);
             return new FileIntegrityCheckResult(
                 IsValid: false,
                 ErrorMessage: msg,
@@ -129,7 +129,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         catch (Exception ex)
         {
             string msg = $"Unexpected error during integrity check: {ex.Message}";
-            _logger.LogError(msg);
+            _logger.LogError("Unexpected error during integrity check: {Message}", ex.Message);
             return new FileIntegrityCheckResult(
                 IsValid: false,
                 ErrorMessage: msg,
@@ -145,7 +145,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error recomputing file hash: {ex.Message}");
+            _logger.LogDebug("Error recomputing file hash: {Message}", ex.Message);
             return null;
         }
     }
@@ -164,7 +164,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error getting file size: {ex.Message}");
+            _logger.LogDebug("Error getting file size: {Message}", ex.Message);
             return null;
         }
     }

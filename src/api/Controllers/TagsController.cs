@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Services.Tags;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Api.Controllers;
 
@@ -14,10 +15,10 @@ namespace Farm.Api.Controllers;
 [Produces("application/json")]
 [Tags("Tags")]
 public class TagsController(
-    Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService,
+    ILogger<TagsController> unifiedLoggingService,
     ITagService tagService) : ControllerBase
 {
-    private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService = unifiedLoggingService;
+    private readonly ILogger<TagsController> _unifiedLoggingService = unifiedLoggingService;
     private readonly ITagService _tagService = tagService;
 
     /// <summary>
@@ -42,7 +43,7 @@ public class TagsController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] GetAllTagsAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] GetAllTagsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve tags" });
         }
     }
@@ -75,7 +76,7 @@ public class TagsController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] SearchTagsAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] SearchTagsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to search tags" });
         }
     }
@@ -108,7 +109,7 @@ public class TagsController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] GetPopularTagsAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] GetPopularTagsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve popular tags" });
         }
     }
@@ -135,7 +136,7 @@ public class TagsController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] GetTagAnalyticsAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] GetTagAnalyticsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve tag analytics" });
         }
     }
@@ -172,7 +173,7 @@ public class TagsController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] GetTagSuggestionsAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] GetTagSuggestionsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve tag suggestions" });
         }
     }
@@ -211,12 +212,12 @@ public class TagsController(
         }
         catch (InvalidOperationException ex)
         {
-            _unifiedLoggingService?.LogWarning(ex, $"[TagsController] CreateTagAsync - Tag already exists: {ex.Message}");
+            _unifiedLoggingService?.LogWarning(ex, "[TagsController] CreateTagAsync - Tag already exists: {Message}", ex.Message);
             return Conflict(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] CreateTagAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] CreateTagAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create tag" });
         }
     }
@@ -248,7 +249,7 @@ public class TagsController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] GetTagByIdAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] GetTagByIdAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve tag" });
         }
     }
@@ -280,12 +281,12 @@ public class TagsController(
         }
         catch (KeyNotFoundException ex)
         {
-            _unifiedLoggingService?.LogWarning(ex, $"[TagsController] DeleteTagAsync - Tag not found: {ex.Message}");
+            _unifiedLoggingService?.LogWarning(ex, "[TagsController] DeleteTagAsync - Tag not found: {Message}", ex.Message);
             return NotFound(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] DeleteTagAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] DeleteTagAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete tag" });
         }
     }
@@ -331,12 +332,12 @@ public class TagsController(
         }
         catch (KeyNotFoundException ex)
         {
-            _unifiedLoggingService?.LogWarning(ex, $"[TagsController] AssignTagToObjectAsync - Object or tag not found: {ex.Message}");
+            _unifiedLoggingService?.LogWarning(ex, "[TagsController] AssignTagToObjectAsync - Object or tag not found: {Message}", ex.Message);
             return NotFound(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] AssignTagToObjectAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] AssignTagToObjectAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to assign tag" });
         }
     }
@@ -379,12 +380,12 @@ public class TagsController(
         }
         catch (KeyNotFoundException ex)
         {
-            _unifiedLoggingService?.LogWarning(ex, $"[TagsController] RemoveTagFromObjectAsync - Mapping not found: {ex.Message}");
+            _unifiedLoggingService?.LogWarning(ex, "[TagsController] RemoveTagFromObjectAsync - Mapping not found: {Message}", ex.Message);
             return NotFound(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] RemoveTagFromObjectAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] RemoveTagFromObjectAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to remove tag" });
         }
     }
@@ -423,7 +424,7 @@ public class TagsController(
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] GetObjectTagsAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, "[TagsController] GetObjectTagsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve object tags" });
         }
     }

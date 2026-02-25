@@ -2,14 +2,14 @@
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure;
 
-public class ChunkUploadCleanupService(IUnifiedLoggingService logger, string webRootPath) : BackgroundService
+public class ChunkUploadCleanupService(ILogger<ChunkUploadCleanupService> logger, string webRootPath) : BackgroundService
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ChunkUploadCleanupService> _logger = logger;
     private readonly string _webRootPath = webRootPath;
     private readonly TimeSpan _interval = TimeSpan.FromMinutes(15);
     private readonly TimeSpan _ttl = TimeSpan.FromHours(2);
@@ -24,7 +24,7 @@ public class ChunkUploadCleanupService(IUnifiedLoggingService logger, string web
             }
             catch (Exception ex)
             {
-                _logger.LogDebug($"Chunk cleanup sweep failed: {ex.Message}");
+                _logger.LogDebug("Chunk cleanup sweep failed: {Message}", ex.Message);
             }
 
             await Task.Delay(_interval, stoppingToken);
@@ -74,7 +74,7 @@ public class ChunkUploadCleanupService(IUnifiedLoggingService logger, string web
 
         if (removed > 0)
         {
-            _logger.LogInformation($"Chunk cleanup removed {removed} stale uploads");
+            _logger.LogInformation("Chunk cleanup removed {Removed} stale uploads", removed);
         }
     }
 }

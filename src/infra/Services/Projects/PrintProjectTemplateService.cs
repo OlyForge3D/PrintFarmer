@@ -2,15 +2,15 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Projects;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Projects;
 
 /// <summary>
 /// Service implementation for managing print project templates.
 /// </summary>
-public class PrintProjectTemplateService(AppDbContext db, IUnifiedLoggingService logger) : IPrintProjectTemplateService
+public class PrintProjectTemplateService(AppDbContext db, ILogger<PrintProjectTemplateService> logger) : IPrintProjectTemplateService
 {
     public async Task<IReadOnlyList<PrintProjectTemplateListDto>> GetTemplatesAsync(
         string? category = null,
@@ -101,7 +101,7 @@ public class PrintProjectTemplateService(AppDbContext db, IUnifiedLoggingService
         }
 
         await db.SaveChangesAsync(ct);
-        logger.LogInformation($"Created project template {template.Id}: {template.Name}");
+        logger.LogInformation("Created project template {TemplateId}: {TemplateName}", template.Id, template.Name);
 
         return MapToDetailDto(template);
     }
@@ -166,7 +166,7 @@ public class PrintProjectTemplateService(AppDbContext db, IUnifiedLoggingService
 
         if (template.IsSystemTemplate)
         {
-            logger.LogWarning($"Cannot delete system template {templateId}");
+            logger.LogWarning("Cannot delete system template {TemplateId}", templateId);
             return false;
         }
 

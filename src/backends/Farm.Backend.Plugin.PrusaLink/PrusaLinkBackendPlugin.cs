@@ -1,8 +1,8 @@
 ﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Backend.Plugin.PrusaLink;
@@ -83,7 +83,7 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
             // Use the ceiling from BackendTimeoutSettings so uploads have enough headroom.
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
             httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
-            IUnifiedLoggingService? logger = provider.GetService<IUnifiedLoggingService>();
+            ILogger<PrusaLinkClient>? logger = provider.GetService<ILoggerFactory>()?.CreateLogger<PrusaLinkClient>();
             return new PrusaLinkClient(httpClient, logger);
         });
 

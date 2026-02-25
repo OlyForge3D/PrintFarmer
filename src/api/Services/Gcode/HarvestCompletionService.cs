@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Gcode;
 
@@ -11,15 +11,15 @@ namespace Farm.Web.Api.Services.Gcode;
 /// </summary>
 public class HarvestCompletionService(
     IServiceProvider serviceProvider,
-    IUnifiedLoggingService logger) : BackgroundService
+    ILogger<HarvestCompletionService> logger) : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<HarvestCompletionService> _logger = logger;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(10);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation($"HarvestCompletionService started", null, null);
+        _logger.LogInformation($"HarvestCompletionService started");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -30,12 +30,12 @@ public class HarvestCompletionService(
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation($"HarvestCompletionService stopping due to cancellation", null, null);
+                _logger.LogInformation($"HarvestCompletionService stopping due to cancellation");
                 break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error in HarvestCompletionService", null, null);
+                _logger.LogError(ex, $"Error in HarvestCompletionService");
                 await Task.Delay(CheckInterval, stoppingToken);
             }
         }
@@ -60,19 +60,19 @@ public class HarvestCompletionService(
         // Find running operations that might be completed
         List<GcodeHarvestOperation> runningOperations = await unitOfWork.HarvestOperations.GetRunningOperationsWithFilesFoundAsync(ct);
 
-        _logger.LogInformation($"Found {runningOperations.Count} running harvest operations to check", null, null);
+        _logger.LogInformation("Found {RunningOperationsCount} running harvest operations to check", runningOperations.Count);
 
         foreach (GcodeHarvestOperation? operation in runningOperations)
         {
             // Count processed files (added + skipped + errored)
             int processedFiles = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
 
-            _logger.LogInformation($"Operation {operation.Id}: Found={operation.FilesFound}, Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored}, Processed={processedFiles}", null, null);
+            _logger.LogInformation("Operation {OperationId}: Found={OperationFilesFound}, Added={OperationFilesAdded}, Skipped={OperationFilesSkipped}, Errored={OperationFilesErrored}, Processed={ProcessedFiles}", operation.Id, operation.FilesFound, operation.FilesAdded, operation.FilesSkipped, operation.FilesErrored, processedFiles);
 
             // Get the count of discovered files for this operation
             int discoveredFileCount = await unitOfWork.HarvestOperations.GetDiscoveredFilesCountAsync(operation.Id, ct);
 
-            _logger.LogInformation($"Operation {operation.Id}: Found {discoveredFileCount} files in the DiscoveredGcodeFiles table", null, null);
+            _logger.LogInformation("Operation {OperationId}: Found {DiscoveredFileCount} files in the DiscoveredGcodeFiles table", operation.Id, discoveredFileCount);
 
             if (processedFiles >= operation.FilesFound)
             {
@@ -80,7 +80,7 @@ public class HarvestCompletionService(
                 operation.Status = GcodeHarvestStatus.Completed;
                 operation.CompletedAt = DateTime.UtcNow;
 
-                _logger.LogInformation($"Marking operation {operation.Id} as completed. Processed {processedFiles}/{operation.FilesFound} files", null, null);
+                _logger.LogInformation("Marking operation {OperationId} as completed. Processed {ProcessedFiles}/{OperationFilesFound} files", operation.Id, processedFiles, operation.FilesFound);
 
                 await unitOfWork.SaveChangesAsync(ct);
             }

@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Dtos;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -12,11 +12,11 @@ namespace Farm.OrcaSlicer.Worker.Services;
 public class ProfileCacheDb : IDisposable
 {
     private readonly string _dbPath;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger _logger;
     private SqliteConnection? _connection;
     private bool _disposed;
 
-    public ProfileCacheDb(IUnifiedLoggingService logger, string? dbPath = null)
+    public ProfileCacheDb(ILogger logger, string? dbPath = null)
     {
         _logger = logger;
         _dbPath = dbPath ?? Path.Combine(Path.GetTempPath(), "orcaslicer-profiles.db");

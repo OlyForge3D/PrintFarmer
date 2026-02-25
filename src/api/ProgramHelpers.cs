@@ -11,7 +11,6 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -26,7 +25,7 @@ namespace Farm.Web.Api
 {
     internal static class ProgramHelpers
     {
-        internal static void HandleDeferredConsoleRedirection(IUnifiedLoggingService? uls, ILogger<Program>? lg)
+        internal static void HandleDeferredConsoleRedirection(ILogger? uls, ILogger<Program>? lg)
         {
             try
             {
@@ -50,7 +49,7 @@ namespace Farm.Web.Api
                 {
                     if (uls != null)
                     {
-                        uls.LogWarning($"[UnifiedLogging] Deferred console redirection failed: {ex.Message}");
+                        uls.LogWarning("[UnifiedLogging] Deferred console redirection failed: {Message}", ex.Message);
                     }
                     else if (lg != null)
                     {
@@ -142,7 +141,7 @@ namespace Farm.Web.Api
             return Results.Ok(new { ranges = suggestions.OrderBy(s => s).ToArray() });
         }
 
-        internal static JwtBearerEvents CreateJwtEvents(IUnifiedLoggingService? startupUls, ILogger<Program>? startupLogger)
+        internal static JwtBearerEvents CreateJwtEvents(ILogger? startupUls, ILogger<Program>? startupLogger)
         {
             return new JwtBearerEvents
             {
@@ -165,7 +164,7 @@ namespace Farm.Web.Api
                         string presence = !string.IsNullOrEmpty(auth) ? "present" : "missing";
                         if (startupUls != null)
                         {
-                            startupUls.LogDebug($"[JWT][OnMessageReceived] Authorization header: {presence} tokenSnippet={snippet}");
+                            startupUls.LogDebug("[JWT][OnMessageReceived] Authorization header: {Presence} tokenSnippet={Snippet}", presence, snippet);
                         }
                         else
                         {
@@ -186,7 +185,7 @@ namespace Farm.Web.Api
                         string exMessage = context.Exception.Message;
                         if (startupUls != null)
                         {
-                            startupUls.LogError(context.Exception, $"[JWT][OnAuthenticationFailed] {exType}: {exMessage}");
+                            startupUls.LogError(context.Exception, "[JWT][OnAuthenticationFailed] {ExType}: {ExMessage}", exType, exMessage);
                         }
                         else
                         {
@@ -207,7 +206,7 @@ namespace Farm.Web.Api
                     {
                         if (startupUls != null)
                         {
-                            startupUls.LogInformation($"[JWT][OnTokenValidated] user: {sub}, roles: [{roles}]");
+                            startupUls.LogInformation("[JWT][OnTokenValidated] user: {Sub}, roles: [{Roles}]", sub, roles);
                         }
                         else
                         {
@@ -241,7 +240,7 @@ namespace Farm.Web.Api
                                 {
                                     if (startupUls != null)
                                     {
-                                        startupUls.LogWarning($"[JWT][OnTokenValidated] Token revoked for user: {sub}");
+                                        startupUls.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {Sub}", sub);
                                     }
                                     else
                                     {
@@ -265,7 +264,7 @@ namespace Farm.Web.Api
                         string desc = context.ErrorDescription ?? "<none>";
                         if (startupUls != null)
                         {
-                            startupUls.LogWarning($"[JWT][OnChallenge] Error={error} Desc={desc}");
+                            startupUls.LogWarning("[JWT][OnChallenge] Error={Error} Desc={Desc}", error, desc);
                         }
                         else
                         {
@@ -324,7 +323,7 @@ namespace Farm.Web.Api
                 IServiceProvider sp = initScope.ServiceProvider;
 
                 // Resolve required services for DB initialization and call into the existing initializer
-                IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
+                ILogger logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInit");
                 AppDbContext db = sp.GetRequiredService<AppDbContext>();
                 IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
                 IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();

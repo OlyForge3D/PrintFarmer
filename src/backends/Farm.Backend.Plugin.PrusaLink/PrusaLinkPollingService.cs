@@ -5,10 +5,10 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -19,10 +19,10 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public sealed class PrusaLinkPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
+    ILogger<PrusaLinkPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<PrusaLinkPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
@@ -116,7 +116,7 @@ public sealed class PrusaLinkPollingService(
                 {
                     // Get list of PrusaLink printers from database
                     List<Guid> printerIds = await GetPrusaLinkPrinterIdsAsync(ct);
-                    _logger.LogDebug($"PrusaLinkPollingService: Found {printerIds.Count} PrusaLink printers");
+                    _logger.LogDebug("PrusaLinkPollingService: Found {PrinterIdsCount} PrusaLink printers", printerIds.Count);
 
                     // Ensure polling loops exist for all PrusaLink printers
                     foreach (Guid id in printerIds)
@@ -127,7 +127,7 @@ public sealed class PrusaLinkPollingService(
                             var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
 #pragma warning restore S6612
                             _pollingLoops.TryAdd(id, pollingLoop);
-                            _logger.LogDebug($"Started polling loop for PrusaLink printer {id}");
+                            _logger.LogDebug("Started polling loop for PrusaLink printer {Id}", id);
                         }
                     }
 
@@ -137,7 +137,7 @@ public sealed class PrusaLinkPollingService(
                     {
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
-                        _logger.LogDebug($"Stopped polling for printer {printerId}");
+                        _logger.LogDebug("Stopped polling for printer {PrinterId}", printerId);
                     }
 
                     // Check every 30 seconds for printer list changes
@@ -197,7 +197,7 @@ public sealed class PrusaLinkPollingService(
                         printer.Credential,
                         ct);
 
-                    _logger.LogDebug($"PrusaLink {printerId}: Got status - Online={status.IsOnline}, State={status.State}, Progress={status.Progress}, JobName={status.JobName}");
+                    _logger.LogDebug("PrusaLink {PrinterId}: Got status - Online={StatusIsOnline}, State={StatusState}, Progress={StatusProgress}, JobName={StatusJobName}", printerId, status.IsOnline, status.State, status.Progress, status.JobName);
 
                     // Check if any values changed
                     // Use tolerance for float progress comparison
@@ -258,12 +258,12 @@ public sealed class PrusaLinkPollingService(
                 catch (Exception ex)
                 {
                     state.ConsecutiveFailures++;
-                    _logger.LogDebug(ex, $"Failed to poll PrusaLink printer {printerId} (attempt {state.ConsecutiveFailures})");
+                    _logger.LogDebug(ex, "Failed to poll PrusaLink printer {PrinterId} (attempt {StateConsecutiveFailures})", printerId, state.ConsecutiveFailures);
 
                     // After 3 consecutive failures, mark as offline
                     if (state.ConsecutiveFailures >= 3 && state.LastKnownIsOnline)
                     {
-                        _logger.LogWarning($"PrusaLink printer {printerId} marked offline after {state.ConsecutiveFailures} failures");
+                        _logger.LogWarning("PrusaLink printer {PrinterId} marked offline after {StateConsecutiveFailures} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
                         var offlineUpdate = new PrinterStatusDto(
                             Id: printerId,
@@ -299,7 +299,7 @@ public sealed class PrusaLinkPollingService(
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Unexpected error polling PrusaLink printer {printerId}");
+                _logger.LogError(ex, "Unexpected error polling PrusaLink printer {PrinterId}", printerId);
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
             }
         }
@@ -340,7 +340,7 @@ public sealed class PrusaLinkPollingService(
                 return;
             }
 
-            _logger.LogInformation($"[PrusaLinkPollingService] Detected state transition for printer {printerId}: {previousState} -> {newState}");
+            _logger.LogInformation("[PrusaLinkPollingService] Detected state transition for printer {PrinterId}: {PreviousState} -> {NewState}", printerId, previousState, newState);
 
             // Create a new scope to get the scoped service
             using IServiceScope scope = _scopeFactory.CreateScope();
@@ -352,7 +352,7 @@ public sealed class PrusaLinkPollingService(
                 bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
                 if (marked)
                 {
-                    _logger.LogInformation($"[PrusaLinkPollingService] Print job marked as completed for printer {printerId}");
+                    _logger.LogInformation("[PrusaLinkPollingService] Print job marked as completed for printer {PrinterId}", printerId);
                 }
             }
             else if (PrintJobCompletionService.IsFailureState(newState))
@@ -361,13 +361,13 @@ public sealed class PrusaLinkPollingService(
                 bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
                 if (marked)
                 {
-                    _logger.LogWarning($"[PrusaLinkPollingService] Print job marked as failed for printer {printerId} (state: {newState})");
+                    _logger.LogWarning("[PrusaLinkPollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[PrusaLinkPollingService] Failed to sync job completion for printer {printerId}");
+            _logger.LogError(ex, "[PrusaLinkPollingService] Failed to sync job completion for printer {PrinterId}", printerId);
         }
     }
 }

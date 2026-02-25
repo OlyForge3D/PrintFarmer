@@ -11,10 +11,10 @@ using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 using IStoredFileOperationsService = Farm.Infrastructure.Services.FileManagement.IStoredFileOperationsService;
@@ -63,7 +63,7 @@ namespace Farm.Slicer.Module.Tests.Services
         public async Task UploadModelAsync_CompositeHash_Path_CreatesNewHash()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
 
             // Arrange: existing model with same file hash but different base name and same extension
             string content = "abc123";
@@ -117,7 +117,7 @@ namespace Farm.Slicer.Module.Tests.Services
         public void ValidateModel_InvalidFileType_ReturnsIssue()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
             Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>();
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
@@ -157,7 +157,7 @@ namespace Farm.Slicer.Module.Tests.Services
         public void ValidateModel_EmptyFile_ThrowsArgument()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
             Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>();
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
@@ -182,7 +182,7 @@ namespace Farm.Slicer.Module.Tests.Services
         public async Task UploadModelAsync_AnalysisServiceThrows_Succeeds()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
 
             Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
             _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);
@@ -222,7 +222,7 @@ namespace Farm.Slicer.Module.Tests.Services
         public async Task UploadModelAsync_RepositorySaveFails_Propagates()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
 
             Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
             _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);

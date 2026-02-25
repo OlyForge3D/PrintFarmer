@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
@@ -24,10 +25,7 @@ const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
 const VALID_TABS = ['all-jobs', 'by-model', 'timing', 'history'] as const;
 
 export function PrintQueueDashboardPage() {
-  const [jobs, setJobs] = useState<QueuedPrintJobWithFileMetaDto[]>([]);
-  const [stats, setStats] = useState<QueueStatsDto | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState<string | null>(null);
@@ -54,6 +52,34 @@ export function PrintQueueDashboardPage() {
   const [dispatchUploadProgressByJobId, setDispatchUploadProgressByJobId] = useState<
     Record<string, DispatchUploadProgressDto>
   >({});
+
+  const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
+    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter],
+    queryFn: () => apiClient.getAnalyticsQueueJobs(
+      statusFilter || undefined,
+      modelFilter || undefined,
+      materialFilter || undefined,
+      100,
+      0
+    ) as Promise<QueuedPrintJobWithFileMetaDto[]>,
+    staleTime: 10_000,
+    refetchInterval: 10_000,
+  });
+
+  const { data: stats = null } = useQuery({
+    queryKey: ['queue-stats'],
+    queryFn: () => apiClient.getAnalyticsQueueStats() as Promise<QueueStatsDto>,
+    staleTime: 10_000,
+    refetchInterval: 10_000,
+  });
+
+  const invalidateQueue = useCallback(() => {
+    setError(null);
+    queryClient.invalidateQueries({ queryKey: ['queue-jobs'] });
+    queryClient.invalidateQueries({ queryKey: ['queue-stats'] });
+  }, [queryClient]);
+
+  const displayError = error || (jobsError ? (jobsError instanceof Error ? jobsError.message : "Failed to load jobs") : null);
 
   // Keyboard navigation for job list (only for active tab)
   const { selectedIndex } = useKeyboardNavigation(
@@ -119,54 +145,6 @@ export function PrintQueueDashboardPage() {
     }
   ]);
 
-  const loadJobs = useCallback(async (isBackgroundRefresh = false) => {
-    try {
-      setError(null);
-      
-      // Only show full loading state on initial load, not background refreshes
-      if (!isBackgroundRefresh) {
-        setLoading(true);
-      } else {
-        setIsRefreshing(true);
-      }
-
-      // Fetch both in parallel to reduce flashing
-      const [data, queueStats] = await Promise.all([
-        apiClient.getAnalyticsQueueJobs(
-          statusFilter || undefined,
-          modelFilter || undefined,
-          materialFilter || undefined,
-          100,
-          0
-        ),
-        apiClient.getAnalyticsQueueStats()
-      ]);
-
-      setJobs(data as QueuedPrintJobWithFileMetaDto[]);
-      setStats(queueStats as QueueStatsDto);
-
-      setLoading(false);
-      setIsRefreshing(false);
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to load jobs";
-      setError(errorMessage);
-      setLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [statusFilter, modelFilter, materialFilter]);
-
-  // Initial load and filter changes trigger immediate fetch
-  useEffect(() => {
-    loadJobs(false);
-  }, [loadJobs]);
-
-  // Background refresh interval - separate effect to avoid recreating interval on filter changes
-  useEffect(() => {
-    const interval = setInterval(() => loadJobs(true), 10000);
-    return () => clearInterval(interval);
-  }, [loadJobs]);
-
   const handleCancelJob = useCallback((jobId: string) => {
     setJobToCancel(jobId);
     setShowCancelConfirmation(true);
@@ -180,7 +158,7 @@ export function PrintQueueDashboardPage() {
       await apiClient.cancelPrintQueueJob(jobToCancel);
       setShowCancelConfirmation(false);
       setJobToCancel(null);
-      loadJobs(true);
+      invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to cancel job";
@@ -190,12 +168,12 @@ export function PrintQueueDashboardPage() {
     } finally {
       setCancelingJobId(null);
     }
-  }, [jobToCancel, loadJobs]);
+  }, [jobToCancel, invalidateQueue]);
 
   const handlePauseJob = async (jobId: string) => {
     try {
       await apiClient.pauseJob(jobId);
-      loadJobs(true);
+      invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to pause job";
@@ -206,13 +184,13 @@ export function PrintQueueDashboardPage() {
   const handleResumeJob = useCallback(async (jobId: string) => {
     try {
       await apiClient.resumeJob(jobId);
-      loadJobs(true);
+      invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to resume job";
       setError(errorMessage);
     }
-  }, [loadJobs]);
+  }, [invalidateQueue]);
 
   const handleDispatchJob = useCallback(async (jobId: string) => {
     setDispatchingJobId(jobId);
@@ -223,7 +201,7 @@ export function PrintQueueDashboardPage() {
     });
     try {
       await apiClient.dispatchPrintQueueJob(jobId);
-      loadJobs(true);
+      invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to start print job";
@@ -236,7 +214,7 @@ export function PrintQueueDashboardPage() {
         return copy;
       });
     }
-  }, [loadJobs]);
+  }, [invalidateQueue]);
 
   // Dispatch upload progress subscription (SignalR)
   useEffect(() => {
@@ -256,8 +234,7 @@ export function PrintQueueDashboardPage() {
     try {
       await apiClient.rerunPrintQueueJob(jobId);
       setError(null);
-      // Reload jobs to show the new job in the queue
-      await loadJobs(true);
+      invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to rerun job";
@@ -268,7 +245,7 @@ export function PrintQueueDashboardPage() {
   const handlePriorityChange = async (jobId: string, newPriority: number) => {
     try {
       await apiClient.updateJobPriority(jobId, newPriority);
-      loadJobs(true);
+      invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to update priority";
@@ -279,7 +256,7 @@ export function PrintQueueDashboardPage() {
   const handleReorder = async (moves: { jobId: string; newPosition: number }[]) => {
     try {
       await apiClient.reorderQueueJobs(moves);
-      loadJobs(true);
+      invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to reorder jobs";
@@ -294,7 +271,7 @@ export function PrintQueueDashboardPage() {
 
   const handleJobDetailsSaved = () => {
     handleCloseJobDetailsModal();
-    loadJobs(true);
+    invalidateQueue();
   };
 
   return (
@@ -302,9 +279,9 @@ export function PrintQueueDashboardPage() {
       title="Print Queue Dashboard"
       subtitle="View and manage all queued and printing jobs"
     >
-      {error && (
+      {displayError && (
         <Alert type="error" className="mb-4">
-          {error}
+          {displayError}
         </Alert>
       )}
 
@@ -361,7 +338,7 @@ export function PrintQueueDashboardPage() {
                   onStatusChange={setStatusFilter}
                   onModelChange={setModelFilter}
                   onMaterialChange={setMaterialFilter}
-                  onRefresh={() => loadJobs(false)}
+                  onRefresh={invalidateQueue}
                   isLoading={loading || isRefreshing}
                 />
               </div>

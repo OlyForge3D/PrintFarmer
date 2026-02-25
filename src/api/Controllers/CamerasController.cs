@@ -5,9 +5,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Startup;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Camera = Farm.Infrastructure.Domain.Camera;
 
 namespace Farm.Web.Api.Controllers;
@@ -23,11 +23,11 @@ namespace Farm.Web.Api.Controllers;
 public class CamerasController(
     ICameraService cameraService,
     IStartupStatus startupStatus,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<CamerasController> logger) : ControllerBase
 {
     private readonly ICameraService _cameraService = cameraService ?? throw new ArgumentNullException(nameof(cameraService));
     private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<CamerasController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Gets all standalone cameras.

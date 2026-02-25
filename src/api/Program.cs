@@ -25,6 +25,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
 
 // using Microsoft.Extensions.Caching.Memory; // removed unused
@@ -103,8 +104,10 @@ bool slicerEnabled = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") !
 // When slicer is disabled, cross-module consumers use = null default parameter values.
 // .NET DI's ActivatorUtilities skips unregistered services that have default values.
 
-// Register SystemLog logger provider to capture all application logs to the database
-builder.Logging.AddSystemLogProvider(LogLevel.Information);
+// Register SystemLog logger provider to capture warnings and errors to the database.
+// Using Warning level to avoid flooding PostgreSQL with high-volume Information logs
+// (at Information level the 146M-row SystemLogs table caused severe I/O contention).
+builder.Logging.AddSystemLogProvider(LogLevel.Warning);
 
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.
@@ -193,7 +196,7 @@ catch
 // use the services safely. We build a temporary provider (disposed immediately)
 // and stash references to services that are safe to keep for the lifetime of the
 // process (loggers, unified logging, temp path provider, startup status).
-IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
+ILogger<Program>? _capturedStartupUnifiedLogging = null;
 ILogger<Program>? _capturedStartupLogger = null;
 ITempPathProvider? _capturedTempPathProvider = null;
 IStartupStatus? _capturedStartupStatus = null;
@@ -229,7 +232,7 @@ try
 {
     await using AsyncServiceScope _captureScope = app.Services.CreateAsyncScope();
     IServiceProvider _captureSp = _captureScope.ServiceProvider;
-    _capturedStartupUnifiedLogging = _captureSp.GetService<IUnifiedLoggingService>();
+    _capturedStartupUnifiedLogging = _captureSp.GetService<ILogger<Program>>();
     _capturedStartupLogger = _captureSp.GetService<ILogger<Program>>();
     _capturedTempPathProvider = _captureSp.GetService<ITempPathProvider>();
     _capturedStartupStatus = _captureSp.GetService<IStartupStatus>();
@@ -260,7 +263,7 @@ if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION
     // Capture root-level logging services once to avoid per-call scope creation inside the callback
     // Prefer startup-captured unified logging / logger when available to avoid creating
     // a scope inside the ApplicationStarted callback.
-    IUnifiedLoggingService? _deferredUls = _capturedStartupUnifiedLogging ?? app.Services.GetService<IUnifiedLoggingService>();
+    ILogger<Program>? _deferredUls = _capturedStartupUnifiedLogging ?? app.Services.GetService<ILogger<Program>>();
     ILogger<Program>? _deferredLg = _capturedStartupLogger ?? app.Services.GetService<ILogger<Program>>();
 
     _ = lifetime.ApplicationStarted.Register(() => ProgramHelpers.HandleDeferredConsoleRedirection(_deferredUls, _deferredLg));

@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Infrastructure;
 
@@ -30,10 +30,10 @@ public static class CliCommandExtensions
         await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
 
         // Resolve logger explicitly; if not registered, keep null to preserve Console fallback
-        IUnifiedLoggingService? logger = null;
+        ILogger? logger = null;
         try
         {
-            logger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
+            logger = scope.ServiceProvider.GetRequiredService<ILogger>();
         }
         catch (InvalidOperationException)
         {
@@ -98,16 +98,16 @@ public static class CliCommandExtensions
         // Method intentionally falls through when a CLI command was handled.
     }
 
-    private static async Task ListUsersAsync(AppDbContext db, IUnifiedLoggingService? logger)
+    private static async Task ListUsersAsync(AppDbContext db, ILogger? logger)
     {
         List<User> users = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role).ToListAsync();
         if (logger != null)
         {
-            logger.LogInformation($"Users ({users.Count}):");
+            logger.LogInformation("Users ({UsersCount}):", users.Count);
             foreach (User u in users)
             {
                 string roles = string.Join(',', u.UserRoles.Where(r => r.IsActive).Select(r => r.Role.Name));
-                logger.LogInformation($" - {u.Username} <{u.Email}> Roles=[{roles}] Active={u.IsActive}");
+                logger.LogInformation(" - {UUsername} <{UEmail}> Roles=[{Roles}] Active={UIsActive}", u.Username, u.Email, roles, u.IsActive);
             }
         }
         else
@@ -121,7 +121,7 @@ public static class CliCommandExtensions
         }
     }
 
-    private static async Task CreateAdminAsync(AppDbContext db, List<string> rawArgs, IUnifiedLoggingService? logger)
+    private static async Task CreateAdminAsync(AppDbContext db, List<string> rawArgs, ILogger? logger)
     {
         string GetArg(string name)
         {
@@ -153,7 +153,7 @@ public static class CliCommandExtensions
         {
             if (logger != null)
             {
-                logger.LogWarning($"User '{username}' already exists.");
+                logger.LogWarning("User '{Username}' already exists.", username);
             }
             else
             {
@@ -191,7 +191,7 @@ public static class CliCommandExtensions
             _ = await db.SaveChangesAsync();
             if (logger != null)
             {
-                logger.LogInformation($"Created admin user '{username}' with farm_admin role.");
+                logger.LogInformation("Created admin user '{Username}' with farm_admin role.", username);
             }
             else
             {
@@ -202,7 +202,7 @@ public static class CliCommandExtensions
         {
             if (logger != null)
             {
-                logger.LogWarning($"Created user '{username}' but farm_admin role not found. Run database seeders first.");
+                logger.LogWarning("Created user '{Username}' but farm_admin role not found. Run database seeders first.", username);
             }
             else
             {

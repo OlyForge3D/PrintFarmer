@@ -1,5 +1,5 @@
 ﻿using System.Collections.Concurrent;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Normalization;
 
@@ -11,7 +11,7 @@ public interface INormalizationEventLogger
 /// <summary>
 /// In-memory rate-limited normalization logger (singleton). Replace with distributed telemetry for multi-instance scaling.
 /// </summary>
-public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : INormalizationEventLogger
+public sealed class NormalizationEventLogger(ILogger<NormalizationEventLogger> logger) : INormalizationEventLogger
 {
     private sealed class Counter(int count, DateTime windowStartUtc)
     {
@@ -20,7 +20,7 @@ public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : IN
         public DateTime WindowStartUtc { get; set; } = windowStartUtc;
     }
 
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<NormalizationEventLogger> _logger = logger;
     private readonly ConcurrentDictionary<string, Counter> _counters = new();
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
     private const int ThresholdPerWindow = 20;
@@ -54,7 +54,7 @@ public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : IN
 
         if (counter.Count <= ThresholdPerWindow)
         {
-            _logger.LogInformation($"Normalization {entityType} normalized '{original}' -> '{normalized}' source={source ?? "unknown"} count={counter.Count}");
+            _logger.LogInformation("Normalization {EntityType} normalized '{Original}' -> '{Normalized}' source={Source} count={CounterCount}", entityType, original, normalized, source ?? "unknown", counter.Count);
         }
     }
 }

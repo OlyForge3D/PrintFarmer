@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Health;
 
@@ -10,7 +10,7 @@ namespace Farm.Web.Api.Health;
 /// </summary>
 public class SignalRHealthCheck(
     IHubContext<PrinterHub> hubContext,
-    IUnifiedLoggingService logger) : IHealthCheck
+    ILogger<SignalRHealthCheck> logger) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {

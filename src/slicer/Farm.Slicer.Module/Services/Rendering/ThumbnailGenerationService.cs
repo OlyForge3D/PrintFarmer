@@ -7,9 +7,9 @@ using System.Numerics;
 using Assimp;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Thumbnails;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
@@ -23,12 +23,12 @@ namespace Farm.Slicer.Module.Services.Rendering;
 /// </summary>
 public class ThumbnailGenerationService : IThumbnailGenerationService
 {
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<ThumbnailGenerationService> _logger;
     private readonly string _thumbnailsBasePath;
 
     public string ThumbnailFileExtension => ".png";
 
-    public ThumbnailGenerationService(IUnifiedLoggingService logger, IConfiguration configuration)
+    public ThumbnailGenerationService(ILogger<ThumbnailGenerationService> logger, IConfiguration configuration)
     {
         _logger = logger;
 
@@ -58,13 +58,13 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
     {
         if (!IsFormatSupported(fileFormat))
         {
-            _logger.LogWarning($"Thumbnail generation not supported for format: {fileFormat}");
+            _logger.LogWarning("Thumbnail generation not supported for format: {FileFormat}", fileFormat);
             return false;
         }
 
         if (!File.Exists(modelFilePath))
         {
-            _logger.LogWarning($"Model file not found: {modelFilePath}");
+            _logger.LogWarning("Model file not found: {ModelFilePath}", modelFilePath);
             return false;
         }
 
@@ -81,7 +81,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Exception during thumbnail generation for {modelFilePath}");
+            _logger.LogError(ex, "Exception during thumbnail generation for {ModelFilePath}", modelFilePath);
             return false;
         }
     }
@@ -91,13 +91,13 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         try
         {
             string fileName = Path.GetFileName(modelFilePath);
-            _logger.LogInformation($"Generating thumbnail for {fileName}...");
-            _logger.LogInformation($"  Model file path: {modelFilePath}");
-            _logger.LogInformation($"  Output path: {outputPath}");
+            _logger.LogInformation("Generating thumbnail for {FileName}...", fileName);
+            _logger.LogInformation("  Model file path: {ModelFilePath}", modelFilePath);
+            _logger.LogInformation("  Output path: {OutputPath}", outputPath);
             _logger.LogInformation($"  Using OrcaSlicerPreviewRenderer...");
-            _logger.LogInformation($"  Zoom percent: {(zoomPercent.HasValue ? zoomPercent.Value.ToString() : "default")}");
-            _logger.LogInformation($"  View: {view ?? "default(front)"}");
-            _logger.LogInformation($"  View mode: {viewMode ?? "default(isometric)"}");
+            _logger.LogInformation("  Zoom percent: {ZoomPercent}", zoomPercent.HasValue ? zoomPercent.Value.ToString() : "default");
+            _logger.LogInformation("  View: {View}", view ?? "default(front)");
+            _logger.LogInformation("  View mode: {ViewMode}", viewMode ?? "default(isometric)");
 
             // Use OrcaPreviewRenderer for high-quality rendering
             var renderer = new OrcaPreviewRenderer();
@@ -107,18 +107,18 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
 
             if (zoomPercent.HasValue)
             {
-                _logger.LogInformation($"    Applying zoom {zoomPercent.Value}% (default base: {defaultZoomPercent}%)");
+                _logger.LogInformation("    Applying zoom {ZoomPercentValue}% (default base: {DefaultZoomPercent}%)", zoomPercent.Value, defaultZoomPercent);
                 options.SetZoomPercent(defaultZoomPercent, zoomPercent.Value);
-                _logger.LogInformation($"    OrthoSize after zoom: {options.OrthoSize:F4}");
+                _logger.LogInformation("    OrthoSize after zoom: {OptionsOrthoSize:F4}", options.OrthoSize);
             }
             else
             {
-                _logger.LogInformation($"    Using default OrthoSize: {options.OrthoSize:F4}");
+                _logger.LogInformation("    Using default OrthoSize: {OptionsOrthoSize:F4}", options.OrthoSize);
             }
 
             if (!string.IsNullOrWhiteSpace(viewMode))
             {
-                _logger.LogInformation($"    Applying view mode: {viewMode}");
+                _logger.LogInformation("    Applying view mode: {ViewMode}", viewMode);
                 if (viewMode.Equals("straight", StringComparison.OrdinalIgnoreCase))
                 {
                     options.CameraViewMode = RenderOptions.ViewMode.Straight;
@@ -131,37 +131,37 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                 }
                 else
                 {
-                    _logger.LogWarning($"    Unknown view mode '{viewMode}', using default 'isometric'");
+                    _logger.LogWarning("    Unknown view mode '{ViewMode}', using default 'isometric'", viewMode);
                 }
             }
 
             if (!string.IsNullOrWhiteSpace(view))
             {
-                _logger.LogInformation($"    Applying camera view: {view}");
+                _logger.LogInformation("    Applying camera view: {View}", view);
                 Vector3 oldPos = options.CameraPosition;
                 Vector3 oldTgt = options.CameraTarget;
                 if (!options.SetCameraView(view))
                 {
-                    _logger.LogWarning($"    Unknown view '{view}', using default 'front'");
+                    _logger.LogWarning("    Unknown view '{View}', using default 'front'", view);
                     options.SetCameraView("front");
                 }
 
-                _logger.LogInformation($"    Camera: Pos({oldPos.X:F2},{oldPos.Y:F2},{oldPos.Z:F2}) -> ({options.CameraPosition.X:F2},{options.CameraPosition.Y:F2},{options.CameraPosition.Z:F2})");
-                _logger.LogInformation($"    Target: ({oldTgt.X:F2},{oldTgt.Y:F2},{oldTgt.Z:F2}) -> ({options.CameraTarget.X:F2},{options.CameraTarget.Y:F2},{options.CameraTarget.Z:F2})");
+                _logger.LogInformation("    Camera: Pos({OldPosX:F2},{OldPosY:F2},{OldPosZ:F2}) -> ({X:F2},{Y:F2},{Z:F2})", oldPos.X, oldPos.Y, oldPos.Z, options.CameraPosition.X, options.CameraPosition.Y, options.CameraPosition.Z);
+                _logger.LogInformation("    Target: ({OldTgtX:F2},{OldTgtY:F2},{OldTgtZ:F2}) -> ({X:F2},{Y:F2},{Z:F2})", oldTgt.X, oldTgt.Y, oldTgt.Z, options.CameraTarget.X, options.CameraTarget.Y, options.CameraTarget.Z);
             }
             else
             {
-                _logger.LogInformation($"    Using default camera view (front): Pos({options.CameraPosition.X:F2},{options.CameraPosition.Y:F2},{options.CameraPosition.Z:F2})");
+                _logger.LogInformation("    Using default camera view (front): Pos({X:F2},{Y:F2},{Z:F2})", options.CameraPosition.X, options.CameraPosition.Y, options.CameraPosition.Z);
             }
 
             renderer.Render(modelFilePath, outputPath, options);
 
-            _logger.LogInformation($"✓ Thumbnail rendered at {width}x{height}: {outputPath}");
+            _logger.LogInformation("✓ Thumbnail rendered at {Width}x{Height}: {OutputPath}", width, height, outputPath);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error generating thumbnail: {ex.Message}");
+            _logger.LogError(ex, "Error generating thumbnail: {Message}", ex.Message);
             return false;
         }
     }

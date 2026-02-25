@@ -2,12 +2,12 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Services.Tags;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -15,13 +15,13 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 public class CatalogControllerTests
 {
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<CatalogController>> _loggerMock;
     private readonly Mock<ICatalogService> _catalogServiceMock;
     private readonly CatalogController _controller;
 
     public CatalogControllerTests()
     {
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<CatalogController>>();
         _catalogServiceMock = new Mock<ICatalogService>();
         _controller = new CatalogController(_loggerMock.Object, _catalogServiceMock.Object);
         _controller.ControllerContext = new ControllerContext

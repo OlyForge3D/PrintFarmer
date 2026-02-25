@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -20,7 +21,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
 
     private readonly RequestDelegate _next = next ?? throw new ArgumentNullException(nameof(next));
 
-    public async Task InvokeAsync(HttpContext context, [FromServices] IUnifiedLoggingService logger)
+    public async Task InvokeAsync(HttpContext context, [FromServices] ILogger<GlobalExceptionMiddleware> logger)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -35,7 +36,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         {
             // Use correlationId from HttpContext.Items if available (set by TelemetryMiddleware)
             string correlationId = context.Items["CorrelationId"] as string ?? context.TraceIdentifier;
-            logger.LogError(ex, $"Unhandled exception occurred for {context.Request.Method} {context.Request.Path}. CorrelationId: {correlationId}", correlationId);
+            logger.LogError(ex, "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}", context.Request.Method, context.Request.Path, correlationId);
             await HandleExceptionAsync(context, ex, correlationId);
         }
     }

@@ -7,9 +7,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Tests.Builders;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -23,14 +23,14 @@ public class JobQueueServiceTests
 {
     private readonly Mock<IQueueRepository> _mockRepo;
     private readonly Mock<IQueueDataService> _mockDataService;
-    private readonly Mock<IUnifiedLoggingService> _mockLogger;
+    private readonly Mock<ILogger<JobQueueService>> _mockLogger;
     private readonly JobQueueService _sut; // System Under Test
 
     public JobQueueServiceTests()
     {
         _mockRepo = new Mock<IQueueRepository>();
         _mockDataService = new Mock<IQueueDataService>();
-        _mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        _mockLogger = new Mock<ILogger<JobQueueService>>(MockBehavior.Loose);
         _sut = new JobQueueService(_mockRepo.Object, _mockDataService.Object, _mockLogger.Object);
     }
 
@@ -70,6 +70,8 @@ public class JobQueueServiceTests
         // Arrange
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer>());
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
 
         // Act
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, null, null, CancellationToken.None);
@@ -89,10 +91,8 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printer });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(printer.Id, It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob>());
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(printer.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrintJob?)null);
 
         // Act
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, null, null, CancellationToken.None);
@@ -118,10 +118,8 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printer });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(printer.Id, It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob> { queuedJob });
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(printer.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrintJob?)null);
 
         // Act
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, null, null, CancellationToken.None);
@@ -149,16 +147,15 @@ public class JobQueueServiceTests
         var queuedJob = new PrintJob
         {
             Id = Guid.NewGuid(),
+            AssignedPrinterId = printer.Id,
             EstimatedPrintTime = TimeSpan.FromMinutes(30),
             Status = PrintJobStatus.Queued
         };
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printer });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(printer.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<PrintJob> { queuedJob });
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(printer.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(currentJob);
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob> { currentJob, queuedJob });
 
         // Act
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, null, null, CancellationToken.None);
@@ -213,10 +210,8 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printerWith04, printerWith06 });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob>());
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrintJob?)null);
 
         // Act - Filter by 0.4mm nozzle
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, 0.4m, null, CancellationToken.None);
@@ -247,7 +242,7 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printerNoNozzle });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob>());
 
         // Act - Filter by 0.4mm nozzle
@@ -278,10 +273,8 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printer });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob>());
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrintJob?)null);
 
         // Act - Filter by exactly 0.4mm
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, 0.4m, null, CancellationToken.None);
@@ -324,10 +317,8 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printerWithPCTG, printerWithoutPCTG });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob>());
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrintJob?)null);
 
         // Act - Filter by PCTG material
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, null, "PCTG", CancellationToken.None);
@@ -357,10 +348,8 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printer });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob>());
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrintJob?)null);
 
         // Act - Filter with lowercase "pctg"
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, null, "pctg", CancellationToken.None);
@@ -383,10 +372,8 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetCompatiblePrintersAsync("Qidi X-Plus 4", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printer });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob>());
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrintJob?)null);
 
         // Act - Filter by model name
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync("Qidi X-Plus 4", null, null, CancellationToken.None);
@@ -455,10 +442,8 @@ public class JobQueueServiceTests
         // GetCompatiblePrintersAsync returns all Qidi printers (model filter)
         _mockDataService.Setup(x => x.GetCompatiblePrintersAsync("Qidi X-Plus 4", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { matchingPrinter, wrongNozzlePrinter, wrongMaterialPrinter });
-        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob>());
-        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrintJob?)null);
 
         // Act - Filter by all three: model, nozzle, material
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync("Qidi X-Plus 4", 0.4m, "PCTG", CancellationToken.None);
@@ -491,6 +476,8 @@ public class JobQueueServiceTests
 
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer> { printer });
+        _mockDataService.Setup(x => x.GetPrintJobsForPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
 
         // Act - Filter by 0.4mm nozzle (printer has 0.8mm)
         IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, 0.4m, null, CancellationToken.None);

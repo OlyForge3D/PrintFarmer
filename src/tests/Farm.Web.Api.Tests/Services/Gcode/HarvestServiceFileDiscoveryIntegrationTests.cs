@@ -12,7 +12,7 @@ using Farm.Infrastructure.Contracts.Printers.OctoPrint;
 using Farm.Infrastructure.Contracts.Printers.Sdcp;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -26,13 +26,13 @@ namespace Farm.Web.Api.Tests.Services.Gcode
     /// </summary>
     public class HarvestServiceFileDiscoveryIntegrationTests
     {
-        private readonly Mock<IUnifiedLoggingService> _mockLogger;
+        private readonly Mock<ILogger<BackendCapabilityFactory>> _mockLogger;
         private readonly Mock<IBackendClientFactory> _mockClientFactory;
         private readonly Mock<IBackendPluginRegistry> _mockPluginRegistry;
 
         public HarvestServiceFileDiscoveryIntegrationTests()
         {
-            _mockLogger = new Mock<IUnifiedLoggingService>();
+            _mockLogger = new Mock<ILogger<BackendCapabilityFactory>>();
             _mockClientFactory = new Mock<IBackendClientFactory>();
             _mockPluginRegistry = new Mock<IBackendPluginRegistry>();
         }

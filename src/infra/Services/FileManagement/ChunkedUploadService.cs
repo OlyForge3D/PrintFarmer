@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Quota;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.FileManagement;
 
@@ -22,7 +22,7 @@ public sealed class ChunkedUploadService(
     IFileManagementService fileManagementService,
     IGcodeThumbnailExtractorService thumbnailExtractor,
     IGcodeMetadataExtractorService metadataExtractor,
-    IUnifiedLoggingService logger) : IChunkedUploadService
+    ILogger<ChunkedUploadService> logger) : IChunkedUploadService
 {
     private const int DefaultRecommendedChunkSize = 1 * 1024 * 1024; // 1 MB
 
@@ -30,7 +30,7 @@ public sealed class ChunkedUploadService(
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
     private readonly IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
     private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<ChunkedUploadService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Initializes a new chunked upload session for large file uploads.
@@ -339,7 +339,7 @@ public sealed class ChunkedUploadService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Failed to rehydrate upload session {uploadId}: {ex.Message}");
+            _logger.LogDebug("Failed to rehydrate upload session {UploadId}: {Message}", uploadId, ex.Message);
         }
 
         return null;
@@ -508,7 +508,7 @@ public sealed class ChunkedUploadService(
             }
             catch (Exception ex)
             {
-                _logger.LogDebug($"Failed to clean up temp files for {uploadId}: {ex.Message}");
+                _logger.LogDebug("Failed to clean up temp files for {UploadId}: {Message}", uploadId, ex.Message);
             }
         }
     }
@@ -593,7 +593,7 @@ public sealed class ChunkedUploadService(
         if (finalPath.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) ||
             finalPath.EndsWith(".bgcode", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogInformation($"FinalizeUploadAsync: File is GCODE, attempting thumbnail extraction for {state.FinalSafeName}");
+            _logger.LogInformation("FinalizeUploadAsync: File is GCODE, attempting thumbnail extraction for {StateFinalSafeName}", state.FinalSafeName);
             try
             {
                 using (var fileStream = new FileStream(finalPath, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -601,24 +601,24 @@ public sealed class ChunkedUploadService(
                     thumbnailPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(fileStream, CancellationToken.None);
                     if (thumbnailPath != null)
                     {
-                        _logger.LogInformation($"Extracted thumbnail for {state.FinalSafeName}: {thumbnailPath}");
+                        _logger.LogInformation("Extracted thumbnail for {StateFinalSafeName}: {ThumbnailPath}", state.FinalSafeName, thumbnailPath);
                     }
                     else
                     {
-                        _logger.LogWarning($"Thumbnail extraction returned null for {state.FinalSafeName}");
+                        _logger.LogWarning("Thumbnail extraction returned null for {StateFinalSafeName}", state.FinalSafeName);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug($"Failed to extract thumbnail for {finalPath}: {ex.Message}");
+                _logger.LogDebug("Failed to extract thumbnail for {FinalPath}: {Message}", finalPath, ex.Message);
 
                 // Continue anyway - thumbnail extraction is optional
             }
         }
         else
         {
-            _logger.LogWarning($"FinalizeUploadAsync: File is NOT GCODE (path={finalPath}), skipping thumbnail extraction");
+            _logger.LogWarning("FinalizeUploadAsync: File is NOT GCODE (path={FinalPath}), skipping thumbnail extraction", finalPath);
         }
 
         // Clean up metadata file
@@ -713,7 +713,7 @@ public sealed class ChunkedUploadService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Failed to persist state for {state.Id}: {ex.Message}");
+            _logger.LogDebug("Failed to persist state for {StateId}: {Message}", state.Id, ex.Message);
         }
     }
 

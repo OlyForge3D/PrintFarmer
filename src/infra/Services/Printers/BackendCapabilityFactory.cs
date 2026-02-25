@@ -6,7 +6,7 @@ using System.Linq;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -20,7 +20,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 {
     private readonly IBackendClientFactory _clientFactory;
     private readonly IBackendPluginRegistry? _pluginRegistry;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<BackendCapabilityFactory> _logger;
 
     // Map of capability marker interfaces to their corresponding BackendCapabilities flags
     private static readonly Dictionary<Type, BackendCapabilities> CapabilityInterfaceMap = new()
@@ -46,7 +46,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 
     public BackendCapabilityFactory(
         IBackendClientFactory clientFactory,
-        IUnifiedLoggingService logger,
+        ILogger<BackendCapabilityFactory> logger,
         IBackendPluginRegistry? pluginRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(clientFactory);
@@ -59,12 +59,12 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         // Initialize capabilities through reflection-based detection and plugin registry
         _capabilitiesCache = DiscoverBackendCapabilities();
 
-        _logger.LogInformation($"BackendCapabilityFactory initialized with capability mappings for {_capabilitiesCache.Count} backends");
+        _logger.LogInformation("BackendCapabilityFactory initialized with capability mappings for {Count} backends", _capabilitiesCache.Count);
 
         if (_pluginRegistry != null)
         {
             int registeredPlugins = _pluginRegistry.GetAllPlugins().Count();
-            _logger.LogInformation($"Plugin registry integrated: {registeredPlugins} backend client plugins registered");
+            _logger.LogInformation("Plugin registry integrated: {RegisteredPlugins} backend client plugins registered", registeredPlugins);
         }
     }
 
@@ -102,11 +102,11 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                 discovered.Add(backend, capabilities);
 
                 List<string> implementedCapabilities = GetCapabilityNames(capabilities);
-                _logger.LogDebug($"Backend {backend} ({backendType}) detected capabilities from {capabilitySource}: {string.Join(", ", implementedCapabilities)}");
+                _logger.LogDebug("Backend {Backend} ({BackendType}) detected capabilities from {CapabilitySource}: {StringJoin}", backend, backendType, capabilitySource, string.Join(", ", implementedCapabilities));
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"Failed to discover capabilities for backend {backend}. Assigning no capabilities.");
+                _logger.LogWarning(ex, "Failed to discover capabilities for backend {Backend}. Assigning no capabilities.", backend);
                 discovered.Add(backend, BackendCapabilities.None);
             }
         }
@@ -196,14 +196,14 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 
     public bool TryGetFileListClient(PrinterBackend backend, out IBackendClient? client)
     {
-        _logger.LogWarning($"[DIAGNOSTIC] TryGetFileListClient called for backend {backend}. Cache contains {_capabilitiesCache.Count} entries. Cache has key: {_capabilitiesCache.ContainsKey(backend)}");
+        _logger.LogWarning("[DIAGNOSTIC] TryGetFileListClient called for backend {Backend}. Cache contains {Count} entries. Cache has key: {ContainsKey}", backend, _capabilitiesCache.Count, _capabilitiesCache.ContainsKey(backend));
         if (_capabilitiesCache.TryGetValue(backend, out BackendCapabilities caps))
         {
-            _logger.LogWarning($"[DIAGNOSTIC] Backend {backend} capabilities from cache: {caps}. Has FileList: {caps.HasFlag(BackendCapabilities.FileList)}");
+            _logger.LogWarning("[DIAGNOSTIC] Backend {Backend} capabilities from cache: {Caps}. Has FileList: {CapsHasFlag}", backend, caps, caps.HasFlag(BackendCapabilities.FileList));
         }
         else
         {
-            _logger.LogWarning($"[DIAGNOSTIC] Backend {backend} NOT FOUND in capabilities cache!");
+            _logger.LogWarning("[DIAGNOSTIC] Backend {Backend} NOT FOUND in capabilities cache!", backend);
         }
 
         return TryGetClientWithCapability(backend, BackendCapabilities.FileList, out client);
@@ -398,7 +398,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             return capabilities;
         }
 
-        _logger.LogWarning($"Unknown backend type: {backend}");
+        _logger.LogWarning("Unknown backend type: {Backend}", backend);
         return BackendCapabilities.None;
     }
 
@@ -410,21 +410,21 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         BackendCapabilities requiredCapability,
         out IBackendClient? client)
     {
-        _logger.LogWarning($"[DIAGNOSTIC] TryGetClientWithCapability ENTRY: backend={backend}, requiredCapability={requiredCapability}");
+        _logger.LogWarning("[DIAGNOSTIC] TryGetClientWithCapability ENTRY: backend={Backend}, requiredCapability={RequiredCapability}", backend, requiredCapability);
 
         client = null;
 
         // Check if this backend supports the requested capability
         if (!_capabilitiesCache.TryGetValue(backend, out BackendCapabilities capabilities))
         {
-            _logger.LogWarning($"Unknown backend type: {backend}");
+            _logger.LogWarning("Unknown backend type: {Backend}", backend);
             return false;
         }
 
         if (!capabilities.HasFlag(requiredCapability))
         {
             _logger.LogDebug(
-                $"Backend {backend} does not support capability {requiredCapability}");
+                "Backend {Backend} does not support capability {RequiredCapability}", backend, requiredCapability);
             return false;
         }
 
@@ -483,21 +483,19 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                 }
 
                 _logger.LogWarning(
-                    $"[DIAGNOSTIC] TryGetClientWithCapability({backend}, {requiredCapability}) => " +
-                    $"Type: {clientFullName}, " +
-                    $"Implements {requiredCapability} Interface: {implementsRequiredInterface}, " +
-                    $"All Interfaces: [{string.Join(", ", interfaces)}]");
+                    "[DIAGNOSTIC] TryGetClientWithCapability({Backend}, {RequiredCapability}) => Type: {ClientType}, Implements Interface: {ImplementsInterface}, All Interfaces: [{Interfaces}]",
+                    backend, requiredCapability, clientFullName, implementsRequiredInterface, string.Join(", ", interfaces));
             }
             else
             {
-                _logger.LogWarning($"[DIAGNOSTIC] TryGetClientWithCapability({backend}, {requiredCapability}) => client is NULL!");
+                _logger.LogWarning("[DIAGNOSTIC] TryGetClientWithCapability({Backend}, {RequiredCapability}) => client is NULL!", backend, requiredCapability);
             }
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to get client for backend {backend}");
+            _logger.LogError(ex, "Failed to get client for backend {Backend}", backend);
             return false;
         }
     }

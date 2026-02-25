@@ -3,7 +3,7 @@ using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Tags;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -12,13 +12,13 @@ namespace Farm.Slicer.Module.Tests.Services;
 public class TagServiceTests
 {
     private readonly Mock<ITagRepository> _tagRepository;
-    private readonly Mock<IUnifiedLoggingService> _logger;
+    private readonly Mock<ILogger<TagService>> _logger;
     private readonly TagService _service;
 
     public TagServiceTests()
     {
         _tagRepository = new Mock<ITagRepository>();
-        _logger = new Mock<IUnifiedLoggingService>();
+        _logger = new Mock<ILogger<TagService>>();
 
         _service = new TagService(
             _tagRepository.Object,

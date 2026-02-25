@@ -1,8 +1,8 @@
 ﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Backend.Plugin.Sdcp;
@@ -80,7 +80,7 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
             // HttpClient.Timeout is just a ceiling to avoid orphaned connections.
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
             httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
-            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            ILogger<SdcpClient> logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<SdcpClient>();
             return new SdcpClient(httpClient, logger, timeouts);
         });
 

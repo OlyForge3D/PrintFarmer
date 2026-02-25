@@ -2,9 +2,9 @@
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -14,7 +14,7 @@ public class JobQueueControllerTests
 {
     private readonly Mock<IJobQueueService> _queueServiceMock;
     private readonly Mock<IPrintJobManagementService> _printJobManagementServiceMock;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<JobQueueController>> _loggerMock;
     private readonly Mock<IPrintJobCompletionService> _printJobCompletionServiceMock;
     private readonly Mock<IPrinterStatusCacheReader> _printerStatusCacheMock;
     private readonly JobQueueController _controller;
@@ -23,7 +23,7 @@ public class JobQueueControllerTests
     {
         _queueServiceMock = new Mock<IJobQueueService>();
         _printJobManagementServiceMock = new Mock<IPrintJobManagementService>();
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<JobQueueController>>();
         _printJobCompletionServiceMock = new Mock<IPrintJobCompletionService>();
         _printerStatusCacheMock = new Mock<IPrinterStatusCacheReader>();
         _controller = new JobQueueController(

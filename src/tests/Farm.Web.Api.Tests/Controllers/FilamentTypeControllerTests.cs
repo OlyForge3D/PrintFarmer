@@ -5,9 +5,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Filament;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.Startup;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -20,7 +20,7 @@ namespace Farm.Web.Api.Tests.Controllers
         {
             Mock<IFilamentTypeService> mockService = new Mock<IFilamentTypeService>(MockBehavior.Strict);
             Mock<IStartupStatus> mockStartup = new Mock<IStartupStatus>();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<FilamentTypeController>> mockLogger = new Mock<ILogger<FilamentTypeController>>();
             Mock<ISpoolmanDbService> mockSpoolmanDb = new Mock<ISpoolmanDbService>();
 
             _ = mockStartup.Setup(s => s.IsReady).Returns(true);
@@ -44,7 +44,7 @@ namespace Farm.Web.Api.Tests.Controllers
         {
             Mock<IFilamentTypeService> mockService = new Mock<IFilamentTypeService>(MockBehavior.Strict);
             Mock<IStartupStatus> mockStartup = new Mock<IStartupStatus>();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<FilamentTypeController>> mockLogger = new Mock<ILogger<FilamentTypeController>>();
             Mock<ISpoolmanDbService> mockSpoolmanDb = new Mock<ISpoolmanDbService>();
 
             _ = mockStartup.Setup(s => s.IsReady).Returns(true);

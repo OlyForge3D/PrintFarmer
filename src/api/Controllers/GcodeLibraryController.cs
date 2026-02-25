@@ -3,9 +3,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Queue;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -16,7 +16,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/gcode-library")]
 [Tags("G-code Library")]
 [Authorize]
-public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeService, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
+public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeService, IWebHostEnvironment env, ILogger<GcodeLibraryController> logger) : ControllerBase
 {
     /// <summary>
     /// Get all G-code files in the library.
@@ -64,7 +64,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error retrieving G-code file {id}");
+            logger.LogError(ex, "Error retrieving G-code file {Id}", id);
             return Problem("An error occurred while retrieving the file", statusCode: 500);
         }
     }
@@ -107,7 +107,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error uploading G-code file {file?.FileName}");
+            logger.LogError(ex, "Error uploading G-code file {FileFileName}", file?.FileName);
             return Problem("An error occurred while uploading the file", statusCode: 500);
         }
     }
@@ -137,7 +137,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error updating G-code file {id}");
+            logger.LogError(ex, "Error updating G-code file {Id}", id);
             return Problem("An error occurred while updating the file", statusCode: 500);
         }
     }
@@ -162,7 +162,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error deleting G-code file {id}");
+            logger.LogError(ex, "Error deleting G-code file {Id}", id);
             return Problem("An error occurred while deleting the file", statusCode: 500);
         }
     }
@@ -190,7 +190,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, $"Error downloading G-code file {id}");
+            logger.LogError(ex, "Error downloading G-code file {Id}", id);
             return Problem("An error occurred while downloading the file", statusCode: 500);
         }
     }

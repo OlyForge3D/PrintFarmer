@@ -1,12 +1,12 @@
 ﻿using System.Collections.Concurrent;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.RateLimiting;
 
-public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingService logger) : IRateLimitService
+public class InMemoryRateLimitService(RateLimitOptions options, ILogger<InMemoryRateLimitService> logger) : IRateLimitService
 {
     private readonly RateLimitOptions _options = options;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<InMemoryRateLimitService> _logger = logger;
     private readonly ConcurrentDictionary<string, List<DateTime>> _passwordResetAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _emailConfirmationAttempts = new();
     private readonly ConcurrentDictionary<Guid, List<DateTime>> _sliceJobSubmitAttempts = new();
@@ -120,13 +120,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
                 DateTime oldestInHour = attemptList.Where(a => (now - a).TotalHours < 1).Min();
                 TimeSpan retryAfter = TimeSpan.FromHours(1) - (now - oldestInHour);
 
-                _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey} (hourly)", null, new
-                {
-                    Key = normalizedKey,
-                    Operation = operation,
-                    AttemptsInLastHour = attemptsInLastHour,
-                    MaxPerHour = maxPerHour
-                });
+                _logger.LogWarning("{Operation} rate limit exceeded for {NormalizedKey} (hourly)", operation, normalizedKey);
 
                 return Task.FromResult(new RateLimitResult(
                     false,
@@ -140,13 +134,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
                 DateTime oldestInDay = attemptList.Min();
                 TimeSpan retryAfter = TimeSpan.FromHours(24) - (now - oldestInDay);
 
-                _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey} (daily)", null, new
-                {
-                    Key = normalizedKey,
-                    Operation = operation,
-                    AttemptsInLastDay = attemptsInLastDay,
-                    MaxPerDay = maxPerDay
-                });
+                _logger.LogWarning("{Operation} rate limit exceeded for {NormalizedKey} (daily)", operation, normalizedKey);
 
                 return Task.FromResult(new RateLimitResult(
                     false,
@@ -184,7 +172,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
             {
                 DateTime oldestInHour = attemptList.Where(a => (now - a).TotalHours < 1).Min();
                 TimeSpan retryAfter = TimeSpan.FromHours(1) - (now - oldestInHour);
-                _logger.LogWarning($"{operation} rate limit exceeded for user {key} (hourly)");
+                _logger.LogWarning("{Operation} rate limit exceeded for user {Key} (hourly)", operation, key);
                 return Task.FromResult(new RateLimitResult(false, 0, retryAfter, $"Too many slice jobs this hour. Retry in {Math.Ceiling(retryAfter.TotalMinutes)} minutes."));
             }
 
@@ -192,7 +180,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
             {
                 DateTime oldestInDay = attemptList.Min();
                 TimeSpan retryAfter = TimeSpan.FromHours(24) - (now - oldestInDay);
-                _logger.LogWarning($"{operation} rate limit exceeded for user {key} (daily)");
+                _logger.LogWarning("{Operation} rate limit exceeded for user {Key} (daily)", operation, key);
                 return Task.FromResult(new RateLimitResult(false, 0, retryAfter, $"Daily slice job limit reached. Retry in {Math.Ceiling(retryAfter.TotalHours)} hours."));
             }
 
@@ -268,14 +256,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
                 DateTime oldestInWindow = attemptList.Min();
                 TimeSpan retryAfter = window - (now - oldestInWindow);
 
-                _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey}", null, new
-                {
-                    Key = normalizedKey,
-                    Operation = operation,
-                    AttemptsInWindow = attemptsInWindow,
-                    MaxAttempts = maxAttempts,
-                    WindowSeconds = (int)window.TotalSeconds
-                });
+                _logger.LogWarning("{Operation} rate limit exceeded for {NormalizedKey}", operation, normalizedKey);
 
                 return Task.FromResult(new RateLimitResult(
                     IsAllowed: false,

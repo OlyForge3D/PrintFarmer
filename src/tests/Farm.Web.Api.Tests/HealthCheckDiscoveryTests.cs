@@ -3,11 +3,11 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Services;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace Farm.Web.Api.Tests;
@@ -23,7 +23,7 @@ public class HealthCheckDiscoveryTests
 {
     private readonly Mock<AppDbContext> _mockDbContext;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
-    private readonly Mock<IUnifiedLoggingService> _mockLogger;
+    private readonly Mock<ILogger<ComprehensiveHealthCheck>> _mockLogger;
     private readonly Mock<ISettingsService> _mockSettingsService;
     private readonly Mock<IHostEnvironment> _mockHostEnvironment;
     private readonly Mock<ISpoolmanService> _mockSpoolmanService;
@@ -32,7 +32,7 @@ public class HealthCheckDiscoveryTests
     {
         _mockDbContext = new Mock<AppDbContext>();
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
-        _mockLogger = new Mock<IUnifiedLoggingService>();
+        _mockLogger = new Mock<ILogger<ComprehensiveHealthCheck>>();
         _mockSettingsService = new Mock<ISettingsService>();
         _mockHostEnvironment = new Mock<IHostEnvironment>();
         _mockSpoolmanService = new Mock<ISpoolmanService>();

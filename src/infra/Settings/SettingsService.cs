@@ -5,10 +5,10 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Settings;
 
@@ -36,7 +36,7 @@ public class SettingsService : ISettingsService
         return key == null ? null : _settings.TryGetValue(key, out object? value) ? value : null;
     }
 
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<SettingsService> _logger;
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
 
     public void Save<T>(T settings)
@@ -72,7 +72,7 @@ public class SettingsService : ISettingsService
 
     private readonly Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository _settingsRepo;
 
-    public SettingsService(IConfiguration config, IDbContextFactory<AppDbContext> dbContextFactory, IUnifiedLoggingService logger, Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository settingsRepo)
+    public SettingsService(IConfiguration config, IDbContextFactory<AppDbContext> dbContextFactory, ILogger<SettingsService> logger, Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository settingsRepo)
     {
         _settingTypes = AppDomain.CurrentDomain.GetAssemblies()
             .SelectMany(a => a.GetTypes())

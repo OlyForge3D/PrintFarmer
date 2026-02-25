@@ -8,7 +8,7 @@ using Farm.Infrastructure.Contracts.Setup;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Setup;
 
@@ -19,12 +19,12 @@ public class SetupService(
     IUsersRepository usersRepository,
     IAuthenticationService authService,
     IPasswordHashingService passwordHashingService,
-    IUnifiedLoggingService logger) : ISetupService
+    ILogger<SetupService> logger) : ISetupService
 {
     private readonly IUsersRepository _usersRepository = usersRepository ?? throw new ArgumentNullException(nameof(usersRepository));
     private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
     private readonly IPasswordHashingService _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<SetupService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<bool> NeedsSetupAsync(CancellationToken ct)
     {
@@ -156,7 +156,7 @@ public class SetupService(
         // Add user with admin role (repository handles SaveChanges)
         await _usersRepository.AddUserWithRoleAsync(adminUser, adminRole.Id, ct);
 
-        _logger.LogInformation($"Initial admin user created: {adminUser.Username} ({adminUser.Email})");
+        _logger.LogInformation("Initial admin user created: {AdminUserUsername} ({AdminUserEmail})", adminUser.Username, adminUser.Email);
 
         // Generate JWT token for immediate login
         string token = await _authService.GenerateJwtTokenAsync(adminUser);

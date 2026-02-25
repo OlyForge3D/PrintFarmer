@@ -5,8 +5,8 @@ using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Catalog;
 
@@ -18,12 +18,12 @@ public class CatalogService(
     ICatalogRepository repo,
     INormalizationEventLogger normLogger,
     ICatalogCacheProvider cacheProvider,
-    IUnifiedLoggingService logger) : ICatalogService
+    ILogger<CatalogService> logger) : ICatalogService
 {
     private readonly ICatalogRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly INormalizationEventLogger _normLogger = normLogger ?? throw new ArgumentNullException(nameof(normLogger));
     private readonly ICatalogCacheProvider _cacheProvider = cacheProvider ?? throw new ArgumentNullException(nameof(cacheProvider));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<CatalogService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // Cache for unknown catalog IDs to avoid repeated database queries
     private Guid? _cachedUnknownMfgId;
@@ -41,7 +41,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetManufacturersAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetManufacturersAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -63,7 +63,7 @@ public class CatalogService(
 
         if (existing.Id != Guid.Empty)
         {
-            _logger.LogInformation($"Manufacturer '{normalized}' already exists with ID {existing.Id}, returning existing manufacturer");
+            _logger.LogInformation("Manufacturer '{Normalized}' already exists with ID {ExistingId}, returning existing manufacturer", normalized, existing.Id);
             return new ManufacturerDto(existing.Id, existing.Name, existing.Url, existing.Description);
         }
 
@@ -74,17 +74,17 @@ public class CatalogService(
         try
         {
             await _repo.SaveChangesAsync(ct);
-            _logger.LogInformation($"Created new manufacturer '{normalized}' with ID {mfg.Id}");
+            _logger.LogInformation("Created new manufacturer '{Normalized}' with ID {MfgId}", normalized, mfg.Id);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
             // Race condition: another thread created the manufacturer between our check and insert
             // Fetch the existing manufacturer and return it
-            _logger.LogInformation($"Race condition detected for manufacturer '{normalized}', fetching existing");
+            _logger.LogInformation("Race condition detected for manufacturer '{Normalized}', fetching existing", normalized);
             (Guid Id, string Name, string? Url, string? Description) found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
             if (found.Id != Guid.Empty)
             {
-                _logger.LogInformation($"Found existing manufacturer '{normalized}' with ID {found.Id} after race condition");
+                _logger.LogInformation("Found existing manufacturer '{Normalized}' with ID {FoundId} after race condition", normalized, found.Id);
                 return new ManufacturerDto(found.Id, found.Name, found.Url, found.Description);
             }
 
@@ -152,7 +152,7 @@ public class CatalogService(
 
         if (existing is not null)
         {
-            _logger.LogInformation($"Model '{normalizedName}' already exists for manufacturer {manufacturerId}, returning existing model");
+            _logger.LogInformation("Model '{NormalizedName}' already exists for manufacturer {ManufacturerId}, returning existing model", normalizedName, manufacturerId);
             return existing;
         }
 
@@ -180,17 +180,17 @@ public class CatalogService(
         try
         {
             await _repo.SaveChangesAsync(ct);
-            _logger.LogInformation($"Created new model '{normalizedName}' with ID {model.Id} for manufacturer {manufacturerId}");
+            _logger.LogInformation("Created new model '{NormalizedName}' with ID {ModelId} for manufacturer {ManufacturerId}", normalizedName, model.Id, manufacturerId);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
             // Race condition: another thread created the model between our check and insert
             // Fetch the existing model and return it
-            _logger.LogInformation($"Race condition detected for model '{normalizedName}', fetching existing");
+            _logger.LogInformation("Race condition detected for model '{NormalizedName}', fetching existing", normalizedName);
             PrinterModelDto? existingNowDto = (await _repo.GetModelsCachedAsync(manufacturerId, ct)).FirstOrDefault(m => m.Name == normalizedName);
             if (existingNowDto is not null)
             {
-                _logger.LogInformation($"Found existing model '{normalizedName}' with ID {existingNowDto.Id} after race condition");
+                _logger.LogInformation("Found existing model '{NormalizedName}' with ID {ExistingNowDtoId} after race condition", normalizedName, existingNowDto.Id);
                 return existingNowDto;
             }
 
@@ -456,7 +456,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[CatalogService] GetModelAliasesAsync failed for modelId {modelId}: {ex.Message}");
+            _logger.LogError(ex, "[CatalogService] GetModelAliasesAsync failed for modelId {ModelId}: {Message}", modelId, ex.Message);
             throw;
         }
     }
@@ -476,7 +476,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[CatalogService] UpdateModelAliasesAsync failed for modelId {modelId}: {ex.Message}");
+            _logger.LogError(ex, "[CatalogService] UpdateModelAliasesAsync failed for modelId {ModelId}: {Message}", modelId, ex.Message);
             throw;
         }
     }
@@ -503,7 +503,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetHotendModelsAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetHotendModelsAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -527,7 +527,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetExtruderModelsAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetExtruderModelsAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -552,7 +552,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetToolheadModelsAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetToolheadModelsAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -579,7 +579,7 @@ public class CatalogService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[CatalogService] GetNozzleModelsAsync failed: " + ex.Message);
+            _logger.LogError(ex, "[CatalogService] GetNozzleModelsAsync failed: {Message}", ex.Message);
             throw;
         }
     }
@@ -613,7 +613,7 @@ public class CatalogService(
         };
 
         await _repo.AddHotendModelAsync(model, ct);
-        _logger.LogInformation($"Created hotend model '{model.Name}' with ID {model.Id}");
+        _logger.LogInformation("Created hotend model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
 
         // Fetch with manufacturer info
         Domain.HotendModelDefinition? created = await _repo.GetHotendModelByIdAsync(model.Id, ct);
@@ -673,7 +673,7 @@ public class CatalogService(
         }
 
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation($"Updated hotend model '{model.Name}' with ID {model.Id}");
+        _logger.LogInformation("Updated hotend model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
 
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetHotendModelByIdAsync(id, ct);
@@ -687,7 +687,7 @@ public class CatalogService(
     {
         await _repo.RemoveHotendModelAsync(id, ct);
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation($"Deleted hotend model with ID {id}");
+        _logger.LogInformation("Deleted hotend model with ID {Id}", id);
     }
 
     #endregion
@@ -719,7 +719,7 @@ public class CatalogService(
         };
 
         await _repo.AddExtruderModelAsync(model, ct);
-        _logger.LogInformation($"Created extruder model '{model.Name}' with ID {model.Id}");
+        _logger.LogInformation("Created extruder model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
 
         Domain.ExtruderModelDefinition? created = await _repo.GetExtruderModelByIdAsync(model.Id, ct);
         return new ExtruderModelDto(
@@ -773,7 +773,7 @@ public class CatalogService(
         }
 
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation($"Updated extruder model '{model.Name}' with ID {model.Id}");
+        _logger.LogInformation("Updated extruder model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
 
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetExtruderModelByIdAsync(id, ct);
@@ -787,7 +787,7 @@ public class CatalogService(
     {
         await _repo.RemoveExtruderModelAsync(id, ct);
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation($"Deleted extruder model with ID {id}");
+        _logger.LogInformation("Deleted extruder model with ID {Id}", id);
     }
 
     #endregion
@@ -817,7 +817,7 @@ public class CatalogService(
         };
 
         await _repo.AddToolheadModelAsync(model, ct);
-        _logger.LogInformation($"Created toolhead model '{model.Name}' with ID {model.Id}");
+        _logger.LogInformation("Created toolhead model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
 
         Domain.ToolheadModelDefinition? created = await _repo.GetToolheadModelByIdAsync(model.Id, ct);
         return new ToolheadModelDto(
@@ -860,7 +860,7 @@ public class CatalogService(
         }
 
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation($"Updated toolhead model '{model.Name}' with ID {model.Id}");
+        _logger.LogInformation("Updated toolhead model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
 
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetToolheadModelByIdAsync(id, ct);
@@ -873,7 +873,7 @@ public class CatalogService(
     {
         await _repo.RemoveToolheadModelAsync(id, ct);
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation($"Deleted toolhead model with ID {id}");
+        _logger.LogInformation("Deleted toolhead model with ID {Id}", id);
     }
 
     #endregion
@@ -907,7 +907,7 @@ public class CatalogService(
         };
 
         await _repo.AddNozzleModelAsync(model, ct);
-        _logger.LogInformation($"Created nozzle model '{model.Name}' with ID {model.Id}");
+        _logger.LogInformation("Created nozzle model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
 
         Domain.NozzleModelDefinition? created = await _repo.GetNozzleModelByIdAsync(model.Id, ct);
         return new NozzleModelDto(
@@ -971,7 +971,7 @@ public class CatalogService(
         }
 
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation($"Updated nozzle model '{model.Name}' with ID {model.Id}");
+        _logger.LogInformation("Updated nozzle model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
 
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetNozzleModelByIdAsync(id, ct);
@@ -985,7 +985,7 @@ public class CatalogService(
     {
         await _repo.RemoveNozzleModelAsync(id, ct);
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation($"Deleted nozzle model with ID {id}");
+        _logger.LogInformation("Deleted nozzle model with ID {Id}", id);
     }
 
     #endregion

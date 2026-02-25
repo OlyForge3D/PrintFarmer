@@ -1,23 +1,23 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Authentication;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Authentication;
 
 /// <summary>
 /// Service for logging authentication and authorization events for security audit trail
 /// </summary>
-public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedLoggingService logging) : IAuthAuditService
+public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<AuthAuditService> logging) : IAuthAuditService
 {
     private readonly IAuthAuditLogRepository _auditRepository = auditRepository;
-    private readonly IUnifiedLoggingService _logging = logging;
+    private readonly ILogger<AuthAuditService> _logging = logging;
 
     // Centralized save helper
     private async Task SaveAuditAsync(AuthAuditLog auditLog, CancellationToken cancellationToken = default)
     {
         await _auditRepository.AddAsync(auditLog, cancellationToken);
-        _logging.LogInformation($"[AuthAudit] Saved audit {auditLog.EventType} Id={auditLog.Id}");
+        _logging.LogInformation("[AuthAudit] Saved audit {AuditLogEventType} Id={AuditLogId}", auditLog.EventType, auditLog.Id);
     }
 
     public async Task LogLoginAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -56,7 +56,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogWarning($"[AuthAudit] Login failed for '{usernameOrEmail}' from IP: {ipAddress} - Reason: {reason}");
+        _logging.LogWarning("[AuthAudit] Login failed for '{UsernameOrEmail}' from IP: {IpAddress} - Reason: {Reason}", usernameOrEmail, ipAddress, reason);
     }
 
     public async Task LogLogoutAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -74,7 +74,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation($"[AuthAudit] Logout for UserId: {userId} from IP: {ipAddress}");
+        _logging.LogInformation("[AuthAudit] Logout for UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
     }
 
     public async Task LogRegisterAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -92,7 +92,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation($"[AuthAudit] New user registered: UserId: {userId} from IP: {ipAddress}");
+        _logging.LogInformation("[AuthAudit] New user registered: UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
     }
 
     public async Task LogPasswordChangeAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -110,7 +110,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation($"[AuthAudit] Password changed for UserId: {userId} from IP: {ipAddress}");
+        _logging.LogInformation("[AuthAudit] Password changed for UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
     }
 
     public async Task LogPasswordResetInitiatedAsync(string email, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -131,7 +131,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation($"[AuthAudit] Password reset initiated for email: {email} from IP: {ipAddress}");
+        _logging.LogInformation("[AuthAudit] Password reset initiated for email: {Email} from IP: {IpAddress}", email, ipAddress);
     }
 
     public async Task LogPasswordResetAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -149,7 +149,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation($"[AuthAudit] Password reset completed for UserId: {userId} from IP: {ipAddress}");
+        _logging.LogInformation("[AuthAudit] Password reset completed for UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
     }
 
     public async Task LogAccountLockedAsync(Guid userId, int attemptCount, TimeSpan lockoutDuration, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -174,7 +174,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogWarning($"[AuthAudit] Account locked for UserId: {userId} after {attemptCount} failed attempts. Lockout duration: {lockoutDuration.TotalMinutes} minutes");
+        _logging.LogWarning("[AuthAudit] Account locked for UserId: {UserId} after {AttemptCount} failed attempts. Lockout duration: {LockoutDurationTotalMinutes} minutes", userId, attemptCount, lockoutDuration.TotalMinutes);
     }
 
     public async Task LogAccountUnlockedAsync(Guid userId, string reason, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -195,7 +195,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation($"[AuthAudit] Account unlocked for UserId: {userId}. Reason: {reason}");
+        _logging.LogInformation("[AuthAudit] Account unlocked for UserId: {UserId}. Reason: {Reason}", userId, reason);
     }
 
     public async Task LogRefreshTokenAsync(Guid userId, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -213,7 +213,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation($"[AuthAudit] Token refreshed for UserId: {userId} from IP: {ipAddress}");
+        _logging.LogInformation("[AuthAudit] Token refreshed for UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
     }
 
     public async Task LogTokenRevokedAsync(Guid userId, Guid revokedByUserId, string reason, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -238,7 +238,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedL
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogWarning($"[AuthAudit] Token revoked for UserId: {userId} by admin UserId: {revokedByUserId}. Reason: {reason}");
+        _logging.LogWarning("[AuthAudit] Token revoked for UserId: {UserId} by admin UserId: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, reason);
     }
 
     public async Task<List<AuthAuditLog>> GetUserAuditLogAsync(Guid userId, int pageSize = 50, int pageNumber = 1, CancellationToken cancellationToken = default)

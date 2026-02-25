@@ -14,7 +14,6 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
@@ -24,6 +23,7 @@ using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 
 namespace Farm.Web.Api.Controllers;
@@ -38,7 +38,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/printers")]
 [Authorize]
 public class PrintersController(
-    IUnifiedLoggingService logger,
+    ILogger<PrintersController> logger,
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
     IValidator<CreatePrinterFromDiscoveryDto> validator,
@@ -50,7 +50,7 @@ public class PrintersController(
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
@@ -85,12 +85,12 @@ public class PrintersController(
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
-            _logger.LogWarning($"[CAMERA-URLS] Startup DB exception in /api/printers/camera-urls. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            _logger.LogWarning("[CAMERA-URLS] Startup DB exception in /api/printers/camera-urls. TraceId={HttpContextTraceIdentifier}, Exception={Message}", HttpContext.TraceIdentifier, ex.Message);
             return Ok(Array.Empty<PrinterCameraUrlsDto>());
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/camera-urls. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/camera-urls. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}\n{StackTrace}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message, ex.StackTrace);
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -122,12 +122,12 @@ public class PrintersController(
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
-            _logger.LogWarning($"[BACKEND-CAPABILITIES] Startup DB exception in /api/printers/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            _logger.LogWarning("[BACKEND-CAPABILITIES] Startup DB exception in /api/printers/backend-capabilities. TraceId={HttpContextTraceIdentifier}, Exception={Message}", HttpContext.TraceIdentifier, ex.Message);
             return Ok(Array.Empty<PrinterBackendCapabilitiesDto>());
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/backend-capabilities. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}\n{StackTrace}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message, ex.StackTrace);
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -151,12 +151,12 @@ public class PrintersController(
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
-            _logger.LogWarning($"[PRINTER-VERSION] Startup DB exception for printer {printerId}. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            _logger.LogWarning("[PRINTER-VERSION] Startup DB exception for printer {PrinterId}. TraceId={HttpContextTraceIdentifier}, Exception={Message}", printerId, HttpContext.TraceIdentifier, ex.Message);
             return NotFound($"Printer with ID {printerId} not found");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/{printerId}/version. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/{PrinterId}/version. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}\n{StackTrace}", printerId, HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message, ex.StackTrace);
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -183,12 +183,12 @@ public class PrintersController(
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
-            _logger.LogWarning($"[BACKEND-CAPABILITIES] Startup DB exception for printer {printerId}. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            _logger.LogWarning("[BACKEND-CAPABILITIES] Startup DB exception for printer {PrinterId}. TraceId={HttpContextTraceIdentifier}, Exception={Message}", printerId, HttpContext.TraceIdentifier, ex.Message);
             return NotFound($"Printer with ID {printerId} not found");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/{printerId}/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/{PrinterId}/backend-capabilities. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}\n{StackTrace}", printerId, HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message, ex.StackTrace);
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -218,7 +218,7 @@ public class PrintersController(
             return BadRequest(new TestConnectionResponse { Success = false, Message = "Invalid server URL format" });
         }
 
-        _logger.LogInformation($"Testing connection to {request.ServerUrl} with backend {request.Backend}");
+        _logger.LogInformation("Testing connection to {RequestServerUrl} with backend {RequestBackend}", request.ServerUrl, request.Backend);
 
         try
         {
@@ -227,7 +227,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Connection test failed: {ex.Message}");
+            _logger.LogWarning("Connection test failed: {Message}", ex.Message);
             return Ok(new TestConnectionResponse
             {
                 Success = false,
@@ -492,12 +492,12 @@ public class PrintersController(
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
-            _logger.LogWarning($"[GET] Startup DB exception in /api/printers. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            _logger.LogWarning("[GET] Startup DB exception in /api/printers. TraceId={HttpContextTraceIdentifier}, Exception={Message}", HttpContext.TraceIdentifier, ex.Message);
             return Ok(Array.Empty<CompletePrinterDto>());
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}\n{StackTrace}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message, ex.StackTrace);
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -545,7 +545,7 @@ public class PrintersController(
         {
             string errorMessage = string.Join("; ", validationErrors.SelectMany(kvp =>
                 kvp.Value.Select(err => $"[Printer {kvp.Key}] {err}")));
-            _logger.LogWarning($"[BulkCreate] Validation failed for all printers: {errorMessage}");
+            _logger.LogWarning("[BulkCreate] Validation failed for all printers: {ErrorMessage}", errorMessage);
             return BadRequest(new { message = "All printers failed validation", errors = validationErrors });
         }
 
@@ -557,7 +557,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[BulkCreate] Bulk printer creation failed: {ex.Message}");
+            _logger.LogError(ex, "[BulkCreate] Bulk printer creation failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Bulk creation operation failed",
@@ -605,27 +605,27 @@ public class PrintersController(
 
         try
         {
-            _logger.LogInformation($"[Import] Starting import from file: {file.FileName}");
+            _logger.LogInformation("[Import] Starting import from file: {FileFileName}", file.FileName);
             using (Stream stream = file.OpenReadStream())
             {
                 object result = await _printersService.ImportFromStreamAsync(stream, file.FileName, duplicateHandling ?? "skip", ct);
-                _logger.LogInformation($"[Import] Successfully imported from file: {file.FileName}");
+                _logger.LogInformation("[Import] Successfully imported from file: {FileFileName}", file.FileName);
                 return Ok(result);
             }
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning($"[Import] Validation error: {ex.Message}");
+            _logger.LogWarning("[Import] Validation error: {Message}", ex.Message);
             return BadRequest(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning($"[Import] Invalid data error: {ex.Message}");
+            _logger.LogWarning("[Import] Invalid data error: {Message}", ex.Message);
             return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[Import] Import operation failed: {ex.Message}");
+            _logger.LogError(ex, "[Import] Import operation failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Import operation failed",
@@ -655,11 +655,11 @@ public class PrintersController(
             Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
             if (printer == null)
             {
-                _logger.LogWarning($"[PrintJob] Printer {id} not found");
+                _logger.LogWarning("[PrintJob] Printer {Id} not found", id);
                 return NotFound(new { message = $"Printer {id} not found" });
             }
 
-            _logger.LogInformation($"[PrintJob] Getting print job status for printer {printer.Name}");
+            _logger.LogInformation("[PrintJob] Getting print job status for printer {PrinterName}", printer.Name);
 
             // Delegate to service for actual retrieval logic
             PrintJobStatusDto? jobStatus = await _printersService.GetPrintJobStatusAsync(id, ct);
@@ -669,17 +669,17 @@ public class PrintersController(
         }
         catch (KeyNotFoundException)
         {
-            _logger.LogWarning($"[PrintJob] Printer {id} not found");
+            _logger.LogWarning("[PrintJob] Printer {Id} not found", id);
             return NotFound(new { message = $"Printer {id} not found" });
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning($"[PrintJob] Timeout retrieving print job status for printer {id}");
+            _logger.LogWarning("[PrintJob] Timeout retrieving print job status for printer {Id}", id);
             return Ok((object?)null); // Return null on timeout
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[PrintJob] Error getting print job status for printer {id}: {ex.Message}");
+            _logger.LogError(ex, "[PrintJob] Error getting print job status for printer {Id}: {Message}", id, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Failed to retrieve print job status",
@@ -714,7 +714,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Error getting status for printer {id}: {ex.Message}");
+            _logger.LogWarning("Error getting status for printer {Id}: {Message}", id, ex.Message);
             return new PrinterStatusDto(Id: id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
         }
     }
@@ -744,7 +744,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to get printer {id}");
+            _logger.LogError(ex, "Failed to get printer {Id}", id);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get printer");
         }
     }
@@ -869,7 +869,7 @@ public class PrintersController(
         ValidationResult validationResult = await _validator.ValidateAsync(dto, ct);
         if (!validationResult.IsValid)
         {
-            _logger.LogWarning($"Printer creation validation failed: {string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage))}");
+            _logger.LogWarning("Printer creation validation failed: {Value0}", string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage)));
 
             foreach (ValidationFailure? error in validationResult.Errors)
             {
@@ -879,7 +879,7 @@ public class PrintersController(
             return BadRequest(ModelState);
         }
 
-        _logger.LogInformation($"Creating new printer: {dto.Name} ({dto.Backend})");
+        _logger.LogInformation("Creating new printer: {DtoName} ({DtoBackend})", dto.Name, dto.Backend);
 
         // Delegate creation/business logic to the service
         PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
@@ -905,14 +905,14 @@ public class PrintersController(
 
                     if (imported > 0)
                     {
-                        _logger.LogInformation($"Imported {imported} slicer profiles for {modelName}");
+                        _logger.LogInformation("Imported {Imported} slicer profiles for {ModelName}", imported, modelName);
                     }
                 }
             }
             catch (Exception ex)
             {
                 // Log but don't fail printer creation if profile import fails
-                _logger.LogWarning($"Failed to import profiles for {modelName}: {ex.Message}");
+                _logger.LogWarning("Failed to import profiles for {ModelName}: {Message}", modelName, ex.Message);
             }
         }
 
@@ -996,15 +996,15 @@ public class PrintersController(
             try
             {
                 _logger.LogInformation(
-                    $"Processing discovered printer: {discovered.Name} " +
-                    $"({discovered.IpAddress}:{discovered.BackendPort}) - Backend: {discovered.Backend}");
+                    "Processing discovered printer: {DiscoveredName} ({IpAddress}:{Port}) - Backend: {Backend}",
+                    discovered.Name, discovered.IpAddress, discovered.BackendPort, discovered.Backend);
 
                 // Check if printer already exists by IP address
                 Printer? existing = await _printersService.FindByServerUrlAsync(discovered.ServerUrl, ct);
 
                 if (existing != null)
                 {
-                    _logger.LogInformation($"Printer already registered: {existing.Name} (ServerUrl: {existing.ServerUrl})");
+                    _logger.LogInformation("Printer already registered: {ExistingName} (ServerUrl: {ExistingServerUrl})", existing.Name, existing.ServerUrl);
                     PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {
@@ -1021,7 +1021,7 @@ public class PrintersController(
                 if (!validationResult.IsValid)
                 {
                     _logger.LogWarning(
-                        $"Discovered printer validation failed: {string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage))}");
+                        "Discovered printer validation failed: {Value0}", string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage)));
                     continue;
                 }
 
@@ -1029,7 +1029,7 @@ public class PrintersController(
                 PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(createDto, ct);
                 registered.Add(created);
 
-                _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
+                _logger.LogInformation("Successfully registered discovered printer: {CreatedName}", created.Name);
 
                 // Import slicer profiles for this printer's model (pull-based, on-demand import)
                 if (_profileImportService is not null && createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
@@ -1044,18 +1044,18 @@ public class PrintersController(
 
                         if (imported > 0)
                         {
-                            _logger.LogInformation($"Imported {imported} slicer profiles for {created.ModelName}");
+                            _logger.LogInformation("Imported {Imported} slicer profiles for {CreatedModelName}", imported, created.ModelName);
                         }
                     }
                     catch (Exception profileEx)
                     {
-                        _logger.LogWarning($"Failed to import profiles for {created.ModelName}: {profileEx.Message}");
+                        _logger.LogWarning("Failed to import profiles for {CreatedModelName}: {ProfileExMessage}", created.ModelName, profileEx.Message);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"Failed to register discovered printer: {discovered.Name}");
+                _logger.LogWarning(ex, "Failed to register discovered printer: {DiscoveredName}", discovered.Name);
 
                 // Continue with next printer on error
             }
@@ -1159,7 +1159,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to refresh camera URLs for printer {id}");
+            _logger.LogError(ex, "Failed to refresh camera URLs for printer {Id}", id);
             return StatusCode(500, "Failed to refresh camera URLs");
         }
     }
@@ -1204,7 +1204,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to apply model template for printer {id}");
+            _logger.LogError(ex, "Failed to apply model template for printer {Id}", id);
             return StatusCode(500, "Failed to apply model template");
         }
     }
@@ -1243,7 +1243,7 @@ public class PrintersController(
 
             await _printersService.SaveChangesAsync(ct);
 
-            _logger.LogInformation($"Applied model templates to {updatedCount}/{totalCount} printers");
+            _logger.LogInformation("Applied model templates to {UpdatedCount}/{TotalCount} printers", updatedCount, totalCount);
             return Ok(new { updated = updatedCount, total = totalCount, message = $"Applied templates to {updatedCount} printers" });
         }
         catch (Exception ex)
@@ -1596,7 +1596,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error retrieving default capabilities for model {modelId}");
+            _logger.LogError(ex, "Error retrieving default capabilities for model {ModelId}", modelId);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve model capabilities");
         }
     }
@@ -2208,7 +2208,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to download file {filename} from printer {id}");
+            _logger.LogError(ex, "Failed to download file {Filename} from printer {Id}", filename, id);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = $"Download failed: {ex.Message}" });
         }
     }
@@ -2279,7 +2279,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to get history for printer {id}: {ex.Message}");
+            _logger.LogError(ex, "Failed to get history for printer {Id}: {Message}", id, ex.Message);
             return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
         }
     }
@@ -2300,27 +2300,27 @@ public class PrintersController(
         }
         catch (ArgumentException)
         {
-            _logger.LogWarning($"GetHistoryJob called with null or empty jobId for printer {id}");
+            _logger.LogWarning("GetHistoryJob called with null or empty jobId for printer {Id}", id);
             return BadRequest("Job ID is required");
         }
         catch (KeyNotFoundException)
         {
-            _logger.LogInformation($"History job {jobId} not found for printer {id}");
+            _logger.LogInformation("History job {JobId} not found for printer {Id}", jobId, id);
             return NotFound($"History job {jobId} not found");
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, $"History requested for non-Moonraker printer {id}");
+            _logger.LogWarning(ex, "History requested for non-Moonraker printer {Id}", id);
             return BadRequest("History is only available for Moonraker printers");
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError($"Network error retrieving history job {jobId} for printer {id}: {ex.Message}");
+            _logger.LogError("Network error retrieving history job {JobId} for printer {Id}: {Message}", jobId, id, ex.Message);
             return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogWarning($"Timeout retrieving history job {jobId} for printer {id}: {ex.Message}");
+            _logger.LogWarning("Timeout retrieving history job {JobId} for printer {Id}: {Message}", jobId, id, ex.Message);
             return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
         }
     }
@@ -2342,7 +2342,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to get history totals for printer {id}: {ex.Message}");
+            _logger.LogError("Failed to get history totals for printer {Id}: {Message}", id, ex.Message);
             return new HistoryTotals { JobTotals = new JobTotals() };
         }
     }
@@ -2365,12 +2365,12 @@ public class PrintersController(
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, $"History deletion requested for non-Moonraker printer {id}");
+            _logger.LogWarning(ex, "History deletion requested for non-Moonraker printer {Id}", id);
             return BadRequest("History deletion is only available for Moonraker printers");
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to delete history job {jobId} for printer {id}: {ex.Message}");
+            _logger.LogError("Failed to delete history job {JobId} for printer {Id}: {Message}", jobId, id, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete history job");
         }
     }
@@ -2485,12 +2485,12 @@ public class PrintersController(
     {
         try
         {
-            _logger.LogInformation($"[Config] Getting printer configuration for {id}");
+            _logger.LogInformation("[Config] Getting printer configuration for {Id}", id);
             Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
 
             if (printer == null)
             {
-                _logger.LogWarning($"[Config] Printer {id} not found");
+                _logger.LogWarning("[Config] Printer {Id} not found", id);
                 return NotFound(new { message = $"Printer {id} not found" });
             }
 
@@ -2518,7 +2518,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[Config] Failed to get printer configuration for {id}: {ex.Message}");
+            _logger.LogError(ex, "[Config] Failed to get printer configuration for {Id}: {Message}", id, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Failed to retrieve printer configuration",
@@ -2557,12 +2557,12 @@ public class PrintersController(
 
         try
         {
-            _logger.LogInformation($"[Config] Updating printer configuration for {id}");
+            _logger.LogInformation("[Config] Updating printer configuration for {Id}", id);
 
             Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
             if (printer == null)
             {
-                _logger.LogWarning($"[Config] Printer {id} not found for update");
+                _logger.LogWarning("[Config] Printer {Id} not found for update", id);
                 return NotFound(new { message = $"Printer {id} not found" });
             }
 
@@ -2616,9 +2616,9 @@ public class PrintersController(
                     printer.FrontendPort = fp;
                 }
 
-                _logger.LogInformation($"[Config] Updating printer: {printer.Name} with new configuration");
+                _logger.LogInformation("[Config] Updating printer: {PrinterName} with new configuration", printer.Name);
                 await _printersService.SaveChangesAsync(ct);
-                _logger.LogInformation($"[Config] Successfully updated printer configuration for {id}");
+                _logger.LogInformation("[Config] Successfully updated printer configuration for {Id}", id);
 
                 // Return updated configuration
                 var updatedConfig = new
@@ -2648,7 +2648,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[Config] Failed to update printer configuration for {id}: {ex.Message}");
+            _logger.LogError(ex, "[Config] Failed to update printer configuration for {Id}: {Message}", id, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Failed to update printer configuration",
@@ -2678,7 +2678,7 @@ public class PrintersController(
         try
         {
             bool autoRegister = request?.AutoRegister ?? false;
-            _logger.LogInformation($"[DISCOVERY] Starting discovery stream via API endpoint (autoRegister={autoRegister})");
+            _logger.LogInformation("[DISCOVERY] Starting discovery stream via API endpoint (autoRegister={AutoRegister})", autoRegister);
 
             IReadOnlyList<PrinterBackend>? backends = request?.Backends?.ToList();
             DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
@@ -2716,7 +2716,7 @@ public class PrintersController(
     {
         try
         {
-            _logger.LogInformation($"[DISCOVERY] Cancelling discovery stream {sessionId}");
+            _logger.LogInformation("[DISCOVERY] Cancelling discovery stream {SessionId}", sessionId);
 
             DiscoveryCancelResponse result = await _discoveryProxyService.CancelDiscoveryStreamAsync(sessionId, ct);
 
@@ -2724,7 +2724,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[DISCOVERY] Failed to cancel discovery stream {sessionId}");
+            _logger.LogError(ex, "[DISCOVERY] Failed to cancel discovery stream {SessionId}", sessionId);
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Failed to cancel discovery",
@@ -2780,7 +2780,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[PrintersController] Failed to assign printer {id} to location");
+            _logger.LogError(ex, "[PrintersController] Failed to assign printer {Id} to location", id);
             return StatusCode(500, new { error = ex.Message });
         }
     }
@@ -2820,7 +2820,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[PrintersController] Failed to unassign printer {id} from location");
+            _logger.LogError(ex, "[PrintersController] Failed to unassign printer {Id} from location", id);
             return StatusCode(500, new { error = ex.Message });
         }
     }

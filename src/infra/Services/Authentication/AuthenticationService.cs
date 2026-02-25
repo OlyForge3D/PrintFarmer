@@ -5,8 +5,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
@@ -16,7 +16,7 @@ public class AuthenticationService(
     IUsersRepository usersRepository,
     IPasswordHashingService passwordHashing,
     IConfiguration configuration,
-    IUnifiedLoggingService logger,
+    ILogger<AuthenticationService> logger,
     IEmailService emailService,
     IRateLimitService rateLimitService,
     IAccountLockoutService accountLockoutService,
@@ -28,7 +28,7 @@ public class AuthenticationService(
     private readonly IUsersRepository _usersRepository = usersRepository;
     private readonly IPasswordHashingService _passwordHashing = passwordHashing;
     private readonly IConfiguration _configuration = configuration;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<AuthenticationService> _logger = logger;
     private readonly IEmailService _emailService = emailService;
     private readonly IRateLimitService _rateLimitService = rateLimitService;
     private readonly IAccountLockoutService _accountLockoutService = accountLockoutService;
@@ -46,7 +46,7 @@ public class AuthenticationService(
                 Console.WriteLine($"[AuthenticationService] Calling LogLoginFailedAsync (User not found) for username={username}");
                 await _authAuditService.LogLoginFailedAsync(username, "User not found", "unknown", null);
                 Console.WriteLine($"[AuthenticationService] Completed LogLoginFailedAsync (User not found) for username={username}");
-                _logger.LogWarning($"Authentication failed for username: {username} - user not found", null, null);
+                _logger.LogWarning("Authentication failed for username: {Username} - user not found", username);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
 
@@ -57,7 +57,7 @@ public class AuthenticationService(
                 Console.WriteLine($"[AuthenticationService] Calling LogLoginFailedAsync (Account locked) for username={username}");
                 await _authAuditService.LogLoginFailedAsync(username, $"Account locked until {lockoutEnd}", "unknown", null);
                 Console.WriteLine($"[AuthenticationService] Completed LogLoginFailedAsync (Account locked) for username={username}");
-                _logger.LogWarning($"Authentication failed for username: {username} - account locked until {lockoutEnd}", null, null);
+                _logger.LogWarning("Authentication failed for username: {Username} - account locked until {LockoutEnd}", username, lockoutEnd);
                 return new AuthenticationResult(false, Error: $"Account is temporarily locked. Please try again later.");
             }
 
@@ -66,7 +66,7 @@ public class AuthenticationService(
                 Console.WriteLine($"[AuthenticationService] Calling LogLoginFailedAsync (User disabled) for username={username}");
                 await _authAuditService.LogLoginFailedAsync(username, "User account is disabled", "unknown", null);
                 Console.WriteLine($"[AuthenticationService] Completed LogLoginFailedAsync (User disabled) for username={username}");
-                _logger.LogWarning($"Authentication failed for username: {username} - user is inactive", null, null);
+                _logger.LogWarning("Authentication failed for username: {Username} - user is inactive", username);
                 return new AuthenticationResult(false, Error: "User account is disabled");
             }
 
@@ -77,7 +77,7 @@ public class AuthenticationService(
                 Console.WriteLine($"[AuthenticationService] Calling LogLoginFailedAsync (Invalid password) for username={username}");
                 await _authAuditService.LogLoginFailedAsync(username, "Invalid password", "unknown", null);
                 Console.WriteLine($"[AuthenticationService] Completed LogLoginFailedAsync (Invalid password) for username={username}");
-                _logger.LogWarning($"Authentication failed for username: {username} - invalid password", null, null);
+                _logger.LogWarning("Authentication failed for username: {Username} - invalid password", username);
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
 
@@ -95,12 +95,12 @@ public class AuthenticationService(
 
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
-            _logger.LogInformation($"User {username} authenticated successfully", null, null);
+            _logger.LogInformation("User {Username} authenticated successfully", username);
             return new AuthenticationResult(true, token, DateTime.UtcNow.AddDays(7), userDto);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error during authentication for username: {username}", null, null);
+            _logger.LogError(ex, "Error during authentication for username: {Username}", username);
             return new AuthenticationResult(false, Error: "Authentication service error");
         }
     }
@@ -155,12 +155,12 @@ public class AuthenticationService(
 
             string token = await GenerateJwtTokenAsync(user);
             UserDto? dto = await GetUserWithRolesAndPermissionsAsync(user.Id);
-            _logger.LogInformation($"User {request.Username} registered successfully", null, null);
+            _logger.LogInformation("User {RequestUsername} registered successfully", request.Username);
             return new AuthenticationResult(true, token, DateTime.UtcNow.AddDays(7), dto);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error during registration for username: {request.Username}", null, null);
+            _logger.LogError(ex, "Error during registration for username: {RequestUsername}", request.Username);
             return new AuthenticationResult(false, Error: "Registration service error");
         }
     }
@@ -171,7 +171,7 @@ public class AuthenticationService(
         string? rawKey = _configuration["Jwt:Key"];
         if (string.IsNullOrWhiteSpace(rawKey) || rawKey.Length < 32)
         {
-            _logger.LogError("JWT key is missing or too short. Minimum 32 characters recommended.", null, null);
+            _logger.LogError("JWT key is missing or too short. Minimum 32 characters recommended.");
             throw new InvalidOperationException("Secure JWT key not configured");
         }
 #pragma warning disable S6781
@@ -349,12 +349,7 @@ public class AuthenticationService(
             RateLimitResult rateLimit = await _rateLimitService.CheckEmailConfirmationLimitAsync(user.Email);
             if (!rateLimit.IsAllowed)
             {
-                _logger.LogWarning($"Email confirmation rate limit exceeded for {user.Email}", null, new
-                {
-                    UserId = user.Id,
-                    Email = user.Email,
-                    RemainingAttempts = rateLimit.RemainingAttempts
-                });
+                _logger.LogWarning("Email confirmation rate limit exceeded for {UserEmail}", user.Email);
                 return false;
             }
 
@@ -383,22 +378,16 @@ public class AuthenticationService(
             }
             catch (Exception exSend)
             {
-                _logger.LogWarning(exSend, "Email confirmation send failed - falling back to log only", null, null);
+                _logger.LogWarning(exSend, "Email confirmation send failed - falling back to log only");
             }
 
-            _logger.LogInformation($"Email confirmation sent to {user.Email}. EmailSent={emailSent}", null, new
-            {
-                UserId = user.Id,
-                Email = user.Email,
-                ConfirmationLink = confirmationLink,
-                ExpirationHours = 24
-            });
+            _logger.LogInformation("Email confirmation sent to {UserEmail}. EmailSent={EmailSent}", user.Email, emailSent);
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to send email confirmation for user {user.Id}", null, null);
+            _logger.LogError(ex, "Failed to send email confirmation for user {UserId}", user.Id);
             return false;
         }
     }
@@ -421,7 +410,7 @@ public class AuthenticationService(
 
             if (user.EmailConfirmed)
             {
-                _logger.LogInformation($"Email already confirmed for user {user.Username}");
+                _logger.LogInformation("Email already confirmed for user {UserUsername}", user.Username);
                 return true; // Already confirmed, consider this success
             }
 
@@ -431,17 +420,13 @@ public class AuthenticationService(
             user.UpdatedAt = DateTime.UtcNow;
             await _usersRepository.SaveChangesAsync();
 
-            _logger.LogInformation($"Email confirmed for user {user.Username}", null, new
-            {
-                UserId = user.Id,
-                Email = user.Email
-            });
+            _logger.LogInformation("Email confirmed for user {UserUsername}", user.Username);
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Email confirmation failed", null, null);
+            _logger.LogError(ex, "Email confirmation failed");
             return false;
         }
     }
@@ -454,12 +439,7 @@ public class AuthenticationService(
             RateLimitResult rateLimit = await _rateLimitService.CheckPasswordResetLimitAsync(email);
             if (!rateLimit.IsAllowed)
             {
-                _logger.LogWarning($"Password reset rate limit exceeded for {email}", null, new
-                {
-                    Email = email,
-                    RemainingAttempts = rateLimit.RemainingAttempts,
-                    RetryAfter = rateLimit.RetryAfter
-                });
+                _logger.LogWarning("Password reset rate limit exceeded for {Email}", email);
 
                 // Still return true to prevent information leakage
                 return true;
@@ -469,7 +449,7 @@ public class AuthenticationService(
             if (user == null)
             {
                 // Don't reveal that the email doesn't exist (security best practice)
-                _logger.LogWarning($"Password reset requested for non-existent email: {email}");
+                _logger.LogWarning("Password reset requested for non-existent email: {Email}", email);
 
                 // Record attempt even for non-existent emails to prevent enumeration via rate limiting
                 await _rateLimitService.RecordPasswordResetAttemptAsync(email);
@@ -513,16 +493,10 @@ public class AuthenticationService(
             }
             catch (Exception exSend)
             {
-                _logger.LogWarning(exSend, "Password reset email send failed - falling back to log only", null, null);
+                _logger.LogWarning(exSend, "Password reset email send failed - falling back to log only");
             }
 
-            _logger.LogInformation($"Password reset token generated for user {user.Username}. EmailSent={emailSent}", null, new
-            {
-                UserId = user.Id,
-                Email = user.Email,
-                ResetLink = resetLink,
-                ExpirationMinutes = 60
-            });
+            _logger.LogInformation("Password reset token generated for user {UserUsername}. EmailSent={EmailSent}", user.Username, emailSent);
 
             // Audit log password reset initiation
             await _authAuditService.LogPasswordResetInitiatedAsync(user.Email, ipAddress, null);
@@ -531,7 +505,7 @@ public class AuthenticationService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error initiating password reset for email: {email}");
+            _logger.LogError(ex, "Error initiating password reset for email: {Email}", email);
             return false;
         }
     }
@@ -544,7 +518,7 @@ public class AuthenticationService(
             User? user = await _usersRepository.GetByEmailAsync(email);
             if (user == null)
             {
-                _logger.LogWarning($"Password reset attempted with invalid email: {email}");
+                _logger.LogWarning("Password reset attempted with invalid email: {Email}", email);
                 return false;
             }
 
@@ -552,21 +526,21 @@ public class AuthenticationService(
             PasswordResetToken? resetToken = await _usersRepository.GetPasswordResetTokenAsync(token);
             if (resetToken == null || resetToken.UserId != user.Id)
             {
-                _logger.LogWarning($"Invalid password reset token for user: {user.Username}");
+                _logger.LogWarning("Invalid password reset token for user: {UserUsername}", user.Username);
                 return false;
             }
 
             // Check if token is expired
             if (resetToken.ExpiresAt < DateTime.UtcNow)
             {
-                _logger.LogWarning($"Expired password reset token for user: {user.Username}");
+                _logger.LogWarning("Expired password reset token for user: {UserUsername}", user.Username);
                 return false;
             }
 
             // Check if token has already been used
             if (resetToken.IsUsed)
             {
-                _logger.LogWarning($"Already used password reset token for user: {user.Username}");
+                _logger.LogWarning("Already used password reset token for user: {UserUsername}", user.Username);
                 return false;
             }
 
@@ -587,7 +561,7 @@ public class AuthenticationService(
             // Audit log successful password reset
             await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);
 
-            _logger.LogInformation($"Password successfully reset for user: {user.Username}");
+            _logger.LogInformation("Password successfully reset for user: {UserUsername}", user.Username);
             return true;
         }
         catch (Exception ex)

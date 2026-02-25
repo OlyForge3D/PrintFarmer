@@ -12,7 +12,7 @@ using Farm.Infrastructure.Contracts.Printers.OctoPrint;
 using Farm.Infrastructure.Contracts.Printers.Sdcp;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -24,11 +24,11 @@ namespace Farm.Web.Api.Tests.Services.Printers
     /// </summary>
     public class FileDiscoveryCapabilityTests
     {
-        private readonly Mock<IUnifiedLoggingService> _mockLogger;
+        private readonly Mock<ILogger<BackendCapabilityFactory>> _mockLogger;
 
         public FileDiscoveryCapabilityTests()
         {
-            _mockLogger = new Mock<IUnifiedLoggingService>();
+            _mockLogger = new Mock<ILogger<BackendCapabilityFactory>>();
         }
 
         #region Tests for File List Client Retrieval

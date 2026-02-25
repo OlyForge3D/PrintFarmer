@@ -119,6 +119,14 @@ public interface IQueueRepository
     Task<int> CountActiveJobsUsingGcodeAsync(Guid gcodeFileId, CancellationToken ct);
 
     /// <summary>
+    /// Get all print jobs assigned to any of the specified printers, ordered by priority and queue time.
+    /// Used to batch-load jobs for multiple printers in a single DB query.
+    /// </summary>
+    /// <param name="printerIds">The printer IDs to get jobs for</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    Task<List<PrintJob>> GetPrintJobsForPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct);
+
+    /// <summary>
     /// Clears (sets to null) the GcodeFileId for any print jobs that reference the specified G-code file.
     /// This is used to allow library file deletion without losing job history.
     /// </summary>

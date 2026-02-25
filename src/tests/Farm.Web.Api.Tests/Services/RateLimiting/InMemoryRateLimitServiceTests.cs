@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Services.RateLimiting;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -7,13 +7,13 @@ namespace Farm.Web.Api.Tests.Services.RateLimiting;
 
 public class InMemoryRateLimitServiceTests
 {
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<InMemoryRateLimitService>> _loggerMock;
     private readonly RateLimitOptions _options;
     private readonly InMemoryRateLimitService _service;
 
     public InMemoryRateLimitServiceTests()
     {
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<InMemoryRateLimitService>>();
         _options = CreateOptions();
         _service = new InMemoryRateLimitService(_options, _loggerMock.Object);
     }

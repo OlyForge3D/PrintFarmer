@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Services.Authentication;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Authentication;
 
@@ -9,10 +9,10 @@ namespace Farm.Web.Api.Services.Authentication;
 /// </summary>
 public class TokenRevocationCleanupService(
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger) : BackgroundService
+    ILogger<TokenRevocationCleanupService> logger) : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<TokenRevocationCleanupService> _logger = logger;
     private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(24); // Run daily
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -61,7 +61,7 @@ public class TokenRevocationCleanupService(
 
             if (deletedCount > 0)
             {
-                _logger.LogInformation($"Token revocation cleanup completed - removed {deletedCount} expired records");
+                _logger.LogInformation("Token revocation cleanup completed - removed {DeletedCount} expired records", deletedCount);
             }
             else
             {

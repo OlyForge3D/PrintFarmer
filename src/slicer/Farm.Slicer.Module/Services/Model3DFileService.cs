@@ -14,13 +14,13 @@ using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Services
 {
@@ -41,7 +41,7 @@ namespace Farm.Slicer.Module.Services
     {
         private readonly IModel3DFileRepository _model3dFiles;
         private readonly ITagRepository _tagRepository;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<Model3DFileService> _logger;
         private readonly string _modelsPath;
         private readonly IModelAnalysisService? _analysisService;
         private readonly Farm.Infrastructure.IO.IFileSystem _fileSystem;
@@ -54,7 +54,7 @@ namespace Farm.Slicer.Module.Services
         public Model3DFileService(
             IModel3DFileRepository model3dFiles,
             ITagRepository tagRepository,
-            IUnifiedLoggingService logger,
+            ILogger<Model3DFileService> logger,
             IConfiguration configuration,
             Farm.Infrastructure.IO.IFileSystem fileSystem,
             IFileManagementService fileManagementService,
@@ -317,11 +317,11 @@ namespace Farm.Slicer.Module.Services
 
                 await _model3dFiles.RemoveAsync(model, ct);
                 await _model3dFiles.SaveChangesAsync(ct);
-                _logger.LogInformation($"Model deleted: {id}");
+                _logger.LogInformation("Model deleted: {Id}", id);
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to delete model: {id}: {ex.Message}");
+                _logger.LogError("Failed to delete model: {Id}: {Message}", id, ex.Message);
                 throw;
             }
         }
@@ -415,7 +415,7 @@ namespace Farm.Slicer.Module.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError($"Failed to write model file to temp location: {ex.Message}");
+                    _logger.LogError("Failed to write model file to temp location: {Message}", ex.Message);
 
                     // Cleanup temp file if write failed
                     try
@@ -513,7 +513,7 @@ namespace Farm.Slicer.Module.Services
                             throw new InvalidOperationException("File move succeeded but verification failed - file not found at final location");
                         }
 
-                        _logger.LogDebug($"Model file moved from temp to final location: {modelId}");
+                        _logger.LogDebug("Model file moved from temp to final location: {ModelId}", modelId);
                     }
                     else
                     {
@@ -522,7 +522,7 @@ namespace Farm.Slicer.Module.Services
                 }
                 catch (Exception moveEx)
                 {
-                    _logger.LogError($"Failed to move model file from temp to final location: {moveEx.Message}");
+                    _logger.LogError("Failed to move model file from temp to final location: {MoveExMessage}", moveEx.Message);
                     throw new InvalidOperationException("Failed to finalize model file", moveEx);
                 }
 
@@ -575,14 +575,14 @@ namespace Farm.Slicer.Module.Services
                                 model.ThumbnailFileName = thumbnailFileName;
                                 await _model3dFiles.SaveChangesAsync(ct);
 
-                                _logger.LogInformation($"Thumbnail generated successfully for model {modelId}");
+                                _logger.LogInformation("Thumbnail generated successfully for model {ModelId}", modelId);
                             }
                         }
                     }
                 }
                 catch (Exception thumbnailEx)
                 {
-                    _logger.LogWarning($"Failed to generate thumbnail for model {modelId}: {thumbnailEx.Message}. Continuing without thumbnail.");
+                    _logger.LogWarning("Failed to generate thumbnail for model {ModelId}: {ThumbnailExMessage}. Continuing without thumbnail.", modelId, thumbnailEx.Message);
 
                     // Don't rethrow - upload should succeed even if thumbnail generation fails
                 }
@@ -675,14 +675,14 @@ namespace Farm.Slicer.Module.Services
                 // Security check: ensure resolved path is within storage directory
                 if (!resolvedPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
                 {
-                    _logger.LogWarning($"[Download] Path traversal attempt blocked: {path}");
+                    _logger.LogWarning("[Download] Path traversal attempt blocked: {Path}", path);
                     return null;
                 }
 
                 // Check file exists
                 if (!_fileSystem.FileExists(resolvedPath))
                 {
-                    _logger.LogWarning($"[Download] File not found: {resolvedPath}");
+                    _logger.LogWarning("[Download] File not found: {ResolvedPath}", resolvedPath);
                     return null;
                 }
 
@@ -694,7 +694,7 @@ namespace Farm.Slicer.Module.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[Download] Error reading file {path}: {ex.Message}");
+                _logger.LogError("[Download] Error reading file {Path}: {Message}", path, ex.Message);
                 return null;
             }
         }
@@ -721,7 +721,7 @@ namespace Farm.Slicer.Module.Services
                 Model3D? model = await _model3dFiles.GetByIdAsync(modelId, ct);
                 if (model == null)
                 {
-                    _logger.LogWarning($"[MoveToFolder] Model not found: {modelId}");
+                    _logger.LogWarning("[MoveToFolder] Model not found: {ModelId}", modelId);
                     return false;
                 }
 
@@ -735,12 +735,12 @@ namespace Farm.Slicer.Module.Services
                 await _model3dFiles.UpdateAsync(model, ct);
                 await _model3dFiles.SaveChangesAsync(ct);
 
-                _logger.LogInformation($"[MoveToFolder] Moved model {model.FileName} to folder {targetFolderPath}");
+                _logger.LogInformation("[MoveToFolder] Moved model {ModelFileName} to folder {TargetFolderPath}", model.FileName, targetFolderPath);
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[MoveToFolder] Failed to move model {modelId}: {ex.Message}");
+                _logger.LogError("[MoveToFolder] Failed to move model {ModelId}: {Message}", modelId, ex.Message);
                 return false;
             }
         }

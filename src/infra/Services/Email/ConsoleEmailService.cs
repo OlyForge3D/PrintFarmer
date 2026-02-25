@@ -1,17 +1,15 @@
-﻿using Farm.Infrastructure.Telemetry;
+﻿using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Email;
 
-public sealed class ConsoleEmailService(IUnifiedLoggingService logger) : IEmailService
+public sealed class ConsoleEmailService(ILogger<ConsoleEmailService> logger) : IEmailService
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ConsoleEmailService> _logger = logger;
 
     public Task<EmailDispatchResult> SendAsync(EmailMessage message, CancellationToken ct = default)
     {
         _logger.LogInformation(
-            $"[EMAIL:CONSOLE] To={message.To} Subject={message.Subject}",
-            null,
-            null);
+            "[EMAIL:CONSOLE] To={MessageTo} Subject={MessageSubject}", message.To, message.Subject);
 
 #pragma warning disable CA1303 // Console logging strings don't require localization
         Console.WriteLine("[EMAIL:CONSOLE]");

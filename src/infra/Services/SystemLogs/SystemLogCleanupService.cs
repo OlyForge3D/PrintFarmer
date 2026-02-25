@@ -2,18 +2,18 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.SystemLogs;
-using Farm.Infrastructure.Telemetry;
+using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.SystemLogs;
 
-public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, IUnifiedLoggingService logger) : BackgroundService
+public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, ILogger<SystemLogCleanupService> logger) : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
-    private readonly IUnifiedLoggingService _logger = logger;
-    private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(6); // Run every 6 hours
-    private readonly int _retentionDays = 30;
+    private readonly ILogger<SystemLogCleanupService> _logger = logger;
+    private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(6);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -23,11 +23,16 @@ public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, IUnified
             {
                 await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
                 ISystemLogRepository logRepository = scope.ServiceProvider.GetRequiredService<ISystemLogRepository>();
-                DateTime cutoff = DateTime.UtcNow.AddDays(-_retentionDays);
+                ISettingsService settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+                SystemLogSettings settings = settingsService.Get<SystemLogSettings>();
+                int retentionDays = settings.RetentionDays;
+
+                DateTime cutoff = DateTime.UtcNow.AddDays(-retentionDays);
                 int deletedCount = await logRepository.DeleteLogsOlderThanAsync(cutoff, stoppingToken);
                 if (deletedCount > 0)
                 {
-                    _logger.LogInformation($"SystemLogCleanupService: Deleted {deletedCount} logs older than {cutoff}");
+                    _logger.LogInformation("SystemLogCleanupService: Deleted {DeletedCount} logs older than {RetentionDays} days", deletedCount, retentionDays);
                 }
             }
             catch (Exception ex)

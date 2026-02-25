@@ -2,26 +2,14 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.RateLimiting;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.RateLimiting;
 
 public class SliceJobRateLimitTests
 {
-    private class StubLogger : IUnifiedLoggingService
-    {
-        public void LogDebug(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-        public void LogInformation(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogWarning(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-        public void LogError(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-        public void LogCritical(string message, string? correlationId = null, object? metadata = null) { }
-        public void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null) { }
-        public void LogWithContext(Microsoft.Extensions.Logging.LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null) { }
-    }
 
     [Fact]
     public async Task EnforcesHourlyLimit()
@@ -30,7 +18,7 @@ public class SliceJobRateLimitTests
         {
             SliceJobs = new SliceJobRateLimitOptions { MaxAttemptsPerHour = 3, MaxAttemptsPerDay = 10 }
         };
-        InMemoryRateLimitService svc = new InMemoryRateLimitService(opts, new StubLogger());
+        InMemoryRateLimitService svc = new InMemoryRateLimitService(opts, NullLogger<InMemoryRateLimitService>.Instance);
         Guid userId = Guid.NewGuid();
         for (int i = 0; i < 3; i++)
         {
@@ -50,7 +38,7 @@ public class SliceJobRateLimitTests
         {
             SliceJobs = new SliceJobRateLimitOptions { MaxAttemptsPerHour = 100, MaxAttemptsPerDay = 5 }
         };
-        InMemoryRateLimitService svc = new InMemoryRateLimitService(opts, new StubLogger());
+        InMemoryRateLimitService svc = new InMemoryRateLimitService(opts, NullLogger<InMemoryRateLimitService>.Instance);
         Guid userId = Guid.NewGuid();
         for (int i = 0; i < 5; i++)
         {

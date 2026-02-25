@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -16,10 +16,10 @@ namespace Farm.Web.Api.Controllers;
 [Authorize(Roles = "farm_admin")]
 public class ConnectionDiagnosticsController(
     IEnumerable<IPrinterConnectionHealthProvider> healthProviders,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<ConnectionDiagnosticsController> logger) : ControllerBase
 {
     private readonly IEnumerable<IPrinterConnectionHealthProvider> _healthProviders = healthProviders;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ConnectionDiagnosticsController> _logger = logger;
 
     /// <summary>
     /// Gets connection health data for all printers across all backends.

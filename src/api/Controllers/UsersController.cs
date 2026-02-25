@@ -2,10 +2,10 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -20,12 +20,12 @@ public class UsersController(
     Farm.Infrastructure.Services.Users.IUsersService usersService,
     IAuthenticationService authService,
     ITokenRevocationService tokenRevocationService,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<UsersController> logger) : ControllerBase
 {
     private readonly Farm.Infrastructure.Services.Users.IUsersService _users = usersService;
     private readonly IAuthenticationService _authService = authService;
     private readonly ITokenRevocationService _tokenRevocation = tokenRevocationService;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<UsersController> _logger = logger;
 
     /// <summary>
     /// Gets all users in the system.
@@ -75,7 +75,7 @@ public class UsersController(
         {
             UserDto createdUser = await _users.CreateUserAsync(request, ct);
             string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            _logger.LogInformation($"User {currentUserId} created new user {createdUser.Id} ({createdUser.Username})");
+            _logger.LogInformation("User {CurrentUserId} created new user {CreatedUserId} ({CreatedUserUsername})", currentUserId, createdUser.Id, createdUser.Username);
             return CreatedAtRoute("GetUserById", new { id = createdUser.Id }, createdUser);
         }
         catch (ArgumentException ex)
@@ -103,7 +103,7 @@ public class UsersController(
         }
 
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation($"User {currentUserId} updated user {id}");
+        _logger.LogInformation("User {CurrentUserId} updated user {Id}", currentUserId, id);
         return Ok(updated);
     }
 
@@ -128,7 +128,7 @@ public class UsersController(
             return NotFound();
         }
 
-        _logger.LogInformation($"User {currentUserId} deleted user {id}");
+        _logger.LogInformation("User {CurrentUserId} deleted user {Id}", currentUserId, id);
         return NoContent();
     }
 
@@ -189,7 +189,7 @@ public class UsersController(
         // Prevent admin from revoking their own sessions
         if (userId == adminUserId)
         {
-            _logger.LogWarning($"Admin {adminUserId} attempted to revoke their own sessions");
+            _logger.LogWarning("Admin {AdminUserId} attempted to revoke their own sessions", adminUserId);
             return BadRequest(new { error = "Admins cannot revoke their own sessions" });
         }
 
@@ -208,7 +208,7 @@ public class UsersController(
             request.Reason ?? "Revoked by administrator",
             ipAddress);
 
-        _logger.LogInformation($"Admin {adminUserId} revoked {revokedCount} sessions for user {userId}");
+        _logger.LogInformation("Admin {AdminUserId} revoked {RevokedCount} sessions for user {UserId}", adminUserId, revokedCount, userId);
 
         return Ok(new RevokeSessionsResult
         {

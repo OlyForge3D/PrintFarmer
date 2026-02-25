@@ -7,7 +7,7 @@ using AutoMapper;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Cameras;
 
@@ -17,13 +17,13 @@ namespace Farm.Infrastructure.Services.Cameras;
 public class CameraService : ICameraService
 {
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<CameraService> _logger;
     private readonly IMapper _mapper;
     private readonly IPrintersService _printersService;
 
     public CameraService(
         IUnitOfWork unitOfWork,
-        IUnifiedLoggingService logger,
+        ILogger<CameraService> logger,
         IMapper mapper,
         IPrintersService printersService)
     {
@@ -80,7 +80,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error finding camera with ID {id}");
+            _logger.LogError(ex, "Error finding camera with ID {Id}", id);
             throw;
         }
     }
@@ -99,7 +99,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error finding camera with name {name}");
+            _logger.LogError(ex, "Error finding camera with name {Name}", name);
             throw;
         }
     }
@@ -118,7 +118,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error checking camera existence by name {name}");
+            _logger.LogError(ex, "Error checking camera existence by name {Name}", name);
             throw;
         }
     }
@@ -164,7 +164,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
-            _logger.LogError(ex, $"Error creating camera {dto.Name}");
+            _logger.LogError(ex, "Error creating camera {DtoName}", dto.Name);
             throw;
         }
     }
@@ -239,7 +239,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
-            _logger.LogError(ex, $"Error updating camera {id}");
+            _logger.LogError(ex, "Error updating camera {Id}", id);
             throw;
         }
     }
@@ -269,7 +269,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error deleting camera {id}");
+            _logger.LogError(ex, "Error deleting camera {Id}", id);
             throw;
         }
     }
@@ -301,7 +301,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error toggling camera {id} enabled status");
+            _logger.LogError(ex, "Error toggling camera {Id} enabled status", id);
             throw;
         }
     }

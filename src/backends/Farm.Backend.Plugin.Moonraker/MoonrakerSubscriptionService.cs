@@ -9,21 +9,21 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
 public sealed class MoonrakerSubscriptionService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
+    ILogger<MoonrakerSubscriptionService> logger,
     IHttpClientFactory httpClientFactory,
     IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<MoonrakerSubscriptionService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly CancellationTokenSource _cts = new();
@@ -213,7 +213,7 @@ public sealed class MoonrakerSubscriptionService(
                     _loops.TryRemove(p.Id, out _);
                     _connectionMetrics.TryRemove(p.Id, out _); // Reset metrics (reconnect attempts) too
                     _logger.LogInformation(
-                        $"Restarting subscription loop for printer {p.Name} ({p.Id}) - previous loop completed");
+                        "Restarting subscription loop for printer {PName} ({PId}) - previous loop completed", p.Name, p.Id);
                 }
             }
 
@@ -236,7 +236,7 @@ public sealed class MoonrakerSubscriptionService(
         {
             if (lastUpdate < staleThreshold)
             {
-                _logger.LogWarning($"Detected stale connection for printer {printerId}, last update was {lastUpdate:O}. Triggering HTTP polling fallback.");
+                _logger.LogWarning("Detected stale connection for printer {PrinterId}, last update was {LastUpdate:O}. Triggering HTTP polling fallback.", printerId, lastUpdate);
 
                 // Find the printer to trigger fallback
                 await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
@@ -307,7 +307,7 @@ public sealed class MoonrakerSubscriptionService(
                 // Re-check backend on each iteration in case it changed
                 if (!await ValidatePrinterBackendAsync(id, ct))
                 {
-                    _logger.LogInformation($"Printer {id} no longer uses Moonraker backend, stopping subscription");
+                    _logger.LogInformation("Printer {Id} no longer uses Moonraker backend, stopping subscription", id);
                     return;
                 }
 
@@ -315,7 +315,7 @@ public sealed class MoonrakerSubscriptionService(
                 if (metrics.ReconnectAttempts > 0)
                 {
                     TimeSpan backoffDelay = metrics.GetNextBackoffDelay();
-                    _logger.LogInformation($"Backing off for {backoffDelay.TotalSeconds}s before reconnecting to printer {printer.Name} (attempt {metrics.ReconnectAttempts + 1}/{MaxReconnectAttempts})");
+                    _logger.LogInformation("Backing off for {BackoffDelayTotalSeconds}s before reconnecting to printer {PrinterName} (attempt {Value2}/{MaxReconnectAttempts})", backoffDelay.TotalSeconds, printer.Name, metrics.ReconnectAttempts + 1, MaxReconnectAttempts);
 
                     try
                     {
@@ -331,7 +331,7 @@ public sealed class MoonrakerSubscriptionService(
                 Uri uri = BuildWsUri(printer.BackendUrl);
                 ws = new ClientWebSocket();
 
-                _logger.LogDebug($"Connecting to Moonraker WebSocket at {uri} for printer {printer.Name}");
+                _logger.LogDebug("Connecting to Moonraker WebSocket at {Uri} for printer {PrinterName}", uri, printer.Name);
                 await ws.ConnectAsync(uri, ct);
 
                 _logger.LogInformation("WebSocket connected to printer {PrinterName} ({PrinterId})", printer.Name, id);
@@ -382,16 +382,16 @@ public sealed class MoonrakerSubscriptionService(
 
                 if (MoonrakerErrors.IsFatalError(ex))
                 {
-                    _logger.LogError(ex, $"Fatal error in subscription loop for printer {printer.Name}, stopping reconnection attempts");
+                    _logger.LogError(ex, "Fatal error in subscription loop for printer {PrinterName}, stopping reconnection attempts", printer.Name);
                     break;
                 }
                 else if (MoonrakerErrors.IsTransientError(ex))
                 {
-                    _logger.LogWarning(ex, $"Transient error for printer {printer.Name}, will retry (attempt {metrics.ReconnectAttempts}/{MaxReconnectAttempts})");
+                    _logger.LogWarning(ex, "Transient error for printer {PrinterName}, will retry (attempt {MetricsReconnectAttempts}/{MaxReconnectAttempts})", printer.Name, metrics.ReconnectAttempts, MaxReconnectAttempts);
                 }
                 else
                 {
-                    _logger.LogError(ex, $"Unexpected error for printer {printer.Name} (attempt {metrics.ReconnectAttempts}/{MaxReconnectAttempts})");
+                    _logger.LogError(ex, "Unexpected error for printer {PrinterName} (attempt {MetricsReconnectAttempts}/{MaxReconnectAttempts})", printer.Name, metrics.ReconnectAttempts, MaxReconnectAttempts);
                 }
 
                 // Only broadcast offline after consecutive failures threshold
@@ -433,7 +433,7 @@ public sealed class MoonrakerSubscriptionService(
 
         if (metrics.ReconnectAttempts >= MaxReconnectAttempts)
         {
-            _logger.LogError($"Exhausted all reconnection attempts ({MaxReconnectAttempts}) for printer {printer.Name}, giving up");
+            _logger.LogError("Exhausted all reconnection attempts ({MaxReconnectAttempts}) for printer {PrinterName}, giving up", MaxReconnectAttempts, printer.Name);
             await SendOfflineStatusAsync(id, ct);
             RecordHealthTransition(id, printer.Name, PrinterConnectionState.Offline, $"Exhausted {MaxReconnectAttempts} reconnection attempts");
         }
@@ -459,13 +459,13 @@ public sealed class MoonrakerSubscriptionService(
 
             if (current is null)
             {
-                _logger.LogInformation($"Printer {printerId} was removed from database");
+                _logger.LogInformation("Printer {PrinterId} was removed from database", printerId);
                 return false;
             }
 
             if (current.Backend != (int)Farm.Infrastructure.Domain.PrinterBackend.Moonraker)
             {
-                _logger.LogInformation($"Printer {printerId} backend changed from Moonraker (Backend={current.Backend})");
+                _logger.LogInformation("Printer {PrinterId} backend changed from Moonraker (Backend={CurrentBackend})", printerId, current.Backend);
                 return false;
             }
 
@@ -473,7 +473,7 @@ public sealed class MoonrakerSubscriptionService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to validate printer backend for {printerId}: {ex.Message}");
+            _logger.LogWarning("Failed to validate printer backend for {PrinterId}: {Message}", printerId, ex.Message);
             return false;
         }
     }
@@ -678,7 +678,7 @@ public sealed class MoonrakerSubscriptionService(
                     {
                         byte[] pingData = Encoding.UTF8.GetBytes($"ping-{DateTime.UtcNow:O}");
                         await ws.SendAsync(pingData, WebSocketMessageType.Text, endOfMessage: true, ct);
-                        _logger.LogDebug($"Sent heartbeat ping to printer {printer.Name}");
+                        _logger.LogDebug("Sent heartbeat ping to printer {PrinterName}", printer.Name);
                     }
                     catch (Exception ex)
                     {
@@ -793,16 +793,16 @@ public sealed class MoonrakerSubscriptionService(
             }
             else
             {
-                _logger.LogWarning($"Received unknown JSON-RPC message from printer {printer.Name}: {message}");
+                _logger.LogWarning("Received unknown JSON-RPC message from printer {PrinterName}: {Message}", printer.Name, message);
             }
         }
         catch (JsonException ex)
         {
-            _logger.LogError($"Failed to parse JSON message from printer {printer.Name}: {ex.Message}. Message: {message}");
+            _logger.LogError("Failed to parse JSON message from printer {PrinterName}: {Message}. Message: {Message1}", printer.Name, ex.Message, message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error processing message from printer {printer.Name}. Message: {message}");
+            _logger.LogError(ex, "Error processing message from printer {PrinterName}. Message: {Message}", printer.Name, message);
         }
     }
 
@@ -822,7 +822,7 @@ public sealed class MoonrakerSubscriptionService(
             JsonRpcResponse? jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(message);
             if (jsonRpcResponse?.Error != null)
             {
-                _logger.LogWarning($"JSON-RPC error from printer {printer.Name}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+                _logger.LogWarning("JSON-RPC error from printer {PrinterName}: {Message} (Code: {Code})", printer.Name, jsonRpcResponse.Error.Message, jsonRpcResponse.Error.Code);
 
                 // Track JSON-RPC parse errors (code -32700) and trigger fallback if threshold exceeded
                 if (jsonRpcResponse.Error.Code == -32700)
@@ -832,7 +832,7 @@ public sealed class MoonrakerSubscriptionService(
 
                     if (errorCount >= MaxParseErrorsBeforeFallback)
                     {
-                        _logger.LogWarning($"JSON-RPC parse error threshold ({MaxParseErrorsBeforeFallback}) exceeded for printer {printer.Name}. Triggering HTTP polling fallback.");
+                        _logger.LogWarning("JSON-RPC parse error threshold ({MaxParseErrorsBeforeFallback}) exceeded for printer {PrinterName}. Triggering HTTP polling fallback.", MaxParseErrorsBeforeFallback, printer.Name);
                         await TriggerHttpPollingFallbackAsync(printer, ct);
                     }
                 }
@@ -851,7 +851,7 @@ public sealed class MoonrakerSubscriptionService(
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning($"Failed to parse JSON-RPC response from printer {printer.Name}: {ex.Message}");
+            _logger.LogWarning("Failed to parse JSON-RPC response from printer {PrinterName}: {Message}", printer.Name, ex.Message);
 
             // Track parse errors and trigger fallback if threshold exceeded
             _ = _parseErrorCounts.AddOrUpdate(printer.Id, 1, (key, value) => value + 1);
@@ -859,7 +859,7 @@ public sealed class MoonrakerSubscriptionService(
 
             if (errorCount >= MaxParseErrorsBeforeFallback)
             {
-                _logger.LogWarning($"Parse error threshold ({MaxParseErrorsBeforeFallback}) exceeded for printer {printer.Name}. Triggering HTTP polling fallback.");
+                _logger.LogWarning("Parse error threshold ({MaxParseErrorsBeforeFallback}) exceeded for printer {PrinterName}. Triggering HTTP polling fallback.", MaxParseErrorsBeforeFallback, printer.Name);
                 await TriggerHttpPollingFallbackAsync(printer, ct);
             }
         }
@@ -876,7 +876,7 @@ public sealed class MoonrakerSubscriptionService(
     private async Task HandleJsonRpcNotificationAsync(JsonElement methodProp, JsonElement root, Printer printer, CancellationToken ct)
     {
         string? method = methodProp.GetString();
-        _logger.LogDebug($"Received notification {method} from printer {printer.Name}");
+        _logger.LogDebug("Received notification {Method} from printer {PrinterName}", method, printer.Name);
 
         switch (method)
         {
@@ -917,7 +917,7 @@ public sealed class MoonrakerSubscriptionService(
                 break;
 
             default:
-                _logger.LogDebug($"Unhandled notification method {method} from printer {printer.Name}");
+                _logger.LogDebug("Unhandled notification method {Method} from printer {PrinterName}", method, printer.Name);
                 break;
         }
     }
@@ -949,7 +949,7 @@ public sealed class MoonrakerSubscriptionService(
             state.ThumbnailUrl = thumbnailUrl;
         }
 
-        _logger.LogDebug($"Processing status update for printer {printerId}. Raw status: {statusObj.GetRawText()}");
+        _logger.LogDebug("Processing status update for printer {PrinterId}. Raw status: {StatusObjGetRawText}", printerId, statusObj.GetRawText());
 
         // Initialize klippy ready state from webhooks if not yet set
         // This handles the initial subscription response which contains the current klippy state
@@ -960,7 +960,7 @@ public sealed class MoonrakerSubscriptionService(
             string? webhooksState = ws.GetString();
             bool isReady = webhooksState == "ready";
             _klippyReadyState[printerId] = isReady;
-            _logger.LogInformation($"Initialized klippyReadyState for printer {printerId}: {isReady} (webhooks.state={webhooksState})");
+            _logger.LogInformation("Initialized klippyReadyState for printer {PrinterId}: {IsReady} (webhooks.state={WebhooksState})", printerId, isReady, webhooksState);
         }
 
         // Process each object type separately by dispatching to handler methods
@@ -1076,12 +1076,12 @@ public sealed class MoonrakerSubscriptionService(
         try
         {
             PrinterToolheadUpdate update = new PrinterToolheadUpdate(printerId, x, y, z, homedAxes);
-            _logger.LogDebug($"Emitting toolhead update for printer {printerId}: X={x}, Y={y}, Z={z}, HomedAxes={homedAxes}");
+            _logger.LogDebug("Emitting toolhead update for printer {PrinterId}: X={X}, Y={Y}, Z={Z}, HomedAxes={HomedAxes}", printerId, x, y, z, homedAxes);
             await hub!.Clients.All.SendAsync("toolheadupdate", update, ct);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to emit toolhead update for printer {printerId}");
+            _logger.LogError(ex, "Failed to emit toolhead update for printer {PrinterId}", printerId);
         }
     }
 
@@ -1134,12 +1134,12 @@ public sealed class MoonrakerSubscriptionService(
         try
         {
             PrinterExtruderUpdate update = new PrinterExtruderUpdate(printerId, temperature, target);
-            _logger.LogDebug($"Emitting extruder update for printer {printerId}: Temp={temperature}, Target={target}");
+            _logger.LogDebug("Emitting extruder update for printer {PrinterId}: Temp={Temperature}, Target={Target}", printerId, temperature, target);
             await hub!.Clients.All.SendAsync("extruderupdate", update, ct);
         }
         catch (Exception extruderEx)
         {
-            _logger.LogError(extruderEx, $"Failed to emit extruder update for printer {printerId}");
+            _logger.LogError(extruderEx, "Failed to emit extruder update for printer {PrinterId}", printerId);
         }
     }
 
@@ -1192,12 +1192,12 @@ public sealed class MoonrakerSubscriptionService(
         try
         {
             PrinterHeaterBedUpdate update = new PrinterHeaterBedUpdate(printerId, temperature, target);
-            _logger.LogDebug($"Emitting heater bed update for printer {printerId}: Temp={temperature}, Target={target}");
+            _logger.LogDebug("Emitting heater bed update for printer {PrinterId}: Temp={Temperature}, Target={Target}", printerId, temperature, target);
             await hub!.Clients.All.SendAsync("heaterbedupdate", update, ct);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to emit heater bed update for printer {printerId}");
+            _logger.LogError(ex, "Failed to emit heater bed update for printer {PrinterId}", printerId);
         }
     }
 
@@ -1295,12 +1295,12 @@ public sealed class MoonrakerSubscriptionService(
             try
             {
                 PrinterStateUpdate update = new PrinterStateUpdate(printerId, stateValue, progress, jobName);
-                _logger.LogDebug($"Emitting state update for printer {printerId}: State={stateValue}, Progress={progress}, JobName={jobName}");
+                _logger.LogDebug("Emitting state update for printer {PrinterId}: State={StateValue}, Progress={Progress}, JobName={JobName}", printerId, stateValue, progress, jobName);
                 await hub!.Clients.All.SendAsync("stateupdate", update, ct);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to emit state update for printer {printerId}");
+                _logger.LogError(ex, "Failed to emit state update for printer {PrinterId}", printerId);
             }
         }
     }
@@ -1341,7 +1341,7 @@ public sealed class MoonrakerSubscriptionService(
                 HomedAxes: state.HomedAxes,
                 SpoolInfo: spoolInfo);
 
-            _logger.LogDebug($"Emitting consolidated status for printer {printerId}: IsOnline={isOnline}, X={state.X}, Y={state.Y}, Z={state.Z}, HotendTemp={state.HotendTemp}, HotendTarget={state.HotendTarget}, BedTemp={state.BedTemp}, BedTarget={state.BedTarget}, HomedAxes={state.HomedAxes}");
+            _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
             // Update cache before broadcasting to clients
             PrinterStatusDto cacheUpdate = new PrinterStatusDto(
@@ -1363,17 +1363,17 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: spoolInfo);
             _statusCacheWriter.UpdateStatus(cacheUpdate);
 
-            _logger.LogInformation($"[MoonrakerSubscriptionService] Broadcasting printerupdated for {printerId} via SignalR");
-            _logger.LogDebug($"[MoonrakerSubscriptionService] Hub is null: {hub == null}");
+            _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
+            _logger.LogDebug("[MoonrakerSubscriptionService] Hub is null: {Value0}", hub == null);
             await hub!.Clients.All.SendAsync("printerupdated", update, ct);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug($"Consolidated status for printer {printerId} was cancelled");
+            _logger.LogDebug("Consolidated status for printer {PrinterId} was cancelled", printerId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to emit consolidated status for printer {printerId}");
+            _logger.LogError(ex, "Failed to emit consolidated status for printer {PrinterId}", printerId);
         }
     }
 
@@ -1389,7 +1389,7 @@ public sealed class MoonrakerSubscriptionService(
         {
             if (hub == null)
             {
-                _logger.LogError($"Hub context is null, cannot send offline status for printer {printerId}");
+                _logger.LogError("Hub context is null, cannot send offline status for printer {PrinterId}", printerId);
                 return;
             }
 
@@ -1423,17 +1423,17 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: null);
             _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
 
-            _logger.LogInformation($"[MoonrakerSubscriptionService] Broadcasting printerupdated (offline) for {printerId} via SignalR");
+            _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (offline) for {PrinterId} via SignalR", printerId);
             await hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
-            _logger.LogDebug($"Sent offline status for printer {printerId}");
+            _logger.LogDebug("Sent offline status for printer {PrinterId}", printerId);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug($"Offline status update for printer {printerId} was cancelled");
+            _logger.LogDebug("Offline status update for printer {PrinterId} was cancelled", printerId);
         }
         catch (Exception sendEx)
         {
-            _logger.LogError(sendEx, $"Failed to send offline status for printer {printerId}: {sendEx.Message}");
+            _logger.LogError(sendEx, "Failed to send offline status for printer {PrinterId}: {SendExMessage}", printerId, sendEx.Message);
         }
     }
 
@@ -1449,7 +1449,7 @@ public sealed class MoonrakerSubscriptionService(
         {
             if (hub == null)
             {
-                _logger.LogError($"Hub context is null, cannot send shutdown status for printer {printerId}");
+                _logger.LogError("Hub context is null, cannot send shutdown status for printer {PrinterId}", printerId);
                 return;
             }
 
@@ -1463,17 +1463,17 @@ public sealed class MoonrakerSubscriptionService(
                 HomedAxes: null,
                 SpoolInfo: null);
 
-            _logger.LogInformation($"[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {printerId} via SignalR");
+            _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {PrinterId} via SignalR", printerId);
             await hub.Clients.All.SendAsync("printerupdated", shutdownUpdate, ct);
-            _logger.LogDebug($"Sent shutdown status for printer {printerId}");
+            _logger.LogDebug("Sent shutdown status for printer {PrinterId}", printerId);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug($"Shutdown status update for printer {printerId} was cancelled");
+            _logger.LogDebug("Shutdown status update for printer {PrinterId} was cancelled", printerId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to send shutdown status for printer {printerId}: {ex.Message}");
+            _logger.LogError(ex, "Failed to send shutdown status for printer {PrinterId}: {Message}", printerId, ex.Message);
         }
     }
 
@@ -1496,7 +1496,7 @@ public sealed class MoonrakerSubscriptionService(
                 return;
             }
 
-            _logger.LogInformation($"[MoonrakerSubscriptionService] Detected state transition for printer {printerId}: {previousState} -> {newState}");
+            _logger.LogInformation("[MoonrakerSubscriptionService] Detected state transition for printer {PrinterId}: {PreviousState} -> {NewState}", printerId, previousState, newState);
 
             // Create a new scope to get the scoped service
             using IServiceScope scope = scopeFactory.CreateScope();
@@ -1508,7 +1508,7 @@ public sealed class MoonrakerSubscriptionService(
                 bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
                 if (marked)
                 {
-                    _logger.LogInformation($"[MoonrakerSubscriptionService] Print job marked as completed for printer {printerId}");
+                    _logger.LogInformation("[MoonrakerSubscriptionService] Print job marked as completed for printer {PrinterId}", printerId);
                 }
             }
             else if (PrintJobCompletionService.IsFailureState(newState))
@@ -1517,13 +1517,13 @@ public sealed class MoonrakerSubscriptionService(
                 bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
                 if (marked)
                 {
-                    _logger.LogWarning($"[MoonrakerSubscriptionService] Print job marked as failed for printer {printerId} (state: {newState})");
+                    _logger.LogWarning("[MoonrakerSubscriptionService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MoonrakerSubscriptionService] Failed to sync job completion for printer {printerId}: {ex.Message}");
+            _logger.LogError(ex, "[MoonrakerSubscriptionService] Failed to sync job completion for printer {PrinterId}: {Message}", printerId, ex.Message);
         }
     }
 
@@ -1540,17 +1540,17 @@ public sealed class MoonrakerSubscriptionService(
         {
             _ = _pollingModes.AddOrUpdate(printerId, mode, (key, oldValue) => mode);
 
-            _logger.LogInformation($"Set polling mode for printer {printerId} to {mode}: {reason}");
+            _logger.LogInformation("Set polling mode for printer {PrinterId} to {Mode}: {Reason}", printerId, mode, reason);
 
             // Log state transition if mode changed
             if (_pollingModes.TryGetValue(printerId, out PollingMode previousMode) && previousMode != mode)
             {
-                _logger.LogDebug($"Polling mode transition for printer {printerId}: {previousMode} -> {mode}");
+                _logger.LogDebug("Polling mode transition for printer {PrinterId}: {PreviousMode} -> {Mode}", printerId, previousMode, mode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to set polling mode for printer {printerId} to {mode}: {ex.Message}");
+            _logger.LogError("Failed to set polling mode for printer {PrinterId} to {Mode}: {Message}", printerId, mode, ex.Message);
         }
     }
 
@@ -1750,7 +1750,7 @@ public sealed class MoonrakerSubscriptionService(
             if (compositeStatus != null && compositeStatus.IsOnline)
             {
                 // Convert CompositeStatus to StatusUpdate format and send via existing logic
-                _logger.LogDebug($"HTTP polling fallback retrieved status for printer {printer.Name}: State={compositeStatus.State}, IsOnline={compositeStatus.IsOnline}");
+                _logger.LogDebug("HTTP polling fallback retrieved status for printer {PrinterName}: State={CompositeStatusState}, IsOnline={CompositeStatusIsOnline}", printer.Name, compositeStatus.State, compositeStatus.IsOnline);
 
                 // Create a status update using the composite status data
                 PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
@@ -1777,7 +1777,7 @@ public sealed class MoonrakerSubscriptionService(
                 {
                     if (hub == null)
                     {
-                        _logger.LogError($"Hub context is null in HTTP polling fallback for printer {printer.Name}");
+                        _logger.LogError("Hub context is null in HTTP polling fallback for printer {PrinterName}", printer.Name);
                         return;
                     }
 
@@ -1791,7 +1791,7 @@ public sealed class MoonrakerSubscriptionService(
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogDebug($"HTTP polling fallback status update for printer {printer.Name} was cancelled");
+                    _logger.LogDebug("HTTP polling fallback status update for printer {PrinterName} was cancelled", printer.Name);
                 }
                 catch (Exception ex)
                 {

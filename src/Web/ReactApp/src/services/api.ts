@@ -2328,6 +2328,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async getSystemLogStats(): Promise<{ rowCount: number }> {
+    const response = await this.client.get('/systemlogs/stats');
+    return response.data;
+  }
+
   // ============ File Upload API methods ============
   /**
    * Upload a 3D model file with progress tracking

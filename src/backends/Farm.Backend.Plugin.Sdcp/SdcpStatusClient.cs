@@ -5,7 +5,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Sdcp
 {
@@ -17,14 +17,14 @@ namespace Farm.Backend.Plugin.Sdcp
     {
         private readonly ISdcpClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<SdcpStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.SDCP;
 
         public SdcpStatusClient(
             ISdcpClient client,
             ICircuitBreakerService circuitBreaker,
-            IUnifiedLoggingService logger)
+            ILogger<SdcpStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);
@@ -66,12 +66,12 @@ namespace Farm.Backend.Plugin.Sdcp
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning($"[SDCP] Status timeout for printer {printer.Id}");
+                _logger.LogWarning("[SDCP] Status timeout for printer {PrinterId}", printer.Id);
                 return CreateOfflineStatus(printer.Id);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[SDCP] Error getting status for printer {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[SDCP] Error getting status for printer {PrinterId}: {Message}", printer.Id, ex.Message);
                 return CreateOfflineStatus(printer.Id);
             }
         }
@@ -94,7 +94,7 @@ namespace Farm.Backend.Plugin.Sdcp
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[SDCP] Error getting printer DTO for {printer.Id}: {ex.Message}");
+                _logger.LogError("[SDCP] Error getting printer DTO for {PrinterId}: {Message}", printer.Id, ex.Message);
                 throw;
             }
         }
@@ -109,7 +109,7 @@ namespace Farm.Backend.Plugin.Sdcp
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[SDCP] Error getting camera stream URL for {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[SDCP] Error getting camera stream URL for {PrinterId}: {Message}", printer.Id, ex.Message);
                 return null;
             }
         }
@@ -124,7 +124,7 @@ namespace Farm.Backend.Plugin.Sdcp
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[SDCP] Error getting camera snapshot URL for {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[SDCP] Error getting camera snapshot URL for {PrinterId}: {Message}", printer.Id, ex.Message);
                 return null;
             }
         }
@@ -140,7 +140,7 @@ namespace Farm.Backend.Plugin.Sdcp
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[SDCP] Error checking camera availability for {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[SDCP] Error checking camera availability for {PrinterId}: {Message}", printer.Id, ex.Message);
                 return false;
             }
         }

@@ -1,6 +1,7 @@
 ﻿using Farm.Web.Api.Services.Startup;
-using Farm.Web.Api.Tests.TestUtils;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace Farm.Web.Api.Tests;
@@ -9,13 +10,13 @@ public class GracefulShutdownServiceTests
 {
     private readonly Mock<IServiceProvider> _mockServiceProvider;
     private readonly Mock<IHostApplicationLifetime> _mockAppLifetime;
-    private readonly TestLoggingService _testLogger;
+    private readonly ILogger<GracefulShutdownService> _testLogger;
 
     public GracefulShutdownServiceTests()
     {
         _mockServiceProvider = new Mock<IServiceProvider>();
         _mockAppLifetime = new Mock<IHostApplicationLifetime>();
-        _testLogger = new TestLoggingService();
+        _testLogger = NullLogger<GracefulShutdownService>.Instance;
     }
 
     [Fact]

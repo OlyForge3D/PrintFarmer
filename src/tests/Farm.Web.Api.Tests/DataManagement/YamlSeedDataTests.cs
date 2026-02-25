@@ -2,7 +2,6 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
-using Farm.Infrastructure.Telemetry;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +13,7 @@ namespace Farm.Web.Api.Tests.DataManagement;
 public class YamlSeedDataTests
 {
     private readonly AppDbContext _context;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<YamlSeedDataReader>> _loggerMock;
     private readonly Mock<IConfiguration> _configMock;
     private readonly YamlSeedDataReader _yamlReader;
 
@@ -25,7 +24,7 @@ public class YamlSeedDataTests
             .Options;
         _context = new AppDbContext(options);
 
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<YamlSeedDataReader>>();
         _configMock = new Mock<IConfiguration>();
         _configMock.Setup(c => c["SeedData:Path"]).Returns("data/seed/");
 

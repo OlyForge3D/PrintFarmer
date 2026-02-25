@@ -9,11 +9,11 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.StorageManagement;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 using IStoredFileOperationsService = Farm.Infrastructure.Services.FileManagement.IStoredFileOperationsService;
@@ -62,7 +62,7 @@ namespace Farm.Slicer.Module.Tests.Services
         public async Task UploadModelAsync_HappyPath_CreatesEntity()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
 
             Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
             // For happy path: repository returns no existing model for the hash and will accept AddAsync
@@ -103,7 +103,7 @@ namespace Farm.Slicer.Module.Tests.Services
         public async Task UploadModelAsync_Duplicate_TreatedAsDuplicate()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
 
             // Prepare an existing model with a computed hash matching the test content
             string content = "dummy-content";

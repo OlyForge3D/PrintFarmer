@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -29,10 +29,10 @@ public interface IPrinterStatusUpdateReceiver
 /// Receives printer status updates from backend services and stores them in the shared cache.
 /// Allows backend plugins to update the cache without direct dependencies on API services.
 /// </summary>
-public class PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, IUnifiedLoggingService logger) : IPrinterStatusUpdateReceiver
+public class PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, ILogger<PrinterStatusUpdateReceiver> logger) : IPrinterStatusUpdateReceiver
 {
     private readonly IPrinterStatusCacheWriter _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<PrinterStatusUpdateReceiver> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public void ReceiveStatusUpdate(PrinterStatusDto status)
     {
@@ -42,7 +42,7 @@ public class PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, IUnifi
         }
 
         _cache.UpdateStatus(status);
-        _logger.LogDebug($"[StatusCache] Updated printer {status.Id}: IsOnline={status.IsOnline}, State={status.State}");
+        _logger.LogDebug("[StatusCache] Updated printer {StatusId}: IsOnline={StatusIsOnline}, State={StatusState}", status.Id, status.IsOnline, status.State);
     }
 
     public void ReceiveStatusUpdates(IEnumerable<PrinterStatusDto> statuses)

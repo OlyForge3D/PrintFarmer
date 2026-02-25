@@ -11,7 +11,6 @@ using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure.Discovery;
-using Farm.Infrastructure.Telemetry;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
 using Microsoft.Extensions.Logging;
@@ -256,7 +255,7 @@ internal static class Program
             if (slicerType == "orcaslicer")
             {
                 // Use a simple console logger for CLI usage
-                var logger = new ConsoleLoggingService();
+                var logger = ConsoleCliLogger.Instance;
                 var service = new OrcaProfilesService(logger, profilesPath);
 
                 Console.WriteLine("[AdminCli] Parsing machine profiles...");
@@ -444,37 +443,37 @@ internal static class Program
     /// <summary>
     /// Simple console logger for CLI usage without DI container.
     /// </summary>
-    private sealed class ConsoleLoggingService : IUnifiedLoggingService
+    private sealed class ConsoleCliLogger : ILogger
     {
-        public void LogDebug(string message, string? correlationId = null, object? metadata = null) =>
-            Console.WriteLine($"[DEBUG] {message}");
+        public static readonly ConsoleCliLogger Instance = new();
 
-        public void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null) =>
-            Console.WriteLine($"[DEBUG] {message}: {exception.Message}");
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+            => null;
 
-        public void LogInformation(string message, string? correlationId = null, object? metadata = null) =>
-            Console.WriteLine($"[INFO] {message}");
+        public bool IsEnabled(LogLevel logLevel) => true;
 
-        public void LogWarning(string message, string? correlationId = null, object? metadata = null) =>
-            Console.WriteLine($"[WARN] {message}");
-
-        public void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null) =>
-            Console.WriteLine($"[WARN] {message}: {exception.Message}");
-
-        public void LogError(string message, string? correlationId = null, object? metadata = null) =>
-            Console.Error.WriteLine($"[ERROR] {message}");
-
-        public void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null) =>
-            Console.Error.WriteLine($"[ERROR] {message}: {exception.Message}");
-
-        public void LogCritical(string message, string? correlationId = null, object? metadata = null) =>
-            Console.Error.WriteLine($"[CRITICAL] {message}");
-
-        public void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null) =>
-            Console.Error.WriteLine($"[CRITICAL] {message}: {exception.Message}");
-
-        public void LogWithContext(LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null) =>
-            Console.WriteLine($"[{level}] [{category}] {message}");
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            string message = formatter(state, exception);
+            string prefix = logLevel switch
+            {
+                LogLevel.Debug => "[DEBUG]",
+                LogLevel.Information => "[INFO]",
+                LogLevel.Warning => "[WARN]",
+                LogLevel.Error => "[ERROR]",
+                LogLevel.Critical => "[CRITICAL]",
+                _ => $"[{logLevel}]"
+            };
+            if (logLevel >= LogLevel.Error)
+            {
+                Console.Error.WriteLine($"{prefix} {message}");
+            }
+            else
+            {
+                Console.WriteLine($"{prefix} {message}");
+            }
+        }
     }
 
     private static async Task<int> HandleDiscoveryAsync(Dictionary<string, string> argsDic)

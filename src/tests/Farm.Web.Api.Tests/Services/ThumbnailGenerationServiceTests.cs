@@ -4,11 +4,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Thumbnails;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.Rendering;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -16,14 +17,14 @@ namespace Farm.Web.Api.Tests.Services
 {
     public class ThumbnailGenerationServiceTests
     {
-        private readonly Mock<IUnifiedLoggingService> _loggerMock;
+        private readonly Mock<ILogger<ThumbnailGenerationService>> _loggerMock;
         private readonly Mock<IConfiguration> _configurationMock;
         private readonly ThumbnailGenerationService _service;
         private readonly string _testThumbnailsDir;
 
         public ThumbnailGenerationServiceTests()
         {
-            _loggerMock = new Mock<IUnifiedLoggingService>();
+            _loggerMock = new Mock<ILogger<ThumbnailGenerationService>>();
             _configurationMock = new Mock<IConfiguration>();
             _testThumbnailsDir = Path.Combine(Path.GetTempPath(), $"test-thumbnails-{Guid.NewGuid()}");
 

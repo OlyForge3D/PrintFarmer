@@ -6,11 +6,11 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.FileManagement;
 
@@ -27,7 +27,7 @@ namespace Farm.Infrastructure.Services.FileManagement;
 /// </summary>
 public class FileConsistencyAuditService(
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
+    ILogger<FileConsistencyAuditService> logger,
     string modelsPath,
     string gcodePath) : BackgroundService
 {
@@ -56,7 +56,7 @@ public class FileConsistencyAuditService(
     }
 
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<FileConsistencyAuditService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly TimeSpan _interval = TimeSpan.FromHours(1); // Default: audit every hour
     private readonly string _modelsPath = modelsPath ?? throw new ArgumentNullException(nameof(modelsPath));
     private readonly string _gcodePath = gcodePath ?? throw new ArgumentNullException(nameof(gcodePath));
@@ -70,7 +70,7 @@ public class FileConsistencyAuditService(
         if (interval.TotalSeconds > 0)
         {
             // Reflection would be needed to change _interval, so log and use in ExecuteAsync instead
-            _logger.LogInformation($"File consistency audit interval set to {interval.TotalMinutes} minutes");
+            _logger.LogInformation("File consistency audit interval set to {IntervalTotalMinutes} minutes", interval.TotalMinutes);
         }
     }
 
@@ -89,7 +89,7 @@ public class FileConsistencyAuditService(
             }
             catch (Exception ex)
             {
-                _logger.LogError($"File consistency audit failed: {ex.Message}");
+                _logger.LogError("File consistency audit failed: {Message}", ex.Message);
 
                 // Continue running despite errors
             }
@@ -167,11 +167,11 @@ public class FileConsistencyAuditService(
             };
 
             await auditRepo.SaveAuditResultAsync(auditEntry, ct);
-            _logger.LogInformation($"Audit results saved for {auditType}: {auditEntry.SummaryMessage}");
+            _logger.LogInformation("Audit results saved for {AuditType}: {AuditEntrySummaryMessage}", auditType, auditEntry.SummaryMessage);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to save audit results for {auditType}: {ex.Message}");
+            _logger.LogError("Failed to save audit results for {AuditType}: {Message}", auditType, ex.Message);
         }
     }
 
@@ -194,7 +194,7 @@ public class FileConsistencyAuditService(
                 // Check main file
                 if (!fileManagementService.IsSafePath(model.FilePath, _modelsPath))
                 {
-                    _logger.LogWarning($"Model {model.Id}: Unsafe path - {model.FilePath}");
+                    _logger.LogWarning("Model {ModelId}: Unsafe path - {ModelFilePath}", model.Id, model.FilePath);
                     continue;
                 }
 
@@ -206,7 +206,7 @@ public class FileConsistencyAuditService(
 
                 if (!result.IsValid)
                 {
-                    _logger.LogWarning($"Model {model.Id}: {result.FailureReason} - {result.ErrorMessage}");
+                    _logger.LogWarning("Model {ModelId}: {FailureReason} - {ErrorMessage}", model.Id, result.FailureReason, result.ErrorMessage);
                     if (result.FailureReason == "Missing")
                     {
                         results.MissingCount++;
@@ -229,22 +229,22 @@ public class FileConsistencyAuditService(
                     string fullThumbnailPath = Path.Combine(model.FilePath, model.ThumbnailFileName);
                     if (!fileManagementService.IsSafePath(fullThumbnailPath, _modelsPath))
                     {
-                        _logger.LogWarning($"Model {model.Id}: Thumbnail unsafe path - {fullThumbnailPath}");
+                        _logger.LogWarning("Model {ModelId}: Thumbnail unsafe path - {FullThumbnailPath}", model.Id, fullThumbnailPath);
                     }
                     else if (!File.Exists(fullThumbnailPath))
                     {
-                        _logger.LogWarning($"Model {model.Id}: Thumbnail missing - {fullThumbnailPath}");
+                        _logger.LogWarning("Model {ModelId}: Thumbnail missing - {FullThumbnailPath}", model.Id, fullThumbnailPath);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error auditing Model {model.Id}: {ex.Message}");
+                _logger.LogWarning("Error auditing Model {ModelId}: {Message}", model.Id, ex.Message);
             }
         }
 
         results.SummaryMessage = $"Model3D audit: Valid={results.ValidCount}, Missing={results.MissingCount}, Corrupted={results.CorruptedCount}";
-        _logger.LogInformation(results.SummaryMessage);
+        _logger.LogInformation("Model3D audit: Valid={ValidCount}, Missing={MissingCount}, Corrupted={CorruptedCount}", results.ValidCount, results.MissingCount, results.CorruptedCount);
 
         return results;
     }
@@ -267,7 +267,7 @@ public class FileConsistencyAuditService(
             {
                 if (!fileManagementService.IsSafePath(gcodeFile.FilePath, _gcodePath))
                 {
-                    _logger.LogWarning($"GcodeFile {gcodeFile.Id}: Unsafe path - {gcodeFile.FilePath}");
+                    _logger.LogWarning("GcodeFile {GcodeFileId}: Unsafe path - {GcodeFileFilePath}", gcodeFile.Id, gcodeFile.FilePath);
                     continue;
                 }
 
@@ -279,7 +279,7 @@ public class FileConsistencyAuditService(
 
                 if (!result.IsValid)
                 {
-                    _logger.LogWarning($"GcodeFile {gcodeFile.Id}: {result.FailureReason} - {result.ErrorMessage}");
+                    _logger.LogWarning("GcodeFile {GcodeFileId}: {FailureReason} - {ErrorMessage}", gcodeFile.Id, result.FailureReason, result.ErrorMessage);
                     if (result.FailureReason == "Missing")
                     {
                         results.MissingCount++;
@@ -298,12 +298,12 @@ public class FileConsistencyAuditService(
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error auditing GcodeFile {gcodeFile.Id}: {ex.Message}");
+                _logger.LogWarning("Error auditing GcodeFile {GcodeFileId}: {Message}", gcodeFile.Id, ex.Message);
             }
         }
 
         results.SummaryMessage = $"GcodeFile audit: Valid={results.ValidCount}, Missing={results.MissingCount}, Corrupted={results.CorruptedCount}";
-        _logger.LogInformation(results.SummaryMessage);
+        _logger.LogInformation("GcodeFile audit: Valid={ValidCount}, Missing={MissingCount}, Corrupted={CorruptedCount}", results.ValidCount, results.MissingCount, results.CorruptedCount);
 
         return results;
     }
@@ -339,13 +339,13 @@ public class FileConsistencyAuditService(
                     {
                         results.OrphanedCount++;
                         results.OrphanedPaths.Add(filePath);
-                        _logger.LogWarning($"Orphaned model file detected: {filePath}");
+                        _logger.LogWarning("Orphaned model file detected: {FilePath}", filePath);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error scanning for orphaned model files: {ex.Message}");
+                _logger.LogWarning("Error scanning for orphaned model files: {Message}", ex.Message);
             }
         }
 
@@ -362,20 +362,20 @@ public class FileConsistencyAuditService(
                     {
                         results.OrphanedCount++;
                         results.OrphanedPaths.Add(filePath);
-                        _logger.LogWarning($"Orphaned gcode file detected: {filePath}");
+                        _logger.LogWarning("Orphaned gcode file detected: {FilePath}", filePath);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error scanning for orphaned gcode files: {ex.Message}");
+                _logger.LogWarning("Error scanning for orphaned gcode files: {Message}", ex.Message);
             }
         }
 
         results.SummaryMessage = $"Orphaned files audit: Found {results.OrphanedCount} orphaned files";
         if (results.OrphanedCount > 0)
         {
-            _logger.LogInformation(results.SummaryMessage);
+            _logger.LogInformation("Orphaned files audit: Found {OrphanedCount} orphaned files", results.OrphanedCount);
         }
 
         return results;

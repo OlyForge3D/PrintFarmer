@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

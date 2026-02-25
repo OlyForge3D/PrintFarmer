@@ -1,10 +1,10 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -12,13 +12,13 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 public class ConnectionDiagnosticsControllerTests
 {
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<ConnectionDiagnosticsController>> _loggerMock;
     private readonly List<Mock<IPrinterConnectionHealthProvider>> _providerMocks;
     private readonly ConnectionDiagnosticsController _controller;
 
     public ConnectionDiagnosticsControllerTests()
     {
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<ConnectionDiagnosticsController>>();
         _providerMocks = new List<Mock<IPrinterConnectionHealthProvider>>();
         _controller = CreateController();
     }

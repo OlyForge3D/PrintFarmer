@@ -5,7 +5,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.PrusaLink
 {
@@ -17,14 +17,14 @@ namespace Farm.Backend.Plugin.PrusaLink
     {
         private readonly IPrusaLinkClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<PrusaLinkStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.PrusaLink;
 
         public PrusaLinkStatusClient(
             IPrusaLinkClient client,
             ICircuitBreakerService circuitBreaker,
-            IUnifiedLoggingService logger)
+            ILogger<PrusaLinkStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);
@@ -66,12 +66,12 @@ namespace Farm.Backend.Plugin.PrusaLink
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning($"[PrusaLink] Status timeout for printer {printer.Id}");
+                _logger.LogWarning("[PrusaLink] Status timeout for printer {PrinterId}", printer.Id);
                 return CreateOfflineStatus(printer.Id);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[PrusaLink] Error getting status for printer {printer.Id}: {ex.Message}");
+                _logger.LogWarning("[PrusaLink] Error getting status for printer {PrinterId}: {Message}", printer.Id, ex.Message);
                 return CreateOfflineStatus(printer.Id);
             }
         }
@@ -94,7 +94,7 @@ namespace Farm.Backend.Plugin.PrusaLink
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[PrusaLink] Error getting printer DTO for {printer.Id}: {ex.Message}");
+                _logger.LogError("[PrusaLink] Error getting printer DTO for {PrinterId}: {Message}", printer.Id, ex.Message);
                 throw;
             }
         }
@@ -104,7 +104,7 @@ namespace Farm.Backend.Plugin.PrusaLink
             ArgumentNullException.ThrowIfNull(printer);
 
             // PrusaLink camera URLs are not supported due to encoding issues
-            _logger.LogWarning($"[PrusaLink] Camera stream URLs are not supported for PrusaLink printer {printer.Id}");
+            _logger.LogWarning("[PrusaLink] Camera stream URLs are not supported for PrusaLink printer {PrinterId}", printer.Id);
             await Task.CompletedTask;
             return null;
         }
@@ -114,7 +114,7 @@ namespace Farm.Backend.Plugin.PrusaLink
             ArgumentNullException.ThrowIfNull(printer);
 
             // PrusaLink camera URLs are not supported due to encoding issues
-            _logger.LogWarning($"[PrusaLink] Camera snapshot URLs are not supported for PrusaLink printer {printer.Id}");
+            _logger.LogWarning("[PrusaLink] Camera snapshot URLs are not supported for PrusaLink printer {PrinterId}", printer.Id);
             await Task.CompletedTask;
             return null;
         }

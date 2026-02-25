@@ -6,12 +6,12 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/maintenance")]
 [Authorize(Roles = "farm_admin")]
 public class MaintenanceController(
-    IUnifiedLoggingService logger,
+    ILogger<MaintenanceController> logger,
     IMaintenanceAlertRepository alertRepository,
     IMaintenanceLogRepository logRepository,
     IMaintenanceScheduleRepository scheduleRepository,
@@ -33,7 +33,7 @@ public class MaintenanceController(
     IHubContext<MaintenanceHub> maintenanceHub)
     : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<MaintenanceController> _logger = logger;
     private readonly IMaintenanceAlertRepository _alertRepository = alertRepository;
     private readonly IMaintenanceLogRepository _logRepository = logRepository;
     private readonly IMaintenanceScheduleRepository _scheduleRepository = scheduleRepository;
@@ -83,7 +83,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting alert {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting alert {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -102,7 +102,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting alerts for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting alerts for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -147,7 +147,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error acknowledging alert {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error acknowledging alert {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -223,7 +223,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error resolving alert {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error resolving alert {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -269,7 +269,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error dismissing alert {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error dismissing alert {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -312,17 +312,31 @@ public class MaintenanceController(
 
             List<UpcomingMaintenanceTaskDto> tasks = [];
 
+            // Batch-load all data in 3 queries instead of 3 per printer
+            List<Guid> printerIds = printers.Select(p => p.Id).ToList();
+            List<PrinterStatistics> allStats = await _statisticsRepository.GetAllAsync(ct);
+            Dictionary<Guid, PrinterStatistics> statsByPrinter = allStats
+                .Where(s => printerIds.Contains(s.PrinterId))
+                .ToDictionary(s => s.PrinterId);
+            List<MaintenanceSchedule> allSchedules = await _scheduleRepository.GetAllAsync(ct);
+            ILookup<Guid, MaintenanceSchedule> schedulesByPrinter = allSchedules
+                .Where(s => s.PrinterId.HasValue && s.IsActive && printerIds.Contains(s.PrinterId.Value))
+                .ToLookup(s => s.PrinterId!.Value);
+            List<MaintenanceLog> allLogs = await _logRepository.GetAllAsync(cancellationToken: ct);
+            ILookup<Guid, MaintenanceLog> logsByPrinter = allLogs
+                .Where(l => printerIds.Contains(l.PrinterId))
+                .ToLookup(l => l.PrinterId);
+
             foreach (Printer printer in printers)
             {
-                PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(printer.Id, ct);
-                List<MaintenanceSchedule> schedules = await _scheduleRepository.GetActivePrinterSchedulesAsync(printer.Id, ct);
+                statsByPrinter.TryGetValue(printer.Id, out PrinterStatistics? stats);
+                List<MaintenanceSchedule> schedules = schedulesByPrinter[printer.Id].ToList();
                 if (schedules.Count == 0)
                 {
                     continue;
                 }
 
-                List<MaintenanceLog> logs = await _logRepository.GetByPrinterIdAsync(printer.Id, ct);
-                Dictionary<Guid, MaintenanceLog> lastLogByScheduleId = logs
+                Dictionary<Guid, MaintenanceLog> lastLogByScheduleId = logsByPrinter[printer.Id]
                     .Where(l => l.MaintenanceScheduleId.HasValue)
                     .GroupBy(l => l.MaintenanceScheduleId!.Value)
                     .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.PerformedAt).First());
@@ -520,7 +534,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting logs for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting logs for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -610,7 +624,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting schedules for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting schedules for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -650,7 +664,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting schedule templates for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting schedule templates for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -722,7 +736,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error updating schedule {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error updating schedule {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -750,7 +764,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error deleting schedule {id}");
+            _logger.LogError(ex, "[MaintenanceController] Error deleting schedule {Id}", id);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -1115,7 +1129,7 @@ public class MaintenanceController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error getting statistics for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error getting statistics for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -1148,13 +1162,13 @@ public class MaintenanceController(
 
             // The IPrintersService doesn't have UpdateAsync, so we rely on EF Core change tracking
             // No explicit call needed - changes are saved automatically
-            _logger.LogInformation($"[MaintenanceController] Printer {printerId} maintenance mode set to {request.InMaintenance}");
+            _logger.LogInformation("[MaintenanceController] Printer {PrinterId} maintenance mode set to {RequestInMaintenance}", printerId, request.InMaintenance);
 
             return NoContent();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"[MaintenanceController] Error updating maintenance mode for printer {printerId}");
+            _logger.LogError(ex, "[MaintenanceController] Error updating maintenance mode for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
     }

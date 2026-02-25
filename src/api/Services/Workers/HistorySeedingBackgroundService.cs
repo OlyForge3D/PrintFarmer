@@ -2,7 +2,7 @@
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.Workers;
@@ -51,13 +51,13 @@ public class HistorySeedingSettings : IAppSetting
 /// </summary>
 public class HistorySeedingBackgroundService(
     IServiceProvider serviceProvider,
-    IUnifiedLoggingService logger,
+    ILogger<HistorySeedingSettings> logger,
     IOptionsMonitor<HistorySeedingSettings> settingsMonitor,
     IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
     private const string ServiceId = "HistorySeedingService";
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<HistorySeedingSettings> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<HistorySeedingSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
     private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
 
@@ -84,7 +84,7 @@ public class HistorySeedingBackgroundService(
 
         _serviceMonitor.ReportEnabled(ServiceId, true);
         _logger.LogInformation(
-            $"History seeding service started. Interval: {settings.IntervalMinutes}m, Initial delay: {settings.InitialDelaySeconds}s (fetches all available history)");
+            "History seeding service started. Interval: {SettingsIntervalMinutes}m, Initial delay: {SettingsInitialDelaySeconds}s (fetches all available history)", settings.IntervalMinutes, settings.InitialDelaySeconds);
 
         // Initial delay to let the system stabilize
         await Task.Delay(TimeSpan.FromSeconds(settings.InitialDelaySeconds), stoppingToken);

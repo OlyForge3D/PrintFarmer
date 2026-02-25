@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Queue
 {
@@ -30,7 +30,7 @@ namespace Farm.Infrastructure.Services.Queue
     {
         private readonly IQueueRepository _repo;
         private readonly IQueueDataService _dataService;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<JobQueueService> _logger;
 
         /// <summary>
         /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -42,7 +42,7 @@ namespace Farm.Infrastructure.Services.Queue
         public JobQueueService(
             IQueueRepository repo,
             IQueueDataService dataService,
-            IUnifiedLoggingService logger)
+            ILogger<JobQueueService> logger)
         {
             ArgumentNullException.ThrowIfNull(repo);
             ArgumentNullException.ThrowIfNull(dataService);
@@ -101,14 +101,21 @@ namespace Farm.Infrastructure.Services.Queue
 
             List<QueueOverviewDto> overview = [];
 
+            // Batch-load all jobs for all printers in a SINGLE query (was 2N+1 queries before)
+            List<Guid> printerIds = printers.Select(p => p.Id).ToList();
+            List<PrintJob> allJobsForAllPrinters = await _dataService.GetPrintJobsForPrintersAsync(printerIds, ct);
+            ILookup<Guid?, List<PrintJob>> jobsByPrinter = allJobsForAllPrinters
+                .GroupBy(j => j.AssignedPrinterId)
+                .ToLookup(g => g.Key, g => g.ToList());
+
             foreach (Printer printer in printers)
             {
-                List<PrintJob> allJobs = await _dataService.GetPrintJobsForPrinterAsync(printer.Id, ct);
+                List<PrintJob> allJobs = jobsByPrinter.Contains(printer.Id)
+                    ? jobsByPrinter[printer.Id].First()
+                    : [];
 
-                // Count jobs with Queued or Assigned status for the QueuedJobsCount display
-                // Assigned = job is assigned to this printer but not yet printing
                 int queuedCount = allJobs.Count(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned);
-                PrintJob? currentJob = await _dataService.GetCurrentJobForPrinterAsync(printer.Id, ct);
+                PrintJob? currentJob = allJobs.FirstOrDefault(j => j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting);
 
                 // Get primary toolhead info (first toolhead or the one marked as primary)
                 Toolhead? primaryToolhead = printer.Toolheads?.FirstOrDefault(t => t.IsPrimary)
@@ -583,7 +590,9 @@ namespace Farm.Infrastructure.Services.Queue
                 totalMinutes += Math.Max(0, remaining.TotalMinutes);
             }
 
-            totalMinutes += queuedJobs.Where(j => j.EstimatedPrintTime.HasValue).Sum(j => j.EstimatedPrintTime!.Value.TotalMinutes);
+            totalMinutes += queuedJobs
+                .Where(j => j.EstimatedPrintTime.HasValue && j != currentJob)
+                .Sum(j => j.EstimatedPrintTime!.Value.TotalMinutes);
 
             return totalMinutes > 0 ? DateTime.UtcNow.AddMinutes(totalMinutes) : null;
         }

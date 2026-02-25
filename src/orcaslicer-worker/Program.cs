@@ -1,12 +1,12 @@
 ﻿using System.Net.Http.Headers;
 using System.Text.Json;
-using Farm.Infrastructure.Telemetry;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker;
 
@@ -43,15 +43,11 @@ public static class Program
         // Profile services - use SQLite-cached service for fast queries
         _ = builder.Services.AddSingleton<CachedOrcaProfilesService>(sp =>
         {
-            IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
+            ILogger<CachedOrcaProfilesService> logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<CachedOrcaProfilesService>();
             return new CachedOrcaProfilesService(logger);
         });
         _ = builder.Services.AddSingleton<ISlicerProfilesService>(sp => sp.GetRequiredService<CachedOrcaProfilesService>());
         _ = builder.Services.AddSingleton<IProfilePreloadService, ProfilePreloadService>(); // profile preload before readiness
-
-        // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
-        _ = builder.Services.AddSingleton<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
-        _ = builder.Services.AddScoped<IUnifiedLoggingService, UnifiedLoggingService>();
 
         // Background services (shared graceful shutdown + queue consumer derived)
         _ = builder.Services.AddHostedService<GracefulShutdownService>(); // shared
