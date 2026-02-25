@@ -5,8 +5,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.DataManagement;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.DataManagement;
 
@@ -16,12 +16,12 @@ namespace Farm.Infrastructure.Services.DataManagement;
 public class DataImportService : IDataImportService
 {
     private readonly AppDbContext _context;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<DataImportService> _logger;
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector;
 
     public DataImportService(
         AppDbContext context,
-        IUnifiedLoggingService logger,
+        ILogger<DataImportService> logger,
         Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector)
     {
         _context = context;

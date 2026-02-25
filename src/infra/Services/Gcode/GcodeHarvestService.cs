@@ -18,16 +18,17 @@ using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Resilience;
+using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MoonrakerDir = Farm.Infrastructure.Contracts.Printers.Moonraker.MoonrakerDirectoryInfo;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Gcode;
 
@@ -37,7 +38,7 @@ namespace Farm.Infrastructure.Services.Gcode;
 /// </summary>
 public class GcodeHarvestService(
     IUnitOfWork unitOfWork,
-    IUnifiedLoggingService logger,
+    ILogger<GcodeHarvestService> logger,
     IServiceScopeFactory serviceScopeFactory,
     IStoragePathService storagePathService,
     IBackendCapabilityFactory capabilityFactory,
@@ -46,7 +47,7 @@ public class GcodeHarvestService(
     IPrintFarmerTelemetryService telemetry) : IGcodeHarvestService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<GcodeHarvestService> _logger = logger;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
     private readonly IStoragePathService _storagePathService = storagePathService;
@@ -108,7 +109,7 @@ public class GcodeHarvestService(
 
         // Trigger the import for this single file by calling ImportSelectedFilesAsync
         // This ensures the retry uses the exact same import logic as the original import
-        _logger.LogInformationWithSource($"Retrying import for file {file.FileName} (ID: {fileId})");
+        _logger.LogInformation($"Retrying import for file {file.FileName} (ID: {fileId})");
 
         try
         {
@@ -537,7 +538,7 @@ public class GcodeHarvestService(
 
     private async Task<MemoryStream?> DownloadFileAsync(PrinterBackend backend, Printer printer, string filePath)
     {
-        IUnifiedLoggingService log = _logger;
+        ILogger<GcodeHarvestService> log = _logger;
         try
         {
             // Check if the backend supports file downloads using capability factory
@@ -769,13 +770,13 @@ public class GcodeHarvestService(
             return new GcodeHarvestResultDto(request.HarvestOperationId, false, "Harvest operation not found");
         }
 
-        _logger.LogInformationWithSource($"Received {request.FileIds.Length} file IDs to import: {string.Join(", ", request.FileIds)}");
+        _logger.LogInformation($"Received {request.FileIds.Length} file IDs to import: {string.Join(", ", request.FileIds)}");
 
         // Load only IDs initially - don't load entities in main context
         // Each file will be loaded fresh within its own scoped context
         List<Guid> fileIdsToImport = request.FileIds.ToList();
 
-        _logger.LogInformationWithSource($"Processing {fileIdsToImport.Count} selected files sequentially");
+        _logger.LogInformation($"Processing {fileIdsToImport.Count} selected files sequentially");
 
         List<string> importedFileIds = new();
         List<string> skippedFileIds = new();
@@ -787,7 +788,7 @@ public class GcodeHarvestService(
         // Each file is loaded FRESH within its own scoped context to avoid cross-context FK violations
         foreach (Guid fileId in fileIdsToImport)
         {
-            _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Starting import iteration for fileId={fileId}");
+            _logger.LogDebug($"[IMPORT-LIFECYCLE] Starting import iteration for fileId={fileId}");
             try
             {
                 // Create a new scope for this import to get fresh DbContext
@@ -809,11 +810,11 @@ public class GcodeHarvestService(
                     continue;
                 }
 
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Loaded discovered file: {discoveredFile.FileName}, Status={discoveredFile.Status}");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Loaded discovered file: {discoveredFile.FileName}, Status={discoveredFile.Status}");
 
                 if (discoveredFile.AlreadyInLibrary)
                 {
-                    _logger.LogInformationWithSource($"File {discoveredFile.FileName} already in library, skipping");
+                    _logger.LogInformation($"File {discoveredFile.FileName} already in library, skipping");
                     skippedFileIds.Add(discoveredFile.Id.ToString());
                     continue;
                 }
@@ -823,9 +824,9 @@ public class GcodeHarvestService(
                 discoveredFile.StartedAt = DateTime.UtcNow;
                 await scopedHarvestRepo.SaveChangesAsync(ct);
 
-                _logger.LogInformationWithSource($"[IMPORT-LIFECYCLE] Updated status to InProgress for {discoveredFile.FileName}, saved to DB");
+                _logger.LogInformation($"[IMPORT-LIFECYCLE] Updated status to InProgress for {discoveredFile.FileName}, saved to DB");
                 await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToEventDto(discoveredFile), ct);
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Sent harvestfileupdated event for {discoveredFile.FileName}");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Sent harvestfileupdated event for {discoveredFile.FileName}");
 
                 // Get storage directory from centralized storage service (supports Docker and K8s)
                 string storageDir = _storagePathService.GetGcodeStorageDirectory();
@@ -872,7 +873,7 @@ public class GcodeHarvestService(
                     continue;
                 }
 
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Successfully downloaded {discoveredFile.FileName}, size={gcodeContent.Length} bytes");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Successfully downloaded {discoveredFile.FileName}, size={gcodeContent.Length} bytes");
 
                 // Save to local storage
                 await using (FileStream fileStream = File.Create(filePath))
@@ -904,17 +905,17 @@ public class GcodeHarvestService(
                     }
                 }
 
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved file to disk: {filePath}");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Saved file to disk: {filePath}");
                 _telemetry.RecordFileOperation("harvest_download", Path.GetExtension(discoveredFile.FileName).TrimStart('.'), gcodeContent.Length);
 
                 // Get or create root folder for gcode files
                 FolderNode targetFolder = await _unitOfWork.Folders.GetOrCreateFolderAsync("/", "gcode", ct);
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Got or created folder: {targetFolder.Path}, Id={targetFolder.Id}");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Got or created folder: {targetFolder.Path}, Id={targetFolder.Id}");
 
                 // Hand off to GcodeFileProcessingService for unified processing via ProcessAndStoreGcodeFileAsync
                 // This handles: storage (we already did this, but service will overwrite), hash, duplicate check,
                 // metadata extraction, thumbnail processing, entity creation, and database save
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Processing file '{discoveredFile.FileName}' via GcodeFileProcessingService");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Processing file '{discoveredFile.FileName}' via GcodeFileProcessingService");
 
                 GcodeFile gcodeFile;
                 try
@@ -937,7 +938,7 @@ public class GcodeHarvestService(
                         thumbnailUrl: discoveredFile.ThumbnailUrl,
                         ct: ct);
 
-                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Created GcodeFile via service: Id={gcodeFile.Id}, FolderId={targetFolder.Id}, PrinterModelId={gcodeFile.PrinterModelId}");
+                    _logger.LogDebug($"[IMPORT-LIFECYCLE] Created GcodeFile via service: Id={gcodeFile.Id}, FolderId={targetFolder.Id}, PrinterModelId={gcodeFile.PrinterModelId}");
 
                     // Update discovered file hash from the gcodeFile
                     discoveredFile.FileHash = gcodeFile.FileHash;
@@ -950,7 +951,7 @@ public class GcodeHarvestService(
                     if (existingFile != null)
                     {
                         gcodeFile = existingFile;
-                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Reusing existing GcodeFile for duplicate content: Id={gcodeFile.Id}");
+                        _logger.LogDebug($"[IMPORT-LIFECYCLE] Reusing existing GcodeFile for duplicate content: Id={gcodeFile.Id}");
                     }
                     else
                     {
@@ -961,26 +962,26 @@ public class GcodeHarvestService(
 
                 // Now create mapping between discovered file and imported gcode file
                 // At this point both files are committed to the database
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Preparing to create mapping for discoveredFile={discoveredFile.Id} -> gcodeFile={gcodeFile.Id}");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Preparing to create mapping for discoveredFile={discoveredFile.Id} -> gcodeFile={gcodeFile.Id}");
                 await scopedHarvestRepo.CreateFileImportMappingAsync(discoveredFile, gcodeFile, ct);
 
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Created file import mapping: discoveredFileId={discoveredFile.Id} -> gcodeFileId={gcodeFile.Id}");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Created file import mapping: discoveredFileId={discoveredFile.Id} -> gcodeFileId={gcodeFile.Id}");
 
                 // Save the mapping
                 await scopedHarvestRepo.SaveChangesAsync(ct);
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved mapping to database");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Saved mapping to database");
 
                 // Mark as complete now that the mapping was persisted
                 discoveredFile.Status = HarvestFileStatus.Complete;
                 discoveredFile.CompletedAt = DateTime.UtcNow;
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Marked discoveredFile status as Complete");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Marked discoveredFile status as Complete");
                 await scopedHarvestRepo.SaveChangesAsync(ct);
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved discovered file status: {discoveredFile.Id}, Status={discoveredFile.Status}");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Saved discovered file status: {discoveredFile.Id}, Status={discoveredFile.Status}");
 
                 // Broadcast completion update
                 await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToEventDto(discoveredFile), ct);
 
-                _logger.LogInformationWithSource($"✅ [IMPORT-LIFECYCLE] Successfully imported file: {discoveredFile.FileName} -> {gcodeFile.Id}");
+                _logger.LogInformation($"✅ [IMPORT-LIFECYCLE] Successfully imported file: {discoveredFile.FileName} -> {gcodeFile.Id}");
 
                 importedFileIds.Add(discoveredFile.Id.ToString());
 
@@ -1021,23 +1022,23 @@ public class GcodeHarvestService(
                     IUnitOfWork errorUnitOfWork = errorScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                     IHarvestRepository errorHarvestRepo = errorUnitOfWork.HarvestOperations;
 
-                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Loading discovered file in error scope: {fileId}");
+                    _logger.LogDebug($"[IMPORT-LIFECYCLE] Loading discovered file in error scope: {fileId}");
 
                     // Reload the discovered file to update its status
                     HarvestDiscoveredFile? dbFile = await errorHarvestRepo.GetDiscoveredFileByIdAsync(fileId, operation.Id, ct);
                     if (dbFile != null)
                     {
-                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Found discovered file in error scope: {dbFile.FileName}, current status={dbFile.Status}");
+                        _logger.LogDebug($"[IMPORT-LIFECYCLE] Found discovered file in error scope: {dbFile.FileName}, current status={dbFile.Status}");
 
                         dbFile.Status = HarvestFileStatus.Failed;
                         dbFile.Error = $"Failed to import {dbFile.FileName}: {errorMessage}";
                         dbFile.CompletedAt = DateTime.UtcNow;
 
-                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Updated status to Failed, saving...");
+                        _logger.LogDebug($"[IMPORT-LIFECYCLE] Updated status to Failed, saving...");
 
                         await errorHarvestRepo.SaveChangesAsync(ct);
 
-                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved failed status, broadcasting event...");
+                        _logger.LogDebug($"[IMPORT-LIFECYCLE] Saved failed status, broadcasting event...");
 
                         // Send failure event to UI
                         await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToEventDto(dbFile), ct);
@@ -1062,9 +1063,9 @@ public class GcodeHarvestService(
 
         try
         {
-            _logger.LogInformationWithSource($"Saving harvest operation: {importedFileIds.Count} added, {skippedFileIds.Count} skipped, {failedFileIds.Count} errored");
+            _logger.LogInformation($"Saving harvest operation: {importedFileIds.Count} added, {skippedFileIds.Count} skipped, {failedFileIds.Count} errored");
             await _unitOfWork.SaveChangesAsync(ct);
-            _logger.LogInformationWithSource($"Harvest operation saved successfully");
+            _logger.LogInformation($"Harvest operation saved successfully");
 
             // Broadcast final operation progress update with error count
             await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestoperationprogress", new
@@ -1076,11 +1077,11 @@ public class GcodeHarvestService(
                 filesSkipped = operation.FilesSkipped,
                 filesErrored = operation.FilesErrored
             }, ct);
-            _logger.LogInformationWithSource($"Sent final operation progress: Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored}");
+            _logger.LogInformation($"Sent final operation progress: Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored}");
         }
         catch (Exception ex)
         {
-            _logger.LogErrorWithSource(ex, $"Error saving harvest operation: {ex.Message} | Inner: {ex.InnerException?.Message}");
+            _logger.LogError(ex, $"Error saving harvest operation: {ex.Message} | Inner: {ex.InnerException?.Message}");
 
             // Don't throw - we want to return partial results to the client
             // Add this error to the general errors list

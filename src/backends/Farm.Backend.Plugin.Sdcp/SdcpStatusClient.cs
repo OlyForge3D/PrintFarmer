@@ -5,7 +5,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Sdcp
 {
@@ -17,14 +17,14 @@ namespace Farm.Backend.Plugin.Sdcp
     {
         private readonly ISdcpClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<SdcpStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.SDCP;
 
         public SdcpStatusClient(
             ISdcpClient client,
             ICircuitBreakerService circuitBreaker,
-            IUnifiedLoggingService logger)
+            ILogger<SdcpStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);

@@ -11,15 +11,15 @@ using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Spoolman;
 
-public class SpoolmanService(HttpClient http, ISettingsService settingsService, IUnifiedLoggingService logger) : ISpoolmanService
+public class SpoolmanService(HttpClient http, ISettingsService settingsService, ILogger<SpoolmanService> logger) : ISpoolmanService
 {
     private readonly HttpClient http = http;
     private readonly ISettingsService settingsService = settingsService;
-    private readonly IUnifiedLoggingService logger = logger;
+    private readonly ILogger<SpoolmanService> logger = logger;
 
     public SpoolmanConfigDto? GetConfig()
     {

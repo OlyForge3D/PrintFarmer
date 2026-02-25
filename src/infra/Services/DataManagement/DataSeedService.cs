@@ -4,8 +4,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.DataManagement;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.DataManagement;
 
@@ -16,12 +16,12 @@ public class DataSeedService : IDataSeedService
 {
     private readonly AppDbContext _context;
     private readonly IYamlSeedDataReader _yamlReader;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<DataSeedService> _logger;
 
     public DataSeedService(
         AppDbContext context,
         IYamlSeedDataReader yamlReader,
-        IUnifiedLoggingService logger)
+        ILogger<DataSeedService> logger)
     {
         _context = context;
         _yamlReader = yamlReader;

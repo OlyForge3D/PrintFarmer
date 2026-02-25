@@ -8,12 +8,12 @@ using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Discovery;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services;
 
@@ -124,7 +124,7 @@ public class DiscoveryProxyServiceTests
         Mock<IDiscoveryProgressCache> progressCache,
         Mock<ISettingsService> settingsService)
     {
-        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        Mock<ILogger<DiscoveryProxyService>> logger = new Mock<ILogger<DiscoveryProxyService>>();
 
         IConfiguration config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { { "PRINTER_DISCOVERY_URL", "http://discovery.local" } })

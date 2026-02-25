@@ -6,8 +6,8 @@ using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Discovery;
 
@@ -21,7 +21,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
     private readonly IHubContext<PrinterHub> _hubContext;
     private readonly IDiscoveryProgressCache _progressCache;
     private readonly ISettingsService _settingsService;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<DiscoveryProxyService> _logger;
     private readonly string _discoveryServiceUrl;
 
     public DiscoveryProxyService(
@@ -29,7 +29,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         IHubContext<PrinterHub> hubContext,
         IDiscoveryProgressCache progressCache,
         ISettingsService settingsService,
-        IUnifiedLoggingService logger,
+        ILogger<DiscoveryProxyService> logger,
         IConfiguration config)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));

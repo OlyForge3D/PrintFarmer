@@ -1,11 +1,11 @@
 ﻿using System.Text.RegularExpressions;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Gcode;
 
-public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGcodeMetadataExtractorService
+public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService> logger) : IGcodeMetadataExtractorService
 {
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<GcodeMetadataExtractorService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Extract metadata from G-code file content by parsing comment lines.

@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Services.Gcode;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Startup;
 
@@ -9,11 +9,11 @@ namespace Farm.Web.Api.Services.Startup;
 public class GracefulShutdownService(
     IServiceProvider serviceProvider,
     IHostApplicationLifetime appLifetime,
-    IUnifiedLoggingService logger) : IHostedService
+    ILogger<GracefulShutdownService> logger) : IHostedService
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IHostApplicationLifetime _appLifetime = appLifetime;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<GracefulShutdownService> _logger = logger;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {

@@ -1,7 +1,7 @@
 ﻿using System.Net.Http.Headers;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Primitives;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -77,7 +77,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
     private readonly RequestDelegate _next = next;
     private readonly SpaProxyActivationState _state = state;
 
-    public async Task InvokeAsync(HttpContext context, [FromServices] IUnifiedLoggingService logger)
+    public async Task InvokeAsync(HttpContext context, [FromServices] ILogger<SpaProxyActivationState> logger)
     {
         // Only proxy when activated, only for root-like SPA routes, and only for GET/HEAD
         ArgumentNullException.ThrowIfNull(context);

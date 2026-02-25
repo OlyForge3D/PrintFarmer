@@ -7,7 +7,7 @@ using AutoMapper;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Cameras;
 
@@ -17,13 +17,13 @@ namespace Farm.Infrastructure.Services.Cameras;
 public class CameraService : ICameraService
 {
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<CameraService> _logger;
     private readonly IMapper _mapper;
     private readonly IPrintersService _printersService;
 
     public CameraService(
         IUnitOfWork unitOfWork,
-        IUnifiedLoggingService logger,
+        ILogger<CameraService> logger,
         IMapper mapper,
         IPrintersService printersService)
     {

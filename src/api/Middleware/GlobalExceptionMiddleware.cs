@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -20,7 +21,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
 
     private readonly RequestDelegate _next = next ?? throw new ArgumentNullException(nameof(next));
 
-    public async Task InvokeAsync(HttpContext context, [FromServices] IUnifiedLoggingService logger)
+    public async Task InvokeAsync(HttpContext context, [FromServices] ILogger<GlobalExceptionMiddleware> logger)
     {
         ArgumentNullException.ThrowIfNull(context);
 

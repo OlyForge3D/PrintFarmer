@@ -6,11 +6,11 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.FileManagement;
 
@@ -27,7 +27,7 @@ namespace Farm.Infrastructure.Services.FileManagement;
 /// </summary>
 public class FileConsistencyAuditService(
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
+    ILogger<FileConsistencyAuditService> logger,
     string modelsPath,
     string gcodePath) : BackgroundService
 {
@@ -56,7 +56,7 @@ public class FileConsistencyAuditService(
     }
 
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<FileConsistencyAuditService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly TimeSpan _interval = TimeSpan.FromHours(1); // Default: audit every hour
     private readonly string _modelsPath = modelsPath ?? throw new ArgumentNullException(nameof(modelsPath));
     private readonly string _gcodePath = gcodePath ?? throw new ArgumentNullException(nameof(gcodePath));

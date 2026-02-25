@@ -2,7 +2,6 @@
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Tests.Services;
-using Farm.Slicer.Module.Tests.TestUtils;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;

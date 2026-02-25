@@ -1,12 +1,12 @@
 ﻿using System.Collections.Concurrent;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.RateLimiting;
 
-public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingService logger) : IRateLimitService
+public class InMemoryRateLimitService(RateLimitOptions options, ILogger<InMemoryRateLimitService> logger) : IRateLimitService
 {
     private readonly RateLimitOptions _options = options;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<InMemoryRateLimitService> _logger = logger;
     private readonly ConcurrentDictionary<string, List<DateTime>> _passwordResetAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _emailConfirmationAttempts = new();
     private readonly ConcurrentDictionary<Guid, List<DateTime>> _sliceJobSubmitAttempts = new();

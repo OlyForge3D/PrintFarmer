@@ -1,7 +1,7 @@
 ﻿using System.Net;
 using System.Runtime.InteropServices;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Network;
 
@@ -9,9 +9,9 @@ namespace Farm.Infrastructure.Network;
 /// Handles URL rewriting for external services based on the runtime environment.
 /// This allows the same configuration to work across Docker, native execution, and different platforms.
 /// </summary>
-public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfiguration configuration) : INetworkUrlRewriteService
+public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, IConfiguration configuration) : INetworkUrlRewriteService
 {
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<NetworkUrlRewriteService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
 
     /// <summary>

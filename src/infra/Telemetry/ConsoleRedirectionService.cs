@@ -32,9 +32,9 @@ public interface IConsoleRedirectionService
     void WriteError(string message);
 }
 
-public class ConsoleRedirectionService(IUnifiedLoggingService unifiedLogger) : IConsoleRedirectionService, IDisposable
+public class ConsoleRedirectionService(ILogger<ConsoleRedirectionService> unifiedLogger) : IConsoleRedirectionService, IDisposable
 {
-    private readonly IUnifiedLoggingService _unifiedLogger = unifiedLogger;
+    private readonly ILogger<ConsoleRedirectionService> _unifiedLogger = unifiedLogger;
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA2213:DisposableFieldsShouldBeDisposed", Justification = "Do not dispose system-owned Console.Out")]
     private readonly TextWriter _originalOut = Console.Out;
 
@@ -61,13 +61,13 @@ public class ConsoleRedirectionService(IUnifiedLoggingService unifiedLogger) : I
 
     public void WriteLine(string message)
     {
-        _unifiedLogger.LogWithContext(LogLevel.Information, "Console", message);
+        _unifiedLogger.LogInformation(message);
         _originalOut.WriteLine(message); // Also write to original console for debugging
     }
 
     public void WriteError(string message)
     {
-        _unifiedLogger.LogWithContext(LogLevel.Error, "Console.Error", message);
+        _unifiedLogger.LogError(message);
         _originalError.WriteLine(message); // Also write to original console for debugging
     }
 
@@ -85,9 +85,9 @@ public class ConsoleRedirectionService(IUnifiedLoggingService unifiedLogger) : I
     }
 }
 
-internal class UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLevel logLevel, string category) : TextWriter
+internal class UnifiedConsoleWriter(ILogger<ConsoleRedirectionService> unifiedLogger, LogLevel logLevel, string category) : TextWriter
 {
-    private readonly IUnifiedLoggingService _unifiedLogger = unifiedLogger;
+    private readonly ILogger<ConsoleRedirectionService> _unifiedLogger = unifiedLogger;
     private readonly LogLevel _logLevel = logLevel;
     private readonly string _category = category;
     private readonly StringBuilder _buffer = new();
@@ -123,7 +123,7 @@ internal class UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLev
             string message = _buffer.ToString();
             _ = _buffer.Clear();
 
-            _unifiedLogger.LogWithContext(_logLevel, _category, message);
+            _unifiedLogger.Log(_logLevel, message);
         }
     }
 

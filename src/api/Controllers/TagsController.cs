@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Services.Tags;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Api.Controllers;
 
@@ -14,10 +15,10 @@ namespace Farm.Api.Controllers;
 [Produces("application/json")]
 [Tags("Tags")]
 public class TagsController(
-    Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService,
+    ILogger<TagsController> unifiedLoggingService,
     ITagService tagService) : ControllerBase
 {
-    private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService = unifiedLoggingService;
+    private readonly ILogger<TagsController> _unifiedLoggingService = unifiedLoggingService;
     private readonly ITagService _tagService = tagService;
 
     /// <summary>

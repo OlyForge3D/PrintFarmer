@@ -5,7 +5,6 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,10 +20,10 @@ namespace Farm.Backend.Plugin.Sdcp;
 public sealed class SdcpPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
+    ILogger<SdcpPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<SdcpPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
@@ -205,21 +204,13 @@ public sealed class SdcpPollingService(
 
                     if (!wasOnline && status.IsOnline)
                     {
-                        _logger.LogWithContext(
-                            LogLevel.Information,
-                            "SDCP",
-                            "SDCP printer recovered to Online",
-                            correlationId: printerId.ToString("N"),
-                            metadata: new { printerId, backendUrl = printer.BackendUrl, previousFailures });
+                        _logger.LogInformation("SDCP printer recovered to Online. PrinterId={PrinterId}, BackendUrl={BackendUrl}, PreviousFailures={PreviousFailures}",
+                            printerId, printer.BackendUrl, previousFailures);
                     }
                     else if (previousFailures > 0)
                     {
-                        _logger.LogWithContext(
-                            LogLevel.Debug,
-                            "SDCP",
-                            "SDCP poll succeeded after failures",
-                            correlationId: printerId.ToString("N"),
-                            metadata: new { printerId, backendUrl = printer.BackendUrl, previousFailures, isOnline = status.IsOnline, state = status.State });
+                        _logger.LogDebug("SDCP poll succeeded after failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, PreviousFailures={PreviousFailures}",
+                            printerId, printer.BackendUrl, previousFailures);
                     }
 
                     _logger.LogDebug($"SDCP {printerId}: Got status - Online={status.IsOnline}, State={status.State}, Progress={status.Progress}, JobName={status.JobName}");
@@ -291,13 +282,8 @@ public sealed class SdcpPollingService(
                     state.ConsecutiveFailures++;
                     _logger.LogDebug(ex, $"Failed to poll SDCP printer {printerId} (attempt {state.ConsecutiveFailures})");
 
-                    _logger.LogWithContext(
-                        LogLevel.Debug,
-                        "SDCP",
-                        "SDCP poll failed",
-                        correlationId: printerId.ToString("N"),
-                        metadata: new { printerId, backendUrl = printer?.BackendUrl, attempt = state.ConsecutiveFailures },
-                        exception: ex);
+                    _logger.LogDebug(ex, "SDCP poll failed. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Attempt={Attempt}",
+                        printerId, printer?.BackendUrl, state.ConsecutiveFailures);
 
                     // Track reconnecting state on first failure
                     if (state.ConsecutiveFailures == 1)
@@ -311,12 +297,8 @@ public sealed class SdcpPollingService(
                         _logger.LogWarning($"SDCP printer {printerId} marked offline after {state.ConsecutiveFailures} failures");
                         state.LastKnownIsOnline = false;
 
-                        _logger.LogWithContext(
-                            LogLevel.Warning,
-                            "SDCP",
-                            "SDCP printer marked Offline after consecutive failures",
-                            correlationId: printerId.ToString("N"),
-                            metadata: new { printerId, backendUrl = printer?.BackendUrl, failures = state.ConsecutiveFailures });
+                        _logger.LogWarning("SDCP printer marked Offline after consecutive failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Failures={Failures}",
+                            printerId, printer?.BackendUrl, state.ConsecutiveFailures);
 
                         RecordHealthTransition(printerId, printer?.Name ?? printerId.ToString(), PrinterConnectionState.Offline, $"Failed {state.ConsecutiveFailures} consecutive times");
 

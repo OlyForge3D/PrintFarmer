@@ -5,10 +5,10 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -19,10 +19,10 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public sealed class PrusaLinkPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
+    ILogger<PrusaLinkPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<PrusaLinkPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;

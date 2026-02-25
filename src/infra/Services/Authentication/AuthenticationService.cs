@@ -5,10 +5,10 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Authentication;
 
@@ -16,7 +16,7 @@ public class AuthenticationService(
     IUsersRepository usersRepository,
     IPasswordHashingService passwordHashing,
     IConfiguration configuration,
-    IUnifiedLoggingService logger,
+    ILogger<AuthenticationService> logger,
     IEmailService emailService,
     IRateLimitService rateLimitService,
     IAccountLockoutService accountLockoutService,
@@ -28,7 +28,7 @@ public class AuthenticationService(
     private readonly IUsersRepository _usersRepository = usersRepository;
     private readonly IPasswordHashingService _passwordHashing = passwordHashing;
     private readonly IConfiguration _configuration = configuration;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<AuthenticationService> _logger = logger;
     private readonly IEmailService _emailService = emailService;
     private readonly IRateLimitService _rateLimitService = rateLimitService;
     private readonly IAccountLockoutService _accountLockoutService = accountLockoutService;

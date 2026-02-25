@@ -7,7 +7,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker
 {
@@ -20,14 +20,14 @@ namespace Farm.Backend.Plugin.Moonraker
     {
         private readonly IMoonrakerClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<MoonrakerStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.Moonraker;
 
         public MoonrakerStatusClient(
             IMoonrakerClient client,
             ICircuitBreakerService circuitBreaker,
-            IUnifiedLoggingService logger)
+            ILogger<MoonrakerStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);

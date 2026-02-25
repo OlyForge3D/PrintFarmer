@@ -5,8 +5,8 @@ using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Projects;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Projects;
 
@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Services.Projects;
 /// </summary>
 public class PrintProjectService(
     AppDbContext db,
-    IUnifiedLoggingService logger,
+    ILogger<PrintProjectService> logger,
     IJobQueueService queueService,
     ISpoolmanService spoolmanService) : IPrintProjectService
 {

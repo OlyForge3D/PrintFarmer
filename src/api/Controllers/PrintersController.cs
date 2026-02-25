@@ -14,7 +14,6 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
@@ -25,6 +24,7 @@ using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -38,7 +38,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/printers")]
 [Authorize]
 public class PrintersController(
-    IUnifiedLoggingService logger,
+    ILogger<PrintersController> logger,
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
     IValidator<CreatePrinterFromDiscoveryDto> validator,
@@ -50,7 +50,7 @@ public class PrintersController(
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;

@@ -1,8 +1,8 @@
 ﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.FlashForge;
 
@@ -50,7 +50,7 @@ public class FlashForgeBackendPlugin : IExtendedBackendPlugin
         // the TCP connections are opened/closed per-command (no persistent connection).
         services.AddScoped<IFlashForgeClient>(provider =>
         {
-            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            ILogger<FlashForgeClient> logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<FlashForgeClient>();
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
             return new FlashForgeClient(logger, timeouts);
         });

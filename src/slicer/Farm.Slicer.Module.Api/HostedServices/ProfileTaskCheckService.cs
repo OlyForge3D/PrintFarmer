@@ -3,9 +3,9 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Tasks;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.HostedServices;
 
@@ -17,14 +17,14 @@ namespace Farm.Slicer.Module.Api.HostedServices;
 public sealed class ProfileTaskCheckService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<ProfileTaskCheckService> _logger;
     private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(5);
     private readonly bool _enabled;
     private readonly bool _enablePeriodicCheck;
 
     public ProfileTaskCheckService(
         IServiceScopeFactory scopeFactory,
-        IUnifiedLoggingService logger,
+        ILogger<ProfileTaskCheckService> logger,
         IConfiguration configuration)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));

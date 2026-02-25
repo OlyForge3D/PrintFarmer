@@ -10,11 +10,11 @@ using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, BackendTimeoutSettings timeouts) : PrinterClientBase, IMoonrakerClient,
+public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, BackendTimeoutSettings timeouts) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -36,7 +36,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger, Bac
     ISupportsGcodeExecution
 {
     private readonly HttpClient _http = http;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)

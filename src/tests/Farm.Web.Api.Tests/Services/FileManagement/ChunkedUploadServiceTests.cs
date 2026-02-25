@@ -7,10 +7,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Quota;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services.FileManagement
 {
@@ -20,7 +20,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
         private readonly Mock<IFileManagementService> _mockFileManagement;
         private readonly Mock<IGcodeThumbnailExtractorService> _mockThumbnailExtractor;
         private readonly Mock<IGcodeMetadataExtractorService> _mockMetadataExtractor;
-        private readonly Mock<IUnifiedLoggingService> _mockLogger;
+        private readonly Mock<ILogger<ChunkedUploadService>> _mockLogger;
         private readonly ChunkedUploadService _service;
 
         public ChunkedUploadServiceTests()
@@ -33,7 +33,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             _mockFileManagement = new Mock<IFileManagementService>();
             _mockThumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>();
             _mockMetadataExtractor = new Mock<IGcodeMetadataExtractorService>();
-            _mockLogger = new Mock<IUnifiedLoggingService>();
+            _mockLogger = new Mock<ILogger<ChunkedUploadService>>();
 
             // Default mock behaviors
             _mockFileManagement.Setup(f => f.SanitizeFileName(It.IsAny<string>(), It.IsAny<string>()))

@@ -11,7 +11,6 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Sdcp;
@@ -361,7 +360,7 @@ public class SdcpAttributes
     public string? MainboardID { get; set; }
 }
 
-public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger, BackendTimeoutSettings timeouts) : PrinterClientBase, ISdcpClient,
+public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger, BackendTimeoutSettings timeouts) : PrinterClientBase, ISdcpClient,
     ISupportsFileList,
     ISupportsFileUpload,
     ISupportsStartPrint,
@@ -374,7 +373,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     ISupportsCompositeStatus
 {
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<SdcpClient> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly BackendTimeoutSettings _timeouts = timeouts ?? throw new ArgumentNullException(nameof(timeouts));
 
     private const string SdcpLogCategory = "SDCP";
@@ -403,7 +402,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     }
 
     private void LogSdcp(LogLevel level, string message, string? correlationId = null, object? metadata = null, Exception? exception = null)
-        => _logger.LogWithContext(level, SdcpLogCategory, message, correlationId, metadata, context: null, exception);
+        => _logger.Log(level, exception, message);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

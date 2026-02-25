@@ -4,10 +4,10 @@ using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -21,10 +21,10 @@ namespace Farm.Web.Api.Controllers;
 public class SpoolmanController(
     ISpoolmanService spoolman,
     ISettingsService settingsService,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<SpoolmanController> logger) : ControllerBase
 {
     private readonly ISettingsService _settingsService = settingsService;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<SpoolmanController> _logger = logger;
 
     /// <summary>
     /// Tests connectivity to an arbitrary Spoolman base URL without persisting configuration.

@@ -1,9 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -15,7 +15,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
 {
     private readonly OrcaProfilesService _innerService;
     private readonly ProfileCacheDb _cacheDb;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<CachedOrcaProfilesService> _logger;
     private readonly string _profilesPath;
     private bool _cacheInitialized;
     private readonly SemaphoreSlim _initLock = new(1, 1);
@@ -32,7 +32,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public Task CacheReadyTask => _cacheReadyTcs.Task;
 
-    public CachedOrcaProfilesService(IUnifiedLoggingService logger, string? profilesPath = null, string? dbPath = null)
+    public CachedOrcaProfilesService(ILogger<CachedOrcaProfilesService> logger, string? profilesPath = null, string? dbPath = null)
     {
         _logger = logger;
         _innerService = new OrcaProfilesService(logger, profilesPath);

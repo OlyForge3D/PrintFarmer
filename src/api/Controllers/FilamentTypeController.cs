@@ -6,9 +6,9 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Filament;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.Startup;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -22,12 +22,12 @@ namespace Farm.Web.Api.Controllers;
 public class FilamentTypeController(
     IFilamentTypeService filamentService,
     IStartupStatus startupStatus,
-    IUnifiedLoggingService logger,
+    ILogger<FilamentTypeController> logger,
     ISpoolmanDbService spoolmanDbService) : ControllerBase
 {
     private readonly IFilamentTypeService _filamentService = filamentService ?? throw new ArgumentNullException(nameof(filamentService));
     private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<FilamentTypeController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ISpoolmanDbService _spoolmanDbService = spoolmanDbService ?? throw new ArgumentNullException(nameof(spoolmanDbService));
 
     /// <summary>

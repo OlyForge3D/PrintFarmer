@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Quota;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.FileManagement;
 
@@ -22,7 +22,7 @@ public sealed class ChunkedUploadService(
     IFileManagementService fileManagementService,
     IGcodeThumbnailExtractorService thumbnailExtractor,
     IGcodeMetadataExtractorService metadataExtractor,
-    IUnifiedLoggingService logger) : IChunkedUploadService
+    ILogger<ChunkedUploadService> logger) : IChunkedUploadService
 {
     private const int DefaultRecommendedChunkSize = 1 * 1024 * 1024; // 1 MB
 
@@ -30,7 +30,7 @@ public sealed class ChunkedUploadService(
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
     private readonly IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
     private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<ChunkedUploadService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Initializes a new chunked upload session for large file uploads.

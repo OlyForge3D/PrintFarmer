@@ -5,7 +5,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.PrusaLink
 {
@@ -17,14 +17,14 @@ namespace Farm.Backend.Plugin.PrusaLink
     {
         private readonly IPrusaLinkClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<PrusaLinkStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.PrusaLink;
 
         public PrusaLinkStatusClient(
             IPrusaLinkClient client,
             ICircuitBreakerService circuitBreaker,
-            IUnifiedLoggingService logger)
+            ILogger<PrusaLinkStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);

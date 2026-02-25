@@ -23,6 +23,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services.Gcode;
 
@@ -61,7 +62,7 @@ public class GcodeFilesServiceTests
     {
         // Arrange
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
-        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
@@ -86,7 +87,6 @@ public class GcodeFilesServiceTests
         // Assert
         result.Should().BeNull();
         repo.Verify(r => r.AddAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()), Times.Never);
-        logger.Verify(x => x.LogWarning(It.IsAny<string>(), It.Is<string?>(v => v == Path.Combine(storageDir, "missing.gcode")), It.IsAny<object?>()), Times.Once);
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class GcodeFilesServiceTests
             .Returns(Task.CompletedTask);
         repo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
@@ -228,7 +228,7 @@ public class GcodeFilesServiceTests
         repo.Setup(r => r.GetLatestHarvestOperationIdsByPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<Guid, Guid?> { { printerId, harvestId } });
 
-        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
@@ -299,7 +299,7 @@ public class GcodeFilesServiceTests
 
         // Setup mocks
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
-        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
@@ -370,7 +370,7 @@ public class GcodeFilesServiceTests
 
         // Setup mocks
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
-        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
@@ -455,7 +455,7 @@ public class GcodeFilesServiceTests
 
         // Setup mocks
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
-        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);

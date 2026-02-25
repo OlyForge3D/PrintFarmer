@@ -1,10 +1,10 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using FluentAssertions;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services.Printers
 {
@@ -33,7 +33,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelAsync_WithSuccessfulOperations_ReturnsAllResults()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters(3);
             var resultMap = printers.ToDictionary(p => p.Id, p => $"Result_{p.Name}");
@@ -58,7 +58,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelAsync_WithEmptyPrinters_ReturnsEmptyArray()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
 
             Func<Printer, CancellationToken, Task<string>> operation = async (p, ct) => "result";
@@ -75,7 +75,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelAsync_WithExceptionInOneOperation_CallsErrorHandlerAndReturnsNull()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters(2);
 #pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type
@@ -115,7 +115,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelAsync_WithNullPrinters_ThrowsArgumentNullException()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
 
             Func<Printer, CancellationToken, Task<string>> operation = async (p, ct) => "result";
@@ -130,7 +130,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelAsync_WithNullOperation_ThrowsArgumentNullException()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters();
 
@@ -145,7 +145,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelAsync_WithNullErrorHandler_ThrowsArgumentNullException()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters();
 
@@ -160,7 +160,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelAsync_WithTimeoutPerPrinter_ReturnsNullForSlowOperations()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters(2);
 #pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type
@@ -198,7 +198,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithSuccessfulOperations_ReturnsAllResults()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters(2);
             var resultMap = printers.ToDictionary(p => p.Id, p => $"Result_{p.Name}");
@@ -225,7 +225,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithTimeout_CallsTimeoutHandlerAndReturnsNull()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters(2);
 #pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type
@@ -269,7 +269,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithException_CallsErrorHandler()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters(1);
 #pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type
@@ -302,7 +302,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithEmptyPrinters_ReturnsEmptyArray()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
 
             Func<Printer, CancellationToken, Task<string>> operation = async (p, ct) => "result";
@@ -321,7 +321,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithNullPrinters_ThrowsArgumentNullException()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
 
             Func<Printer, CancellationToken, Task<string>> operation = async (p, ct) => "result";
@@ -337,7 +337,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithNullOperation_ThrowsArgumentNullException()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters();
 
@@ -353,7 +353,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithNullTimeoutHandler_ThrowsArgumentNullException()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters();
 
@@ -369,7 +369,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithNullErrorHandler_ThrowsArgumentNullException()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters();
 
@@ -385,7 +385,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task ExecuteParallelWithTimeoutAsync_WithCancellation_PropagateCancellation()
         {
             // Arrange
-            var loggerMock = new Mock<IUnifiedLoggingService>();
+            var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
             var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
             List<Printer> printers = CreateTestPrinters(1);
             var cts = new CancellationTokenSource();

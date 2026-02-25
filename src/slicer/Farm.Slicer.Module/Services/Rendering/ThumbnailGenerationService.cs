@@ -7,13 +7,13 @@ using System.Numerics;
 using Assimp;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Thumbnails;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.Configuration;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Services.Rendering;
 
@@ -23,12 +23,12 @@ namespace Farm.Slicer.Module.Services.Rendering;
 /// </summary>
 public class ThumbnailGenerationService : IThumbnailGenerationService
 {
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<ThumbnailGenerationService> _logger;
     private readonly string _thumbnailsBasePath;
 
     public string ThumbnailFileExtension => ".png";
 
-    public ThumbnailGenerationService(IUnifiedLoggingService logger, IConfiguration configuration)
+    public ThumbnailGenerationService(ILogger<ThumbnailGenerationService> logger, IConfiguration configuration)
     {
         _logger = logger;
 

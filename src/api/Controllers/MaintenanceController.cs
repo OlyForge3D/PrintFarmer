@@ -6,12 +6,12 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/maintenance")]
 [Authorize(Roles = "farm_admin")]
 public class MaintenanceController(
-    IUnifiedLoggingService logger,
+    ILogger<MaintenanceController> logger,
     IMaintenanceAlertRepository alertRepository,
     IMaintenanceLogRepository logRepository,
     IMaintenanceScheduleRepository scheduleRepository,
@@ -33,7 +33,7 @@ public class MaintenanceController(
     IHubContext<MaintenanceHub> maintenanceHub)
     : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<MaintenanceController> _logger = logger;
     private readonly IMaintenanceAlertRepository _alertRepository = alertRepository;
     private readonly IMaintenanceLogRepository _logRepository = logRepository;
     private readonly IMaintenanceScheduleRepository _scheduleRepository = scheduleRepository;

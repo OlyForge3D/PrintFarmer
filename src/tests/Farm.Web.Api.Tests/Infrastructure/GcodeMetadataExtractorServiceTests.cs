@@ -1,15 +1,15 @@
 ﻿using System.Text.RegularExpressions;
 using Farm.Infrastructure.Services.Gcode;
-using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Tests.Utilities;
 using FluentAssertions;
 using Moq;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Web.Api.Tests.Infrastructure;
 
 public class GcodeMetadataExtractorServiceTests
 {
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<GcodeMetadataExtractorService>> _loggerMock;
     private readonly GcodeMetadataExtractorService _service;
     private readonly bool _useConsoleLogging = false; // Set to true to see detailed logs during debugging
 
@@ -17,14 +17,13 @@ public class GcodeMetadataExtractorServiceTests
     {
         if (_useConsoleLogging)
         {
-            // Use console logger for debugging
-            var consoleLogger = new ConsoleLoggingService(nameof(GcodeMetadataExtractorService));
-            _service = new GcodeMetadataExtractorService(consoleLogger);
+            // Use null logger for debugging
+            _service = new GcodeMetadataExtractorService(NullLogger<GcodeMetadataExtractorService>.Instance);
         }
         else
         {
             // Use mock logger (default behavior)
-            _loggerMock = new Mock<IUnifiedLoggingService>();
+            _loggerMock = new Mock<ILogger<GcodeMetadataExtractorService>>();
             _service = new GcodeMetadataExtractorService(_loggerMock.Object);
         }
     }

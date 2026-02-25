@@ -26,6 +26,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
+using Microsoft.Extensions.Logging;
 
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -195,7 +196,7 @@ catch
 // use the services safely. We build a temporary provider (disposed immediately)
 // and stash references to services that are safe to keep for the lifetime of the
 // process (loggers, unified logging, temp path provider, startup status).
-IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
+ILogger<Program>? _capturedStartupUnifiedLogging = null;
 ILogger<Program>? _capturedStartupLogger = null;
 ITempPathProvider? _capturedTempPathProvider = null;
 IStartupStatus? _capturedStartupStatus = null;
@@ -231,7 +232,7 @@ try
 {
     await using AsyncServiceScope _captureScope = app.Services.CreateAsyncScope();
     IServiceProvider _captureSp = _captureScope.ServiceProvider;
-    _capturedStartupUnifiedLogging = _captureSp.GetService<IUnifiedLoggingService>();
+    _capturedStartupUnifiedLogging = _captureSp.GetService<ILogger<Program>>();
     _capturedStartupLogger = _captureSp.GetService<ILogger<Program>>();
     _capturedTempPathProvider = _captureSp.GetService<ITempPathProvider>();
     _capturedStartupStatus = _captureSp.GetService<IStartupStatus>();
@@ -262,7 +263,7 @@ if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION
     // Capture root-level logging services once to avoid per-call scope creation inside the callback
     // Prefer startup-captured unified logging / logger when available to avoid creating
     // a scope inside the ApplicationStarted callback.
-    IUnifiedLoggingService? _deferredUls = _capturedStartupUnifiedLogging ?? app.Services.GetService<IUnifiedLoggingService>();
+    ILogger<Program>? _deferredUls = _capturedStartupUnifiedLogging ?? app.Services.GetService<ILogger<Program>>();
     ILogger<Program>? _deferredLg = _capturedStartupLogger ?? app.Services.GetService<ILogger<Program>>();
 
     _ = lifetime.ApplicationStarted.Register(() => ProgramHelpers.HandleDeferredConsoleRedirection(_deferredUls, _deferredLg));

@@ -7,6 +7,7 @@ using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -18,10 +19,10 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Catalog")]
 [Authorize]
 public class CatalogController(
-    Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService,
+    ILogger<CatalogController> unifiedLoggingService,
     Services.Catalog.ICatalogService catalogService) : ControllerBase
 {
-    private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService = unifiedLoggingService;
+    private readonly ILogger<CatalogController> _unifiedLoggingService = unifiedLoggingService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
 
     /// <summary>

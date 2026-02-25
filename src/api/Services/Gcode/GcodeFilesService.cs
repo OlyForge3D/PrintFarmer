@@ -23,6 +23,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Gcode
 {
@@ -64,7 +65,7 @@ namespace Farm.Web.Api.Services.Gcode
     public class GcodeFilesService(
         IGcodeRepository gcodeRepo,
         IUnitOfWork unitOfWork,
-        IUnifiedLoggingService logger,
+        ILogger<GcodeFilesService> logger,
         IStoragePathService storagePathService,
         IGcodeMetadataExtractorService metadataExtractor,
         IGcodeThumbnailExtractorService thumbnailExtractor,
@@ -74,7 +75,7 @@ namespace Farm.Web.Api.Services.Gcode
     {
         private readonly IGcodeRepository _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
         private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly ILogger<GcodeFilesService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
         private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
         private readonly IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));

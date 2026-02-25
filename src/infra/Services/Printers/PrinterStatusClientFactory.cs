@@ -6,8 +6,8 @@ using System.Linq;
 using System.Reflection;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -26,12 +26,12 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
 {
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly Dictionary<PrinterBackend, Type> _statusClientTypeMap;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<PrinterStatusClientFactory> _logger;
 
     public PrinterStatusClientFactory(
         IServiceProvider serviceProvider,
         IBackendPluginRegistry pluginRegistry,
-        IUnifiedLoggingService logger)
+        ILogger<PrinterStatusClientFactory> logger)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
         ArgumentNullException.ThrowIfNull(pluginRegistry);

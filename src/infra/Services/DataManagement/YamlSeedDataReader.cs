@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.DataManagement;
 
@@ -12,11 +12,11 @@ namespace Farm.Infrastructure.Services.DataManagement;
 /// </summary>
 public class YamlSeedDataReader : IYamlSeedDataReader
 {
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<YamlSeedDataReader> _logger;
     private readonly string _seedDataPath;
     private readonly IDeserializer _yamlDeserializer;
 
-    public YamlSeedDataReader(IUnifiedLoggingService logger, IConfiguration configuration)
+    public YamlSeedDataReader(ILogger<YamlSeedDataReader> logger, IConfiguration configuration)
     {
         _logger = logger;
         _seedDataPath = configuration["SeedData:Path"] ?? Path.Combine(AppContext.BaseDirectory, "data", "seed");

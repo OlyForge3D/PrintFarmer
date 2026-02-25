@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.OctoPrint
 {
@@ -19,14 +19,14 @@ namespace Farm.Backend.Plugin.OctoPrint
     {
         private readonly IOctoPrintClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<OctoPrintStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.OctoPrint;
 
         public OctoPrintStatusClient(
             IOctoPrintClient client,
             ICircuitBreakerService circuitBreaker,
-            IUnifiedLoggingService logger)
+            ILogger<OctoPrintStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);

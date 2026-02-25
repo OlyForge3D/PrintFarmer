@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Projects;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/project-templates")]
 [Tags("Print Project Templates")]
 [Authorize]
-public class PrintProjectTemplatesController(IPrintProjectTemplateService templateService, IUnifiedLoggingService logger) : ControllerBase
+public class PrintProjectTemplatesController(IPrintProjectTemplateService templateService, ILogger<PrintProjectTemplatesController> logger) : ControllerBase
 {
     /// <summary>
     /// Get all project templates with optional filtering.

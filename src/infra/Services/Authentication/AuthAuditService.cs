@@ -1,17 +1,17 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Authentication;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Authentication;
 
 /// <summary>
 /// Service for logging authentication and authorization events for security audit trail
 /// </summary>
-public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedLoggingService logging) : IAuthAuditService
+public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<AuthAuditService> logging) : IAuthAuditService
 {
     private readonly IAuthAuditLogRepository _auditRepository = auditRepository;
-    private readonly IUnifiedLoggingService _logging = logging;
+    private readonly ILogger<AuthAuditService> _logging = logging;
 
     // Centralized save helper
     private async Task SaveAuditAsync(AuthAuditLog auditLog, CancellationToken cancellationToken = default)

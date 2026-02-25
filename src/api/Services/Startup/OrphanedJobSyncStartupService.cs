@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Startup;
 
@@ -11,11 +11,11 @@ namespace Farm.Web.Api.Services.Startup;
 public class OrphanedJobSyncStartupService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<OrphanedJobSyncStartupService> _logger;
 
     public OrphanedJobSyncStartupService(
         IServiceProvider serviceProvider,
-        IUnifiedLoggingService logger)
+        ILogger<OrphanedJobSyncStartupService> logger)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;

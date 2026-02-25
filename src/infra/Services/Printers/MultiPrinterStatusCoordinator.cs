@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -9,9 +9,9 @@ namespace Farm.Infrastructure.Services.Printers;
 /// </summary>
 public class MultiPrinterStatusCoordinator : IMultiPrinterStatusCoordinator
 {
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<MultiPrinterStatusCoordinator> _logger;
 
-    public MultiPrinterStatusCoordinator(IUnifiedLoggingService logger)
+    public MultiPrinterStatusCoordinator(ILogger<MultiPrinterStatusCoordinator> logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;

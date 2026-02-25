@@ -1,18 +1,19 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Worker.Core;
 
 public class GracefulShutdownService : BackgroundService
 {
     private readonly IWorkerStateService _state;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<GracefulShutdownService> _logger;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly TimeSpan _grace;
     private readonly CancellationTokenSource _cts = new();
 
-    public GracefulShutdownService(IWorkerStateService state, IUnifiedLoggingService logger, IHostApplicationLifetime lifetime, IConfiguration config)
+    public GracefulShutdownService(IWorkerStateService state, ILogger<GracefulShutdownService> logger, IHostApplicationLifetime lifetime, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(logger);

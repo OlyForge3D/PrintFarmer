@@ -1,20 +1,20 @@
 ﻿using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Worker.Core;
 
 public class HttpProgressReporter : IProgressReporter
 {
     private readonly HttpClient _httpClient;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<HttpProgressReporter> _logger;
     private readonly string _apiBaseUrl;
     private readonly string _workerId;
 
-    public HttpProgressReporter(HttpClient httpClient, IUnifiedLoggingService logger, IConfiguration configuration)
+    public HttpProgressReporter(HttpClient httpClient, ILogger<HttpProgressReporter> logger, IConfiguration configuration)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

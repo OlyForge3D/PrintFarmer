@@ -3,9 +3,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Queue;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -16,7 +16,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/gcode-library")]
 [Tags("G-code Library")]
 [Authorize]
-public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeService, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
+public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeService, IWebHostEnvironment env, ILogger<GcodeLibraryController> logger) : ControllerBase
 {
     /// <summary>
     /// Get all G-code files in the library.

@@ -7,9 +7,9 @@ using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -25,7 +25,7 @@ public class JobQueueController(
     IPrintJobManagementService printJobManagementService,
     IPrintJobCompletionService printJobCompletionService,
     IPrinterStatusCacheReader printerStatusCache,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<JobQueueController> logger) : ControllerBase
 {
     /// <summary>
     /// Get queue overview with optional compatibility filtering.

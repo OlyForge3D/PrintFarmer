@@ -1,10 +1,10 @@
 ﻿using System;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
@@ -81,7 +81,7 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
             // using values from BackendTimeoutSettings.
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
             httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
-            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            ILogger<MoonrakerClient> logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<MoonrakerClient>();
             return new MoonrakerClient(httpClient, logger, timeouts);
         });
 

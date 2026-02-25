@@ -27,6 +27,7 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -69,7 +70,7 @@ public class PrintersService(
     IBackendCapabilityFactory capabilityFactory,
     Catalog.ICatalogService catalogService,
     IHttpClientFactory httpClientFactory,
-    Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger,
+    ILogger<PrintersService> logger,
     IPrinterStatusBroadcaster broadcaster,
     IMultiPrinterStatusCoordinator coordinator,
     IPrinterStatusClientFactory statusClientFactory,
@@ -82,7 +83,7 @@ public class PrintersService(
     private readonly IBackendClientFactory _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-    private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<PrintersService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IPrinterStatusBroadcaster _broadcaster = broadcaster ?? throw new ArgumentNullException(nameof(broadcaster));
     private readonly IMultiPrinterStatusCoordinator _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
     private readonly IPrinterStatusClientFactory _statusClientFactory = statusClientFactory ?? throw new ArgumentNullException(nameof(statusClientFactory));

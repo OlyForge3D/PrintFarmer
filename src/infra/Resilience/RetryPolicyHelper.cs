@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Telemetry;
+﻿using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Resilience;
 
@@ -14,7 +14,7 @@ public static class RetryPolicyHelper
     /// <param name="operation">Function to execute with retry</param>
     /// <param name="maxRetries">Maximum number of retry attempts (default: 3)</param>
     /// <param name="initialDelayMs">Initial delay in milliseconds (default: 500)</param>
-    /// <param name="logger">Optional logger to log retry attempts (IUnifiedLoggingService)</param>
+    /// <param name="logger">Optional logger to log retry attempts (ILogger)</param>
     /// <param name="operationName">Name of the operation for logging</param>
     /// <returns>Result of the operation</returns>
     /// <exception cref="InvalidOperationException">Thrown when all retry attempts fail</exception>
@@ -22,7 +22,7 @@ public static class RetryPolicyHelper
         Func<Task<T>> operation,
         int maxRetries = 3,
         int initialDelayMs = 500,
-        IUnifiedLoggingService? logger = null,
+        ILogger? logger = null,
         string operationName = "operation")
     {
         ArgumentNullException.ThrowIfNull(operation);
@@ -70,14 +70,14 @@ public static class RetryPolicyHelper
     /// <param name="operation">Action to execute with retry</param>
     /// <param name="maxRetries">Maximum number of retry attempts (default: 3)</param>
     /// <param name="initialDelayMs">Initial delay in milliseconds (default: 500)</param>
-    /// <param name="logger">Optional logger to log retry attempts (IUnifiedLoggingService)</param>
+    /// <param name="logger">Optional logger to log retry attempts (ILogger)</param>
     /// <param name="operationName">Name of the operation for logging</param>
     /// <exception cref="InvalidOperationException">Thrown when all retry attempts fail</exception>
     public static async Task ExecuteWithRetryAsync(
         Func<Task> operation,
         int maxRetries = 3,
         int initialDelayMs = 500,
-        IUnifiedLoggingService? logger = null,
+        ILogger? logger = null,
         string operationName = "operation")
     {
         ArgumentNullException.ThrowIfNull(operation);

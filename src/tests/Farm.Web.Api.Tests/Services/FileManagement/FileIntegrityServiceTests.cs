@@ -3,17 +3,17 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.FileManagement;
-using Farm.Infrastructure.Telemetry;
 using FluentAssertions;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services.FileManagement;
 
 public class FileIntegrityServiceTests
 {
     private readonly Mock<IFileManagementService> _fileManagementService = new();
-    private readonly Mock<IUnifiedLoggingService> _logger = new();
+    private readonly Mock<ILogger<FileIntegrityService>> _logger = new();
 
     private FileIntegrityService CreateSut() => new(_fileManagementService.Object, _logger.Object);
 

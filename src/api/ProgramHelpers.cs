@@ -11,7 +11,6 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -26,7 +25,7 @@ namespace Farm.Web.Api
 {
     internal static class ProgramHelpers
     {
-        internal static void HandleDeferredConsoleRedirection(IUnifiedLoggingService? uls, ILogger<Program>? lg)
+        internal static void HandleDeferredConsoleRedirection(ILogger? uls, ILogger<Program>? lg)
         {
             try
             {
@@ -142,7 +141,7 @@ namespace Farm.Web.Api
             return Results.Ok(new { ranges = suggestions.OrderBy(s => s).ToArray() });
         }
 
-        internal static JwtBearerEvents CreateJwtEvents(IUnifiedLoggingService? startupUls, ILogger<Program>? startupLogger)
+        internal static JwtBearerEvents CreateJwtEvents(ILogger? startupUls, ILogger<Program>? startupLogger)
         {
             return new JwtBearerEvents
             {
@@ -324,7 +323,7 @@ namespace Farm.Web.Api
                 IServiceProvider sp = initScope.ServiceProvider;
 
                 // Resolve required services for DB initialization and call into the existing initializer
-                IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
+                ILogger logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInit");
                 AppDbContext db = sp.GetRequiredService<AppDbContext>();
                 IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
                 IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();

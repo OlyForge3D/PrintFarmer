@@ -7,8 +7,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.OctoPrint;
 
@@ -21,12 +21,12 @@ namespace Farm.Backend.Plugin.OctoPrint;
 public sealed class OctoPrintWebSocketAdapter(
     Guid printerId,
     Printer printer,
-    IUnifiedLoggingService logger,
+    ILogger logger,
     IOctoPrintClient octoPrintClient,
     IHubContext<PrinterHub> hub,
     IPrinterStatusCacheWriter statusCacheWriter) : IDisposable
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger _logger = logger;
     private readonly IOctoPrintClient _octoPrintClient = octoPrintClient;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;

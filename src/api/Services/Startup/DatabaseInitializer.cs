@@ -4,19 +4,19 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Services.Interfaces;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Startup;
 
 /// <summary>
 /// Handles database initialization with retry logic for resilient startup
 /// </summary>
-public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger, IDataSeedService dataSeedService) : IDatabaseInitializer
+public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializer> logger, IDataSeedService dataSeedService) : IDatabaseInitializer
 {
     private readonly AppDbContext _context = context;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<DatabaseInitializer> _logger = logger;
     private readonly IDataSeedService _dataSeedService = dataSeedService;
 
     /// <summary>

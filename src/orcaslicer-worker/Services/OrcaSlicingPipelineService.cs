@@ -1,10 +1,10 @@
 ﻿using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
-using Farm.Slicer.Worker.Core; // shared interfaces
+using Farm.Slicer.Worker.Core;
+using Microsoft.Extensions.Logging; // shared interfaces
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -12,12 +12,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 {
     private readonly HttpClient _httpClient;
     private readonly IProgressReporter _progressReporter;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<OrcaSlicingPipelineService> _logger;
     private readonly string _workingDirectory;
     private readonly string _storageEndpoint;
     private readonly string _orcaSlicerBinaryPath;
 
-    public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, IUnifiedLoggingService logger, IConfiguration configuration)
+    public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _progressReporter = progressReporter ?? throw new ArgumentNullException(nameof(progressReporter));

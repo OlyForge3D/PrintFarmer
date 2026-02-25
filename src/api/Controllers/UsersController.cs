@@ -2,10 +2,10 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -20,12 +20,12 @@ public class UsersController(
     Farm.Infrastructure.Services.Users.IUsersService usersService,
     IAuthenticationService authService,
     ITokenRevocationService tokenRevocationService,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<UsersController> logger) : ControllerBase
 {
     private readonly Farm.Infrastructure.Services.Users.IUsersService _users = usersService;
     private readonly IAuthenticationService _authService = authService;
     private readonly ITokenRevocationService _tokenRevocation = tokenRevocationService;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<UsersController> _logger = logger;
 
     /// <summary>
     /// Gets all users in the system.

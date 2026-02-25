@@ -5,10 +5,10 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
 using ManufacturerDto = Farm.Infrastructure.ManufacturerDto;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -31,11 +31,11 @@ public interface IProfilePreloadService
 /// </summary>
 public class ProfilePreloadService(
     ISlicerProfilesService profileService,
-    IUnifiedLoggingService logger,
+    ILogger<ProfilePreloadService> logger,
     IHttpClientFactory httpClientFactory) : IProfilePreloadService
 {
     private readonly ISlicerProfilesService _profileService = profileService;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ProfilePreloadService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private static readonly JsonSerializerOptions s_jsonOptions = new() { PropertyNameCaseInsensitive = true };
 

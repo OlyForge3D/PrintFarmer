@@ -8,8 +8,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Tags
 {
@@ -30,10 +30,10 @@ namespace Farm.Infrastructure.Services.Tags
     /// </remarks>
     public class TagService(
         ITagRepository tagRepository,
-        IUnifiedLoggingService logger) : ITagService
+        ILogger<TagService> logger) : ITagService
     {
         private readonly ITagRepository _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
-        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly ILogger<TagService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         /// <summary>
         /// Retrieves all tags in the system.

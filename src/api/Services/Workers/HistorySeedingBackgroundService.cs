@@ -2,8 +2,8 @@
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Workers;
 
@@ -51,13 +51,13 @@ public class HistorySeedingSettings : IAppSetting
 /// </summary>
 public class HistorySeedingBackgroundService(
     IServiceProvider serviceProvider,
-    IUnifiedLoggingService logger,
+    ILogger<HistorySeedingSettings> logger,
     IOptionsMonitor<HistorySeedingSettings> settingsMonitor,
     IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
     private const string ServiceId = "HistorySeedingService";
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<HistorySeedingSettings> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<HistorySeedingSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
     private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
 

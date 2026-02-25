@@ -8,7 +8,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Locations;
 
@@ -19,12 +19,12 @@ namespace Farm.Infrastructure.Services.Locations;
 public class LocationService : ILocationService
 {
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<LocationService> _logger;
     private readonly IMapper _mapper;
 
     public LocationService(
         IUnitOfWork unitOfWork,
-        IUnifiedLoggingService logger,
+        ILogger<LocationService> logger,
         IMapper mapper)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);

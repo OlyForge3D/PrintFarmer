@@ -3,7 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.FileManagement;
 
@@ -11,10 +11,10 @@ namespace Farm.Infrastructure.Services.FileManagement;
 /// Implements file integrity verification with hash and size checking.
 /// Thread-safe and reusable across requests.
 /// </summary>
-public class FileIntegrityService(IFileManagementService fileManagementService, IUnifiedLoggingService logger) : IFileIntegrityService
+public class FileIntegrityService(IFileManagementService fileManagementService, ILogger<FileIntegrityService> logger) : IFileIntegrityService
 {
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<FileIntegrityService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public Task<bool> FileExistsAsync(string filePath, CancellationToken ct = default)
     {

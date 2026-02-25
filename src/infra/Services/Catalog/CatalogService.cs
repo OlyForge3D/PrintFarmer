@@ -5,8 +5,8 @@ using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Catalog;
 
@@ -18,12 +18,12 @@ public class CatalogService(
     ICatalogRepository repo,
     INormalizationEventLogger normLogger,
     ICatalogCacheProvider cacheProvider,
-    IUnifiedLoggingService logger) : ICatalogService
+    ILogger<CatalogService> logger) : ICatalogService
 {
     private readonly ICatalogRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly INormalizationEventLogger _normLogger = normLogger ?? throw new ArgumentNullException(nameof(normLogger));
     private readonly ICatalogCacheProvider _cacheProvider = cacheProvider ?? throw new ArgumentNullException(nameof(cacheProvider));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<CatalogService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // Cache for unknown catalog IDs to avoid repeated database queries
     private Guid? _cachedUnknownMfgId;

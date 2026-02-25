@@ -1,10 +1,10 @@
-﻿using Farm.Infrastructure.Telemetry;
+﻿using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Email;
 
-public sealed class ConsoleEmailService(IUnifiedLoggingService logger) : IEmailService
+public sealed class ConsoleEmailService(ILogger<ConsoleEmailService> logger) : IEmailService
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ConsoleEmailService> _logger = logger;
 
     public Task<EmailDispatchResult> SendAsync(EmailMessage message, CancellationToken ct = default)
     {

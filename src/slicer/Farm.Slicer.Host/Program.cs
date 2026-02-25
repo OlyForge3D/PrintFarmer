@@ -1,7 +1,6 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
@@ -41,7 +40,7 @@ builder.Services.AddSharedInfrastructureServices(builder.Configuration);
 builder.Services.AddUnimplementedSlicerServiceStubs();
 
 // ── Infrastructure services shared with the main API ──────────────────────────
-builder.Services.AddSingleton<IUnifiedLoggingService, UnifiedLoggingService>();
+// ILogger<T> is automatically provided by the DI container
 
 // ── Authentication (transitional — allow all for standalone mode) ──────────────
 // When the host is deployed behind an API gateway, this will be replaced with

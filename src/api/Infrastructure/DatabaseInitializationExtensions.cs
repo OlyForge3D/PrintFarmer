@@ -4,9 +4,9 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Infrastructure;
 
@@ -24,7 +24,7 @@ public static class DatabaseInitializationExtensions
     /// <param name="startupStatus">The startup status tracker to mark application readiness.</param>
     public static async Task InitializeDatabaseAsync(
         this WebApplication app,
-        IUnifiedLoggingService logger,
+        ILogger logger,
         AppDbContext db,
         IDatabaseInitializer dbInitializer,
         IStartupStatus startupStatus)
@@ -242,7 +242,7 @@ public static class DatabaseInitializationExtensions
     /// </summary>
     private static async Task ApplyMigrationsWithFallbackAsync(
         AppDbContext db,
-        IUnifiedLoggingService logger,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         var pendingMigrations = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
@@ -415,7 +415,7 @@ public static class DatabaseInitializationExtensions
     /// </summary>
     private static async Task EnsureMigrationHistoryTableExistsAsync(
         AppDbContext db,
-        IUnifiedLoggingService logger,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         string providerName = db.Database.ProviderName ?? string.Empty;

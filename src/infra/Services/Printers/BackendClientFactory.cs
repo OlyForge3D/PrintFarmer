@@ -5,8 +5,8 @@ using System.Reflection;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -23,12 +23,12 @@ public class BackendClientFactory : IBackendClientFactory
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly Dictionary<PrinterBackend, Type> _clientTypeMap;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<BackendClientFactory> _logger;
 
     public BackendClientFactory(
         IServiceProvider serviceProvider,
         IBackendPluginRegistry pluginRegistry,
-        IUnifiedLoggingService logger)
+        ILogger<BackendClientFactory> logger)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
         ArgumentNullException.ThrowIfNull(pluginRegistry);

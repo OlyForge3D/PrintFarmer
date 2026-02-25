@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Projects;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/projects")]
 [Tags("Print Projects")]
 [Authorize]
-public class PrintProjectsController(IPrintProjectService projectService, IUnifiedLoggingService logger) : ControllerBase
+public class PrintProjectsController(IPrintProjectService projectService, ILogger<PrintProjectsController> logger) : ControllerBase
 {
     /// <summary>
     /// Get all print projects with optional filtering.

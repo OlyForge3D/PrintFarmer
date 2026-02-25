@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -9,10 +9,10 @@ namespace Farm.Infrastructure.Services.Printers;
 /// </summary>
 public class PrinterStatusFallbackService(
     ICircuitBreakerService circuitBreaker,
-    IUnifiedLoggingService logger) : IPrinterStatusFallbackService
+    ILogger<PrinterStatusFallbackService> logger) : IPrinterStatusFallbackService
 {
     private readonly ICircuitBreakerService _circuitBreaker = circuitBreaker ?? throw new ArgumentNullException(nameof(circuitBreaker));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<PrinterStatusFallbackService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<TResult> ExecuteWithFallbackAsync<TResult>(
         Printer printer,

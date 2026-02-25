@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Services.Assets;
 using Farm.Infrastructure.Services.StorageManagement;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Startup;
 
@@ -45,13 +45,13 @@ public static class BackgroundServicesStartup
         services.AddHostedService(sp =>
         {
             IServiceScopeFactory scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-            IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
+            ILoggerFactory loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             IConfiguration config = sp.GetRequiredService<IConfiguration>();
             string modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
             string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
             return new Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService(
                 scopeFactory,
-                logger,
+                loggerFactory.CreateLogger<Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService>(),
                 modelStoragePath,
                 gcodeStoragePath);
         });

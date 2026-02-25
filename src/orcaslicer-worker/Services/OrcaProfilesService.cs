@@ -6,9 +6,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -26,7 +26,7 @@ namespace Farm.OrcaSlicer.Worker.Services;
 /// </summary>
 public class OrcaProfilesService : ISlicerProfilesService
 {
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger _logger;
     private readonly string _orcaProfilesPath;
 
     // Cache for loaded profile JSON as strings to minimize disk I/O
@@ -53,7 +53,7 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// <summary>
     /// Creates an OrcaProfilesService with the default profile path (from ORCA_PROFILES_PATH env var or /opt/orcaslicer/resources/profiles).
     /// </summary>
-    public OrcaProfilesService(IUnifiedLoggingService logger)
+    public OrcaProfilesService(ILogger logger)
         : this(logger, null)
     {
     }
@@ -63,7 +63,7 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// </summary>
     /// <param name="logger">Logging service for diagnostics.</param>
     /// <param name="profilesPath">Custom path to profiles directory. If null, uses ORCA_PROFILES_PATH env var or default.</param>
-    public OrcaProfilesService(IUnifiedLoggingService logger, string? profilesPath)
+    public OrcaProfilesService(ILogger logger, string? profilesPath)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 

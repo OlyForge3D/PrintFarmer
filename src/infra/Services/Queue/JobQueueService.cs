@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Queue
 {
@@ -30,7 +30,7 @@ namespace Farm.Infrastructure.Services.Queue
     {
         private readonly IQueueRepository _repo;
         private readonly IQueueDataService _dataService;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<JobQueueService> _logger;
 
         /// <summary>
         /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -42,7 +42,7 @@ namespace Farm.Infrastructure.Services.Queue
         public JobQueueService(
             IQueueRepository repo,
             IQueueDataService dataService,
-            IUnifiedLoggingService logger)
+            ILogger<JobQueueService> logger)
         {
             ArgumentNullException.ThrowIfNull(repo);
             ArgumentNullException.ThrowIfNull(dataService);

@@ -3,9 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Authentication;
 
@@ -14,11 +14,11 @@ namespace Farm.Infrastructure.Services.Authentication;
 /// </summary>
 public class TokenRevocationService(
     AppDbContext context,
-    IUnifiedLoggingService logging,
+    ILogger<TokenRevocationService> logging,
     IAuthAuditService authAuditService) : ITokenRevocationService
 {
     private readonly AppDbContext _context = context;
-    private readonly IUnifiedLoggingService _logging = logging;
+    private readonly ILogger<TokenRevocationService> _logging = logging;
     private readonly IAuthAuditService _authAuditService = authAuditService;
 
     public async Task<bool> RevokeTokenAsync(

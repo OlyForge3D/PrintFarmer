@@ -9,21 +9,21 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
 public sealed class MoonrakerSubscriptionService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
+    ILogger<MoonrakerSubscriptionService> logger,
     IHttpClientFactory httpClientFactory,
     IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<MoonrakerSubscriptionService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly CancellationTokenSource _cts = new();

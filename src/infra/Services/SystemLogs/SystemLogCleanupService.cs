@@ -3,16 +3,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.SystemLogs;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.SystemLogs;
 
-public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, IUnifiedLoggingService logger) : BackgroundService
+public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, ILogger<SystemLogCleanupService> logger) : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<SystemLogCleanupService> _logger = logger;
     private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(6);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

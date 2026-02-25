@@ -7,7 +7,7 @@ using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -23,13 +23,13 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<PrusaLinkApiClient> _logger;
 
     // Cache for digest auth clients - keyed by username:password hash
     private readonly Dictionary<string, HttpClient> _digestAuthClients = new();
     private readonly object _clientLock = new();
 
-    public PrusaLinkApiClient(HttpClient httpClient, IUnifiedLoggingService logger)
+    public PrusaLinkApiClient(HttpClient httpClient, ILogger<PrusaLinkApiClient> logger)
     {
         _httpClient = httpClient;
         _logger = logger;

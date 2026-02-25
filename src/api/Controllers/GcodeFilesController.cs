@@ -12,13 +12,13 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Tags;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -35,7 +35,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/gcode-files")]
 [Authorize]
 public class GcodeFilesController(
-    IUnifiedLoggingService logger,
+    ILogger<GcodeFilesController> logger,
     IGcodeUploadSettings uploadSettings,
     IGcodeUploadQuotaService quotaService,
     Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService,

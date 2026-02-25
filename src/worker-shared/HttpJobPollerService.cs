@@ -1,13 +1,13 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Worker.Core;
 
@@ -24,13 +24,13 @@ namespace Farm.Slicer.Worker.Core;
 public abstract class HttpJobPollerService(
     IHttpClientFactory httpClientFactory,
     IServiceProvider serviceProvider,
-    IUnifiedLoggingService logger,
+    ILogger<HttpJobPollerService> logger,
     IWorkerStateService workerState,
     IConfiguration configuration) : BackgroundService
 {
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<HttpJobPollerService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IWorkerStateService _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     private readonly Guid _workerId = Guid.NewGuid();

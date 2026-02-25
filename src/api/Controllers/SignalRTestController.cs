@@ -1,10 +1,10 @@
 ﻿using Farm.Infrastructure.Services.SignalR;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -16,7 +16,7 @@ namespace Farm.Web.Api.Controllers;
 [Authorize(Roles = "farm_admin")]
 public class SignalRTestController(
     ISignalRTestService testService,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<SignalRTestController> logger) : ControllerBase
 {
     /// <summary>
     /// Test endpoint to verify SignalR hub can send messages

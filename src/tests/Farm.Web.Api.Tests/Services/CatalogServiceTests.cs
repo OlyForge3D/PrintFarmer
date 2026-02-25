@@ -6,11 +6,11 @@ using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Catalog;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services
 {
@@ -24,7 +24,7 @@ namespace Farm.Web.Api.Tests.Services
             _ = mockCacheProvider.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             Mock<INormalizationEventLogger> normLogger = new Mock<INormalizationEventLogger>();
-            Mock<IUnifiedLoggingService> unifiedLogging = new Mock<IUnifiedLoggingService>();
+            Mock<ILogger<CatalogService>> unifiedLogging = new Mock<ILogger<CatalogService>>();
             Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
 
             Farm.Infrastructure.Services.Catalog.CatalogService svc = new Farm.Infrastructure.Services.Catalog.CatalogService(

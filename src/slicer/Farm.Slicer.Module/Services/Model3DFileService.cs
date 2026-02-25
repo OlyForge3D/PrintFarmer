@@ -14,13 +14,13 @@ using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
-using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Services
 {
@@ -41,7 +41,7 @@ namespace Farm.Slicer.Module.Services
     {
         private readonly IModel3DFileRepository _model3dFiles;
         private readonly ITagRepository _tagRepository;
-        private readonly IUnifiedLoggingService _logger;
+        private readonly ILogger<Model3DFileService> _logger;
         private readonly string _modelsPath;
         private readonly IModelAnalysisService? _analysisService;
         private readonly Farm.Infrastructure.IO.IFileSystem _fileSystem;
@@ -54,7 +54,7 @@ namespace Farm.Slicer.Module.Services
         public Model3DFileService(
             IModel3DFileRepository model3dFiles,
             ITagRepository tagRepository,
-            IUnifiedLoggingService logger,
+            ILogger<Model3DFileService> logger,
             IConfiguration configuration,
             Farm.Infrastructure.IO.IFileSystem fileSystem,
             IFileManagementService fileManagementService,

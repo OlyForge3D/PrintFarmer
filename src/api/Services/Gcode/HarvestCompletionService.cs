@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Gcode;
 
@@ -11,10 +11,10 @@ namespace Farm.Web.Api.Services.Gcode;
 /// </summary>
 public class HarvestCompletionService(
     IServiceProvider serviceProvider,
-    IUnifiedLoggingService logger) : BackgroundService
+    ILogger<HarvestCompletionService> logger) : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<HarvestCompletionService> _logger = logger;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(10);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

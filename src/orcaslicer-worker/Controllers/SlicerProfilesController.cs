@@ -3,6 +3,7 @@ using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Controllers;
 
@@ -13,11 +14,11 @@ namespace Farm.OrcaSlicer.Worker.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Slicer Profiles")]
-public class ProfilesController(ISlicerProfilesService profileService, IUnifiedLoggingService logger) : ControllerBase
+public class ProfilesController(ISlicerProfilesService profileService, ILogger<ProfilesController> logger) : ControllerBase
 {
     private readonly ISlicerProfilesService _profileService = profileService;
     private readonly CachedOrcaProfilesService? _cachedService = profileService as CachedOrcaProfilesService;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ProfilesController> _logger = logger;
 
     /// <summary>
     /// Get all available slicer profiles organized by manufacturer and model hierarchy.

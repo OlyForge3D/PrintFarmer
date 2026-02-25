@@ -1,5 +1,4 @@
 ﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Gcode;
 using Microsoft.AspNetCore.Hosting;
@@ -7,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Controllers;
 
@@ -14,14 +14,14 @@ public class GcodeLibraryControllerTests
 {
     private readonly Mock<IGcodeFilesService> _gcodeServiceMock;
     private readonly Mock<IWebHostEnvironment> _envMock;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ILogger<GcodeLibraryController>> _loggerMock;
     private readonly GcodeLibraryController _controller;
 
     public GcodeLibraryControllerTests()
     {
         _gcodeServiceMock = new Mock<IGcodeFilesService>();
         _envMock = new Mock<IWebHostEnvironment>();
-        _loggerMock = new Mock<IUnifiedLoggingService>();
+        _loggerMock = new Mock<ILogger<GcodeLibraryController>>();
         _envMock.Setup(e => e.WebRootPath).Returns("/app/wwwroot");
         _controller = new GcodeLibraryController(_gcodeServiceMock.Object, _envMock.Object, _loggerMock.Object);
     }

@@ -2,15 +2,15 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Projects;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Projects;
 
 /// <summary>
 /// Service implementation for managing print project templates.
 /// </summary>
-public class PrintProjectTemplateService(AppDbContext db, IUnifiedLoggingService logger) : IPrintProjectTemplateService
+public class PrintProjectTemplateService(AppDbContext db, ILogger<PrintProjectTemplateService> logger) : IPrintProjectTemplateService
 {
     public async Task<IReadOnlyList<PrintProjectTemplateListDto>> GetTemplatesAsync(
         string? category = null,

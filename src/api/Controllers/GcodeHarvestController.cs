@@ -2,9 +2,9 @@
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.GcodeHarvest;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -18,11 +18,11 @@ namespace Farm.Web.Api.Controllers;
 public class GcodeHarvestController(
     IGcodeHarvestService harvestService,
     IGcodeHarvestQueue harvestQueue,
-    IUnifiedLoggingService logger) : ControllerBase
+    ILogger<GcodeHarvestController> logger) : ControllerBase
 {
     private readonly IGcodeHarvestService _harvestService = harvestService;
     private readonly IGcodeHarvestQueue _harvestQueue = harvestQueue;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<GcodeHarvestController> _logger = logger;
 
     /// <summary>
     /// Queue a G-code harvest operation for a specific printer
@@ -208,12 +208,12 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogErrorWithSource(ex, $"Failed to import selected files for operation {request.HarvestOperationId}");
+            _logger.LogError(ex, $"Failed to import selected files for operation {request.HarvestOperationId}");
 
             // Log inner exceptions for better debugging
             if (ex.InnerException != null)
             {
-                _logger.LogErrorWithSource(ex.InnerException, "Inner exception details");
+                _logger.LogError(ex.InnerException, "Inner exception details");
             }
 
             // Return a result object with error information instead of throwing 500

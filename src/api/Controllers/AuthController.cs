@@ -3,7 +3,6 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ChangePasswordRequest = Farm.Infrastructure.Contracts.Auth.ChangePasswordRequest;
@@ -13,16 +12,17 @@ using LoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
 using RegisterRequest = Farm.Infrastructure.Contracts.Auth.RegisterRequest;
 using ResetPasswordRequest = Farm.Infrastructure.Contracts.Auth.ResetPasswordRequest;
 using UserDto = Farm.Infrastructure.Contracts.Auth.UserDto;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
 [Tags("Authentication")]
-public class AuthController(IAuthenticationService authService, IUnifiedLoggingService logger) : ControllerBase
+public class AuthController(IAuthenticationService authService, ILogger<AuthController> logger) : ControllerBase
 {
     private readonly IAuthenticationService _authService = authService;
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<AuthController> _logger = logger;
 
     [HttpPost("login")]
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)

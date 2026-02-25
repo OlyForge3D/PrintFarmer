@@ -2,7 +2,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Email;
 
@@ -10,12 +10,12 @@ public sealed class MailjetEmailService : IEmailService
 {
     private const string MailjetApiBaseUrl = "https://api.mailjet.com/v3.1/send";
 
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<MailjetEmailService> _logger;
     private readonly EmailOptions _options;
     private readonly IEmailTemplateRenderer _renderer;
     private readonly IHttpClientFactory _httpClientFactory;
 
-    public MailjetEmailService(IUnifiedLoggingService logger, EmailOptions options, IEmailTemplateRenderer renderer, IHttpClientFactory httpClientFactory)
+    public MailjetEmailService(ILogger<MailjetEmailService> logger, EmailOptions options, IEmailTemplateRenderer renderer, IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
         _options = options;

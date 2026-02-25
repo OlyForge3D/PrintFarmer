@@ -1,14 +1,15 @@
 ﻿using System.Collections.Concurrent;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Infrastructure;
 
-public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, TimeSpan? retryDelay = null, IUnifiedLoggingService? logger = null)
+public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, TimeSpan? retryDelay = null, ILogger? logger = null)
 {
     private readonly int _failureThreshold = failureThreshold;
     private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromMinutes(1);
     private readonly TimeSpan _retryDelay = retryDelay ?? TimeSpan.FromSeconds(30);
-    private readonly IUnifiedLoggingService _logger = logger ?? new NullLoggingService();
+    private readonly ILogger _logger = logger ?? NullLogger<CircuitBreaker>.Instance;
 
     private readonly Lock _lock = new();
     private int _failureCount;

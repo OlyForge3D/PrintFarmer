@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.FlashForge;
 
@@ -16,7 +16,7 @@ namespace Farm.Backend.Plugin.FlashForge;
 /// </summary>
 public sealed partial class FlashForgeClient : IFlashForgeClient
 {
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<FlashForgeClient> _logger;
     private readonly BackendTimeoutSettings _timeouts;
 
     /// <summary>Buffer size for TCP read/write operations (4 KB).</summary>
@@ -25,7 +25,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient
     /// <summary>Response terminator indicating success.</summary>
     private const string OkTerminator = "ok\n";
 
-    public FlashForgeClient(IUnifiedLoggingService logger, BackendTimeoutSettings timeouts)
+    public FlashForgeClient(ILogger<FlashForgeClient> logger, BackendTimeoutSettings timeouts)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeouts = timeouts ?? throw new ArgumentNullException(nameof(timeouts));

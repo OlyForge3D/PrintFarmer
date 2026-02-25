@@ -1,12 +1,12 @@
 ﻿using System.Collections.Concurrent;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure;
 
-public class CircuitBreakerService(IUnifiedLoggingService logger) : ICircuitBreakerService
+public class CircuitBreakerService(ILogger<CircuitBreakerService> logger) : ICircuitBreakerService
 {
     private readonly ConcurrentDictionary<string, CircuitBreaker> _circuitBreakers = new();
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<CircuitBreakerService> _logger = logger;
 
     public CircuitBreaker GetCircuitBreaker(string name, int? failureThreshold = null, TimeSpan? timeout = null, TimeSpan? retryDelay = null)
     {

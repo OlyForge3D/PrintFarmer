@@ -5,7 +5,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -23,16 +24,16 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsTemperatureControl
 {
     private readonly IPrusaLinkApiClient _apiClient;
-    private readonly IUnifiedLoggingService? _logger;
+    private readonly ILogger<PrusaLinkClient>? _logger;
 
-    public PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = null)
+    public PrusaLinkClient(HttpClient http, ILogger<PrusaLinkClient>? logger = null)
     {
-        _apiClient = new PrusaLinkApiClient(http, logger ?? new NullLoggingService());
+        _apiClient = new PrusaLinkApiClient(http, NullLogger<PrusaLinkApiClient>.Instance);
         _logger = logger;
     }
 
     // For testability: allow injection of mock API client
-    internal PrusaLinkClient(IPrusaLinkApiClient apiClient, IUnifiedLoggingService? logger = null)
+    internal PrusaLinkClient(IPrusaLinkApiClient apiClient, ILogger<PrusaLinkClient>? logger = null)
     {
         _apiClient = apiClient;
         _logger = logger;

@@ -1,10 +1,11 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Health;
 
-public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, IUnifiedLoggingService logger) : IHealthCheck
+public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, ILogger<WorkerReadinessHealthCheck> logger) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {

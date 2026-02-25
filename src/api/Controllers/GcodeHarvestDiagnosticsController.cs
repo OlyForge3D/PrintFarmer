@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Gcode;
-using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -14,10 +14,10 @@ namespace Farm.Web.Api.Controllers;
 [Tags("G-code Harvesting Diagnostics")]
 [Authorize(Roles = "farm_admin")]
 public class GcodeHarvestDiagnosticsController(
-IUnifiedLoggingService logger,
+ILogger<GcodeHarvestDiagnosticsController> logger,
 IGcodeHarvestService harvestService) : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<GcodeHarvestDiagnosticsController> _logger = logger;
     private readonly IGcodeHarvestService _harvestService = harvestService;
 
     /// <summary>

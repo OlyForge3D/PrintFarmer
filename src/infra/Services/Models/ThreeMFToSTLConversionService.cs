@@ -2,7 +2,7 @@
 using System.Text.Json;
 using System.Xml;
 using Farm.Infrastructure.Services;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Models;
 
@@ -14,9 +14,9 @@ namespace Farm.Infrastructure.Services.Models;
 /// 3. Applying transformations to vertices
 /// 4. Merging into a single coherent mesh
 /// </summary>
-public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3MfToStlConversionService
+public class ThreeMfToStlConversionService(ILogger<ThreeMfToStlConversionService> logger) : I3MfToStlConversionService
 {
-    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly ILogger<ThreeMfToStlConversionService> _logger = logger;
 
     /// <inheritdoc/>
     public async Task<byte[]?> ConvertToSTLAsync(byte[] threeMfBytes, CancellationToken cancellationToken = default)

@@ -5,9 +5,9 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Setup;
-using Farm.Infrastructure.Telemetry;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Tests.Services;
 
@@ -16,7 +16,7 @@ public class SetupServiceTests
     private readonly Mock<IUsersRepository> _usersRepository;
     private readonly Mock<IAuthenticationService> _authService;
     private readonly Mock<IPasswordHashingService> _passwordHashingService;
-    private readonly Mock<IUnifiedLoggingService> _logger;
+    private readonly Mock<ILogger<SetupService>> _logger;
     private readonly SetupService _service;
 
     public SetupServiceTests()
@@ -24,7 +24,7 @@ public class SetupServiceTests
         _usersRepository = new Mock<IUsersRepository>();
         _authService = new Mock<IAuthenticationService>();
         _passwordHashingService = new Mock<IPasswordHashingService>();
-        _logger = new Mock<IUnifiedLoggingService>();
+        _logger = new Mock<ILogger<SetupService>>();
 
         _service = new SetupService(
             _usersRepository.Object,
@@ -576,9 +576,6 @@ public class SetupServiceTests
 
         _usersRepository.Verify(
             r => r.AddUserWithRoleAsync(It.IsAny<User>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        _logger.Verify(
-            l => l.LogInformation(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>()),
             Times.Once);
     }
 

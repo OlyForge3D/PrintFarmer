@@ -6,7 +6,7 @@ using System.Linq;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -20,7 +20,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 {
     private readonly IBackendClientFactory _clientFactory;
     private readonly IBackendPluginRegistry? _pluginRegistry;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ILogger<BackendCapabilityFactory> _logger;
 
     // Map of capability marker interfaces to their corresponding BackendCapabilities flags
     private static readonly Dictionary<Type, BackendCapabilities> CapabilityInterfaceMap = new()
@@ -46,7 +46,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 
     public BackendCapabilityFactory(
         IBackendClientFactory clientFactory,
-        IUnifiedLoggingService logger,
+        ILogger<BackendCapabilityFactory> logger,
         IBackendPluginRegistry? pluginRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(clientFactory);
