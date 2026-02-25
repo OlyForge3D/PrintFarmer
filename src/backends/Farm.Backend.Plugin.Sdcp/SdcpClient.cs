@@ -541,6 +541,40 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         return state;
     }
 
+    /// <summary>
+    /// Computes print progress as a 0.0–1.0 fraction.
+    /// Prefers CurrentLayer/TotalLayer (always updated during printing), falling back to
+    /// the firmware Progress field (which some firmware only updates sporadically).
+    /// </summary>
+    /// <summary>
+    /// Computes print progress as a 0–100 percentage for UI display.
+    /// The frontend expects progress in the 0–100 range (same as Moonraker).
+    /// Prefers layer-based calculation (most reliable on Elegoo firmware),
+    /// falls back to firmware-reported Progress field.
+    /// </summary>
+    private static double? ComputeProgress(SdcpPrintInfo? printInfo)
+    {
+        if (printInfo == null)
+        {
+            return null;
+        }
+
+        // Layer-based progress: most reliable on Elegoo SDCP firmware
+        // Returns 0–100 range to match frontend expectations
+        if (printInfo.TotalLayer > 0)
+        {
+            return (double)printInfo.CurrentLayer / printInfo.TotalLayer * 100.0;
+        }
+
+        // Fallback to firmware-reported progress (already 0–100 scale)
+        if (printInfo.Progress > 0)
+        {
+            return printInfo.Progress;
+        }
+
+        return 0.0;
+    }
+
 #pragma warning disable S1172 // Parameters reserved for future diagnostic logging
     private async Task<string?> ReceiveTextMessageAsync(ClientWebSocket ws, string operation, string correlationId, CancellationToken ct)
 #pragma warning restore S1172
@@ -979,7 +1013,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                     string state = ResolveMachineState(status);
 
-                    double? progress = printInfo?.Progress / 100.0;
+                    double? progress = ComputeProgress(printInfo);
                     string? jobName = string.IsNullOrWhiteSpace(printInfo?.Filename) ? null :
                                  Path.GetFileName(printInfo.Filename);
 
