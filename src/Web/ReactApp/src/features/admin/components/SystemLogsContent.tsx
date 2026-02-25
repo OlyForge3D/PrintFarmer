@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { apiClient } from "@/services/api";
 import { Button, Input, FormField, Select, Textarea, Checkbox } from '@/common/components/ui';
 import type { SystemLog, LogColumnKey } from '@/types/admin';
@@ -36,11 +36,19 @@ export function SystemLogsContent() {
     ) as Record<LogColumnKey, boolean>;
   });
   const [expandedRowId, setExpandedRowId] = useState<number | null>(null);
+  const defaultDateRange = useMemo(() => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - 7);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { from: fmt(from), to: fmt(to) };
+  }, []);
+
   const [filters, setFilters] = useState({
     correlationId: "",
     level: "",
-    from: "",
-    to: "",
+    from: defaultDateRange.from,
+    to: defaultDateRange.to,
     metadata: ""
   });
 
@@ -129,11 +137,11 @@ export function SystemLogsContent() {
 
       {/* Filters */}
       {!useAdvancedQuery && (
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-          <FormField label="CorrelationId" inline>
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2">
+          <FormField label="CorrelationId">
             <Input placeholder="CorrelationId" value={filters.correlationId} onChange={e => setFilters(f => ({ ...f, correlationId: e.target.value }))} />
           </FormField>
-          <FormField label="Level" inline>
+          <FormField label="Level">
             <Select value={filters.level} onChange={e => setFilters(f => ({ ...f, level: e.target.value }))}>
               <option value="">All Levels</option>
               <option value="Trace">Trace</option>
@@ -144,13 +152,13 @@ export function SystemLogsContent() {
               <option value="Critical">Critical</option>
             </Select>
           </FormField>
-          <FormField label="From" inline>
-            <Input type="date" placeholder="From" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} />
+          <FormField label="From">
+            <Input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} />
           </FormField>
-          <FormField label="To" inline>
-            <Input type="date" placeholder="To" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} />
+          <FormField label="To">
+            <Input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} />
           </FormField>
-          <FormField label="Metadata" inline>
+          <FormField label="Metadata">
             <Input placeholder="Metadata" value={filters.metadata} onChange={e => setFilters(f => ({ ...f, metadata: e.target.value }))} />
           </FormField>
         </div>
