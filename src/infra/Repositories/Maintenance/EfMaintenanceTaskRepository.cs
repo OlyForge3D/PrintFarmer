@@ -39,6 +39,7 @@ public class EfMaintenanceTaskRepository(AppDbContext context) : IMaintenanceTas
         return await _context.MaintenanceTasks
             .Include(t => t.TaskComponents)
                 .ThenInclude(tc => tc.MaintenanceComponent)
+            .Include(t => t.PlanTasks)
             .FirstOrDefaultAsync(t => t.Id == id, ct);
     }
 

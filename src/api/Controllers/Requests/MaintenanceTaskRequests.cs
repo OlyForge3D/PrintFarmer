@@ -21,7 +21,19 @@ public record CreateMaintenanceTaskRequest(
     [Range(1, 4)]
     int Priority = 2,
     bool IsActive = true,
-    bool IsDefault = false);
+    bool IsDefault = false,
+    bool? RequiresEnclosure = null,
+    bool? RequiresCarbonFilter = null,
+    bool? RequiresHepaFilter = null,
+    bool? RequiresBowdenTube = null,
+    bool? RequiresPtfeLiner = null,
+    bool? RequiresLinearRails = null,
+    bool? RequiresLeadScrews = null,
+    bool? RequiresToolchanger = null,
+    bool? RequiresFilamentCutter = null,
+    bool? RequiresHeatedChamber = null,
+    bool? RequiresHeatedBed = null,
+    bool? RequiresMultiMaterial = null);
 
 /// <summary>
 /// Request payload for updating a maintenance task.
@@ -42,7 +54,19 @@ public record UpdateMaintenanceTaskRequest(
     [Range(1, 4)]
     int Priority = 2,
     bool IsActive = true,
-    bool IsDefault = false);
+    bool IsDefault = false,
+    bool? RequiresEnclosure = null,
+    bool? RequiresCarbonFilter = null,
+    bool? RequiresHepaFilter = null,
+    bool? RequiresBowdenTube = null,
+    bool? RequiresPtfeLiner = null,
+    bool? RequiresLinearRails = null,
+    bool? RequiresLeadScrews = null,
+    bool? RequiresToolchanger = null,
+    bool? RequiresFilamentCutter = null,
+    bool? RequiresHeatedChamber = null,
+    bool? RequiresHeatedBed = null,
+    bool? RequiresMultiMaterial = null);
 
 /// <summary>
 /// Request payload for adding a component to a task.

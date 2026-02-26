@@ -61,6 +61,7 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenancePlanRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenancePlanRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceTaskRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceTaskRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceComponentRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceComponentRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterMaintenanceScheduleRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterMaintenanceScheduleRepository>();
 
         // Maintenance Module - Services
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();

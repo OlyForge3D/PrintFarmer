@@ -62,6 +62,18 @@ public class MaintenancePlanController(
         task.Priority,
         task.IsActive,
         task.IsDefault,
+        task.RequiresEnclosure,
+        task.RequiresCarbonFilter,
+        task.RequiresHepaFilter,
+        task.RequiresBowdenTube,
+        task.RequiresPtfeLiner,
+        task.RequiresLinearRails,
+        task.RequiresLeadScrews,
+        task.RequiresToolchanger,
+        task.RequiresFilamentCutter,
+        task.RequiresHeatedChamber,
+        task.RequiresHeatedBed,
+        task.RequiresMultiMaterial,
         task.CreatedAt,
         task.UpdatedAt,
         task.TaskComponents.Select(ToTaskComponentResponse).ToList());
@@ -256,6 +268,18 @@ public class MaintenancePlanController(
             Priority = request.Priority,
             IsActive = request.IsActive,
             IsDefault = request.IsDefault,
+            RequiresEnclosure = request.RequiresEnclosure,
+            RequiresCarbonFilter = request.RequiresCarbonFilter,
+            RequiresHepaFilter = request.RequiresHepaFilter,
+            RequiresBowdenTube = request.RequiresBowdenTube,
+            RequiresPtfeLiner = request.RequiresPtfeLiner,
+            RequiresLinearRails = request.RequiresLinearRails,
+            RequiresLeadScrews = request.RequiresLeadScrews,
+            RequiresToolchanger = request.RequiresToolchanger,
+            RequiresFilamentCutter = request.RequiresFilamentCutter,
+            RequiresHeatedChamber = request.RequiresHeatedChamber,
+            RequiresHeatedBed = request.RequiresHeatedBed,
+            RequiresMultiMaterial = request.RequiresMultiMaterial,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -303,6 +327,18 @@ public class MaintenancePlanController(
         task.Priority = request.Priority;
         task.IsActive = request.IsActive;
         task.IsDefault = request.IsDefault;
+        task.RequiresEnclosure = request.RequiresEnclosure;
+        task.RequiresCarbonFilter = request.RequiresCarbonFilter;
+        task.RequiresHepaFilter = request.RequiresHepaFilter;
+        task.RequiresBowdenTube = request.RequiresBowdenTube;
+        task.RequiresPtfeLiner = request.RequiresPtfeLiner;
+        task.RequiresLinearRails = request.RequiresLinearRails;
+        task.RequiresLeadScrews = request.RequiresLeadScrews;
+        task.RequiresToolchanger = request.RequiresToolchanger;
+        task.RequiresFilamentCutter = request.RequiresFilamentCutter;
+        task.RequiresHeatedChamber = request.RequiresHeatedChamber;
+        task.RequiresHeatedBed = request.RequiresHeatedBed;
+        task.RequiresMultiMaterial = request.RequiresMultiMaterial;
         task.UpdatedAt = DateTime.UtcNow;
 
         await _taskRepository.UpdateAsync(task, ct);

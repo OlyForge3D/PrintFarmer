@@ -46,6 +46,18 @@ public record MaintenanceTaskResponse(
     int Priority,
     bool IsActive,
     bool IsDefault,
+    bool? RequiresEnclosure,
+    bool? RequiresCarbonFilter,
+    bool? RequiresHepaFilter,
+    bool? RequiresBowdenTube,
+    bool? RequiresPtfeLiner,
+    bool? RequiresLinearRails,
+    bool? RequiresLeadScrews,
+    bool? RequiresToolchanger,
+    bool? RequiresFilamentCutter,
+    bool? RequiresHeatedChamber,
+    bool? RequiresHeatedBed,
+    bool? RequiresMultiMaterial,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     List<MaintenanceTaskComponentResponse> TaskComponents);
@@ -75,5 +87,20 @@ public record MaintenanceComponentResponse(
     string? Url,
     int InStock,
     int MinimumStock,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+/// <summary>
+/// Response DTO for a maintenance plan deployed to a specific printer.
+/// </summary>
+public record PrinterMaintenanceScheduleResponse(
+    Guid Id,
+    Guid MaintenancePlanId,
+    string PlanName,
+    Guid PrinterId,
+    string? PrinterName,
+    bool IsActive,
+    DateTime DeployedAt,
+    string? Notes,
     DateTime CreatedAt,
     DateTime UpdatedAt);
