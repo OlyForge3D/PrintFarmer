@@ -266,3 +266,22 @@ public class MaintenanceTaskSeedDto
 
     public bool? RequiresMultiMaterial { get; set; }
 }
+
+/// <summary>
+/// DTO for deserializing maintenance plan seed data from YAML.
+/// Plans reference tasks by name — resolved to IDs at seed time.
+/// </summary>
+public class MaintenancePlanSeedDto
+{
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// List of task names to include in this plan (resolved by name at seed time).
+    /// </summary>
+    public List<string> Tasks { get; set; } = [];
+}

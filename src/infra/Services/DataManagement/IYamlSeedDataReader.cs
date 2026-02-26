@@ -46,4 +46,9 @@ public interface IYamlSeedDataReader
     /// Read global maintenance task catalog from YAML file
     /// </summary>
     Task<List<MaintenanceTaskSeedDto>> ReadMaintenanceTasksAsync();
+
+    /// <summary>
+    /// Read default maintenance plans from YAML file
+    /// </summary>
+    Task<List<MaintenancePlanSeedDto>> ReadMaintenancePlansAsync();
 }

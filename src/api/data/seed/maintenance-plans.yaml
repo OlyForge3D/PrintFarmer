@@ -1,0 +1,50 @@
+# ============================================================================
+# Default Maintenance Plans
+# Seeded into MaintenancePlans table on first run.
+# Each plan references tasks by name (must match maintenance-tasks.yaml).
+# ============================================================================
+
+# ─────────────────────────────────────────────────────────────────────
+# Essential Maintenance — Core tasks every FDM printer needs
+# ─────────────────────────────────────────────────────────────────────
+
+- name: "Essential Printer Care"
+  description: "Core preventive maintenance for all FDM 3D printers. Covers the critical inspections and cleanings that keep your printer running reliably."
+  isActive: true
+  tasks:
+    - "Nozzle Replacement"
+    - "Bed Surface Cleaning"
+    - "Bed Leveling & Calibration"
+    - "Belt Tension Check"
+    - "Extruder Gear Cleaning"
+    - "Cooling Fan Inspection"
+    - "Wiring & Connector Inspection"
+
+# ─────────────────────────────────────────────────────────────────────
+# Deep Maintenance — Thorough periodic overhaul
+# ─────────────────────────────────────────────────────────────────────
+
+- name: "Deep Maintenance Overhaul"
+  description: "Comprehensive inspection and servicing for long-term printer health. Scheduled less frequently for thorough mechanical and electrical review."
+  isActive: true
+  tasks:
+    - "Hotend Replacement"
+    - "Heat Break Inspection"
+    - "PEI Sheet Replacement"
+    - "Gantry Squareness Check"
+    - "Power Supply Inspection"
+    - "Full Mechanical Inspection"
+    - "Firmware Update Check"
+
+# ─────────────────────────────────────────────────────────────────────
+# Enclosure & Filtration — For enclosed printers
+# ─────────────────────────────────────────────────────────────────────
+
+- name: "Enclosure & Filtration"
+  description: "Maintenance tasks specific to enclosed printers with air filtration systems. Critical for safe printing with ABS, ASA, and Nylon."
+  isActive: true
+  tasks:
+    - "HEPA Filter Replacement"
+    - "Carbon Filter Replacement"
+    - "Enclosure Seal Inspection"
+    - "Chamber Heater Inspection"

@@ -36,6 +36,12 @@ public interface IDataSeedService
     Task SeedMaintenanceTasksAsync();
 
     /// <summary>
+    /// Load and seed default maintenance plans from YAML file.
+    /// Plans reference tasks by name and create PlanTask join entities.
+    /// </summary>
+    Task SeedMaintenancePlansAsync();
+
+    /// <summary>
     /// Reload seed data from YAML files (for admin use)
     /// </summary>
     Task ReloadSeedDataAsync();

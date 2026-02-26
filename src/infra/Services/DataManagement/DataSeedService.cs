@@ -37,6 +37,7 @@ public class DataSeedService : IDataSeedService
         await SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
         await SeedPrinterModelsAsync();
         await SeedMaintenanceTasksAsync();
+        await SeedMaintenancePlansAsync();
 
         _logger.LogInformation("[SeedData] Completed seed data load from YAML files");
     }
@@ -931,6 +932,75 @@ public class DataSeedService : IDataSeedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SeedData] Error seeding maintenance tasks: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    public async Task SeedMaintenancePlansAsync()
+    {
+        try
+        {
+            List<MaintenancePlanSeedDto> plansData = await _yamlReader.ReadMaintenancePlansAsync();
+
+            if (plansData.Count == 0)
+            {
+                _logger.LogInformation("[SeedData] No maintenance plans found in YAML, skipping");
+                return;
+            }
+
+            _logger.LogInformation("[SeedData] Seeding {PlanCount} maintenance plans from YAML", plansData.Count);
+
+            // Pre-load all tasks by name for efficient lookup
+            Dictionary<string, MaintenanceTask> tasksByName = await _context.MaintenanceTasks
+                .ToDictionaryAsync(t => t.TaskName, StringComparer.OrdinalIgnoreCase);
+
+            foreach (MaintenancePlanSeedDto dto in plansData)
+            {
+                bool exists = await _context.MaintenancePlans
+                    .AnyAsync(p => p.Name == dto.Name);
+
+                if (exists) continue;
+
+                var plan = new MaintenancePlan
+                {
+                    Id = Guid.NewGuid(),
+                    Name = dto.Name,
+                    Description = dto.Description,
+                    IsActive = dto.IsActive,
+                    IsDefault = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                };
+
+                // Resolve task names to PlanTask join entities
+                int sortOrder = 0;
+                foreach (string taskName in dto.Tasks)
+                {
+                    if (tasksByName.TryGetValue(taskName, out MaintenanceTask? task))
+                    {
+                        plan.PlanTasks.Add(new PlanTask
+                        {
+                            Id = Guid.NewGuid(),
+                            MaintenancePlanId = plan.Id,
+                            MaintenanceTaskId = task.Id,
+                            SortOrder = sortOrder++,
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogWarning("[SeedData] Plan '{PlanName}' references unknown task '{TaskName}', skipping", dto.Name, taskName);
+                    }
+                }
+
+                _context.MaintenancePlans.Add(plan);
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Maintenance plans seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding maintenance plans: {Message}", ex.Message);
             throw;
         }
     }
