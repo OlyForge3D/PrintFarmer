@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
+import { useNavigate } from 'react-router';
 import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
@@ -25,7 +26,6 @@ import { PrinterBackend } from '@/types/api';
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
 import PrinterBulkControls from '@/features/printers/components/admin/PrinterBulkControls';
-import { PrinterMaintenanceActionsModal } from '@/features/maintenance/components/PrinterMaintenanceActionsModal';
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -92,7 +92,7 @@ export function PrintersPage() {
     printers: Printer[];
   }>({ isOpen: false, printers: [] });
 
-  const [maintenancePrinter, setMaintenancePrinter] = useState<Printer | null>(null);
+  const navigate = useNavigate();
 
   // Discovery availability state
   const [discoveryAvailable, setDiscoveryAvailable] = useState(false);
@@ -225,7 +225,7 @@ export function PrintersPage() {
   };
 
   const handleOpenMaintenance = (printer: Printer) => {
-    setMaintenancePrinter(printer);
+    navigate(`/printers/${printer.id}/maintenance`);
   };
 
 
@@ -473,13 +473,6 @@ export function PrintersPage() {
           onSuccess={() => { setShowDiscovery(false); refetchPrinters(); }}
         />
 
-        {maintenancePrinter && (
-          <PrinterMaintenanceActionsModal
-            isOpen={true}
-            printer={maintenancePrinter}
-            onClose={() => setMaintenancePrinter(null)}
-          />
-        )}
     </PageTemplate>
   );
 }

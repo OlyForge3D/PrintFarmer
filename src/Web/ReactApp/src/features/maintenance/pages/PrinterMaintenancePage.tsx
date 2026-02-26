@@ -7,8 +7,7 @@ import { maintenanceService } from '@/services/maintenanceService';
 import { apiClient } from '@/services/api';
 import type { 
   MaintenanceSchedule, 
-  CreateMaintenanceLogRequest,
-  CreateMaintenanceScheduleRequest
+  CreateMaintenanceLogRequest
 } from '@/types/maintenance';
 import type { Printer } from '@/types/api';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
@@ -19,12 +18,10 @@ import {
   ExclamationTriangleIcon,
   CheckCircleIcon,
   PlusIcon,
-  ArrowLeftIcon,
-  CalendarDaysIcon
+  ArrowLeftIcon
 } from '@heroicons/react/24/outline';
 import { formatDistanceToNow, format } from 'date-fns';
 import { LogMaintenanceModal } from '../components/LogMaintenanceModal';
-import { CreateScheduleModal } from '../components/CreateScheduleModal';
 
 /**
  * Printer-specific maintenance page showing:
@@ -39,7 +36,6 @@ export function PrinterMaintenancePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showLogModal, setShowLogModal] = useState(false);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState<MaintenanceSchedule | null>(null);
 
   // Fetch printer details
@@ -100,13 +96,6 @@ export function PrinterMaintenancePage() {
     setSelectedSchedule(null);
   };
 
-  const handleScheduleSubmit = async (data: CreateMaintenanceScheduleRequest) => {
-    await maintenanceService.createSchedule(data);
-    // Refresh schedules
-    queryClient.invalidateQueries({ queryKey: ['printerSchedules', printerId] });
-    setShowScheduleModal(false);
-  };
-
   const isLoading = printerLoading || statsLoading || logsLoading || schedulesLoading || alertsLoading;
 
   if (!printerId) {
@@ -154,14 +143,6 @@ export function PrinterMaintenancePage() {
           >
             <ArrowLeftIcon className="h-4 w-4" />
             Back
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => setShowScheduleModal(true)}
-            className="gap-2"
-          >
-            <CalendarDaysIcon className="h-4 w-4" />
-            Schedule Maintenance
           </Button>
           <Button
             variant="primary"
@@ -387,16 +368,6 @@ export function PrinterMaintenancePage() {
         />
       )}
 
-      {/* Create Schedule Modal */}
-      {printerId && (
-        <CreateScheduleModal
-          isOpen={showScheduleModal}
-          printerId={printerId}
-          printerName={printer?.name || 'Unknown Printer'}
-          onSubmit={handleScheduleSubmit}
-          onClose={() => setShowScheduleModal(false)}
-        />
-      )}
     </PageTemplate>
   );
 }

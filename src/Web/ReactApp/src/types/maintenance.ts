@@ -171,33 +171,6 @@ export interface CreateMaintenanceLogRequest {
   partsReplaced?: string | null;
 }
 
-export interface CreateMaintenanceScheduleRequest {
-  taskName: string;
-  description?: string | null;
-  intervalHours?: number | null;
-  intervalDays?: number | null;
-  componentName?: string | null;
-  printerModelId?: string | null;
-  printerId?: string | null;
-  isActive?: boolean | null;
-}
-
-export interface BulkScheduleOperationResponse {
-  printersProcessed: number;
-  schedulesCreated: number;
-  schedulesUpdated: number;
-  schedulesSkipped: number;
-}
-
-export interface UpdateMaintenanceScheduleRequest {
-  taskName?: string | null;
-  description?: string | null;
-  intervalHours?: number | null;
-  intervalDays?: number | null;
-  componentName?: string | null;
-  isActive?: boolean | null;
-}
-
 export interface UpdateMaintenanceModeRequest {
   inMaintenance: boolean;
 }

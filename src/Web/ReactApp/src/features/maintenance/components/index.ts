@@ -37,11 +37,7 @@ export { FleetStatisticsTable } from './FleetStatisticsTable';
 export type { FleetStatisticsTableProps } from './FleetStatisticsTable';
 
 export { LogMaintenanceModal } from './LogMaintenanceModal';
-export { CreateScheduleModal } from './CreateScheduleModal';
-export { EditScheduleModal } from './EditScheduleModal';
-export { MaintenancePlansTab } from './MaintenancePlansTab';
-export { MaintenanceTemplateManager } from './MaintenanceTemplateManager';
-export { MaintenancePlansTab as MaintenancePlansTabV2 } from './MaintenancePlansTabV2';
+export { MaintenancePlansTab } from './MaintenancePlansTabV2';
 export { PartsInventoryTab } from './PartsInventoryTab';
 export { TaskCatalogTab } from './TaskCatalogTab';
 export { TaskComponentManager } from './TaskComponentManager';

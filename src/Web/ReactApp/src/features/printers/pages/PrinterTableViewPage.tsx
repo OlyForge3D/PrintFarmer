@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { usePrinters } from '@/common/hooks/useApi';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
@@ -8,17 +9,16 @@ import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfir
 import type { Printer } from '@/types/api';
 import { EditPrinterModal } from '@/features/printers/components/EditPrinterModal';
 import { Button, Alert } from '@/common/components/ui';
-import { PrinterMaintenanceActionsModal } from '@/features/maintenance/components/PrinterMaintenanceActionsModal';
 
 export function PrinterTableViewPage() {
   const { hasPermission } = useAuth();
   const { data: printers, isLoading, error, refetch } = usePrinters();
+  const navigate = useNavigate();
   
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [printersToDelete, setPrintersToDelete] = useState<Printer[]>([]);
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [maintenancePrinter, setMaintenancePrinter] = useState<Printer | null>(null);
 
   // Handler functions
   const handleEditPrinter = (printer: Printer) => {
@@ -63,7 +63,7 @@ export function PrinterTableViewPage() {
   };
 
   const handleOpenMaintenance = (printer: Printer) => {
-    setMaintenancePrinter(printer);
+    navigate(`/printers/${printer.id}/maintenance`);
   };
 
   if (isLoading) {
@@ -174,13 +174,6 @@ export function PrinterTableViewPage() {
         }}
       />
 
-      {maintenancePrinter && (
-        <PrinterMaintenanceActionsModal
-          isOpen={true}
-          printer={maintenancePrinter}
-          onClose={() => setMaintenancePrinter(null)}
-        />
-      )}
     </div>
   );
 }
