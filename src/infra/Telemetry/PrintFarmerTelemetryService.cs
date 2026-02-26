@@ -84,9 +84,9 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
             description: "Total number of API calls");
 
         _apiCallDuration = _meter.CreateHistogram<double>(
-            "printfarmer_api_call_duration_seconds",
-            unit: "s",
-            description: "Duration of API calls in seconds");
+            "printfarmer_api_call_duration_ms",
+            unit: "ms",
+            description: "Duration of API calls in milliseconds");
 
         // Printer metrics
         _printerOperationsCounter = _meter.CreateCounter<long>(
@@ -135,7 +135,7 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
         };
 
         _apiCallsCounter.Add(1, tags);
-        _apiCallDuration.Record(duration.TotalSeconds, tags);
+        _apiCallDuration.Record(duration.TotalMilliseconds, tags);
     }
 
     public void RecordPrinterOperation(string operation, string printerId, bool success)

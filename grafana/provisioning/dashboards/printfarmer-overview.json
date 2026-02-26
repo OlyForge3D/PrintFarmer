@@ -67,7 +67,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_ms_bucket[5m])) by (le))",
           "legendFormat": "ms"
         }
       ],
@@ -136,17 +136,17 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.50, sum(rate(printfarmer_api_call_duration_ms_bucket[5m])) by (le))",
           "legendFormat": "p50"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_ms_bucket[5m])) by (le))",
           "legendFormat": "p95"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_ms_bucket[5m])) by (le))",
           "legendFormat": "p99"
         }
       ],
@@ -294,17 +294,17 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.50, sum(rate(printfarmer_api_call_duration_ms_bucket[5m])) by (le))",
           "legendFormat": "p50"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_ms_bucket[5m])) by (le))",
           "legendFormat": "p95"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_ms_bucket[5m])) by (le))",
           "legendFormat": "p99"
         }
       ],
@@ -324,7 +324,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "topk(10, histogram_quantile(0.95, sum by (endpoint, le) (rate(printfarmer_api_call_duration_seconds_bucket[5m]))) * 1000)",
+          "expr": "topk(10, histogram_quantile(0.95, sum by (endpoint, le) (rate(printfarmer_api_call_duration_ms_bucket[5m]))))",
           "legendFormat": "{{ endpoint }}",
           "instant": true
         }
