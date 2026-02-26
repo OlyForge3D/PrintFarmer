@@ -32,6 +32,24 @@ public class PrinterModelSeedDto
 
     public bool HasEnclosure { get; set; }
 
+    public bool HasCarbonFilter { get; set; }
+
+    public bool HasHepaFilter { get; set; }
+
+    public bool HasBowdenTube { get; set; }
+
+    public bool HasPtfeLiner { get; set; }
+
+    public bool HasLinearRails { get; set; }
+
+    public bool HasLeadScrews { get; set; }
+
+    public bool HasToolchanger { get; set; }
+
+    public bool HasFilamentCutter { get; set; }
+
+    public bool HasHeatedChamber { get; set; }
+
     public bool SupportsAutoLeveling { get; set; }
 
     public bool MultiMaterial { get; set; }

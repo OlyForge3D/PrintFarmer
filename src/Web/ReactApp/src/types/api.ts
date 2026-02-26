@@ -880,6 +880,15 @@ export interface PrinterModelDto {
   // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
+  hasCarbonFilter?: boolean;
+  hasHepaFilter?: boolean;
+  hasBowdenTube?: boolean;
+  hasPtfeLiner?: boolean;
+  hasLinearRails?: boolean;
+  hasLeadScrews?: boolean;
+  hasToolchanger?: boolean;
+  hasFilamentCutter?: boolean;
+  hasHeatedChamber?: boolean;
   multiMaterial?: boolean;
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
@@ -1159,6 +1168,15 @@ export interface UpdateModelRequest {
   // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
+  hasCarbonFilter?: boolean;
+  hasHepaFilter?: boolean;
+  hasBowdenTube?: boolean;
+  hasPtfeLiner?: boolean;
+  hasLinearRails?: boolean;
+  hasLeadScrews?: boolean;
+  hasToolchanger?: boolean;
+  hasFilamentCutter?: boolean;
+  hasHeatedChamber?: boolean;
   multiMaterial?: boolean;
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
@@ -1181,6 +1199,15 @@ export interface CreateModelRequest {
   // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
+  hasCarbonFilter?: boolean;
+  hasHepaFilter?: boolean;
+  hasBowdenTube?: boolean;
+  hasPtfeLiner?: boolean;
+  hasLinearRails?: boolean;
+  hasLeadScrews?: boolean;
+  hasToolchanger?: boolean;
+  hasFilamentCutter?: boolean;
+  hasHeatedChamber?: boolean;
   multiMaterial?: boolean;
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
