@@ -18,7 +18,8 @@ import {
   GearIcon,
   ChartIcon,
   TableIcon,
-  PackageIcon
+  PackageIcon,
+  DatabaseIcon
 } from '@/common/components/icons/MdiIcons';
 import { Button, Tabs } from '@/common/components/ui';
 import { usePrintersFast } from '@/common/hooks/useApi';
@@ -34,6 +35,7 @@ import { ComponentReplacementHistory } from '../components/ComponentReplacementH
 import { FleetStatisticsTable } from '../components/FleetStatisticsTable';
 import { MaintenancePlansTab } from '../components/MaintenancePlansTabV2';
 import { PartsInventoryTab } from '../components/PartsInventoryTab';
+import { TaskCatalogTab } from '../components/TaskCatalogTab';
 import { useMaintenanceStats } from '../hooks/useMaintenanceStats';
 import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
@@ -235,6 +237,9 @@ export function MaintenanceDashboardPage() {
           </Tabs.Tab>
           <Tabs.Tab id="analytics" icon={<ChartIcon className="h-4 w-4" />}>
             Analytics
+          </Tabs.Tab>
+          <Tabs.Tab id="taskcatalog" icon={<DatabaseIcon className="h-4 w-4" />}>
+            Task Catalog
           </Tabs.Tab>
           <Tabs.Tab id="plans" icon={<ListIcon className="h-4 w-4" />}>
             Plans
@@ -510,6 +515,29 @@ export function MaintenanceDashboardPage() {
           </Tabs.Panel>
 
           {/* Plans Tab - All maintenance plans with full CRUD */}
+          <Tabs.Panel id="taskcatalog">
+            <div className="space-y-6">
+              <section aria-labelledby="task-catalog-heading">
+                <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-pf-border">
+                    <h2
+                      id="task-catalog-heading"
+                      className="text-lg font-semibold text-pf-text-primary"
+                    >
+                      Task Catalog
+                    </h2>
+                    <p className="text-sm text-pf-text-tertiary mt-1">
+                      Global library of maintenance tasks. Tasks can be added to plans and deployed to printers.
+                    </p>
+                  </div>
+                  <div className="p-5">
+                    <TaskCatalogTab />
+                  </div>
+                </div>
+              </section>
+            </div>
+          </Tabs.Panel>
+
           <Tabs.Panel id="plans">
             <div className="space-y-6">
               <section aria-labelledby="maintenance-plans-heading">

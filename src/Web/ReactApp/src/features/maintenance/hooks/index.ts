@@ -53,3 +53,26 @@ export {
   useDeleteComponent,
   componentKeys,
 } from './useMaintenanceComponents';
+
+// Task catalog hooks (standalone tasks)
+export {
+  useTaskCatalog,
+  useTaskCatalogItem,
+  useTaskCategories,
+  useCreateCatalogTask,
+  useUpdateCatalogTask,
+  useDeleteCatalogTask,
+  useAddCatalogTaskComponent,
+  useRemoveCatalogTaskComponent,
+  taskCatalogKeys,
+} from './useTaskCatalog';
+
+// Schedule deployment hooks
+export {
+  useScheduleDeployments,
+  useScheduleDeployment,
+  useDeployPlan,
+  useUpdateScheduleDeployment,
+  useDeleteScheduleDeployment,
+  scheduleKeys,
+} from './useScheduleDeployments';

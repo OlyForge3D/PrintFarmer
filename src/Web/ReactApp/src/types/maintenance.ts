@@ -247,9 +247,55 @@ export interface MaintenanceCompletedEvent {
 }
 
 // ============================================================================
-// Hierarchical Maintenance Plan Types (new architecture)
-// Plan → Task → Component
+// Hierarchical Maintenance Plan Types (V3 architecture)
+// Task (global catalog) → Plan (curated task bundle via PlanTask) → Schedule (deployment)
 // ============================================================================
+
+/**
+ * A global maintenance task in the catalog.
+ * Tasks exist independently and can be reused across multiple plans.
+ */
+export interface MaintenanceTaskDto {
+  id: string;
+  taskName: string;
+  description?: string | null;
+  category: string;
+  intervalHours?: number | null;
+  intervalDays?: number | null;
+  estimatedDurationMinutes?: number | null;
+  priority: number;
+  isActive: boolean;
+  isDefault: boolean;
+  // Scope rules — nullable booleans indicating which printer features require this task
+  requiresEnclosure?: boolean | null;
+  requiresCarbonFilter?: boolean | null;
+  requiresHepaFilter?: boolean | null;
+  requiresBowdenTube?: boolean | null;
+  requiresPtfeLiner?: boolean | null;
+  requiresLinearRails?: boolean | null;
+  requiresLeadScrews?: boolean | null;
+  requiresToolchanger?: boolean | null;
+  requiresFilamentCutter?: boolean | null;
+  requiresHeatedChamber?: boolean | null;
+  requiresHeatedBed?: boolean | null;
+  requiresMultiMaterial?: boolean | null;
+  createdAt: string;
+  updatedAt: string;
+  taskComponents: MaintenanceTaskComponentDto[];
+}
+
+/**
+ * Join entity linking a task to a plan, with optional sort order and interval overrides.
+ */
+export interface PlanTaskDto {
+  id: string;
+  maintenancePlanId: string;
+  maintenanceTaskId: string;
+  sortOrder: number;
+  intervalHoursOverride?: number | null;
+  intervalDaysOverride?: number | null;
+  task: MaintenanceTaskDto;
+}
 
 /**
  * A maintenance plan groups related tasks for a printer, model, manufacturer, or motion type.
@@ -259,33 +305,17 @@ export interface MaintenancePlanDto {
   name: string;
   description?: string | null;
   printerId?: string | null;
+  printerName?: string | null;
   printerModelId?: string | null;
+  printerModelName?: string | null;
   manufacturerId?: string | null;
+  manufacturerName?: string | null;
   motionType?: number | null;
   isActive: boolean;
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
-  tasks: MaintenanceTaskDto[];
-}
-
-/**
- * An individual maintenance task within a plan.
- */
-export interface MaintenanceTaskDto {
-  id: string;
-  maintenancePlanId: string;
-  taskName: string;
-  description?: string | null;
-  intervalHours?: number | null;
-  intervalDays?: number | null;
-  estimatedDurationMinutes?: number | null;
-  priority: number;
-  isActive: boolean;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-  taskComponents: MaintenanceTaskComponentDto[];
+  planTasks: PlanTaskDto[];
 }
 
 /**
@@ -295,9 +325,9 @@ export interface MaintenanceTaskComponentDto {
   id: string;
   maintenanceTaskId: string;
   maintenanceComponentId: string;
+  componentName?: string | null;
   quantity: number;
   notes?: string | null;
-  maintenanceComponent?: MaintenanceComponentDto | null;
 }
 
 /**
@@ -314,6 +344,22 @@ export interface MaintenanceComponentDto {
   url?: string | null;
   inStock: number;
   minimumStock: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A maintenance plan deployed to a specific printer.
+ */
+export interface PrinterMaintenanceScheduleDto {
+  id: string;
+  maintenancePlanId: string;
+  planName: string;
+  printerId: string;
+  printerName?: string | null;
+  isActive: boolean;
+  deployedAt: string;
+  notes?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -346,29 +392,66 @@ export interface UpdateMaintenancePlanDto {
 
 export interface CreateMaintenanceTaskDto {
   taskName: string;
+  category: string;
   description?: string | null;
   intervalHours?: number | null;
   intervalDays?: number | null;
   estimatedDurationMinutes?: number | null;
   priority?: number;
   isActive?: boolean;
-  sortOrder?: number;
+  isDefault?: boolean;
+  requiresEnclosure?: boolean | null;
+  requiresCarbonFilter?: boolean | null;
+  requiresHepaFilter?: boolean | null;
+  requiresBowdenTube?: boolean | null;
+  requiresPtfeLiner?: boolean | null;
+  requiresLinearRails?: boolean | null;
+  requiresLeadScrews?: boolean | null;
+  requiresToolchanger?: boolean | null;
+  requiresFilamentCutter?: boolean | null;
+  requiresHeatedChamber?: boolean | null;
+  requiresHeatedBed?: boolean | null;
+  requiresMultiMaterial?: boolean | null;
 }
 
 export interface UpdateMaintenanceTaskDto {
   taskName: string;
+  category: string;
   description?: string | null;
   intervalHours?: number | null;
   intervalDays?: number | null;
   estimatedDurationMinutes?: number | null;
   priority?: number;
   isActive?: boolean;
-  sortOrder?: number;
+  isDefault?: boolean;
+  requiresEnclosure?: boolean | null;
+  requiresCarbonFilter?: boolean | null;
+  requiresHepaFilter?: boolean | null;
+  requiresBowdenTube?: boolean | null;
+  requiresPtfeLiner?: boolean | null;
+  requiresLinearRails?: boolean | null;
+  requiresLeadScrews?: boolean | null;
+  requiresToolchanger?: boolean | null;
+  requiresFilamentCutter?: boolean | null;
+  requiresHeatedChamber?: boolean | null;
+  requiresHeatedBed?: boolean | null;
+  requiresMultiMaterial?: boolean | null;
 }
 
 export interface AddTaskComponentDto {
   componentId: string;
   quantity?: number;
+  notes?: string | null;
+}
+
+export interface DeployMaintenancePlanDto {
+  maintenancePlanId: string;
+  printerId: string;
+  notes?: string | null;
+}
+
+export interface UpdateScheduleDeploymentDto {
+  isActive: boolean;
   notes?: string | null;
 }
 

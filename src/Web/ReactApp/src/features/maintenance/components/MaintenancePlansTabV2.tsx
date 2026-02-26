@@ -39,11 +39,13 @@ import {
 import type {
   MaintenancePlanDto,
   MaintenanceTaskDto,
+  PlanTaskDto,
   CreateMaintenancePlanDto,
   UpdateMaintenancePlanDto,
   CreateMaintenanceTaskDto,
   UpdateMaintenanceTaskDto,
 } from '@/types/maintenance';
+import { useTaskCategories } from '../hooks/useTaskCatalog';
 
 // ──────────────────────── Helpers ────────────────────────
 
@@ -162,12 +164,17 @@ interface TaskFormModalProps {
   onClose: () => void;
 }
 
+const DEFAULT_CATEGORY = 'General';
+
 function TaskFormModal({ isOpen, planId, task, onClose }: TaskFormModalProps) {
   const isEdit = !!task;
   const createTask = useCreateTask(planId);
   const updateTask = useUpdateTask(planId);
 
+  const { data: categories = [] } = useTaskCategories();
+
   const [taskName, setTaskName] = useState('');
+  const [category, setCategory] = useState(DEFAULT_CATEGORY);
   const [description, setDescription] = useState('');
   const [intervalType, setIntervalType] = useState<'hours' | 'days' | 'none'>('hours');
   const [intervalValue, setIntervalValue] = useState('');
@@ -179,6 +186,7 @@ function TaskFormModal({ isOpen, planId, task, onClose }: TaskFormModalProps) {
   React.useEffect(() => {
     if (isOpen) {
       setTaskName(task?.taskName ?? '');
+      setCategory(task?.category ?? (categories[0] ?? DEFAULT_CATEGORY));
       setDescription(task?.description ?? '');
       setEstimatedMinutes(task?.estimatedDurationMinutes?.toString() ?? '');
       setPriority((task?.priority ?? 2).toString());
@@ -203,6 +211,7 @@ function TaskFormModal({ isOpen, planId, task, onClose }: TaskFormModalProps) {
     try {
       const base = {
         taskName: taskName.trim(),
+        category,
         description: description.trim() || null,
         intervalHours: intervalType === 'hours' && intervalValue ? Number(intervalValue) : null,
         intervalDays: intervalType === 'days' && intervalValue ? Number(intervalValue) : null,
@@ -233,6 +242,12 @@ function TaskFormModal({ isOpen, planId, task, onClose }: TaskFormModalProps) {
             Task Name <span className="text-red-400">*</span>
           </label>
           <Input id="task-name" value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="e.g. Check belt tension" required maxLength={200} />
+        </div>
+        <div>
+          <label htmlFor="task-cat" className="block text-sm font-medium text-pf-text-secondary mb-1">Category <span className="text-red-400">*</span></label>
+          <Select id="task-cat" value={category} onChange={(e) => setCategory(e.target.value)}>
+            {categories.length > 0 ? categories.map(c => (<option key={c} value={c}>{c}</option>)) : <option value={DEFAULT_CATEGORY}>{DEFAULT_CATEGORY}</option>}
+          </Select>
         </div>
         <div>
           <label htmlFor="task-desc" className="block text-sm font-medium text-pf-text-secondary mb-1">Description</label>
@@ -368,7 +383,7 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
     setDeletingTask(null);
   };
 
-  const activeTaskCount = plan.tasks.filter((t) => t.isActive).length;
+  const activeTaskCount = plan.planTasks.filter((pt) => pt.task.isActive).length;
 
   return (
     <div
@@ -400,7 +415,7 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
               <span className="block text-sm text-pf-text-tertiary mt-0.5 line-clamp-1">{plan.description}</span>
             )}
             <span className="flex items-center gap-4 mt-1 text-xs text-pf-text-tertiary">
-              <span>{plan.tasks.length} task{plan.tasks.length !== 1 ? 's' : ''} ({activeTaskCount} active)</span>
+              <span>{plan.planTasks.length} task{plan.planTasks.length !== 1 ? 's' : ''} ({activeTaskCount} active)</span>
               <span>Created {format(new Date(plan.createdAt), 'MMM d, yyyy')}</span>
             </span>
           </span>
@@ -418,15 +433,15 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
       {/* Expanded tasks */}
       {isExpanded && (
         <div id={`plan-tasks-${plan.id}`} className="border-t border-pf-border/60 px-4 py-3 space-y-2">
-          {plan.tasks.length === 0 ? (
+          {plan.planTasks.length === 0 ? (
             <p className="text-sm text-pf-text-tertiary text-center py-4">No tasks yet. Add tasks to define what this plan covers.</p>
           ) : (
-            plan.tasks.map((task) => (
+            plan.planTasks.map((planTask) => (
               <TaskRow
-                key={task.id}
-                task={task}
-                onEdit={() => handleEditTask(task)}
-                onDelete={() => setDeletingTask(task)}
+                key={planTask.task.id}
+                task={planTask.task}
+                onEdit={() => handleEditTask(planTask.task)}
+                onDelete={() => setDeletingTask(planTask.task)}
               />
             ))
           )}
@@ -488,7 +503,7 @@ export function MaintenancePlansTab() {
         (p) =>
           p.name.toLowerCase().includes(q) ||
           (p.description?.toLowerCase().includes(q) ?? false) ||
-          p.tasks.some((t) => t.taskName.toLowerCase().includes(q))
+          p.planTasks.some((pt) => pt.task.taskName.toLowerCase().includes(q))
       );
     }
     return [...result].sort((a, b) => {
@@ -557,7 +572,7 @@ export function MaintenancePlansTab() {
       <p className="text-sm text-pf-text-tertiary mb-4">
         {filtered.length} plan{filtered.length !== 1 ? 's' : ''}
         {search ? ` matching "${search}"` : ''}
-        {' '}• {filtered.reduce((n, p) => n + p.tasks.length, 0)} total tasks
+        {' '}• {filtered.reduce((n, p) => n + p.planTasks.length, 0)} total tasks
       </p>
 
       {/* Plan List */}
@@ -595,7 +610,7 @@ export function MaintenancePlansTab() {
       <ConfirmationModal
         isOpen={!!deletingPlan}
         title="Delete Maintenance Plan"
-        message={`Delete "${deletingPlan?.name}" and all its ${deletingPlan?.tasks.length ?? 0} task(s)? This cannot be undone.`}
+        message={`Delete "${deletingPlan?.name}" and all its ${deletingPlan?.planTasks.length ?? 0} task(s)? This cannot be undone.`}
         confirmButtonText="Delete"
         isDangerous
         onConfirm={handleDeletePlanConfirm}

@@ -9,11 +9,14 @@ import type {
   MaintenanceTaskDto,
   MaintenanceTaskComponentDto,
   MaintenanceComponentDto,
+  PrinterMaintenanceScheduleDto,
   CreateMaintenancePlanDto,
   UpdateMaintenancePlanDto,
   CreateMaintenanceTaskDto,
   UpdateMaintenanceTaskDto,
   AddTaskComponentDto,
+  DeployMaintenancePlanDto,
+  UpdateScheduleDeploymentDto,
   CreateMaintenanceComponentDto,
   UpdateMaintenanceComponentDto,
 } from '@/types/maintenance';
@@ -137,6 +140,86 @@ export class MaintenancePlanService {
 
   async deleteComponent(id: string): Promise<void> {
     await apiClient.delete(`/maintenance/components/${id}`);
+  }
+
+  // ──────────── Task Catalog (standalone) ────────────────
+
+  async getCatalogTasks(category?: string, activeOnly?: boolean): Promise<MaintenanceTaskDto[]> {
+    const params = new URLSearchParams();
+    if (category) params.set('category', category);
+    if (activeOnly != null) params.set('activeOnly', String(activeOnly));
+    const qs = params.toString();
+    const res = await apiClient.get<MaintenanceTaskDto[]>(`/maintenance/tasks${qs ? `?${qs}` : ''}`);
+    return res.data;
+  }
+
+  async getCatalogTaskById(id: string): Promise<MaintenanceTaskDto> {
+    const res = await apiClient.get<MaintenanceTaskDto>(`/maintenance/tasks/${id}`);
+    return res.data;
+  }
+
+  async getTaskCategories(): Promise<string[]> {
+    const res = await apiClient.get<string[]>('/maintenance/tasks/categories');
+    return res.data;
+  }
+
+  async createCatalogTask(data: CreateMaintenanceTaskDto): Promise<MaintenanceTaskDto> {
+    const res = await apiClient.post<MaintenanceTaskDto>('/maintenance/tasks', data);
+    return res.data;
+  }
+
+  async updateCatalogTask(id: string, data: UpdateMaintenanceTaskDto): Promise<MaintenanceTaskDto> {
+    const res = await apiClient.put<MaintenanceTaskDto>(`/maintenance/tasks/${id}`, data);
+    return res.data;
+  }
+
+  async deleteCatalogTask(id: string): Promise<void> {
+    await apiClient.delete(`/maintenance/tasks/${id}`);
+  }
+
+  async getCatalogTaskComponents(taskId: string): Promise<MaintenanceTaskComponentDto[]> {
+    const res = await apiClient.get<MaintenanceTaskComponentDto[]>(`/maintenance/tasks/${taskId}/components`);
+    return res.data;
+  }
+
+  async addCatalogTaskComponent(taskId: string, data: AddTaskComponentDto): Promise<MaintenanceTaskComponentDto> {
+    const res = await apiClient.post<MaintenanceTaskComponentDto>(`/maintenance/tasks/${taskId}/components`, data);
+    return res.data;
+  }
+
+  async removeCatalogTaskComponent(taskId: string, componentId: string): Promise<void> {
+    await apiClient.delete(`/maintenance/tasks/${taskId}/components/${componentId}`);
+  }
+
+  // ─────────── Schedule Deployments ──────────────────────
+
+  async getScheduleDeployments(printerId?: string, planId?: string, activeOnly?: boolean): Promise<PrinterMaintenanceScheduleDto[]> {
+    const params = new URLSearchParams();
+    if (printerId) params.set('printerId', printerId);
+    if (planId) params.set('planId', planId);
+    if (activeOnly != null) params.set('activeOnly', String(activeOnly));
+    const qs = params.toString();
+    const res = await apiClient.get<PrinterMaintenanceScheduleDto[]>(`/maintenance/schedules${qs ? `?${qs}` : ''}`);
+    return res.data;
+  }
+
+  async getScheduleDeploymentById(id: string): Promise<PrinterMaintenanceScheduleDto> {
+    const res = await apiClient.get<PrinterMaintenanceScheduleDto>(`/maintenance/schedules/${id}`);
+    return res.data;
+  }
+
+  async deployPlan(data: DeployMaintenancePlanDto): Promise<PrinterMaintenanceScheduleDto> {
+    const res = await apiClient.post<PrinterMaintenanceScheduleDto>('/maintenance/schedules', data);
+    return res.data;
+  }
+
+  async updateScheduleDeployment(id: string, data: UpdateScheduleDeploymentDto): Promise<PrinterMaintenanceScheduleDto> {
+    const res = await apiClient.put<PrinterMaintenanceScheduleDto>(`/maintenance/schedules/${id}`, data);
+    return res.data;
+  }
+
+  async deleteScheduleDeployment(id: string): Promise<void> {
+    await apiClient.delete(`/maintenance/schedules/${id}`);
   }
 }
 
