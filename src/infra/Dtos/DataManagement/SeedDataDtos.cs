@@ -251,3 +251,52 @@ public class MaintenanceScheduleSeedDto
 
     public string? Manufacturer { get; set; }
 }
+
+/// <summary>
+/// DTO for global maintenance task catalog seed data from YAML.
+/// </summary>
+public class MaintenanceTaskSeedDto
+{
+    [Required]
+    public string TaskName { get; set; } = string.Empty;
+
+    [Required]
+    public string Category { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public double? IntervalHours { get; set; }
+
+    public int? IntervalDays { get; set; }
+
+    public int? EstimatedDurationMinutes { get; set; }
+
+    public int Priority { get; set; } = 2;
+
+    public bool IsActive { get; set; } = true;
+
+    // Scope rules — nullable bools
+    public bool? RequiresEnclosure { get; set; }
+
+    public bool? RequiresCarbonFilter { get; set; }
+
+    public bool? RequiresHepaFilter { get; set; }
+
+    public bool? RequiresBowdenTube { get; set; }
+
+    public bool? RequiresPtfeLiner { get; set; }
+
+    public bool? RequiresLinearRails { get; set; }
+
+    public bool? RequiresLeadScrews { get; set; }
+
+    public bool? RequiresToolchanger { get; set; }
+
+    public bool? RequiresFilamentCutter { get; set; }
+
+    public bool? RequiresHeatedChamber { get; set; }
+
+    public bool? RequiresHeatedBed { get; set; }
+
+    public bool? RequiresMultiMaterial { get; set; }
+}

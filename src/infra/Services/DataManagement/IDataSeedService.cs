@@ -36,6 +36,11 @@ public interface IDataSeedService
     Task SeedMaintenanceSchedulesAsync();
 
     /// <summary>
+    /// Load and seed global maintenance task catalog from YAML file.
+    /// </summary>
+    Task SeedMaintenanceTasksAsync();
+
+    /// <summary>
     /// Reload seed data from YAML files (for admin use)
     /// </summary>
     Task ReloadSeedDataAsync();

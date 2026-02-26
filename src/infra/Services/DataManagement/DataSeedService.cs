@@ -37,6 +37,7 @@ public class DataSeedService : IDataSeedService
         await SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
         await SeedPrinterModelsAsync();
         await SeedMaintenanceSchedulesAsync();
+        await SeedMaintenanceTasksAsync();
 
         _logger.LogInformation("[SeedData] Completed seed data load from YAML files");
     }
@@ -958,6 +959,67 @@ public class DataSeedService : IDataSeedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SeedData] Error seeding maintenance schedules: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    public async Task SeedMaintenanceTasksAsync()
+    {
+        try
+        {
+            List<MaintenanceTaskSeedDto> tasksData = await _yamlReader.ReadMaintenanceTasksAsync();
+
+            if (tasksData.Count == 0)
+            {
+                _logger.LogInformation("[SeedData] No maintenance tasks found in YAML, skipping");
+                return;
+            }
+
+            _logger.LogInformation("[SeedData] Seeding {TaskCount} maintenance tasks from YAML", tasksData.Count);
+
+            foreach (MaintenanceTaskSeedDto dto in tasksData)
+            {
+                bool exists = await _context.MaintenanceTasks
+                    .AnyAsync(t => t.TaskName == dto.TaskName);
+
+                if (!exists)
+                {
+                    _context.MaintenanceTasks.Add(new MaintenanceTask
+                    {
+                        Id = Guid.NewGuid(),
+                        TaskName = dto.TaskName,
+                        Description = dto.Description,
+                        Category = dto.Category,
+                        IntervalHours = dto.IntervalHours,
+                        IntervalDays = dto.IntervalDays,
+                        EstimatedDurationMinutes = dto.EstimatedDurationMinutes,
+                        Priority = dto.Priority,
+                        IsActive = dto.IsActive,
+                        IsDefault = true,
+                        RequiresEnclosure = dto.RequiresEnclosure,
+                        RequiresCarbonFilter = dto.RequiresCarbonFilter,
+                        RequiresHepaFilter = dto.RequiresHepaFilter,
+                        RequiresBowdenTube = dto.RequiresBowdenTube,
+                        RequiresPtfeLiner = dto.RequiresPtfeLiner,
+                        RequiresLinearRails = dto.RequiresLinearRails,
+                        RequiresLeadScrews = dto.RequiresLeadScrews,
+                        RequiresToolchanger = dto.RequiresToolchanger,
+                        RequiresFilamentCutter = dto.RequiresFilamentCutter,
+                        RequiresHeatedChamber = dto.RequiresHeatedChamber,
+                        RequiresHeatedBed = dto.RequiresHeatedBed,
+                        RequiresMultiMaterial = dto.RequiresMultiMaterial,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Maintenance tasks seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding maintenance tasks: {Message}", ex.Message);
             throw;
         }
     }
