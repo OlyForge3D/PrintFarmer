@@ -21,14 +21,15 @@ public class MaintenanceAlert
     public Printer Printer { get; set; } = null!;
 
     /// <summary>
-    /// Maintenance schedule that triggered this alert
+    /// Optional: Deployment (printer × plan) that triggered this alert.
+    /// Nullable because alerts can outlive a removed deployment.
     /// </summary>
-    public Guid MaintenanceScheduleId { get; set; }
+    public Guid? PrinterMaintenanceScheduleId { get; set; }
 
     /// <summary>
-    /// Navigation property to maintenance schedule
+    /// Navigation property to printer maintenance schedule deployment
     /// </summary>
-    public MaintenanceSchedule MaintenanceSchedule { get; set; } = null!;
+    public PrinterMaintenanceSchedule? PrinterMaintenanceSchedule { get; set; }
 
     /// <summary>
     /// Optional: The maintenance task that triggered this alert

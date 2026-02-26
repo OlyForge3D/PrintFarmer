@@ -220,41 +220,7 @@ public class NozzleModelSeedDto
     public string? Url { get; set; }
 }
 
-/// <summary>
-/// DTO for maintenance schedule seed data from YAML
-/// </summary>
-public class MaintenanceScheduleSeedDto
-{
-    [Required]
-    public string TaskName { get; set; } = string.Empty;
-
-    [Required]
-    public string Description { get; set; } = string.Empty;
-
-    [Required]
-    public string Component { get; set; } = string.Empty;
-
-    public double? IntervalHours { get; set; }
-
-    public int? IntervalDays { get; set; }
-
-    public int EstimatedDurationMinutes { get; set; }
-
-    public bool IsActive { get; set; } = true;
-
-    /// <summary>
-    /// Optional: Printer motion type this schedule applies to (e.g., "CoreXY", "Cartesian", "Delta").
-    /// </summary>
-    public string? MotionType { get; set; }
-
-    public string? PrinterModel { get; set; }
-
-    public string? Manufacturer { get; set; }
-}
-
-/// <summary>
-/// DTO for global maintenance task catalog seed data from YAML.
-/// </summary>
+/// <summary>\n/// DTO for global maintenance task catalog seed data from YAML.\n/// </summary>
 public class MaintenanceTaskSeedDto
 {
     [Required]

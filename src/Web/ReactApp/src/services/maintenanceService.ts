@@ -7,7 +7,6 @@ import { apiClient } from './api';
 import type {
   MaintenanceAlert,
   MaintenanceLog,
-  MaintenanceSchedule,
   PrinterStatistics,
   FleetPrinterStatistics,
   AcknowledgeAlertRequest,
@@ -48,12 +47,13 @@ export interface PrinterUptimeEntry {
 
 export interface UpcomingMaintenanceTaskDto {
   id: string;
-  scheduleId: string;
+  taskId: string;
   printerId: string;
   printerName: string;
   taskName: string;
   component?: string | null;
   description?: string | null;
+  category?: string | null;
   priority: number;
   intervalType: 'hours' | 'days';
   intervalValue: number;
@@ -212,17 +212,8 @@ export class MaintenanceService {
   }
 
   // ============================================================================
-  // Maintenance Schedules
+  // Upcoming Maintenance
   // ============================================================================
-
-  /**
-   * Gets all maintenance schedules.
-   * @deprecated Old flat model — will be removed when useComponentMaintenance is rewired.
-   */
-  async getAllSchedules(): Promise<MaintenanceSchedule[]> {
-    const response = await apiClient.get<MaintenanceSchedule[]>('/maintenance/schedules');
-    return response.data;
-  }
 
   /**
    * Gets upcoming maintenance tasks computed server-side.
@@ -242,26 +233,6 @@ export class MaintenanceService {
     const url = `/maintenance/upcoming${queryString ? `?${queryString}` : ''}`;
 
     const response = await apiClient.get<UpcomingMaintenanceTaskDto[]>(url);
-    return response.data;
-  }
-
-  /**
-   * Gets maintenance schedules for a specific printer (includes both printer-specific and model-wide).
-   * @deprecated Old flat model — will be removed when PrinterMaintenancePage is rewired.
-   * @param printerId - The printer ID
-   */
-  async getPrinterSchedules(printerId: string): Promise<MaintenanceSchedule[]> {
-    const response = await apiClient.get<MaintenanceSchedule[]>(`/maintenance/printers/${printerId}/schedules`);
-    return response.data;
-  }
-
-  /**
-   * Gets all active schedule templates applicable to a specific printer.
-   * Includes model-wide, motion-type-wide, manufacturer-wide, and global defaults.
-   * @deprecated Old flat model — will be removed when LogMaintenanceModal is rewired.
-   */
-  async getPrinterScheduleTemplates(printerId: string): Promise<MaintenanceSchedule[]> {
-    const response = await apiClient.get<MaintenanceSchedule[]>(`/maintenance/printers/${printerId}/schedule-templates`);
     return response.data;
   }
 

@@ -6,30 +6,28 @@ import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
-import type { MaintenanceSchedule, CreateMaintenanceLogRequest } from '@/types/maintenance';
-import { maintenanceService } from '@/services/maintenanceService';
+import type { CreateMaintenanceLogRequest, PrinterMaintenanceScheduleDto, MaintenanceTaskDto } from '@/types/maintenance';
+import { maintenancePlanService } from '@/services/maintenancePlanService';
 import { WrenchIcon } from '@heroicons/react/24/outline';
 
 interface LogMaintenanceModalProps {
   isOpen: boolean;
   printerId: string;
   printerName: string;
-  schedule?: MaintenanceSchedule | null;
-  schedules: MaintenanceSchedule[];
+  deployments: PrinterMaintenanceScheduleDto[];
   onSubmit: (data: CreateMaintenanceLogRequest) => Promise<void>;
   onClose: () => void;
 }
 
 /**
  * Modal for logging maintenance activity on a printer.
- * Can be pre-populated with a schedule or allow custom entry.
+ * Uses the V3 task catalog for task selection and links to deployed plans.
  */
 export function LogMaintenanceModal({
   isOpen,
   printerId,
   printerName,
-  schedule,
-  schedules,
+  deployments,
   onSubmit,
   onClose,
 }: LogMaintenanceModalProps) {
@@ -38,62 +36,56 @@ export function LogMaintenanceModal({
   const [error, setError] = useState<string | null>(null);
 
   // Form state
-  const [selectedScheduleId, setSelectedScheduleId] = useState<string>(schedule?.id || '');
-  const [taskName, setTaskName] = useState(schedule?.taskName || '');
-  const [component, setComponent] = useState(schedule?.component || '');
+  const [selectedTaskId, setSelectedTaskId] = useState<string>('');
+  const [taskName, setTaskName] = useState('');
+  const [component, setComponent] = useState('');
   const [notes, setNotes] = useState('');
   const [durationMinutes, setDurationMinutes] = useState<string>('');
   const [cost, setCost] = useState<string>('');
   const [partsReplaced, setPartsReplaced] = useState('');
 
-  const { data: templates = [] } = useQuery({
-    queryKey: ['maintenanceScheduleTemplates', printerId],
+  // Load V3 task catalog for task selection
+  const { data: catalogTasks = [] } = useQuery({
+    queryKey: ['catalogTasks'],
     enabled: isOpen,
-    queryFn: () => maintenanceService.getPrinterScheduleTemplates(printerId),
+    queryFn: () => maintenancePlanService.getCatalogTasks(undefined, true),
   });
 
-  const commonMaintenanceTasks = useMemo(() => {
-    const byKey = new Map<string, { taskName: string; component: string }>();
-    for (const schedule of templates) {
-      if (!schedule.taskName?.trim()) continue;
-      if (!schedule.component?.trim()) continue;
-
-      const key = `${schedule.taskName}||${schedule.component}`;
-      if (!byKey.has(key)) {
-        byKey.set(key, { taskName: schedule.taskName, component: schedule.component });
-      }
+  // Group catalog tasks by category for the dropdown
+  const tasksByCategory = useMemo(() => {
+    const grouped = new Map<string, MaintenanceTaskDto[]>();
+    for (const task of catalogTasks) {
+      const cat = task.category || 'Other';
+      const existing = grouped.get(cat) || [];
+      existing.push(task);
+      grouped.set(cat, existing);
     }
+    return grouped;
+  }, [catalogTasks]);
 
-    return Array.from(byKey.values()).sort((a, b) => {
-      const componentCompare = a.component.localeCompare(b.component);
-      if (componentCompare !== 0) return componentCompare;
-      return a.taskName.localeCompare(b.taskName);
-    });
-  }, [templates]);
+  // Derive unique components from catalog tasks
+  const commonComponents = useMemo(() => {
+    const unique = new Set<string>();
+    for (const task of catalogTasks) {
+      if (task.category?.trim()) unique.add(task.category);
+    }
+    const result = Array.from(unique).sort((a, b) => a.localeCompare(b));
+    if (!result.includes('Other')) result.push('Other');
+    return result;
+  }, [catalogTasks]);
 
-  // When schedule selection changes, update form fields
-  const handleScheduleChange = (value: string) => {
+  // When task selection changes, update form fields
+  const handleTaskChange = (value: string) => {
     if (value === '') {
-      // Custom entry - clear pre-filled values
-      setSelectedScheduleId('');
+      setSelectedTaskId('');
       setTaskName('');
       setComponent('');
-    } else if (value.startsWith('preset:')) {
-      // Preset task selected
-      const presetIndex = parseInt(value.replace('preset:', ''), 10);
-      const preset = commonMaintenanceTasks[presetIndex];
-      if (preset) {
-        setSelectedScheduleId(''); // No schedule ID for presets
-        setTaskName(preset.taskName);
-        setComponent(preset.component);
-      }
     } else {
-      // Schedule selected
-      setSelectedScheduleId(value);
-      const selected = schedules.find(s => s.id === value);
-      if (selected) {
-        setTaskName(selected.taskName);
-        setComponent(selected.component || '');
+      const task = catalogTasks.find(t => t.id === value);
+      if (task) {
+        setSelectedTaskId(task.id);
+        setTaskName(task.taskName);
+        setComponent(task.category || '');
       }
     }
   };
@@ -110,9 +102,13 @@ export function LogMaintenanceModal({
     setError(null);
 
     try {
+      // Link to the first active deployment for this printer (if any)
+      const activeDeployment = deployments.find(d => d.isActive);
+
       const request: CreateMaintenanceLogRequest = {
         printerId,
-        scheduleId: selectedScheduleId || null,
+        deploymentId: activeDeployment?.id ?? null,
+        taskId: selectedTaskId || null,
         taskName: taskName.trim(),
         componentName: component.trim() || null,
         performedBy: user?.username || user?.email || 'Unknown',
@@ -130,17 +126,6 @@ export function LogMaintenanceModal({
       setIsSubmitting(false);
     }
   };
-
-  const commonComponents = useMemo(() => {
-    const unique = new Set<string>();
-    for (const schedule of templates) {
-      if (schedule.component?.trim()) unique.add(schedule.component);
-    }
-
-    const result = Array.from(unique).sort((a, b) => a.localeCompare(b));
-    if (!result.includes('Other')) result.push('Other');
-    return result;
-  }, [templates]);
 
   return (
     <Modal
@@ -186,39 +171,28 @@ export function LogMaintenanceModal({
         {/* Maintenance Type Selection */}
         <div>
           <label className="block text-sm font-medium text-pf-text-primary mb-1">
-            Maintenance Type
+            Maintenance Task
           </label>
           <Select
-            value={selectedScheduleId}
-            onChange={(e) => handleScheduleChange(e.target.value)}
+            value={selectedTaskId}
+            onChange={(e) => handleTaskChange(e.target.value)}
             className="w-full"
           >
             <option value="">Custom / Ad-hoc Maintenance</option>
             
-            {/* Scheduled Tasks (from database) */}
-            {schedules.filter(s => s.isActive).length > 0 && (
-              <optgroup label="📅 Scheduled Tasks">
-                {schedules.filter(s => s.isActive).map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.taskName} {s.component ? `(${s.component})` : ''}
+            {/* Tasks grouped by category from the V3 catalog */}
+            {Array.from(tasksByCategory.entries()).map(([category, tasks]) => (
+              <optgroup key={category} label={`🔧 ${category}`}>
+                {tasks.map(task => (
+                  <option key={task.id} value={task.id}>
+                    {task.taskName}
                   </option>
                 ))}
               </optgroup>
-            )}
-            
-            {/* Common Preset Tasks */}
-            {commonMaintenanceTasks.length > 0 && (
-              <optgroup label="🔧 Common Tasks">
-                {commonMaintenanceTasks.map((task, index) => (
-                  <option key={`preset-${index}`} value={`preset:${index}`}>
-                    {task.taskName} ({task.component})
-                  </option>
-                ))}
-              </optgroup>
-            )}
+            ))}
           </Select>
           <p className="text-xs text-pf-text-tertiary mt-1">
-            Select a scheduled task, common preset, or enter custom maintenance
+            Select a task from the catalog, or enter custom maintenance
           </p>
         </div>
 
@@ -231,7 +205,7 @@ export function LogMaintenanceModal({
             value={taskName}
             onChange={(e) => setTaskName(e.target.value)}
             placeholder="e.g., Nozzle Replacement, Belt Tensioning"
-            disabled={!!selectedScheduleId}
+            disabled={!!selectedTaskId}
             required
           />
         </div>
@@ -246,14 +220,14 @@ export function LogMaintenanceModal({
               value={component}
               onChange={(e) => setComponent(e.target.value)}
               className="w-full"
-              disabled={!!selectedScheduleId && !!schedule?.component}
+              disabled={!!selectedTaskId}
             >
               <option value="">Select component...</option>
               {commonComponents.map(c => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </Select>
-            {!selectedScheduleId && (
+            {!selectedTaskId && (
               <Input
                 value={component}
                 onChange={(e) => setComponent(e.target.value)}

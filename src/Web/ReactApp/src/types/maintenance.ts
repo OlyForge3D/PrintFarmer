@@ -24,7 +24,8 @@ export enum MaintenanceAlertStatus {
 export interface MaintenanceAlert {
   id: string;
   printerId: string;
-  maintenanceScheduleId: string;
+  printerMaintenanceScheduleId?: string | null;
+  maintenanceTaskId?: string | null;
   title: string;
   message: string;
   severity: number; // 1=Low, 2=Medium, 3=High, 4=Critical
@@ -43,33 +44,8 @@ export interface MaintenanceAlert {
   updatedAt: string;
   // Navigation properties (optional for API responses)
   printer?: Record<string, unknown>; // Printer entity reference
-  maintenanceSchedule?: MaintenanceSchedule;
-}
-
-/**
- * Defines a maintenance task and its interval/threshold for a specific printer.
- * Can be model-specific (seeded for all printers of a model) or printer-specific (custom per printer).
- */
-export interface MaintenanceSchedule {
-  id: string;
-  printerId?: string | null;
-  printerModelId?: string | null;
-  manufacturerId?: string | null;
-  motionType?: number | null;
-  taskName: string;
-  description?: string | null;
-  component?: string | null; // e.g., "Hotend", "Bed", "Belts", "Bearings", "Fans"
-  intervalHours?: number | null; // Maintenance interval in print hours
-  intervalDays?: number | null; // Maintenance interval in calendar days
-  estimatedDurationMinutes?: number | null;
-  priority: number; // 1=Low, 2=Medium, 3=High, 4=Critical
-  isActive: boolean;
-  isDefault: boolean; // Seeded for all printers of this model
-  createdAt: string;
-  updatedAt: string;
-  // Navigation properties (optional)
-  printer?: Record<string, unknown>;
-  printerModel?: Record<string, unknown>;
+  printerMaintenanceSchedule?: Record<string, unknown>;
+  maintenanceTask?: Record<string, unknown>;
 }
 
 /**
@@ -79,7 +55,8 @@ export interface MaintenanceSchedule {
 export interface MaintenanceLog {
   id: string;
   printerId: string;
-  maintenanceScheduleId?: string | null;
+  printerMaintenanceScheduleId?: string | null;
+  maintenanceTaskId?: string | null;
   resolvedAlertId?: string | null;
   taskName: string;
   notes?: string | null;
@@ -93,7 +70,8 @@ export interface MaintenanceLog {
   createdAt: string;
   // Navigation properties (optional)
   printer?: Record<string, unknown>;
-  maintenanceSchedule?: MaintenanceSchedule;
+  printerMaintenanceSchedule?: Record<string, unknown>;
+  maintenanceTask?: Record<string, unknown>;
   resolvedAlert?: MaintenanceAlert;
 }
 
@@ -160,7 +138,8 @@ export interface ResolveAlertRequest {
 
 export interface CreateMaintenanceLogRequest {
   printerId: string;
-  scheduleId?: string | null;
+  deploymentId?: string | null;
+  taskId?: string | null;
   taskName?: string | null;
   componentName?: string | null;
   performedAt?: string | null; // ISO 8601 datetime

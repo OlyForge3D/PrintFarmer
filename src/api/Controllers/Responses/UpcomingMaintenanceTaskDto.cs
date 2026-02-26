@@ -4,7 +4,7 @@ namespace Farm.Web.Api.Controllers.Responses;
 
 public record UpcomingMaintenanceTaskDto(
     string Id,
-    Guid ScheduleId,
+    Guid TaskId,
     Guid PrinterId,
     string PrinterName,
     string TaskName,

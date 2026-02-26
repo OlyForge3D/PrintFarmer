@@ -38,6 +38,19 @@ public class EfPrinterMaintenanceScheduleRepository(AppDbContext context) : IPri
             .ToListAsync(ct);
     }
 
+    public async Task<List<PrinterMaintenanceSchedule>> GetActiveWithTasksAsync(Guid printerId, CancellationToken ct = default)
+    {
+        return await _context.PrinterMaintenanceSchedules
+            .AsNoTracking()
+            .Where(s => s.PrinterId == printerId && s.IsActive)
+            .Include(s => s.Printer)
+            .Include(s => s.MaintenancePlan)
+                .ThenInclude(p => p.PlanTasks)
+                    .ThenInclude(pt => pt.MaintenanceTask)
+            .OrderByDescending(s => s.DeployedAt)
+            .ToListAsync(ct);
+    }
+
     public async Task<PrinterMaintenanceSchedule?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         return await _context.PrinterMaintenanceSchedules

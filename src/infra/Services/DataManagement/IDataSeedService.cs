@@ -31,11 +31,6 @@ public interface IDataSeedService
     Task SeedComponentModelsAsync();
 
     /// <summary>
-    /// Load and seed maintenance schedule templates from YAML file.
-    /// </summary>
-    Task SeedMaintenanceSchedulesAsync();
-
-    /// <summary>
     /// Load and seed global maintenance task catalog from YAML file.
     /// </summary>
     Task SeedMaintenanceTasksAsync();

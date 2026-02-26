@@ -10,12 +10,12 @@ using Microsoft.Extensions.Options;
 namespace Farm.Web.Api.Services.Maintenance;
 
 /// <summary>
-/// Service that evaluates maintenance schedules against printer statistics
-/// and generates alerts when maintenance is due.
+/// Service that evaluates V3 maintenance deployments (PrinterMaintenanceSchedule → Plan → PlanTask → Task)
+/// against printer statistics and generates alerts when maintenance is due.
 /// </summary>
 public class MaintenanceAlertEngine(
     IPrinterStatisticsRepository statsRepo,
-    IMaintenanceScheduleRepository scheduleRepo,
+    IPrinterMaintenanceScheduleRepository deploymentRepo,
     IMaintenanceAlertRepository alertRepo,
     IMaintenanceLogRepository logRepo,
     IHubContext<MaintenanceHub> hubContext,
@@ -23,7 +23,7 @@ public class MaintenanceAlertEngine(
     ILogger<MaintenanceAlertEngine> logger) : IMaintenanceAlertService
 {
     private readonly IPrinterStatisticsRepository _statsRepo = statsRepo ?? throw new ArgumentNullException(nameof(statsRepo));
-    private readonly IMaintenanceScheduleRepository _scheduleRepo = scheduleRepo ?? throw new ArgumentNullException(nameof(scheduleRepo));
+    private readonly IPrinterMaintenanceScheduleRepository _deploymentRepo = deploymentRepo ?? throw new ArgumentNullException(nameof(deploymentRepo));
     private readonly IMaintenanceAlertRepository _alertRepo = alertRepo ?? throw new ArgumentNullException(nameof(alertRepo));
     private readonly IMaintenanceLogRepository _logRepo = logRepo ?? throw new ArgumentNullException(nameof(logRepo));
     private readonly IHubContext<MaintenanceHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
@@ -46,51 +46,75 @@ public class MaintenanceAlertEngine(
             return 0;
         }
 
-        // Get active schedules for this printer
-        List<MaintenanceSchedule> schedules = await _scheduleRepo.GetActivePrinterSchedulesAsync(
+        // Get active V3 deployments with deep-loaded PlanTasks → MaintenanceTasks
+        List<PrinterMaintenanceSchedule> deployments = await _deploymentRepo.GetActiveWithTasksAsync(
             printerId,
             cancellationToken);
 
-        if (schedules.Count == 0)
+        if (deployments.Count == 0)
         {
-            _logger.LogDebug("No active schedules found for printer {PrinterId}", printerId);
+            _logger.LogDebug("No active deployments found for printer {PrinterId}", printerId);
             return 0;
         }
 
         // Load maintenance logs once so we can compute baselines efficiently.
+        // Group by MaintenanceTaskId for V3 task-level dedup.
         List<MaintenanceLog> logs = await _logRepo.GetByPrinterIdAsync(printerId, cancellationToken);
-        Dictionary<Guid, MaintenanceLog> lastLogByScheduleId = logs
-            .Where(l => l.MaintenanceScheduleId.HasValue)
-            .GroupBy(l => l.MaintenanceScheduleId!.Value)
+        Dictionary<Guid, MaintenanceLog> lastLogByTaskId = logs
+            .Where(l => l.MaintenanceTaskId.HasValue)
+            .GroupBy(l => l.MaintenanceTaskId!.Value)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.PerformedAt).First());
 
         int alertsGenerated = 0;
 
-        // Evaluate each schedule
-        foreach (MaintenanceSchedule schedule in schedules)
+        // Evaluate each deployment → plan → tasks
+        foreach (PrinterMaintenanceSchedule deployment in deployments)
         {
-            lastLogByScheduleId.TryGetValue(schedule.Id, out MaintenanceLog? lastLog);
-            bool shouldAlert = ShouldGenerateAlert(stats, schedule, lastLog, settings);
-
-            if (shouldAlert)
+            if (deployment.MaintenancePlan?.PlanTasks == null)
             {
-                // Check if alert already exists
-                bool hasActiveAlert = await _alertRepo.HasActiveAlertAsync(
-                    printerId,
-                    schedule.Id,
-                    cancellationToken);
+                continue;
+            }
 
-                if (!hasActiveAlert)
+            foreach (PlanTask planTask in deployment.MaintenancePlan.PlanTasks)
+            {
+                MaintenanceTask task = planTask.MaintenanceTask;
+                if (task == null || !task.IsActive)
                 {
-                    await GenerateAlertAsync(stats, schedule, lastLog, cancellationToken);
-                    alertsGenerated++;
+                    continue;
                 }
-                else
+
+                // Effective intervals: PlanTask overrides take precedence over base task
+                double? effectiveHours = planTask.IntervalHoursOverride ?? task.IntervalHours;
+                int? effectiveDays = planTask.IntervalDaysOverride ?? task.IntervalDays;
+
+                if (!effectiveHours.HasValue && !effectiveDays.HasValue)
                 {
-                    _logger.LogDebug(
-                        "Active alert already exists for printer {PrinterId} and schedule {ScheduleId}",
+                    continue;
+                }
+
+                lastLogByTaskId.TryGetValue(task.Id, out MaintenanceLog? lastLog);
+                bool shouldAlert = ShouldGenerateAlert(stats, task.TaskName, effectiveHours, effectiveDays, lastLog, deployment.DeployedAt, settings);
+
+                if (shouldAlert)
+                {
+                    // Check if alert already exists (dedup by printer + task)
+                    bool hasActiveAlert = await _alertRepo.HasActiveAlertAsync(
                         printerId,
-                        schedule.Id);
+                        task.Id,
+                        cancellationToken);
+
+                    if (!hasActiveAlert)
+                    {
+                        await GenerateAlertAsync(stats, deployment, task, effectiveHours, effectiveDays, lastLog, cancellationToken);
+                        alertsGenerated++;
+                    }
+                    else
+                    {
+                        _logger.LogDebug(
+                            "Active alert already exists for printer {PrinterId} and task {TaskId}",
+                            printerId,
+                            task.Id);
+                    }
                 }
             }
         }
@@ -109,44 +133,47 @@ public class MaintenanceAlertEngine(
 
     private bool ShouldGenerateAlert(
         PrinterStatistics stats,
-        MaintenanceSchedule schedule,
+        string taskName,
+        double? intervalHours,
+        int? intervalDays,
         MaintenanceLog? lastLog,
+        DateTime deployedAt,
         MaintenanceAlertSettings settings)
     {
         // Check hour-based interval
-        if (schedule.IntervalHours.HasValue)
+        if (intervalHours.HasValue)
         {
-            double thresholdHours = schedule.IntervalHours.Value * (settings.ThresholdPercentage / 100.0);
+            double thresholdHours = intervalHours.Value * (settings.ThresholdPercentage / 100.0);
 
             double hoursSinceLast = ComputeHoursSinceLastMaintenance(stats, lastLog);
 
             if (hoursSinceLast >= thresholdHours)
             {
                 _logger.LogDebug(
-                    "Schedule '{TaskName}' triggered: {Hours}h >= {Threshold}h (interval: {Interval}h)",
-                    schedule.TaskName,
+                    "Task '{TaskName}' triggered: {Hours}h >= {Threshold}h (interval: {Interval}h)",
+                    taskName,
                     hoursSinceLast,
                     thresholdHours,
-                    schedule.IntervalHours.Value);
+                    intervalHours.Value);
                 return true;
             }
         }
 
         // Check day-based interval
-        if (schedule.IntervalDays.HasValue)
+        if (intervalDays.HasValue)
         {
-            DateTime baselineDate = lastLog?.PerformedAt ?? schedule.CreatedAt;
+            DateTime baselineDate = lastLog?.PerformedAt ?? deployedAt;
             int daysSinceBaseline = (DateTime.UtcNow - baselineDate).Days;
-            int thresholdDays = (int)(schedule.IntervalDays.Value * (settings.ThresholdPercentage / 100.0));
+            int thresholdDays = (int)(intervalDays.Value * (settings.ThresholdPercentage / 100.0));
 
             if (daysSinceBaseline >= thresholdDays)
             {
                 _logger.LogDebug(
-                    "Schedule '{TaskName}' triggered: {Days} days >= {Threshold} days (interval: {Interval} days)",
-                    schedule.TaskName,
+                    "Task '{TaskName}' triggered: {Days} days >= {Threshold} days (interval: {Interval} days)",
+                    taskName,
                     daysSinceBaseline,
                     thresholdDays,
-                    schedule.IntervalDays.Value);
+                    intervalDays.Value);
                 return true;
             }
         }
@@ -156,29 +183,33 @@ public class MaintenanceAlertEngine(
 
     private async Task GenerateAlertAsync(
         PrinterStatistics stats,
-        MaintenanceSchedule schedule,
+        PrinterMaintenanceSchedule deployment,
+        MaintenanceTask task,
+        double? effectiveHours,
+        int? effectiveDays,
         MaintenanceLog? lastLog,
         CancellationToken cancellationToken)
     {
         MaintenanceAlertSettings settings = _settingsMonitor.CurrentValue;
 
-        double? hoursSinceLast = schedule.IntervalHours.HasValue
+        double? hoursSinceLast = effectiveHours.HasValue
             ? ComputeHoursSinceLastMaintenance(stats, lastLog)
             : null;
 
-        int? daysSinceLast = schedule.IntervalDays.HasValue
-            ? (DateTime.UtcNow - (lastLog?.PerformedAt ?? schedule.CreatedAt)).Days
+        int? daysSinceLast = effectiveDays.HasValue
+            ? (DateTime.UtcNow - (lastLog?.PerformedAt ?? deployment.DeployedAt)).Days
             : null;
 
-        // Create alert
+        // Create alert referencing both the deployment and the specific task
         MaintenanceAlert alert = new()
         {
             Id = Guid.NewGuid(),
             PrinterId = stats.PrinterId,
-            MaintenanceScheduleId = schedule.Id,
-            Title = $"Maintenance Due: {schedule.TaskName}",
-            Message = BuildAlertMessage(stats, schedule, hoursSinceLast, daysSinceLast),
-            Severity = schedule.Priority,
+            PrinterMaintenanceScheduleId = deployment.Id,
+            MaintenanceTaskId = task.Id,
+            Title = $"Maintenance Due: {task.TaskName}",
+            Message = BuildAlertMessage(stats, task.TaskName, task.Description, effectiveHours, effectiveDays, hoursSinceLast, daysSinceLast),
+            Severity = task.Priority,
             Status = MaintenanceAlertStatus.Active,
             PrinterHoursAtTrigger = stats.TotalPrintHours,
             HoursSinceLastMaintenance = hoursSinceLast,
@@ -201,35 +232,40 @@ public class MaintenanceAlertEngine(
 
     private static string BuildAlertMessage(
         PrinterStatistics stats,
-        MaintenanceSchedule schedule,
+        string taskName,
+        string? description,
+        double? intervalHours,
+        int? intervalDays,
         double? hoursSinceLastMaintenance,
         int? daysSinceLastMaintenance)
     {
-        if (schedule.IntervalHours.HasValue && !schedule.IntervalDays.HasValue)
+        string fallbackMessage = description ?? "Please perform scheduled maintenance.";
+
+        if (intervalHours.HasValue && !intervalDays.HasValue)
         {
-            return $"{schedule.TaskName} is due for printer. " +
+            return $"{taskName} is due for printer. " +
                    $"Hours since last maintenance: {hoursSinceLastMaintenance ?? stats.TotalPrintHours:F1}h, " +
-                   $"Interval: {schedule.IntervalHours:F1}h. " +
-                   $"{schedule.Description ?? "Please perform scheduled maintenance."}";
+                   $"Interval: {intervalHours:F1}h. " +
+                   fallbackMessage;
         }
 
-        if (schedule.IntervalDays.HasValue && !schedule.IntervalHours.HasValue)
+        if (intervalDays.HasValue && !intervalHours.HasValue)
         {
-            return $"{schedule.TaskName} is due for printer. " +
+            return $"{taskName} is due for printer. " +
                    $"Days since last maintenance: {daysSinceLastMaintenance ?? 0}, " +
-                   $"Interval: {schedule.IntervalDays} days. " +
-                   $"{schedule.Description ?? "Please perform scheduled maintenance."}";
+                   $"Interval: {intervalDays} days. " +
+                   fallbackMessage;
         }
 
-        if (schedule.IntervalHours.HasValue && schedule.IntervalDays.HasValue)
+        if (intervalHours.HasValue && intervalDays.HasValue)
         {
-            return $"{schedule.TaskName} is due for printer. " +
-                   $"Hours since last maintenance: {hoursSinceLastMaintenance ?? stats.TotalPrintHours:F1}h (interval: {schedule.IntervalHours:F1}h), " +
-                   $"Days since last maintenance: {daysSinceLastMaintenance ?? 0} (interval: {schedule.IntervalDays} days). " +
-                   $"{schedule.Description ?? "Please perform scheduled maintenance."}";
+            return $"{taskName} is due for printer. " +
+                   $"Hours since last maintenance: {hoursSinceLastMaintenance ?? stats.TotalPrintHours:F1}h (interval: {intervalHours:F1}h), " +
+                   $"Days since last maintenance: {daysSinceLastMaintenance ?? 0} (interval: {intervalDays} days). " +
+                   fallbackMessage;
         }
 
-        return $"{schedule.TaskName} is due. {schedule.Description ?? "Please perform scheduled maintenance."}";
+        return $"{taskName} is due. {fallbackMessage}";
     }
 
     private static double ComputeHoursSinceLastMaintenance(PrinterStatistics stats, MaintenanceLog? lastLog)

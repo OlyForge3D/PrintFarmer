@@ -230,7 +230,7 @@ export function PartsInventoryTab() {
   const inventorySummary = useMemo(() => {
     let totalValue = 0;
     let totalParts = 0;
-    let categoriesSet = new Set<string>();
+    const categoriesSet = new Set<string>();
     for (const c of components) {
       totalParts += c.inStock;
       if (c.unitCost != null) totalValue += c.inStock * c.unitCost;

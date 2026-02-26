@@ -18,7 +18,6 @@ import {
   DeleteIcon,
   SearchIcon,
   GearIcon,
-  PackageIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
   useAddCatalogTaskComponent,

@@ -13,6 +13,12 @@ public interface IPrinterMaintenanceScheduleRepository
     Task<List<PrinterMaintenanceSchedule>> GetAllAsync(Guid? printerId = null, Guid? planId = null, bool? activeOnly = null, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets active deployments for a printer with deep-loaded PlanTasks and MaintenanceTasks.
+    /// Used by the alert engine to evaluate maintenance intervals.
+    /// </summary>
+    Task<List<PrinterMaintenanceSchedule>> GetActiveWithTasksAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets a schedule deployment by ID, including plan and printer navigation.
     /// </summary>
     Task<PrinterMaintenanceSchedule?> GetByIdAsync(Guid id, CancellationToken ct = default);

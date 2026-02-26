@@ -29,22 +29,22 @@ public interface IMaintenanceLogRepository
     Task<List<MaintenanceLog>> GetByPrinterIdAsync(Guid printerId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets all maintenance logs for a specific printer and schedule combination.
+    /// Gets all maintenance logs for a specific printer and task combination.
     /// </summary>
     /// <param name="printerId">The printer ID.</param>
-    /// <param name="scheduleId">The maintenance schedule ID.</param>
+    /// <param name="taskId">The maintenance task ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of maintenance logs for the printer and schedule.</returns>
-    Task<List<MaintenanceLog>> GetByPrinterAndScheduleAsync(Guid printerId, Guid scheduleId, CancellationToken cancellationToken = default);
+    /// <returns>List of maintenance logs for the printer and task.</returns>
+    Task<List<MaintenanceLog>> GetByPrinterAndTaskAsync(Guid printerId, Guid taskId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets the most recent maintenance log for a specific printer and schedule combination.
+    /// Gets the most recent maintenance log for a specific printer and task combination.
     /// </summary>
     /// <param name="printerId">The printer ID.</param>
-    /// <param name="scheduleId">The maintenance schedule ID.</param>
+    /// <param name="taskId">The maintenance task ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The most recent maintenance log, or null if none found.</returns>
-    Task<MaintenanceLog?> GetLastMaintenanceAsync(Guid printerId, Guid scheduleId, CancellationToken cancellationToken = default);
+    Task<MaintenanceLog?> GetLastMaintenanceAsync(Guid printerId, Guid taskId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets all maintenance logs, optionally filtered by date range.

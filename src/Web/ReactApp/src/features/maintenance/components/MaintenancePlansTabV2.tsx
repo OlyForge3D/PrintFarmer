@@ -39,7 +39,6 @@ import {
 import type {
   MaintenancePlanDto,
   MaintenanceTaskDto,
-  PlanTaskDto,
   CreateMaintenancePlanDto,
   UpdateMaintenancePlanDto,
   CreateMaintenanceTaskDto,

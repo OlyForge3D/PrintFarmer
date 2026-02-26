@@ -122,8 +122,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Printer Maintenance Module
     public DbSet<PrinterStatistics> PrinterStatisticsSet => Set<PrinterStatistics>();
 
-    public DbSet<MaintenanceSchedule> MaintenanceSchedules => Set<MaintenanceSchedule>();
-
     public DbSet<MaintenanceLog> MaintenanceLogs => Set<MaintenanceLog>();
 
     public DbSet<MaintenanceAlert> MaintenanceAlerts => Set<MaintenanceAlert>();

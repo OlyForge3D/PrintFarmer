@@ -4,9 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { maintenanceService } from '@/services/maintenanceService';
+import { maintenancePlanService } from '@/services/maintenancePlanService';
 import { apiClient } from '@/services/api';
 import type { 
-  MaintenanceSchedule, 
   CreateMaintenanceLogRequest
 } from '@/types/maintenance';
 import type { Printer } from '@/types/api';
@@ -36,7 +36,6 @@ export function PrinterMaintenancePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showLogModal, setShowLogModal] = useState(false);
-  const [selectedSchedule, setSelectedSchedule] = useState<MaintenanceSchedule | null>(null);
 
   // Fetch printer details
   const { data: printer, isLoading: printerLoading } = useQuery({
@@ -62,10 +61,10 @@ export function PrinterMaintenancePage() {
     enabled: !!printerId,
   });
 
-  // Fetch maintenance schedules
-  const { data: schedules = [], isLoading: schedulesLoading } = useQuery({
-    queryKey: ['printerSchedules', printerId],
-    queryFn: () => maintenanceService.getPrinterSchedules(printerId!),
+  // Fetch V3 schedule deployments for this printer
+  const { data: deployments = [], isLoading: deploymentsLoading } = useQuery({
+    queryKey: ['scheduleDeployments', printerId],
+    queryFn: () => maintenancePlanService.getScheduleDeployments(printerId!, undefined, true),
     enabled: !!printerId,
   });
 
@@ -81,8 +80,7 @@ export function PrinterMaintenancePage() {
     a.status === MaintenanceAlertStatus.Acknowledged
   );
 
-  const handleLogMaintenance = (schedule?: MaintenanceSchedule) => {
-    setSelectedSchedule(schedule || null);
+  const handleLogMaintenance = () => {
     setShowLogModal(true);
   };
 
@@ -92,11 +90,11 @@ export function PrinterMaintenancePage() {
     queryClient.invalidateQueries({ queryKey: ['printerMaintenanceLogs', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerStatistics', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerAlerts', printerId] });
+    queryClient.invalidateQueries({ queryKey: ['upcomingMaintenance', printerId] });
     setShowLogModal(false);
-    setSelectedSchedule(null);
   };
 
-  const isLoading = printerLoading || statsLoading || logsLoading || schedulesLoading || alertsLoading;
+  const isLoading = printerLoading || statsLoading || logsLoading || deploymentsLoading || alertsLoading;
 
   if (!printerId) {
     return (
@@ -218,10 +216,7 @@ export function PrinterMaintenancePage() {
                     <Button
                       size="sm"
                       variant="primary"
-                      onClick={() => {
-                        const schedule = schedules.find(s => s.id === alert.maintenanceScheduleId);
-                        handleLogMaintenance(schedule);
-                      }}
+                      onClick={() => handleLogMaintenance()}
                     >
                       Resolve
                     </Button>
@@ -231,67 +226,46 @@ export function PrinterMaintenancePage() {
             </section>
           )}
 
-          {/* Two-column layout for Schedules and History */}
+          {/* Two-column layout for Deployed Plans and History */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Scheduled Maintenance */}
+            {/* Deployed Maintenance Plans */}
             <section className="bg-pf-bg-card border border-pf-border rounded-lg p-6">
               <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center gap-2">
                 <ClockIcon className="h-5 w-5 text-pf-primary" />
-                Maintenance Schedule
+                Deployed Plans
               </h2>
-              {schedules.length === 0 ? (
-                <p className="text-pf-text-secondary text-sm">No maintenance schedules configured for this printer.</p>
+              {deployments.length === 0 ? (
+                <p className="text-pf-text-secondary text-sm">No maintenance plans deployed to this printer.</p>
               ) : (
                 <div className="space-y-3">
-                  {schedules.filter(s => s.isActive).map(schedule => {
-                    const lastLog = logs.find(l => l.maintenanceScheduleId === schedule.id);
-                    const hasAlert = activeAlerts.some(a => a.maintenanceScheduleId === schedule.id);
-                    
-                    return (
-                      <div 
-                        key={schedule.id}
-                        className={`p-4 rounded-lg border ${hasAlert ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-pf-bg-dark/50 border-pf-border'}`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-pf-text-primary">{schedule.taskName}</span>
-                              {hasAlert && (
-                                <ExclamationTriangleIcon className="h-4 w-4 text-yellow-500" />
-                              )}
-                            </div>
-                            {schedule.description && (
-                              <p className="text-sm text-pf-text-secondary mt-1">{schedule.description}</p>
-                            )}
-                            <div className="flex flex-wrap gap-3 mt-2 text-xs text-pf-text-tertiary">
-                              {schedule.component && (
-                                <span>Component: {schedule.component}</span>
-                              )}
-                              {schedule.intervalHours && (
-                                <span>Every {schedule.intervalHours}h</span>
-                              )}
-                              {schedule.intervalDays && (
-                                <span>Every {schedule.intervalDays} days</span>
-                              )}
-                            </div>
-                            {lastLog && (
-                              <p className="text-xs text-pf-text-tertiary mt-2">
-                                Last performed: {format(new Date(lastLog.performedAt), 'MMM d, yyyy')}
-                                {lastLog.performedBy && ` by ${lastLog.performedBy}`}
-                              </p>
-                            )}
+                  {deployments.map(deployment => (
+                    <div 
+                      key={deployment.id}
+                      className="p-4 rounded-lg border bg-pf-bg-dark/50 border-pf-border"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <span className="font-medium text-pf-text-primary">{deployment.planName}</span>
+                          {deployment.notes && (
+                            <p className="text-sm text-pf-text-secondary mt-1">{deployment.notes}</p>
+                          )}
+                          <div className="flex flex-wrap gap-3 mt-2 text-xs text-pf-text-tertiary">
+                            <span>Deployed {formatDistanceToNow(new Date(deployment.deployedAt), { addSuffix: true })}</span>
+                            <span className={deployment.isActive ? 'text-green-500' : 'text-pf-text-tertiary'}>
+                              {deployment.isActive ? 'Active' : 'Inactive'}
+                            </span>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleLogMaintenance(schedule)}
-                          >
-                            Log
-                          </Button>
                         </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleLogMaintenance()}
+                        >
+                          Log
+                        </Button>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               )}
             </section>
@@ -358,13 +332,9 @@ export function PrinterMaintenancePage() {
           isOpen={showLogModal}
           printerId={printerId}
           printerName={printer?.name || 'Unknown Printer'}
-          schedule={selectedSchedule}
-          schedules={schedules}
+          deployments={deployments}
           onSubmit={handleLogSubmit}
-          onClose={() => {
-            setShowLogModal(false);
-            setSelectedSchedule(null);
-          }}
+          onClose={() => setShowLogModal(false)}
         />
       )}
 
