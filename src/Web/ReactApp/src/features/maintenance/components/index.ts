@@ -44,3 +44,5 @@ export { MaintenanceTemplateManager } from './MaintenanceTemplateManager';
 export { MaintenancePlansTab as MaintenancePlansTabV2 } from './MaintenancePlansTabV2';
 export { PartsInventoryTab } from './PartsInventoryTab';
 export { TaskCatalogTab } from './TaskCatalogTab';
+export { TaskComponentManager } from './TaskComponentManager';
+export { LowStockAlert } from './LowStockAlert';

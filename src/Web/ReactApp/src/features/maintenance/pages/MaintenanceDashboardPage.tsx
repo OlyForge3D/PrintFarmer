@@ -36,6 +36,7 @@ import { FleetStatisticsTable } from '../components/FleetStatisticsTable';
 import { MaintenancePlansTab } from '../components/MaintenancePlansTabV2';
 import { PartsInventoryTab } from '../components/PartsInventoryTab';
 import { TaskCatalogTab } from '../components/TaskCatalogTab';
+import { LowStockAlert } from '../components/LowStockAlert';
 import { useMaintenanceStats } from '../hooks/useMaintenanceStats';
 import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
@@ -332,6 +333,12 @@ export function MaintenanceDashboardPage() {
                   </div>
                 </section>
               </div>
+
+              {/* Low Stock Alert */}
+              <section aria-labelledby="low-stock-heading">
+                <h2 id="low-stock-heading" className="sr-only">Low Stock Alerts</h2>
+                <LowStockAlert maxItems={5} />
+              </section>
             </div>
           </Tabs.Panel>
 

@@ -22,7 +22,9 @@ import {
   PlusIcon,
   SearchIcon,
   FilterIcon,
+  GearIcon,
 } from '@/common/components/icons/MdiIcons';
+import { TaskComponentManager } from './TaskComponentManager';
 import {
   useTaskCatalog,
   useTaskCategories,
@@ -322,6 +324,7 @@ export function TaskCatalogTab() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<MaintenanceTaskDto | null>(null);
   const [deletingTask, setDeletingTask] = useState<MaintenanceTaskDto | null>(null);
+  const [partsTask, setPartsTask] = useState<MaintenanceTaskDto | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -469,6 +472,15 @@ export function TaskCatalogTab() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    onClick={() => setPartsTask(task)}
+                    aria-label={`Manage parts for ${task.taskName}`}
+                    title="Manage parts"
+                  >
+                    <GearIcon className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleEdit(task)}
                     aria-label={`Edit ${task.taskName}`}
                   >
@@ -506,6 +518,13 @@ export function TaskCatalogTab() {
         onConfirm={handleDelete}
         onCancel={() => setDeletingTask(null)}
       />
+      {partsTask && (
+        <TaskComponentManager
+          isOpen={!!partsTask}
+          task={partsTask}
+          onClose={() => setPartsTask(null)}
+        />
+      )}
     </div>
   );
 }
