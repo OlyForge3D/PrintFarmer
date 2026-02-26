@@ -1,9 +1,11 @@
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -17,12 +19,14 @@ namespace Farm.Web.Api.Controllers;
 public class MaintenanceScheduleDeploymentController(
     ILogger<MaintenanceScheduleDeploymentController> logger,
     IPrinterMaintenanceScheduleRepository scheduleRepository,
-    IMaintenancePlanRepository planRepository)
+    IMaintenancePlanRepository planRepository,
+    AppDbContext dbContext)
     : ControllerBase
 {
     private readonly ILogger<MaintenanceScheduleDeploymentController> _logger = logger;
     private readonly IPrinterMaintenanceScheduleRepository _scheduleRepository = scheduleRepository;
     private readonly IMaintenancePlanRepository _planRepository = planRepository;
+    private readonly AppDbContext _dbContext = dbContext;
 
     private static PrinterMaintenanceScheduleResponse ToResponse(PrinterMaintenanceSchedule s) => new(
         s.Id,
@@ -80,6 +84,13 @@ public class MaintenanceScheduleDeploymentController(
             return NotFound(new { message = "Maintenance plan not found." });
         }
 
+        // Verify the printer exists
+        bool printerExists = await _dbContext.Printers.AnyAsync(p => p.Id == request.PrinterId, ct);
+        if (!printerExists)
+        {
+            return NotFound(new { message = "Printer not found." });
+        }
+
         // Check for duplicate deployment
         bool exists = await _scheduleRepository.ExistsAsync(request.MaintenancePlanId, request.PrinterId, ct);
         if (exists)
@@ -99,7 +110,16 @@ public class MaintenanceScheduleDeploymentController(
             UpdatedAt = DateTime.UtcNow
         };
 
-        await _scheduleRepository.AddAsync(schedule, ct);
+        try
+        {
+            await _scheduleRepository.AddAsync(schedule, ct);
+        }
+        catch (DbUpdateException)
+        {
+            // TOCTOU race: another request deployed the same plan concurrently
+            return Conflict(new { message = "This plan is already deployed to this printer." });
+        }
+
         _logger.LogInformation("Deployed plan {PlanId} to printer {PrinterId} as schedule {ScheduleId}", request.MaintenancePlanId, request.PrinterId, schedule.Id);
 
         // Reload with navigation properties

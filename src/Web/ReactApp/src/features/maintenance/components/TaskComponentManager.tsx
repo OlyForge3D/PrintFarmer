@@ -171,7 +171,6 @@ function AddPartPicker({ taskId, existingComponentIds, components }: AddPartPick
 // ──────────────────────── Linked Part Row ────────────────────────
 
 interface LinkedPartRowProps {
-  taskId: string;
   tc: MaintenanceTaskComponentDto;
   component?: MaintenanceComponentDto;
   onRemoveClick: (tc: MaintenanceTaskComponentDto) => void;
@@ -240,7 +239,7 @@ export function TaskComponentManager({ isOpen, task, onClose }: TaskComponentMan
     try {
       await removeComponent.mutateAsync({
         taskId: task.id,
-        componentId: removingTc.id,
+        componentId: removingTc.maintenanceComponentId,
       });
       toast.success(`Removed "${removingTc.componentName ?? 'part'}"`);
     } catch (err) {
@@ -267,7 +266,6 @@ export function TaskComponentManager({ isOpen, task, onClose }: TaskComponentMan
               {task.taskComponents.map(tc => (
                 <LinkedPartRow
                   key={tc.id}
-                  taskId={task.id}
                   tc={tc}
                   component={componentMap.get(tc.maintenanceComponentId)}
                   onRemoveClick={setRemovingTc}

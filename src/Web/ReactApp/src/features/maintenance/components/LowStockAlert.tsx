@@ -55,7 +55,7 @@ export function LowStockAlert({ maxItems = 5, onViewAll }: LowStockAlertProps) {
       {/* Items */}
       <div className="divide-y divide-amber-500/10">
         {visible.map((part: MaintenanceComponentDto) => {
-          const deficit = part.minimumStock - part.inStock;
+          const deficit = Math.max(0, part.minimumStock - part.inStock);
           return (
             <div key={part.id} className="flex items-center gap-3 px-4 py-2.5">
               <div className="flex-1 min-w-0">

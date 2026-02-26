@@ -88,6 +88,15 @@ public class EfMaintenanceTaskRepository(AppDbContext context) : IMaintenanceTas
             .FirstOrDefaultAsync(tc => tc.MaintenanceTaskId == taskId && tc.MaintenanceComponentId == componentId, ct);
     }
 
+    public async Task<List<string>> GetCategoriesAsync(CancellationToken ct = default)
+    {
+        return await _context.MaintenanceTasks
+            .Select(t => t.Category)
+            .Distinct()
+            .OrderBy(c => c)
+            .ToListAsync(ct);
+    }
+
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
         await _context.SaveChangesAsync(ct);

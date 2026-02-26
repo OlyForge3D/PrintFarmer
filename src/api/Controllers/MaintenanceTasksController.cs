@@ -22,42 +22,6 @@ public class MaintenanceTasksController(
     private readonly ILogger<MaintenanceTasksController> _logger = logger;
     private readonly IMaintenanceTaskRepository _taskRepository = taskRepository;
 
-    // ───────────────────── Mapping Helpers ─────────────────────
-    private static MaintenanceTaskResponse ToResponse(MaintenanceTask task) => new(
-        task.Id,
-        task.TaskName,
-        task.Description,
-        task.Category,
-        task.IntervalHours,
-        task.IntervalDays,
-        task.EstimatedDurationMinutes,
-        task.Priority,
-        task.IsActive,
-        task.IsDefault,
-        task.RequiresEnclosure,
-        task.RequiresCarbonFilter,
-        task.RequiresHepaFilter,
-        task.RequiresBowdenTube,
-        task.RequiresPtfeLiner,
-        task.RequiresLinearRails,
-        task.RequiresLeadScrews,
-        task.RequiresToolchanger,
-        task.RequiresFilamentCutter,
-        task.RequiresHeatedChamber,
-        task.RequiresHeatedBed,
-        task.RequiresMultiMaterial,
-        task.CreatedAt,
-        task.UpdatedAt,
-        task.TaskComponents.Select(ToTaskComponentResponse).ToList());
-
-    private static MaintenanceTaskComponentResponse ToTaskComponentResponse(MaintenanceTaskComponent tc) => new(
-        tc.Id,
-        tc.MaintenanceTaskId,
-        tc.MaintenanceComponentId,
-        tc.MaintenanceComponent?.Name,
-        tc.Quantity,
-        tc.Notes);
-
     // ───────────────────────── Tasks ─────────────────────────
 
     /// <summary>
@@ -70,7 +34,7 @@ public class MaintenanceTasksController(
         CancellationToken ct)
     {
         List<MaintenanceTask> tasks = await _taskRepository.GetAllAsync(category, activeOnly, ct);
-        return Ok(tasks.Select(ToResponse).ToList());
+        return Ok(tasks.Select(MaintenanceResponseMapper.ToTaskResponse).ToList());
     }
 
     /// <summary>
@@ -85,7 +49,7 @@ public class MaintenanceTasksController(
             return NotFound();
         }
 
-        return Ok(ToResponse(task));
+        return Ok(MaintenanceResponseMapper.ToTaskResponse(task));
     }
 
     /// <summary>
@@ -94,12 +58,7 @@ public class MaintenanceTasksController(
     [HttpGet("categories")]
     public async Task<ActionResult<List<string>>> GetCategoriesAsync(CancellationToken ct)
     {
-        List<MaintenanceTask> tasks = await _taskRepository.GetAllAsync(ct: ct);
-        List<string> categories = tasks
-            .Select(t => t.Category)
-            .Distinct()
-            .OrderBy(c => c)
-            .ToList();
+        List<string> categories = await _taskRepository.GetCategoriesAsync(ct);
         return Ok(categories);
     }
 
@@ -142,7 +101,7 @@ public class MaintenanceTasksController(
         await _taskRepository.AddAsync(task, ct);
         _logger.LogInformation("Created maintenance task {TaskId} '{TaskName}'", task.Id, task.TaskName);
 
-        return Created($"/api/maintenance/tasks/{task.Id}", ToResponse(task));
+        return Created($"/api/maintenance/tasks/{task.Id}", MaintenanceResponseMapper.ToTaskResponse(task));
     }
 
     /// <summary>
@@ -186,7 +145,7 @@ public class MaintenanceTasksController(
         await _taskRepository.UpdateAsync(task, ct);
         _logger.LogInformation("Updated maintenance task {TaskId} '{TaskName}'", task.Id, task.TaskName);
 
-        return Ok(ToResponse(task));
+        return Ok(MaintenanceResponseMapper.ToTaskResponse(task));
     }
 
     /// <summary>
@@ -229,7 +188,7 @@ public class MaintenanceTasksController(
         }
 
         List<MaintenanceTaskComponent> components = await _taskRepository.GetTaskComponentsAsync(taskId, ct);
-        return Ok(components.Select(ToTaskComponentResponse).ToList());
+        return Ok(components.Select(MaintenanceResponseMapper.ToTaskComponentResponse).ToList());
     }
 
     /// <summary>
@@ -265,7 +224,7 @@ public class MaintenanceTasksController(
         await _taskRepository.AddComponentAsync(taskComponent, ct);
         _logger.LogInformation("Added component {ComponentId} to task {TaskId}", request.ComponentId, taskId);
 
-        return Created($"/api/maintenance/tasks/{taskId}/components", ToTaskComponentResponse(taskComponent));
+        return Created($"/api/maintenance/tasks/{taskId}/components", MaintenanceResponseMapper.ToTaskComponentResponse(taskComponent));
     }
 
     /// <summary>

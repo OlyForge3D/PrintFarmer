@@ -7,7 +7,7 @@
  * require it.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Badge, Button } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
@@ -115,9 +115,10 @@ function TaskFormModal({ isOpen, task, categories, onClose }: TaskFormModalProps
   const [isDefault, setIsDefault] = useState(false);
   const [scopeRules, setScopeRules] = useState<Record<string, boolean | null>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const prevOpenRef = useRef(false);
 
   React.useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevOpenRef.current) {
       setTaskName(task?.taskName ?? '');
       setCategory(task?.category ?? (categories[0] ?? ''));
       setCustomCategory('');
@@ -143,7 +144,8 @@ function TaskFormModal({ isOpen, task, categories, onClose }: TaskFormModalProps
       }
       setScopeRules(rules);
     }
-  }, [isOpen, task, categories]);
+    prevOpenRef.current = isOpen;
+  }, [isOpen, task]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

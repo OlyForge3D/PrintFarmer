@@ -53,6 +53,11 @@ public interface IMaintenanceTaskRepository
     Task<MaintenanceTaskComponent?> FindTaskComponentAsync(Guid taskId, Guid componentId, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets all distinct task categories, ordered alphabetically.
+    /// </summary>
+    Task<List<string>> GetCategoriesAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Persists changes to the database.
     /// </summary>
     Task SaveChangesAsync(CancellationToken ct = default);
