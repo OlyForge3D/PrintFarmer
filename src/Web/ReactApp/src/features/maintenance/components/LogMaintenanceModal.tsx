@@ -133,7 +133,7 @@ export function LogMaintenanceModal({
       onClose={onClose}
       title="Log Maintenance"
       titleIcon={<WrenchIcon className="h-6 w-6 text-pf-primary" />}
-      size="lg"
+      size="xl"
       isDisabled={isSubmitting}
       footer={
         <>

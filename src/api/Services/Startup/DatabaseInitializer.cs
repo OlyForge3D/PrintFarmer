@@ -175,6 +175,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             await _dataSeedService.SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
             await _dataSeedService.SeedPrinterModelsAsync();    // Now includes toolhead seeding
             await _dataSeedService.SeedMaintenanceTasksAsync(); // Seed global maintenance task catalog
+            await _dataSeedService.SeedMaintenanceComponentsAsync(); // Seed starter parts inventory with categories
             await _dataSeedService.SeedMaintenancePlansAsync(); // Seed default maintenance plans (must come after tasks)
 
             // Note: Toolhead default components are now resolved within SeedComponentModelsAsync

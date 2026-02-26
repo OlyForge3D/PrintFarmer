@@ -130,7 +130,7 @@ function PlanFormModal({ isOpen, plan, onClose }: PlanFormModalProps) {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Plan' : 'New Maintenance Plan'} size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Plan' : 'New Maintenance Plan'} size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="plan-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
@@ -201,7 +201,7 @@ function TaskFormModal({ isOpen, planId, task, onClose }: TaskFormModalProps) {
         setIntervalValue('');
       }
     }
-  }, [isOpen, task]);
+  }, [isOpen, task, categories]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,7 +234,7 @@ function TaskFormModal({ isOpen, planId, task, onClose }: TaskFormModalProps) {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Task' : 'Add Task'} size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Task' : 'Add Task'} size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="task-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
@@ -394,7 +394,8 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
     >
       {/* Plan header */}
       <div className="flex items-center gap-3 p-4">
-        <button
+        <Button
+          variant="unstyled"
           type="button"
           className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer text-left"
           onClick={onToggle}
@@ -418,7 +419,7 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
               <span>Created {format(new Date(plan.createdAt), 'MMM d, yyyy')}</span>
             </span>
           </span>
-        </button>
+        </Button>
         <div className="flex items-center gap-1.5 shrink-0">
           <Button variant="subtle" size="sm" onClick={onEditPlan} aria-label={`Edit plan ${plan.name}`}>
             <EditIcon className="h-4 w-4" />
@@ -444,8 +445,7 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
               />
             ))
           )}
-          <Button variant="secondary" size="sm" onClick={handleAddTask} className="gap-1.5 mt-2">
-            <PlusIcon className="h-3.5 w-3.5" />
+          <Button variant="secondary" size="sm" onClick={handleAddTask} iconLeft={<PlusIcon className="h-3.5 w-3.5" />} className="mt-2">
             Add Task
           </Button>
 
@@ -560,9 +560,9 @@ export function MaintenancePlansTab() {
           variant="primary"
           size="sm"
           onClick={() => { setEditingPlan(null); setIsPlanFormOpen(true); }}
-          className="gap-1.5 shrink-0"
+          iconLeft={<PlusIcon className="h-4 w-4" />}
+          className="shrink-0"
         >
-          <PlusIcon className="h-4 w-4" />
           New Plan
         </Button>
       </div>

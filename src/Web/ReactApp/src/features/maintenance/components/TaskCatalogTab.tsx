@@ -185,7 +185,7 @@ function TaskFormModal({ isOpen, task, categories, onClose }: TaskFormModalProps
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Task' : 'New Catalog Task'} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Task' : 'New Catalog Task'} size="xl">
       <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
         {/* Name */}
         <div>
@@ -406,8 +406,7 @@ export function TaskCatalogTab() {
             ))}
           </Select>
         </div>
-        <Button variant="primary" size="sm" onClick={handleCreate} className="gap-1 shrink-0">
-          <PlusIcon className="h-4 w-4" aria-hidden="true" />
+        <Button variant="primary" size="sm" onClick={handleCreate} iconLeft={<PlusIcon className="h-4 w-4" />} className="shrink-0">
           New Task
         </Button>
       </div>

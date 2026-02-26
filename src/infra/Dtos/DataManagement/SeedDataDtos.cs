@@ -220,6 +220,32 @@ public class NozzleModelSeedDto
     public string? Url { get; set; }
 }
 
+/// <summary>
+/// DTO for deserializing maintenance component (spare part) seed data from YAML.
+/// Establishes initial parts inventory with category taxonomy.
+/// Note: inStock is NOT seeded — every deployment starts at 0.
+/// </summary>
+public class MaintenanceComponentSeedDto
+{
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    public string Category { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public string? Sku { get; set; }
+
+    public decimal? UnitCost { get; set; }
+
+    public string? Supplier { get; set; }
+
+    public string? Url { get; set; }
+
+    public int RecommendedMinimumStock { get; set; }
+}
+
 /// <summary>\n/// DTO for global maintenance task catalog seed data from YAML.\n/// </summary>
 public class MaintenanceTaskSeedDto
 {

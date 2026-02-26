@@ -48,6 +48,11 @@ public interface IYamlSeedDataReader
     Task<List<MaintenanceTaskSeedDto>> ReadMaintenanceTasksAsync();
 
     /// <summary>
+    /// Read maintenance components (spare parts) from YAML file
+    /// </summary>
+    Task<List<MaintenanceComponentSeedDto>> ReadMaintenanceComponentsAsync();
+
+    /// <summary>
     /// Read default maintenance plans from YAML file
     /// </summary>
     Task<List<MaintenancePlanSeedDto>> ReadMaintenancePlansAsync();

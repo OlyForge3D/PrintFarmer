@@ -37,6 +37,7 @@ public class DataSeedService : IDataSeedService
         await SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
         await SeedPrinterModelsAsync();
         await SeedMaintenanceTasksAsync();
+        await SeedMaintenanceComponentsAsync();
         await SeedMaintenancePlansAsync();
 
         _logger.LogInformation("[SeedData] Completed seed data load from YAML files");
@@ -932,6 +933,55 @@ public class DataSeedService : IDataSeedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SeedData] Error seeding maintenance tasks: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    public async Task SeedMaintenanceComponentsAsync()
+    {
+        try
+        {
+            List<MaintenanceComponentSeedDto> componentsData = await _yamlReader.ReadMaintenanceComponentsAsync();
+
+            if (componentsData.Count == 0)
+            {
+                _logger.LogInformation("[SeedData] No maintenance components found in YAML, skipping");
+                return;
+            }
+
+            _logger.LogInformation("[SeedData] Seeding {ComponentCount} maintenance components from YAML", componentsData.Count);
+
+            foreach (MaintenanceComponentSeedDto dto in componentsData)
+            {
+                bool exists = await _context.MaintenanceComponents
+                    .AnyAsync(c => c.Name == dto.Name && c.Category == dto.Category);
+
+                if (!exists)
+                {
+                    _context.MaintenanceComponents.Add(new MaintenanceComponent
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = dto.Name,
+                        Category = dto.Category,
+                        Description = dto.Description,
+                        Sku = dto.Sku,
+                        UnitCost = dto.UnitCost,
+                        Supplier = dto.Supplier,
+                        Url = dto.Url,
+                        InStock = 0,
+                        MinimumStock = dto.RecommendedMinimumStock,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Maintenance components seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding maintenance components: {Message}", ex.Message);
             throw;
         }
     }

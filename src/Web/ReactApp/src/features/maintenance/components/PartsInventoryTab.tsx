@@ -117,7 +117,7 @@ function ComponentFormModal({ isOpen, component, categories, onClose }: Componen
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Part' : 'Add Part'} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Part' : 'Add Part'} size="xl">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -303,9 +303,9 @@ export function PartsInventoryTab() {
           variant="primary"
           size="sm"
           onClick={() => { setEditingComponent(null); setIsFormOpen(true); }}
-          className="gap-1.5 shrink-0"
+          iconLeft={<PlusIcon className="h-4 w-4" />}
+          className="shrink-0"
         >
-          <PlusIcon className="h-4 w-4" />
           Add Part
         </Button>
       </div>

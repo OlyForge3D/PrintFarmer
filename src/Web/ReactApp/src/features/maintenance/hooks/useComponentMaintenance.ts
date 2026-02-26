@@ -124,7 +124,7 @@ function normalizeComponent(component: string | null | undefined): string {
 export function useComponentMaintenance(
   options: UseComponentMaintenanceOptions = {}
 ): UseComponentMaintenanceResult {
-  const { component, printerId, enabled = true } = options;
+  const { component, enabled = true } = options;
 
   // Fetch all tasks from the V3 task catalog
   const tasksQuery = useQuery({
@@ -241,7 +241,7 @@ export function useComponentMaintenance(
       componentNames,
       totalMaintenanceCost: totalCost,
     };
-  }, [tasksQuery.data, alertsQuery.data, component, printerId]);
+  }, [tasksQuery.data, alertsQuery.data, component]);
 
   return {
     ...result,

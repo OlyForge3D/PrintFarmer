@@ -250,7 +250,7 @@ export function TaskComponentManager({ isOpen, task, onClose }: TaskComponentMan
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} title={`Parts for "${task.taskName}"`} size="lg">
+      <Modal isOpen={isOpen} onClose={onClose} title={`Parts for "${task.taskName}"`} size="xl">
         <div className="space-y-4">
           {/* Summary */}
           <p className="text-sm text-pf-text-muted">

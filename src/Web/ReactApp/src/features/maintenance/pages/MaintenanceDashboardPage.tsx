@@ -140,11 +140,12 @@ export function MaintenanceDashboardPage() {
           size="sm"
           onClick={handleRefresh}
           disabled={isAnyLoading}
-          className="gap-2"
+          iconLeft={
+            <RefreshIcon
+              className={`h-4 w-4 ${isAnyLoading ? 'animate-spin' : ''}`}
+            />
+          }
         >
-          <RefreshIcon
-            className={`h-4 w-4 ${isAnyLoading ? 'animate-spin' : ''}`}
-          />
           Refresh
         </Button>
       }
