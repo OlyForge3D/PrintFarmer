@@ -16,13 +16,13 @@ import {
 import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
 import { normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
 import { Button, Checkbox, Select } from '@/common/components/ui';
-import { ColorFamilySelect } from '@/features/catalog/components/ColorFamilySelect';
-import { ColorSwatch } from '@/features/catalog/components/ColorSwatch';
-import { SpoolUsageBar } from '@/features/catalog/components/SpoolUsageBar';
+import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
+import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
+import { SpoolUsageBar } from '@/features/filamentManagement/components/SpoolUsageBar';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { apiClient } from '@/services/api';
-import '@/features/catalog/components/spool-components.css';
+import '@/features/filamentManagement/components/spool-components.css';
 
 // Matches backend SpoolmanController (SpoolmanSpoolDto) serialized with camelCase
 interface SpoolmanSpoolDto {
@@ -763,14 +763,12 @@ export function SpoolsTab() {
                 </div>
 
                 <div className="space-y-2">
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="text-sm font-medium text-pf-text-primary truncate">
-                        {spool.vendor || 'Unknown Vendor'}
-                      </div>
-                      <div className="text-xs text-pf-text-secondary text-right whitespace-nowrap">
-                        {spool.filamentName || spool.name || 'Unnamed'} [ {(spool.material || 'Unknown Material')} ]
-                      </div>
+                  <div className="space-y-0.5">
+                    <div className="text-sm font-medium text-pf-text-primary truncate">
+                      {spool.vendor || 'Unknown Vendor'}
+                    </div>
+                    <div className="text-xs text-pf-text-secondary truncate">
+                      {spool.filamentName || spool.name || 'Unnamed'} [{spool.material || 'Unknown Material'}]
                     </div>
                   </div>
 

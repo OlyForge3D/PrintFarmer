@@ -3,8 +3,8 @@ import { useSearchParams } from 'react-router';
 import { PackageIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { FilamentsTab } from '@/features/catalog/components/FilamentsTab';
-import { SpoolsTab } from '@/features/catalog/components/SpoolsTab';
+import { FilamentsTab } from '@/features/filamentManagement/components/FilamentsTab';
+import { SpoolsTab } from '@/features/filamentManagement/components/SpoolsTab';
 
 type TabId = 'filaments' | 'spools';
 
@@ -28,10 +28,10 @@ const TABS: Tab[] = [
 ];
 
 /**
- * SpoolsPage — Container page with tabbed navigation for Filaments and Spools.
+ * FilamentManagementPage — Container page with tabbed navigation for Filaments and Spools.
  * Defaults to the Filaments tab. Active tab is persisted via URL search params.
  */
-export function SpoolsPage() {
+export function FilamentManagementPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<TabId>(() => {

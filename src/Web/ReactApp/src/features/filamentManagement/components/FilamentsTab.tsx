@@ -18,13 +18,13 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { Button, Select, FileUpload } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
-import { ColorSwatch } from '@/features/catalog/components/ColorSwatch';
+import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
-import { SpoolmanDbBrowserModal } from '@/features/catalog/components/SpoolmanDbBrowserModal';
-import { BulkEditFilamentsModal } from '@/features/catalog/components/BulkEditFilamentsModal';
-import { EditFilamentModal } from '@/features/catalog/components/EditFilamentModal';
-import { AddFilamentModal } from '@/features/catalog/components/AddFilamentModal';
+import { SpoolmanDbBrowserModal } from '@/features/filamentManagement/components/SpoolmanDbBrowserModal';
+import { BulkEditFilamentsModal } from '@/features/filamentManagement/components/BulkEditFilamentsModal';
+import { EditFilamentModal } from '@/features/filamentManagement/components/EditFilamentModal';
+import { AddFilamentModal } from '@/features/filamentManagement/components/AddFilamentModal';
 import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
 import { useExportSpoolmanFilamentsCsv, useImportSpoolmanFilamentsCsv, useDeleteFilament, useBulkDeleteFilaments } from '@/common/hooks/useApi';
@@ -60,6 +60,11 @@ export function FilamentsTab() {
   const [filters, setFilters] = useState<FilterState>({ material: '', vendor: '', search: '' });
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(() => {
+    const saved = localStorage.getItem('filaments-page-size');
+    return saved ? Number(saved) : 50;
+  });
   const [isSpoolmanDbOpen, setIsSpoolmanDbOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
@@ -162,16 +167,30 @@ export function FilamentsTab() {
     });
   }, [filteredFilaments, sortField, sortDir]);
 
+  // Pagination
+  const totalPages = pageSize > 0 ? Math.ceil(sortedFilaments.length / pageSize) : 1;
+  const pagedFilaments = useMemo(() => {
+    if (pageSize <= 0) return sortedFilaments; // "All"
+    const start = (page - 1) * pageSize;
+    return sortedFilaments.slice(start, start + pageSize);
+  }, [sortedFilaments, page, pageSize]);
+
+  // Reset page when filters or sort change
+  useEffect(() => { setPage(1); }, [filters, sortField, sortDir]);
+
+  // Persist page size preference
+  useEffect(() => { localStorage.setItem('filaments-page-size', String(pageSize)); }, [pageSize]);
+
   // These MUST be defined after sortedFilaments to avoid TDZ errors in production builds
   const toggleSelectAll = () => {
-    if (selectedIds.size === sortedFilaments.length) {
+    if (selectedIds.size === pagedFilaments.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(sortedFilaments.map(f => f.id)));
+      setSelectedIds(new Set(pagedFilaments.map(f => f.id)));
     }
   };
 
-  const allSelected = sortedFilaments.length > 0 && selectedIds.size === sortedFilaments.length;
+  const allSelected = pagedFilaments.length > 0 && selectedIds.size === pagedFilaments.length;
   const someSelected = selectedIds.size > 0;
 
   const handleConfirmDelete = async () => {
@@ -424,8 +443,26 @@ export function FilamentsTab() {
                 </div>
               </div>
             )}
-            <div className="ml-auto text-sm text-pf-text-secondary">
-              Showing {sortedFilaments.length} of {filaments.length}
+            <div className="flex items-center gap-3 ml-auto">
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="filament-page-size" className="text-xs text-pf-text-secondary">Show</label>
+                <Select
+                  id="filament-page-size"
+                  aria-label="Page size"
+                  value={String(pageSize)}
+                  onChange={e => { const v = Number(e.target.value); setPageSize(v); setPage(1); }}
+                  className="w-20"
+                >
+                  <option value="10">10</option>
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                  <option value="0">All</option>
+                </Select>
+              </div>
+              <span className="text-sm text-pf-text-secondary">
+                Showing {pagedFilaments.length} of {sortedFilaments.length}{sortedFilaments.length !== filaments.length ? ` (${filaments.length} total)` : ''}
+              </span>
             </div>
           </div>
         </div>
@@ -471,20 +508,19 @@ export function FilamentsTab() {
       {/* Card view */}
       {viewMode === 'cards' && sortedFilaments.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {sortedFilaments.map(f => (
+          {pagedFilaments.map(f => (
             <div
               key={f.id}
               className={`bg-pf-bg-1 border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors ${selectedIds.has(f.id) ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-pf-border'}`}
             >
-              <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 mb-1">
                 <Checkbox
                   checked={selectedIds.has(f.id)}
                   onChange={() => toggleSelect(f.id)}
                   aria-label={`Select ${f.name || 'filament'}`}
                 />
-                <ColorSwatch color={f.colorHex || '#888888'} label={f.name || 'Unknown'} />
-                <div className="text-sm font-medium text-pf-text-primary truncate flex-1">
-                  {f.name || 'Unnamed'}
+                <div className="text-xs text-pf-text-secondary truncate flex-1">
+                  {f.vendor || 'Unknown Vendor'}
                 </div>
                 <Button
                   variant="subtle"
@@ -514,8 +550,13 @@ export function FilamentsTab() {
                   <DeleteIcon className="h-3.5 w-3.5" />
                 </Button>
               </div>
+              <div className="flex items-center gap-2 mb-3">
+                <ColorSwatch color={f.colorHex || '#888888'} label={f.name || 'Unknown'} />
+                <div className="text-sm font-medium text-pf-text-primary truncate">
+                  {f.name || 'Unnamed'}
+                </div>
+              </div>
               <div className="space-y-1.5">
-                <div className="text-xs text-pf-text-secondary">{f.vendor || 'Unknown Vendor'}</div>
                 {f.material && (
                   <span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-blue-600/20 text-blue-300 border border-blue-600/40 uppercase tracking-wide">
                     {f.material}
@@ -590,7 +631,7 @@ export function FilamentsTab() {
               </tr>
             </thead>
             <tbody>
-              {sortedFilaments.map(f => (
+              {pagedFilaments.map(f => (
                 <SelectableRow key={f.id} className="border-t border-pf-border" isSelected={selectedIds.has(f.id)}>
                   <td className="px-3 py-2">
                     <Checkbox
@@ -643,6 +684,33 @@ export function FilamentsTab() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Pagination controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            aria-label="Previous page"
+          >
+            ← Prev
+          </Button>
+          <span className="text-sm text-pf-text-secondary">
+            Page {page} of {totalPages}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={page >= totalPages}
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            aria-label="Next page"
+          >
+            Next →
+          </Button>
         </div>
       )}
 

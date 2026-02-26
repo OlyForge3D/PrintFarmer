@@ -7,7 +7,7 @@ import {
   DeleteIcon,
   SearchIcon,
 } from '@/common/components/icons/MdiIcons';
-import { ColorSwatch } from '@/features/catalog/components/ColorSwatch';
+import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { projectService } from '@/services/projectService';
 import { templateService } from '@/services/templateService';
 import { apiClient } from '@/services/api';

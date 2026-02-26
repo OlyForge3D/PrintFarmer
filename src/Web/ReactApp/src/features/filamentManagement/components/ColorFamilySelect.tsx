@@ -79,7 +79,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
         data-open={open ? 'true' : 'false'}
         onClick={() => { setOpen(o => !o); if (!open) setActiveIdx( value ? (families.indexOf(value) + 1) : 0 ); }}
         onKeyDown={onKeyDown}
-        className="w-40 border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none pr-7 flex items-center justify-between gap-2"
+        className="w-40 border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none flex items-center justify-between gap-2"
         variant="subtle"
       >
         <span className="flex items-center gap-2 flex-1">
