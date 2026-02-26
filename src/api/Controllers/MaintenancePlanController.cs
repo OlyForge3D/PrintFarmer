@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
@@ -40,19 +40,28 @@ public class MaintenancePlanController(
         plan.IsDefault,
         plan.CreatedAt,
         plan.UpdatedAt,
-        plan.Tasks.Select(ToTaskResponse).ToList());
+        plan.PlanTasks.Select(ToPlanTaskResponse).ToList());
+
+    private static PlanTaskResponse ToPlanTaskResponse(PlanTask pt) => new(
+        pt.Id,
+        pt.MaintenancePlanId,
+        pt.MaintenanceTaskId,
+        pt.SortOrder,
+        pt.IntervalHoursOverride,
+        pt.IntervalDaysOverride,
+        ToTaskResponse(pt.MaintenanceTask));
 
     private static MaintenanceTaskResponse ToTaskResponse(MaintenanceTask task) => new(
         task.Id,
-        task.MaintenancePlanId,
         task.TaskName,
         task.Description,
+        task.Category,
         task.IntervalHours,
         task.IntervalDays,
         task.EstimatedDurationMinutes,
         task.Priority,
         task.IsActive,
-        task.SortOrder,
+        task.IsDefault,
         task.CreatedAt,
         task.UpdatedAt,
         task.TaskComponents.Select(ToTaskComponentResponse).ToList());
@@ -185,10 +194,10 @@ public class MaintenancePlanController(
     // ───────────────────────── Tasks ─────────────────────────
 
     /// <summary>
-    /// Gets all tasks for a plan.
+    /// Gets all tasks linked to a plan (via PlanTask join).
     /// </summary>
     [HttpGet("{planId:guid}/tasks")]
-    public async Task<ActionResult<List<MaintenanceTaskResponse>>> GetTasksAsync(Guid planId, CancellationToken ct)
+    public async Task<ActionResult<List<PlanTaskResponse>>> GetTasksAsync(Guid planId, CancellationToken ct)
     {
         MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
         if (plan == null)
@@ -196,27 +205,32 @@ public class MaintenancePlanController(
             return NotFound();
         }
 
-        List<MaintenanceTask> tasks = await _taskRepository.GetByPlanIdAsync(planId, ct);
-        return Ok(tasks.Select(ToTaskResponse).ToList());
+        return Ok(plan.PlanTasks.OrderBy(pt => pt.SortOrder).Select(ToPlanTaskResponse).ToList());
     }
 
     /// <summary>
-    /// Gets a single task by ID.
+    /// Gets a single task by ID (global catalog lookup).
     /// </summary>
     [HttpGet("{planId:guid}/tasks/{taskId:guid}")]
     public async Task<ActionResult<MaintenanceTaskResponse>> GetTaskAsync(Guid planId, Guid taskId, CancellationToken ct)
     {
-        MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
+        if (plan == null)
         {
             return NotFound();
         }
 
-        return Ok(ToTaskResponse(task));
+        PlanTask? planTask = plan.PlanTasks.FirstOrDefault(pt => pt.MaintenanceTaskId == taskId);
+        if (planTask == null)
+        {
+            return NotFound();
+        }
+
+        return Ok(ToTaskResponse(planTask.MaintenanceTask));
     }
 
     /// <summary>
-    /// Creates a new task in a plan.
+    /// Creates a new task in the global catalog and links it to the plan.
     /// </summary>
     [HttpPost("{planId:guid}/tasks")]
     public async Task<ActionResult<MaintenanceTaskResponse>> CreateTaskAsync(
@@ -233,27 +247,39 @@ public class MaintenancePlanController(
         var task = new MaintenanceTask
         {
             Id = Guid.NewGuid(),
-            MaintenancePlanId = planId,
             TaskName = request.TaskName,
             Description = request.Description,
+            Category = request.Category,
             IntervalHours = request.IntervalHours,
             IntervalDays = request.IntervalDays,
             EstimatedDurationMinutes = request.EstimatedDurationMinutes,
             Priority = request.Priority,
             IsActive = request.IsActive,
-            SortOrder = request.SortOrder,
+            IsDefault = request.IsDefault,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _taskRepository.AddAsync(task, ct);
-        _logger.LogInformation("Created task {TaskId} '{TaskName}' in plan {PlanId}", task.Id, task.TaskName, planId);
+
+        // Link task to plan via PlanTask join
+        int maxSort = plan.PlanTasks.Count > 0 ? plan.PlanTasks.Max(pt => pt.SortOrder) : 0;
+        plan.PlanTasks.Add(new PlanTask
+        {
+            Id = Guid.NewGuid(),
+            MaintenancePlanId = planId,
+            MaintenanceTaskId = task.Id,
+            SortOrder = maxSort + 1
+        });
+        await _planRepository.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Created task {TaskId} '{TaskName}' and linked to plan {PlanId}", task.Id, task.TaskName, planId);
 
         return Created($"/api/maintenance/plans/{planId}/tasks/{task.Id}", ToTaskResponse(task));
     }
 
     /// <summary>
-    /// Updates a task.
+    /// Updates a task in the global catalog.
     /// </summary>
     [HttpPut("{planId:guid}/tasks/{taskId:guid}")]
     public async Task<ActionResult<MaintenanceTaskResponse>> UpdateTaskAsync(
@@ -263,19 +289,20 @@ public class MaintenancePlanController(
         CancellationToken ct)
     {
         MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        if (task == null)
         {
             return NotFound();
         }
 
         task.TaskName = request.TaskName;
         task.Description = request.Description;
+        task.Category = request.Category;
         task.IntervalHours = request.IntervalHours;
         task.IntervalDays = request.IntervalDays;
         task.EstimatedDurationMinutes = request.EstimatedDurationMinutes;
         task.Priority = request.Priority;
         task.IsActive = request.IsActive;
-        task.SortOrder = request.SortOrder;
+        task.IsDefault = request.IsDefault;
         task.UpdatedAt = DateTime.UtcNow;
 
         await _taskRepository.UpdateAsync(task, ct);
@@ -285,19 +312,26 @@ public class MaintenancePlanController(
     }
 
     /// <summary>
-    /// Deletes a task (cascades to component associations).
+    /// Removes a task from a plan (deletes PlanTask link). Does not delete the global task.
     /// </summary>
     [HttpDelete("{planId:guid}/tasks/{taskId:guid}")]
     public async Task<IActionResult> DeleteTaskAsync(Guid planId, Guid taskId, CancellationToken ct)
     {
-        MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
+        if (plan == null)
         {
             return NotFound();
         }
 
-        await _taskRepository.DeleteAsync(task, ct);
-        _logger.LogInformation("Deleted task {TaskId} from plan {PlanId}", taskId, planId);
+        PlanTask? planTask = plan.PlanTasks.FirstOrDefault(pt => pt.MaintenanceTaskId == taskId);
+        if (planTask == null)
+        {
+            return NotFound();
+        }
+
+        plan.PlanTasks.Remove(planTask);
+        await _planRepository.SaveChangesAsync(ct);
+        _logger.LogInformation("Removed task {TaskId} from plan {PlanId}", taskId, planId);
 
         return NoContent();
     }
@@ -314,7 +348,7 @@ public class MaintenancePlanController(
         CancellationToken ct)
     {
         MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        if (task == null)
         {
             return NotFound();
         }
@@ -334,7 +368,7 @@ public class MaintenancePlanController(
         CancellationToken ct)
     {
         MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        if (task == null)
         {
             return NotFound();
         }
@@ -372,7 +406,7 @@ public class MaintenancePlanController(
         CancellationToken ct)
     {
         MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        if (task == null)
         {
             return NotFound();
         }

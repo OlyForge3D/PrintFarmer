@@ -28,9 +28,16 @@ public class MaintenanceAlertConfiguration : IEntityTypeConfiguration<Maintenanc
             .HasForeignKey(a => a.MaintenanceScheduleId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // Relationship with MaintenanceTask (optional)
+        _ = builder.HasOne(a => a.MaintenanceTask)
+            .WithMany()
+            .HasForeignKey(a => a.MaintenanceTaskId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         // Indexes for efficient queries
         _ = builder.HasIndex(a => a.PrinterId);
         _ = builder.HasIndex(a => a.MaintenanceScheduleId);
+        _ = builder.HasIndex(a => a.MaintenanceTaskId);
         _ = builder.HasIndex(a => new { a.Status, a.Severity });
         _ = builder.HasIndex(a => a.CreatedAt);
     }

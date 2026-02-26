@@ -31,6 +31,16 @@ public class MaintenanceAlert
     public MaintenanceSchedule MaintenanceSchedule { get; set; } = null!;
 
     /// <summary>
+    /// Optional: The maintenance task that triggered this alert
+    /// </summary>
+    public Guid? MaintenanceTaskId { get; set; }
+
+    /// <summary>
+    /// Navigation property to maintenance task
+    /// </summary>
+    public MaintenanceTask? MaintenanceTask { get; set; }
+
+    /// <summary>
     /// Alert title/summary
     /// </summary>
     [MaxLength(128)]

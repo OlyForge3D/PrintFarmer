@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,9 +17,10 @@ public class EfMaintenancePlanRepository(AppDbContext context) : IMaintenancePla
             .AsNoTracking()
             .Include(p => p.PrinterModel)
             .Include(p => p.Manufacturer)
-            .Include(p => p.Tasks.OrderBy(t => t.SortOrder))
-                .ThenInclude(t => t.TaskComponents)
-                    .ThenInclude(tc => tc.MaintenanceComponent);
+            .Include(p => p.PlanTasks.OrderBy(pt => pt.SortOrder))
+                .ThenInclude(pt => pt.MaintenanceTask)
+                    .ThenInclude(t => t.TaskComponents)
+                        .ThenInclude(tc => tc.MaintenanceComponent);
 
         if (activeOnly == true)
         {
@@ -36,9 +37,10 @@ public class EfMaintenancePlanRepository(AppDbContext context) : IMaintenancePla
         return await _context.MaintenancePlans
             .Include(p => p.PrinterModel)
             .Include(p => p.Manufacturer)
-            .Include(p => p.Tasks.OrderBy(t => t.SortOrder))
-                .ThenInclude(t => t.TaskComponents)
-                    .ThenInclude(tc => tc.MaintenanceComponent)
+            .Include(p => p.PlanTasks.OrderBy(pt => pt.SortOrder))
+                .ThenInclude(pt => pt.MaintenanceTask)
+                    .ThenInclude(t => t.TaskComponents)
+                        .ThenInclude(tc => tc.MaintenanceComponent)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
     }
 
@@ -60,7 +62,8 @@ public class EfMaintenancePlanRepository(AppDbContext context) : IMaintenancePla
 
         return await _context.MaintenancePlans
             .AsNoTracking()
-            .Include(p => p.Tasks.OrderBy(t => t.SortOrder))
+            .Include(p => p.PlanTasks.OrderBy(pt => pt.SortOrder))
+                .ThenInclude(pt => pt.MaintenanceTask)
             .Where(p => p.IsActive &&
                 (p.PrinterId == printerId ||
                  (modelId != null && p.PrinterModelId == modelId) ||

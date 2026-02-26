@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -72,7 +72,7 @@ public class MaintenancePlan
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Tasks belonging to this plan
+    /// Tasks belonging to this plan (via join entity)
     /// </summary>
-    public ICollection<MaintenanceTask> Tasks { get; set; } = new List<MaintenanceTask>();
+    public ICollection<PlanTask> PlanTasks { get; set; } = new List<PlanTask>();
 }

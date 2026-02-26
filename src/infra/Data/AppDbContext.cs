@@ -137,6 +137,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<MaintenanceTaskComponent> MaintenanceTaskComponents => Set<MaintenanceTaskComponent>();
 
+    public DbSet<PlanTask> PlanTasks => Set<PlanTask>();
+
+    public DbSet<PrinterMaintenanceSchedule> PrinterMaintenanceSchedules => Set<PrinterMaintenanceSchedule>();
+
     // Cameras (standalone webcams not attached to printers)
     public DbSet<Camera> Cameras => Set<Camera>();
 

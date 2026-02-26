@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,14 +11,26 @@ public class EfMaintenanceTaskRepository(AppDbContext context) : IMaintenanceTas
 {
     private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
-    public async Task<List<MaintenanceTask>> GetByPlanIdAsync(Guid planId, CancellationToken ct = default)
+    public async Task<List<MaintenanceTask>> GetAllAsync(string? category = null, bool? activeOnly = null, CancellationToken ct = default)
     {
-        return await _context.MaintenanceTasks
+        IQueryable<MaintenanceTask> query = _context.MaintenanceTasks
             .AsNoTracking()
-            .Where(t => t.MaintenancePlanId == planId)
             .Include(t => t.TaskComponents)
-                .ThenInclude(tc => tc.MaintenanceComponent)
-            .OrderBy(t => t.SortOrder)
+                .ThenInclude(tc => tc.MaintenanceComponent);
+
+        if (category is not null)
+        {
+            query = query.Where(t => t.Category == category);
+        }
+
+        if (activeOnly == true)
+        {
+            query = query.Where(t => t.IsActive);
+        }
+
+        return await query
+            .OrderBy(t => t.Category)
+            .ThenBy(t => t.TaskName)
             .ToListAsync(ct);
     }
 

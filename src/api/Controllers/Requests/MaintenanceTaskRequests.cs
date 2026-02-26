@@ -1,13 +1,15 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace Farm.Web.Api.Controllers.Requests;
 
 /// <summary>
-/// Request payload for creating a maintenance task within a plan.
+/// Request payload for creating a maintenance task in the global catalog.
 /// </summary>
 public record CreateMaintenanceTaskRequest(
     [Required, MinLength(1), MaxLength(200)]
     string TaskName,
+    [Required, MinLength(1), MaxLength(100)]
+    string Category,
     [MaxLength(1000)]
     string? Description = null,
     [Range(0.1, double.MaxValue)]
@@ -19,7 +21,7 @@ public record CreateMaintenanceTaskRequest(
     [Range(1, 4)]
     int Priority = 2,
     bool IsActive = true,
-    int SortOrder = 0);
+    bool IsDefault = false);
 
 /// <summary>
 /// Request payload for updating a maintenance task.
@@ -27,6 +29,8 @@ public record CreateMaintenanceTaskRequest(
 public record UpdateMaintenanceTaskRequest(
     [Required, MinLength(1), MaxLength(200)]
     string TaskName,
+    [Required, MinLength(1), MaxLength(100)]
+    string Category,
     [MaxLength(1000)]
     string? Description = null,
     [Range(0.1, double.MaxValue)]
@@ -38,7 +42,7 @@ public record UpdateMaintenanceTaskRequest(
     [Range(1, 4)]
     int Priority = 2,
     bool IsActive = true,
-    int SortOrder = 0);
+    bool IsDefault = false);
 
 /// <summary>
 /// Request payload for adding a component to a task.

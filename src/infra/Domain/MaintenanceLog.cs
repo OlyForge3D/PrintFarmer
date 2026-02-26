@@ -41,6 +41,16 @@ public class MaintenanceLog
     public MaintenanceAlert? ResolvedAlert { get; set; }
 
     /// <summary>
+    /// Optional: The maintenance task (from the global catalog) that was performed
+    /// </summary>
+    public Guid? MaintenanceTaskId { get; set; }
+
+    /// <summary>
+    /// Navigation property to maintenance task
+    /// </summary>
+    public MaintenanceTask? MaintenanceTask { get; set; }
+
+    /// <summary>
     /// Name/title of the maintenance performed
     /// </summary>
     [MaxLength(128)]

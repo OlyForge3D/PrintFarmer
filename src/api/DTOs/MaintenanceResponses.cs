@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.DTOs;
+﻿namespace Farm.Web.Api.DTOs;
 
 /// <summary>
 /// Response DTO for a maintenance plan. Excludes navigation entities that carry sensitive data.
@@ -18,22 +18,34 @@ public record MaintenancePlanResponse(
     bool IsDefault,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    List<MaintenanceTaskResponse> Tasks);
+    List<PlanTaskResponse> PlanTasks);
 
 /// <summary>
-/// Response DTO for a maintenance task within a plan.
+/// Response DTO for a task within a plan (join entity with sort order and interval overrides).
+/// </summary>
+public record PlanTaskResponse(
+    Guid Id,
+    Guid MaintenancePlanId,
+    Guid MaintenanceTaskId,
+    int SortOrder,
+    double? IntervalHoursOverride,
+    int? IntervalDaysOverride,
+    MaintenanceTaskResponse Task);
+
+/// <summary>
+/// Response DTO for a maintenance task (global catalog item).
 /// </summary>
 public record MaintenanceTaskResponse(
     Guid Id,
-    Guid MaintenancePlanId,
     string TaskName,
     string? Description,
+    string Category,
     double? IntervalHours,
     int? IntervalDays,
     int? EstimatedDurationMinutes,
     int Priority,
     bool IsActive,
-    int SortOrder,
+    bool IsDefault,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     List<MaintenanceTaskComponentResponse> TaskComponents);

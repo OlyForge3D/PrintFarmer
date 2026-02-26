@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 /// <summary>
 /// Junction table linking a maintenance task to a component with quantity.
