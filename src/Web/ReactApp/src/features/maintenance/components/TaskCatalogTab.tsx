@@ -22,18 +22,21 @@ import {
   PlusIcon,
   SearchIcon,
   FilterIcon,
-  GearIcon,
 } from '@/common/components/icons/MdiIcons';
-import { TaskComponentManager } from './TaskComponentManager';
 import {
   useTaskCatalog,
   useTaskCategories,
   useCreateCatalogTask,
   useUpdateCatalogTask,
   useDeleteCatalogTask,
+  useAddCatalogTaskComponent,
+  useRemoveCatalogTaskComponent,
 } from '../hooks/useTaskCatalog';
+import { useMaintenanceComponents } from '../hooks/useMaintenanceComponents';
 import type {
   MaintenanceTaskDto,
+  MaintenanceTaskComponentDto,
+  MaintenanceComponentDto,
   CreateMaintenanceTaskDto,
   UpdateMaintenanceTaskDto,
 } from '@/types/maintenance';
@@ -93,16 +96,28 @@ const priorityOptions = [
 
 interface TaskFormModalProps {
   isOpen: boolean;
-  task?: MaintenanceTaskDto | null;
+  taskId: string | null;
+  tasks: MaintenanceTaskDto[];
   categories: string[];
   onClose: () => void;
+  onTaskCreated?: (taskId: string) => void;
 }
 
-function TaskFormModal({ isOpen, task, categories, onClose }: TaskFormModalProps) {
+function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreated }: TaskFormModalProps) {
+  // Derive fresh task from the query-backed array so part mutations auto-refresh
+  const task = taskId ? tasks.find(t => t.id === taskId) ?? null : null;
   const isEdit = !!task;
+
+  // Task CRUD mutations
   const createTask = useCreateCatalogTask();
   const updateTask = useUpdateCatalogTask();
 
+  // Parts data & mutations
+  const { data: allComponents = [] } = useMaintenanceComponents();
+  const addComponent = useAddCatalogTaskComponent();
+  const removeComponent = useRemoveCatalogTaskComponent();
+
+  // ── Form state ──
   const [taskName, setTaskName] = useState('');
   const [category, setCategory] = useState('');
   const [customCategory, setCustomCategory] = useState('');
@@ -115,8 +130,39 @@ function TaskFormModal({ isOpen, task, categories, onClose }: TaskFormModalProps
   const [isDefault, setIsDefault] = useState(false);
   const [scopeRules, setScopeRules] = useState<Record<string, boolean | null>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ── Parts state ──
+  const [removingTc, setRemovingTc] = useState<MaintenanceTaskComponentDto | null>(null);
+  const [partSearch, setPartSearch] = useState('');
+  const [selectedPartId, setSelectedPartId] = useState('');
+  const [partQuantity, setPartQuantity] = useState('1');
+  const [partNotes, setPartNotes] = useState('');
+  const [isAddingPart, setIsAddingPart] = useState(false);
+
+  // ── Derived data ──
+  const componentMap = useMemo(() => {
+    const map = new Map<string, MaintenanceComponentDto>();
+    for (const c of allComponents) map.set(c.id, c);
+    return map;
+  }, [allComponents]);
+
+  const existingComponentIds = useMemo(
+    () => new Set(task?.taskComponents.map(tc => tc.maintenanceComponentId) ?? []),
+    [task?.taskComponents],
+  );
+
+  const availableParts = useMemo(() => {
+    const q = partSearch.toLowerCase();
+    return allComponents.filter(c => {
+      if (existingComponentIds.has(c.id)) return false;
+      if (q && !c.name.toLowerCase().includes(q) && !c.category.toLowerCase().includes(q) && !(c.sku?.toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }, [allComponents, existingComponentIds, partSearch]);
+
   const prevOpenRef = useRef(false);
 
+  /* Init form state when modal opens (or task switches from create→edit) */
   React.useEffect(() => {
     if (isOpen && !prevOpenRef.current) {
       setTaskName(task?.taskName ?? '');
@@ -143,10 +189,17 @@ function TaskFormModal({ isOpen, task, categories, onClose }: TaskFormModalProps
         rules[rule.key] = typeof val === 'boolean' ? val : null;
       }
       setScopeRules(rules);
+      // Reset parts picker state
+      setRemovingTc(null);
+      setPartSearch('');
+      setSelectedPartId('');
+      setPartQuantity('1');
+      setPartNotes('');
     }
     prevOpenRef.current = isOpen;
   }, [isOpen, task]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Task form submit ──
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const resolvedCategory = category === '__custom__' ? customCategory.trim() : category;
@@ -172,11 +225,12 @@ function TaskFormModal({ isOpen, task, categories, onClose }: TaskFormModalProps
       if (isEdit && task) {
         await updateTask.mutateAsync({ id: task.id, data: data as UpdateMaintenanceTaskDto });
         toast.success('Task updated');
+        onClose();
       } else {
-        await createTask.mutateAsync(data as CreateMaintenanceTaskDto);
-        toast.success('Task created');
+        const newTask = await createTask.mutateAsync(data as CreateMaintenanceTaskDto);
+        toast.success('Task created — add required parts below');
+        onTaskCreated?.(newTask.id);
       }
-      onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save task');
     } finally {
@@ -184,117 +238,312 @@ function TaskFormModal({ isOpen, task, categories, onClose }: TaskFormModalProps
     }
   };
 
+  // ── Part handlers ──
+  const handleAddPart = async () => {
+    if (!selectedPartId || !task) return;
+    setIsAddingPart(true);
+    try {
+      await addComponent.mutateAsync({
+        taskId: task.id,
+        data: {
+          componentId: selectedPartId,
+          quantity: Math.max(1, Number(partQuantity) || 1),
+          notes: partNotes.trim() || null,
+        },
+      });
+      const part = allComponents.find(c => c.id === selectedPartId);
+      toast.success(`Added "${part?.name ?? 'part'}"`);
+      setSelectedPartId('');
+      setPartQuantity('1');
+      setPartNotes('');
+      setPartSearch('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add part');
+    } finally {
+      setIsAddingPart(false);
+    }
+  };
+
+  const handleRemoveConfirm = async () => {
+    if (!removingTc || !task) return;
+    try {
+      await removeComponent.mutateAsync({
+        taskId: task.id,
+        componentId: removingTc.maintenanceComponentId,
+      });
+      toast.success(`Removed "${removingTc.componentName ?? 'part'}"`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove part');
+    } finally {
+      setRemovingTc(null);
+    }
+  };
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Task' : 'New Catalog Task'} size="xl">
-      <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-        {/* Name */}
-        <div>
-          <label htmlFor="task-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
-            Name <span className="text-red-400">*</span>
-          </label>
-          <Input id="task-name" value={taskName} onChange={e => setTaskName(e.target.value)} placeholder="e.g. Clean nozzle" required maxLength={200} />
-        </div>
-
-        {/* Category */}
-        <div>
-          <label htmlFor="task-category" className="block text-sm font-medium text-pf-text-secondary mb-1">
-            Category <span className="text-red-400">*</span>
-          </label>
-          <Select id="task-category" value={category} onChange={e => setCategory(e.target.value)}>
-            {categories.map(c => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-            <option value="__custom__">+ New category…</option>
-          </Select>
-          {category === '__custom__' && (
-            <Input className="mt-2" value={customCategory} onChange={e => setCustomCategory(e.target.value)} placeholder="Enter new category name" required maxLength={100} />
-          )}
-        </div>
-
-        {/* Description */}
-        <div>
-          <label htmlFor="task-desc" className="block text-sm font-medium text-pf-text-secondary mb-1">Description</label>
-          <Textarea id="task-desc" value={description} onChange={e => setDescription(e.target.value)} placeholder="What does this task involve?" rows={2} maxLength={1000} />
-        </div>
-
-        {/* Interval */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="interval-type" className="block text-sm font-medium text-pf-text-secondary mb-1">Interval type</label>
-            <Select id="interval-type" value={intervalType} onChange={e => setIntervalType(e.target.value as 'hours' | 'days' | 'none')}>
-              <option value="hours">Print hours</option>
-              <option value="days">Calendar days</option>
-              <option value="none">Manual only</option>
-            </Select>
-          </div>
-          {intervalType !== 'none' && (
+    <>
+      <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? `Edit "${task!.taskName}"` : 'New Catalog Task'} size="full">
+        <div className="max-h-[80vh] overflow-y-auto space-y-6 pr-1">
+          {/* ── Task Details Form ── */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Name */}
             <div>
-              <label htmlFor="interval-val" className="block text-sm font-medium text-pf-text-secondary mb-1">
-                {intervalType === 'hours' ? 'Hours' : 'Days'}
+              <label htmlFor="task-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
+                Name <span className="text-red-400">*</span>
               </label>
-              <Input id="interval-val" type="number" min="1" value={intervalValue} onChange={e => setIntervalValue(e.target.value)} placeholder={intervalType === 'hours' ? '500' : '90'} />
+              <Input id="task-name" value={taskName} onChange={e => setTaskName(e.target.value)} placeholder="e.g. Clean nozzle" required maxLength={200} />
             </div>
-          )}
-        </div>
 
-        {/* Estimated duration + Priority */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="est-min" className="block text-sm font-medium text-pf-text-secondary mb-1">Estimated (min)</label>
-            <Input id="est-min" type="number" min="1" value={estimatedMinutes} onChange={e => setEstimatedMinutes(e.target.value)} placeholder="15" />
-          </div>
-          <div>
-            <label htmlFor="task-priority" className="block text-sm font-medium text-pf-text-secondary mb-1">Priority</label>
-            <Select id="task-priority" value={priority} onChange={e => setPriority(e.target.value)}>
-              {priorityOptions.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </Select>
-          </div>
-        </div>
+            {/* Category */}
+            <div>
+              <label htmlFor="task-category" className="block text-sm font-medium text-pf-text-secondary mb-1">
+                Category <span className="text-red-400">*</span>
+              </label>
+              <Select id="task-category" value={category} onChange={e => setCategory(e.target.value)}>
+                {categories.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+                <option value="__custom__">+ New category…</option>
+              </Select>
+              {category === '__custom__' && (
+                <Input className="mt-2" value={customCategory} onChange={e => setCustomCategory(e.target.value)} placeholder="Enter new category name" required maxLength={100} />
+              )}
+            </div>
 
-        {/* Flags */}
-        <div className="flex gap-6">
-          <Checkbox label="Active" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
-          <Checkbox label="Default (seed task)" checked={isDefault} onChange={e => setIsDefault(e.target.checked)} />
-        </div>
+            {/* Description */}
+            <div>
+              <label htmlFor="task-desc" className="block text-sm font-medium text-pf-text-secondary mb-1">Description</label>
+              <Textarea id="task-desc" value={description} onChange={e => setDescription(e.target.value)} placeholder="What does this task involve?" rows={2} maxLength={1000} />
+            </div>
 
-        {/* Scope Rules */}
-        <fieldset className="border border-pf-border rounded-lg p-3">
-          <legend className="text-sm font-medium text-pf-text-secondary px-2">Scope Rules (applies to printers with…)</legend>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
-            {SCOPE_RULES.map(rule => {
-              const val = scopeRules[rule.key];
-              return (
-                <Checkbox
-                  key={rule.key}
-                  label={rule.label}
-                  checked={val === true}
-                  indeterminate={val === null}
-                  onChange={() => {
-                    setScopeRules(prev => ({
-                      ...prev,
-                      [rule.key]: prev[rule.key] === true ? null : true,
-                    }));
-                  }}
-                />
-              );
-            })}
-          </div>
-          <p className="text-xs text-pf-text-muted mt-2">
-            Checked = required. Unchecked/indeterminate = no constraint.
-          </p>
-        </fieldset>
+            {/* Interval */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="interval-type" className="block text-sm font-medium text-pf-text-secondary mb-1">Interval type</label>
+                <Select id="interval-type" value={intervalType} onChange={e => setIntervalType(e.target.value as 'hours' | 'days' | 'none')}>
+                  <option value="hours">Print hours</option>
+                  <option value="days">Calendar days</option>
+                  <option value="none">Manual only</option>
+                </Select>
+              </div>
+              {intervalType !== 'none' && (
+                <div>
+                  <label htmlFor="interval-val" className="block text-sm font-medium text-pf-text-secondary mb-1">
+                    {intervalType === 'hours' ? 'Hours' : 'Days'}
+                  </label>
+                  <Input id="interval-val" type="number" min="1" value={intervalValue} onChange={e => setIntervalValue(e.target.value)} placeholder={intervalType === 'hours' ? '500' : '90'} />
+                </div>
+              )}
+            </div>
 
-        {/* Actions */}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !taskName.trim()}>
-            {isSubmitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Task'}
-          </Button>
+            {/* Estimated duration + Priority */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="est-min" className="block text-sm font-medium text-pf-text-secondary mb-1">Estimated (min)</label>
+                <Input id="est-min" type="number" min="1" value={estimatedMinutes} onChange={e => setEstimatedMinutes(e.target.value)} placeholder="15" />
+              </div>
+              <div>
+                <label htmlFor="task-priority" className="block text-sm font-medium text-pf-text-secondary mb-1">Priority</label>
+                <Select id="task-priority" value={priority} onChange={e => setPriority(e.target.value)}>
+                  {priorityOptions.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+
+            {/* Flags */}
+            <div className="flex gap-6">
+              <Checkbox label="Active" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
+              <Checkbox label="Default (seed task)" checked={isDefault} onChange={e => setIsDefault(e.target.checked)} />
+            </div>
+
+            {/* Scope Rules */}
+            <fieldset className="border border-pf-border rounded-lg p-3">
+              <legend className="text-sm font-medium text-pf-text-secondary px-2">Scope Rules (applies to printers with…)</legend>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
+                {SCOPE_RULES.map(rule => {
+                  const val = scopeRules[rule.key];
+                  return (
+                    <Checkbox
+                      key={rule.key}
+                      label={rule.label}
+                      checked={val === true}
+                      indeterminate={val === null}
+                      onChange={() => {
+                        setScopeRules(prev => ({
+                          ...prev,
+                          [rule.key]: prev[rule.key] === true ? null : true,
+                        }));
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              <p className="text-xs text-pf-text-muted mt-2">
+                Checked = required. Unchecked/indeterminate = no constraint.
+              </p>
+            </fieldset>
+
+            {/* Form Actions */}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+                {isEdit ? 'Close' : 'Cancel'}
+              </Button>
+              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !taskName.trim()}>
+                {isSubmitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Task'}
+              </Button>
+            </div>
+          </form>
+
+          {/* ── Divider ── */}
+          <div className="border-t border-pf-border" />
+
+          {/* ── Required Parts Section ── */}
+          <section className="space-y-3 pb-2">
+            <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide">
+              Required Parts
+            </h3>
+
+            {!isEdit ? (
+              <p className="text-sm text-pf-text-muted py-6 text-center border border-dashed border-pf-border rounded-lg">
+                Save the task first to manage required parts.
+              </p>
+            ) : (
+              <>
+                {/* Summary */}
+                <p className="text-sm text-pf-text-muted">
+                  {task!.taskComponents.length === 0
+                    ? 'No parts linked to this task yet. Add parts from your inventory below.'
+                    : `${task!.taskComponents.length} part${task!.taskComponents.length !== 1 ? 's' : ''} required for this task.`}
+                </p>
+
+                {/* Parts Table */}
+                {task!.taskComponents.length > 0 && (
+                  <div className="overflow-x-auto rounded-lg border border-pf-border">
+                    <table className="w-full text-sm" role="grid" aria-label="Required parts">
+                      <thead>
+                        <tr className="bg-pf-bg-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
+                          <th scope="col" className="px-3 py-2">Part</th>
+                          <th scope="col" className="px-3 py-2">Category</th>
+                          <th scope="col" className="px-3 py-2 text-right">Qty</th>
+                          <th scope="col" className="px-3 py-2">SKU</th>
+                          <th scope="col" className="px-3 py-2 text-right">Stock</th>
+                          <th scope="col" className="px-3 py-2">Notes</th>
+                          <th scope="col" className="px-3 py-2 w-10"><span className="sr-only">Actions</span></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-pf-border">
+                        {task!.taskComponents.map(tc => {
+                          const comp = componentMap.get(tc.maintenanceComponentId);
+                          const isLow = comp ? comp.inStock < comp.minimumStock : false;
+                          return (
+                            <tr key={tc.id} className="hover:bg-pf-bg-3/50 transition-colors">
+                              <td className="px-3 py-2 font-medium text-pf-text">
+                                {tc.componentName ?? comp?.name ?? 'Unknown'}
+                              </td>
+                              <td className="px-3 py-2">
+                                {comp && <Badge variant="default" className="text-[10px]">{comp.category}</Badge>}
+                              </td>
+                              <td className="px-3 py-2 text-right">{tc.quantity}</td>
+                              <td className="px-3 py-2 text-pf-text-muted">{comp?.sku ?? '—'}</td>
+                              <td className="px-3 py-2 text-right">
+                                <span className={isLow ? 'text-amber-400' : ''}>{comp?.inStock ?? '—'}</span>
+                                {isLow && <Badge variant="warning" className="text-[10px] ml-1">Low</Badge>}
+                              </td>
+                              <td className="px-3 py-2 text-pf-text-muted italic text-xs">{tc.notes ?? '—'}</td>
+                              <td className="px-3 py-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setRemovingTc(tc)}
+                                  aria-label={`Remove ${tc.componentName ?? 'part'}`}
+                                  className="text-red-400 hover:text-red-300"
+                                >
+                                  <DeleteIcon className="h-4 w-4" aria-hidden="true" />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Add Part Picker */}
+                <div className="space-y-3 border border-pf-border rounded-lg p-3 bg-pf-bg-3">
+                  <h4 className="text-sm font-medium text-pf-text-secondary flex items-center gap-1.5">
+                    <PlusIcon className="h-4 w-4" aria-hidden="true" />
+                    Add Part from Inventory
+                  </h4>
+
+                  <div className="relative">
+                    <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-pf-text-muted" aria-hidden="true" />
+                    <Input
+                      className="pl-9"
+                      placeholder="Search parts…"
+                      value={partSearch}
+                      onChange={e => setPartSearch(e.target.value)}
+                      aria-label="Search inventory parts"
+                    />
+                  </div>
+
+                  {availableParts.length === 0 ? (
+                    <p className="text-xs text-pf-text-muted py-2 text-center">
+                      {allComponents.length === 0
+                        ? 'No parts in inventory yet. Add parts in the Parts Inventory tab first.'
+                        : 'No matching parts available (all may already be linked).'}
+                    </p>
+                  ) : (
+                    <>
+                      <Select
+                        value={selectedPartId}
+                        onChange={e => setSelectedPartId(e.target.value)}
+                        aria-label="Select part to add"
+                      >
+                        <option value="">Select a part…</option>
+                        {availableParts.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.category}){c.sku ? ` [${c.sku}]` : ''}{c.inStock < c.minimumStock ? ' ⚠ Low' : ''}
+                          </option>
+                        ))}
+                      </Select>
+
+                      {selectedPartId && (
+                        <div className="flex items-end gap-2">
+                          <div className="w-20">
+                            <label htmlFor="part-qty" className="block text-xs text-pf-text-muted mb-0.5">Qty</label>
+                            <Input id="part-qty" type="number" min="1" value={partQuantity} onChange={e => setPartQuantity(e.target.value)} />
+                          </div>
+                          <div className="flex-1">
+                            <label htmlFor="part-notes" className="block text-xs text-pf-text-muted mb-0.5">Notes (optional)</label>
+                            <Input id="part-notes" value={partNotes} onChange={e => setPartNotes(e.target.value)} placeholder="e.g. use PTFE-coated variant" maxLength={500} />
+                          </div>
+                          <Button variant="primary" size="sm" onClick={handleAddPart} disabled={isAddingPart} className="shrink-0">
+                            {isAddingPart ? 'Adding…' : 'Add'}
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
         </div>
-      </form>
-    </Modal>
+      </Modal>
+
+      {/* Remove part confirmation */}
+      <ConfirmationModal
+        isOpen={!!removingTc}
+        title="Remove Part"
+        message={`Remove "${removingTc?.componentName ?? 'this part'}" from task "${task?.taskName ?? ''}"? The part remains in your inventory.`}
+        confirmButtonText="Remove"
+        isDangerous
+        onConfirm={handleRemoveConfirm}
+        onCancel={() => setRemovingTc(null)}
+      />
+    </>
   );
 }
 
@@ -324,9 +573,8 @@ export function TaskCatalogTab() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<MaintenanceTaskDto | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [deletingTask, setDeletingTask] = useState<MaintenanceTaskDto | null>(null);
-  const [partsTask, setPartsTask] = useState<MaintenanceTaskDto | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -349,13 +597,18 @@ export function TaskCatalogTab() {
   }, [filtered]);
 
   const handleEdit = (task: MaintenanceTaskDto) => {
-    setEditingTask(task);
+    setEditingTaskId(task.id);
     setIsFormOpen(true);
   };
 
   const handleCreate = () => {
-    setEditingTask(null);
+    setEditingTaskId(null);
     setIsFormOpen(true);
+  };
+
+  const handleFormClose = () => {
+    setIsFormOpen(false);
+    setEditingTaskId(null);
   };
 
   const handleDelete = async () => {
@@ -473,15 +726,6 @@ export function TaskCatalogTab() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setPartsTask(task)}
-                    aria-label={`Manage parts for ${task.taskName}`}
-                    title="Manage parts"
-                  >
-                    <GearIcon className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
                     onClick={() => handleEdit(task)}
                     aria-label={`Edit ${task.taskName}`}
                   >
@@ -506,9 +750,11 @@ export function TaskCatalogTab() {
       {/* Modals */}
       <TaskFormModal
         isOpen={isFormOpen}
-        task={editingTask}
+        taskId={editingTaskId}
+        tasks={tasks}
         categories={categories}
-        onClose={() => { setIsFormOpen(false); setEditingTask(null); }}
+        onClose={handleFormClose}
+        onTaskCreated={(newId) => setEditingTaskId(newId)}
       />
       <ConfirmationModal
         isOpen={!!deletingTask}
@@ -519,13 +765,6 @@ export function TaskCatalogTab() {
         onConfirm={handleDelete}
         onCancel={() => setDeletingTask(null)}
       />
-      {partsTask && (
-        <TaskComponentManager
-          isOpen={!!partsTask}
-          task={partsTask}
-          onClose={() => setPartsTask(null)}
-        />
-      )}
     </div>
   );
 }

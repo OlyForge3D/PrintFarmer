@@ -205,11 +205,11 @@ export function MaintenanceDashboardPage() {
           <Tabs.Tab id="library" icon={<DatabaseIcon className="h-4 w-4" />}>
             Library
           </Tabs.Tab>
-          <Tabs.Tab id="analytics" icon={<ChartIcon className="h-4 w-4" />}>
-            Analytics
-          </Tabs.Tab>
           <Tabs.Tab id="inventory" icon={<PackageIcon className="h-4 w-4" />}>
             Inventory
+          </Tabs.Tab>
+          <Tabs.Tab id="analytics" icon={<ChartIcon className="h-4 w-4" />}>
+            Analytics
           </Tabs.Tab>
         </Tabs.List>
 
@@ -374,11 +374,11 @@ export function MaintenanceDashboardPage() {
               <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
                 <Tabs defaultTab="tasks" className="p-0">
                   <Tabs.List className="border-b border-pf-border bg-pf-bg-2 px-2">
-                    <Tabs.Tab id="tasks" icon={<DatabaseIcon className="h-4 w-4" />}>
-                      Task Catalog
-                    </Tabs.Tab>
                     <Tabs.Tab id="plans" icon={<ListIcon className="h-4 w-4" />}>
                       Maintenance Plans
+                    </Tabs.Tab>
+                    <Tabs.Tab id="tasks" icon={<DatabaseIcon className="h-4 w-4" />}>
+                      Task Catalog
                     </Tabs.Tab>
                   </Tabs.List>
 

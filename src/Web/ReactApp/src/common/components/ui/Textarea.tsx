@@ -15,7 +15,7 @@ export const Textarea: React.FC<TextareaProps> = ({
   return (
     <textarea
       className={clsx(
-        'border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border',
+        'w-full border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border',
         'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent',
         'disabled:bg-pf-disabled disabled:cursor-not-allowed',
         'placeholder:text-pf-text-tertiary',

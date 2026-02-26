@@ -246,7 +246,7 @@ export function LogMaintenanceModal({
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Describe what was done, any issues found, etc."
-            className="w-full h-24"
+            rows={3}
           />
         </div>
 

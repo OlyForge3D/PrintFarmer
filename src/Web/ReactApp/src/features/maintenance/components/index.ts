@@ -40,5 +40,4 @@ export { LogMaintenanceModal } from './LogMaintenanceModal';
 export { MaintenancePlansTab } from './MaintenancePlansTabV2';
 export { PartsInventoryTab } from './PartsInventoryTab';
 export { TaskCatalogTab } from './TaskCatalogTab';
-export { TaskComponentManager } from './TaskComponentManager';
 export { LowStockAlert } from './LowStockAlert';
