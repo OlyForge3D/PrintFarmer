@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Queue
@@ -31,6 +32,7 @@ namespace Farm.Infrastructure.Services.Queue
         private readonly IQueueRepository _repo;
         private readonly IQueueDataService _dataService;
         private readonly ILogger<JobQueueService> _logger;
+        private readonly IPrintCostCalculator? _costCalculator;
 
         /// <summary>
         /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -38,11 +40,13 @@ namespace Farm.Infrastructure.Services.Queue
         /// <param name="repo">Repository for print job persistence and CRUD operations</param>
         /// <param name="dataService">Specialized data service for queue-specific queries</param>
         /// <param name="logger">Unified logging service for operation tracking and audit trails</param>
+        /// <param name="costCalculator">Optional cost calculator for estimating job costs from Spoolman data</param>
         /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
         public JobQueueService(
             IQueueRepository repo,
             IQueueDataService dataService,
-            ILogger<JobQueueService> logger)
+            ILogger<JobQueueService> logger,
+            IPrintCostCalculator? costCalculator = null)
         {
             ArgumentNullException.ThrowIfNull(repo);
             ArgumentNullException.ThrowIfNull(dataService);
@@ -50,6 +54,7 @@ namespace Farm.Infrastructure.Services.Queue
             _repo = repo;
             _dataService = dataService;
             _logger = logger;
+            _costCalculator = costCalculator;
         }
 
         /// <summary>
@@ -185,6 +190,8 @@ namespace Farm.Infrastructure.Services.Queue
                 ActualPrintTime = j.ActualPrintTime,
                 ActualFilamentUsage = j.ActualFilamentUsage,
                 FailureReason = j.FailureReason,
+                EstimatedCost = j.EstimatedCost,
+                ActualCost = j.ActualCost,
                 CreatedAt = j.CreatedAt,
                 UpdatedAt = j.UpdatedAt,
                 GcodeFileName = j.GcodeFile?.FileName ?? string.Empty,
@@ -272,6 +279,22 @@ namespace Farm.Infrastructure.Services.Queue
                 QueuedAt = DateTime.UtcNow
             };
 
+            // Calculate estimated cost if cost calculator is available
+            if (_costCalculator != null && job.SpoolmanFilamentId.HasValue)
+            {
+                try
+                {
+                    job.EstimatedCost = await _costCalculator.CalculateEstimatedCostAsync(
+                        job.SpoolmanFilamentId,
+                        job.EstimatedFilamentUsage,
+                        ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to calculate estimated cost for queued job");
+                }
+            }
+
             await _repo.AddAsync(job, ct);
             await _repo.SaveChangesAsync(ct);
 
@@ -293,6 +316,8 @@ namespace Farm.Infrastructure.Services.Queue
                 FilamentName = job.FilamentName,
                 FilamentVendor = job.FilamentVendor,
                 FilamentColor = job.FilamentColor,
+                EstimatedCost = job.EstimatedCost,
+                ActualCost = job.ActualCost,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };
@@ -337,6 +362,8 @@ namespace Farm.Infrastructure.Services.Queue
                     FilamentName = job.FilamentName,
                     FilamentVendor = job.FilamentVendor,
                     FilamentColor = job.FilamentColor,
+                    EstimatedCost = job.EstimatedCost,
+                    ActualCost = job.ActualCost,
                     CreatedAt = job.CreatedAt,
                     UpdatedAt = job.UpdatedAt
                 };
@@ -407,6 +434,8 @@ namespace Farm.Infrastructure.Services.Queue
                 QueuePosition = job.QueuePosition,
                 EstimatedPrintTime = job.EstimatedPrintTime,
                 EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                EstimatedCost = job.EstimatedCost,
+                ActualCost = job.ActualCost,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };
@@ -533,6 +562,8 @@ namespace Farm.Infrastructure.Services.Queue
                 FilamentName = job.FilamentName,
                 FilamentVendor = job.FilamentVendor,
                 FilamentColor = job.FilamentColor,
+                EstimatedCost = job.EstimatedCost,
+                ActualCost = job.ActualCost,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };

@@ -1539,6 +1539,8 @@ public class PrintJobManagementService(
             FilamentColor = job.FilamentColor,
             ProjectId = job.ProjectId,
             ProjectName = job.ProjectName,
+            EstimatedCost = job.EstimatedCost,
+            ActualCost = job.ActualCost,
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt,

@@ -1,0 +1,58 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace Farm.Migrations.PostgreSQL.Migrations
+{
+    /// <inheritdoc />
+    public partial class AddPrintJobCostFields : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AddColumn<decimal>(
+                name: "ActualCost",
+                table: "PrintJobStatistics",
+                type: "numeric",
+                nullable: true);
+
+            migrationBuilder.AddColumn<decimal>(
+                name: "EstimatedCost",
+                table: "PrintJobStatistics",
+                type: "numeric",
+                nullable: true);
+
+            migrationBuilder.AddColumn<decimal>(
+                name: "ActualCost",
+                table: "PrintJobs",
+                type: "numeric",
+                nullable: true);
+
+            migrationBuilder.AddColumn<decimal>(
+                name: "EstimatedCost",
+                table: "PrintJobs",
+                type: "numeric",
+                nullable: true);
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropColumn(
+                name: "ActualCost",
+                table: "PrintJobStatistics");
+
+            migrationBuilder.DropColumn(
+                name: "EstimatedCost",
+                table: "PrintJobStatistics");
+
+            migrationBuilder.DropColumn(
+                name: "ActualCost",
+                table: "PrintJobs");
+
+            migrationBuilder.DropColumn(
+                name: "EstimatedCost",
+                table: "PrintJobs");
+        }
+    }
+}

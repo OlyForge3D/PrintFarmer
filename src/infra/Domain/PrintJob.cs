@@ -57,6 +57,19 @@ public class PrintJob
 
     public double? ActualFilamentUsage { get; set; }
 
+    /// <summary>
+    /// Estimated cost of the print job in the user's currency, calculated from
+    /// spool price and estimated filament usage. Populated at queue time if
+    /// Spoolman spool data is available.
+    /// </summary>
+    public decimal? EstimatedCost { get; set; }
+
+    /// <summary>
+    /// Actual cost of the print job in the user's currency, calculated from
+    /// spool price and actual filament usage. Populated on job completion.
+    /// </summary>
+    public decimal? ActualCost { get; set; }
+
     public string? FailureReason { get; set; }
 
     public Guid[]? PreferredPrinterIds { get; set; } // JSON array of preferred printer IDs

@@ -1961,6 +1961,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("ActualCost")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<DateTime?>("ActualEndTime")
                         .HasColumnType("datetime2");
 
@@ -1978,6 +1981,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("EstimatedCost")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<double?>("EstimatedFilamentUsage")
                         .HasColumnType("float");
@@ -2102,6 +2108,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("ActualCost")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<long?>("ActualDurationMs")
                         .HasColumnType("bigint");
 
@@ -2113,6 +2122,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("EstimatedCost")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<long?>("EstimatedDurationMs")
                         .HasColumnType("bigint");

@@ -1,5 +1,9 @@
-﻿using Farm.Infrastructure.Domain.Notifications;
+﻿using Farm.Infrastructure.Contracts.Auth;
+using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
+using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Services.SignalR;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Notifications;
@@ -131,61 +135,125 @@ public interface INotificationService
 
 public class NotificationService(
     INotificationRepository notificationRepository,
-    ILogger<NotificationService> logger) : INotificationService
+    IUsersRepository usersRepository,
+    ILogger<NotificationService> logger,
+    IHubContext<PrinterHub>? hubContext = null) : INotificationService
 {
-    public Task SendJobStartedAsync(
+    public async Task SendJobStartedAsync(
         string jobId,
         string jobName,
         string? printerName = null,
         CancellationToken cancellationToken = default)
     {
-        // Note: In Phase 4.3, we don't know who created the job yet
-        // This will be populated once we integrate with PrintQueueService
-        // For now, this is a placeholder
-        logger.LogInformation("Job started notification queued for job {JobId}: {JobName}", jobId, jobName);
-        return Task.CompletedTask;
+        string subject = printerName != null
+            ? $"Job started on {printerName}"
+            : "Job started";
+        string body = printerName != null
+            ? $"Print job \"{jobName}\" has started printing on {printerName}."
+            : $"Print job \"{jobName}\" has started printing.";
+
+        await BroadcastJobNotificationAsync(
+            NotificationType.JobStarted, subject, body, jobId, cancellationToken);
     }
 
-    public Task SendJobCompletedAsync(
+    public async Task SendJobCompletedAsync(
         string jobId,
         string jobName,
         string? printerName = null,
         CancellationToken cancellationToken = default)
     {
-        // Note: In Phase 4.3, we don't know who created the job yet
-        // This will be populated once we integrate with PrintQueueService
-        logger.LogInformation("Job completed notification queued for job {JobId}: {JobName}", jobId, jobName);
-        return Task.CompletedTask;
+        string subject = printerName != null
+            ? $"Job completed on {printerName}"
+            : "Job completed";
+        string body = printerName != null
+            ? $"Print job \"{jobName}\" has completed successfully on {printerName}."
+            : $"Print job \"{jobName}\" has completed successfully.";
+
+        await BroadcastJobNotificationAsync(
+            NotificationType.JobCompleted, subject, body, jobId, cancellationToken);
     }
 
-    public Task SendJobFailedAsync(
+    public async Task SendJobFailedAsync(
         string jobId,
         string jobName,
         string errorMessage,
         CancellationToken cancellationToken = default)
     {
-        // Note: In Phase 4.3, we don't know who created the job yet
-        logger.LogInformation("Job failed notification queued for job {JobId}: {JobName} - Error: {Error}", jobId, jobName, errorMessage);
-        return Task.CompletedTask;
+        string subject = "Job failed";
+        string body = $"Print job \"{jobName}\" has failed: {errorMessage}";
+
+        await BroadcastJobNotificationAsync(
+            NotificationType.JobFailed, subject, body, jobId, cancellationToken);
     }
 
-    public Task SendJobPausedAsync(
+    public async Task SendJobPausedAsync(
         string jobId,
         string jobName,
         string? reason = null,
         CancellationToken cancellationToken = default)
     {
-        logger.LogInformation("Job paused notification queued for job {JobId}: {JobName}", jobId, jobName);
-        return Task.CompletedTask;
+        string subject = "Job paused";
+        string body = reason != null
+            ? $"Print job \"{jobName}\" has been paused: {reason}"
+            : $"Print job \"{jobName}\" has been paused.";
+
+        await BroadcastJobNotificationAsync(
+            NotificationType.JobPaused, subject, body, jobId, cancellationToken);
     }
 
-    public Task SendJobResumedAsync(
+    public async Task SendJobResumedAsync(
         string jobId,
         string jobName,
         CancellationToken cancellationToken = default)
     {
-        logger.LogInformation("Job resumed notification queued for job {JobId}: {JobName}", jobId, jobName);
-        return Task.CompletedTask;
+        string subject = "Job resumed";
+        string body = $"Print job \"{jobName}\" has resumed printing.";
+
+        await BroadcastJobNotificationAsync(
+            NotificationType.JobResumed, subject, body, jobId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Broadcasts a job notification to all active users and sends a SignalR event.
+    /// Since PrintJob does not track an owner, notifications are sent to all users.
+    /// </summary>
+    private async Task BroadcastJobNotificationAsync(
+        NotificationType type,
+        string subject,
+        string body,
+        string jobId,
+        CancellationToken cancellationToken)
+    {
+        Guid? parsedJobId = Guid.TryParse(jobId, out Guid jid) ? jid : null;
+
+        try
+        {
+            IReadOnlyList<UserDto> users = await usersRepository.GetUsersAsync(cancellationToken);
+            IEnumerable<UserDto> activeUsers = users.Where(u => u.IsActive);
+
+            foreach (UserDto user in activeUsers)
+            {
+                await SendNotificationAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
+            }
+
+            // Broadcast real-time event via SignalR so connected clients update immediately
+            if (hubContext != null)
+            {
+                await hubContext.Clients.All.SendAsync(
+                    "notificationreceived",
+                    new { type = type.ToString(), subject, body, jobId = parsedJobId },
+                    cancellationToken);
+            }
+
+            logger.LogInformation(
+                "Job notification broadcast ({Type}) for job {JobId}: {Subject}",
+                type, jobId, subject);
+        }
+        catch (Exception ex)
+        {
+            // Don't let notification failures break job processing
+            logger.LogError(ex, "Error broadcasting {Type} notification for job {JobId}", type, jobId);
+        }
     }
 
     public async Task SendNotificationAsync(

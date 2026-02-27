@@ -173,6 +173,8 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
             Material = job.RequiredMaterialType,
             IsSuccess = isSuccess,
             FailureReason = failureReason,
+            EstimatedCost = job.EstimatedCost,
+            ActualCost = job.ActualCost,
             CompletedAtUtc = DateTime.UtcNow,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
@@ -298,6 +300,8 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
                 SpeedPercentage = stats.SpeedPercentage,
                 IsSuccess = stats.IsSuccess,
                 FailureReason = stats.FailureReason,
+                EstimatedCost = stats.EstimatedCost,
+                ActualCost = stats.ActualCost,
                 CompletedAtUtc = stats.CompletedAtUtc
             };
     }
@@ -539,6 +543,10 @@ public class PrintJobStatisticsDto
     public bool IsSuccess { get; set; }
 
     public string? FailureReason { get; set; }
+
+    public decimal? EstimatedCost { get; set; }
+
+    public decimal? ActualCost { get; set; }
 
     public DateTime? CompletedAtUtc { get; set; }
 }

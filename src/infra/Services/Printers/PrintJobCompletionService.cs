@@ -17,6 +17,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IHubContext<PrinterHub> _hub;
     private readonly ILogger<PrintJobCompletionService> _logger;
     private readonly INotificationService? _notificationService;
+    private readonly IPrintCostCalculator? _costCalculator;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -62,12 +63,14 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         AppDbContext db,
         IHubContext<PrinterHub> hub,
         ILogger<PrintJobCompletionService> logger,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IPrintCostCalculator? costCalculator = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _notificationService = notificationService;
+        _costCalculator = costCalculator;
     }
 
     /// <summary>
@@ -132,6 +135,30 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         }
 
         PrintJob primaryJob = activeJobs[0];
+
+        // Calculate actual cost if cost calculator is available
+        if (_costCalculator != null)
+        {
+            try
+            {
+                primaryJob.ActualCost = await _costCalculator.CalculateActualCostAsync(
+                    primaryJob.SpoolmanFilamentId,
+                    primaryJob.ActualFilamentUsage,
+                    primaryJob.EstimatedFilamentUsage,
+                    ct);
+
+                if (primaryJob.ActualCost.HasValue)
+                {
+                    _logger.LogInformation(
+                        "[PrintJobCompletionService] Calculated actual cost for job {JobId}: {Cost:C2}",
+                        primaryJob.Id, primaryJob.ActualCost.Value);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to calculate actual cost for job {JobId}", primaryJob.Id);
+            }
+        }
 
         await _db.SaveChangesAsync(ct);
 
