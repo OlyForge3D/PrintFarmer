@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿using System.Collections.ObjectModel;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,7 +51,7 @@ public class OpenFilamentDbService : IOpenFilamentDbService
         OfdBrandsResponse? response = await _httpClient.GetFromJsonAsync<OfdBrandsResponse>(
             $"{BaseUrl}brands/index.json", JsonOptions, cts.Token);
 
-        IReadOnlyList<OfdBrand> brands = response?.Brands?.AsReadOnly() ?? (IReadOnlyList<OfdBrand>)[];
+        ReadOnlyCollection<OfdBrand> brands = response?.Brands?.AsReadOnly() ?? new ReadOnlyCollection<OfdBrand>([]);
         _logger.LogDebug("Retrieved {Count} brands from Open Filament Database", brands.Count);
         _cache.Set(BrandsCacheKey, brands, CacheDuration);
         return brands;
@@ -173,7 +174,7 @@ public class OpenFilamentDbService : IOpenFilamentDbService
             }
         }
 
-        IReadOnlyList<OfdFlattenedEntry> result = entries.AsReadOnly();
+        ReadOnlyCollection<OfdFlattenedEntry> result = entries.AsReadOnly();
         _cache.Set(cacheKey, result, CacheDuration);
         _logger.LogDebug("Flattened {Count} entries for {Brand}/{Material} from OFD", result.Count, brandSlug, materialSlug);
         return result;

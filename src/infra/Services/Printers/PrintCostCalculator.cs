@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Interfaces;
+﻿using Farm.Infrastructure.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;

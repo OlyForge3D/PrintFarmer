@@ -215,46 +215,63 @@ public class StatisticsController(AppDbContext db) : ControllerBase
 }
 
 // ── Response DTOs ──────────────────────────────────────────────
-
 public record StatisticsSummaryDto
 {
     public int TotalJobs { get; init; }
+
     public int CompletedJobs { get; init; }
+
     public int FailedJobs { get; init; }
+
     public int CancelledJobs { get; init; }
+
     public double SuccessRate { get; init; }
+
     public decimal TotalCost { get; init; }
+
     public double TotalFilamentGrams { get; init; }
+
     public double TotalPrintHours { get; init; }
 }
 
 public record DailyJobCountDto
 {
     public string Date { get; init; } = string.Empty;
+
     public int Completed { get; init; }
+
     public int Failed { get; init; }
+
     public int Cancelled { get; init; }
 }
 
 public record DailyCostDto
 {
     public string Date { get; init; } = string.Empty;
+
     public decimal Cost { get; init; }
 }
 
 public record FilamentByMaterialDto
 {
     public string Material { get; init; } = string.Empty;
+
     public double Grams { get; init; }
 }
 
 public record PrinterUtilizationDto
 {
     public Guid PrinterId { get; init; }
+
     public string PrinterName { get; init; } = string.Empty;
+
     public int TotalJobs { get; init; }
+
     public int CompletedJobs { get; init; }
+
     public int FailedJobs { get; init; }
+
     public double TotalPrintHours { get; init; }
+
     public double SuccessRate { get; init; }
 }

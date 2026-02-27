@@ -478,7 +478,8 @@ public class MaintenancePlanController(
         }
 
         MaintenanceImportResult result = await _importExportService.ImportPlansAsync(envelope.Plans, ct);
-        _logger.LogInformation("Plan import: {Created} created, {Updated} updated, {Errors} errors",
+        _logger.LogInformation(
+            "Plan import: {Created} created, {Updated} updated, {Errors} errors",
             result.CreatedCount, result.UpdatedCount, result.ErrorCount);
 
         return Ok(result);

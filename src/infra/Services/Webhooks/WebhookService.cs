@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -92,13 +92,19 @@ public sealed class WebhookService(
             .Where(w => MatchesEventType(w.EventTypes, evt.EventType))
             .ToList();
 
-        if (matching.Count == 0) return;
+        if (matching.Count == 0)
+        {
+            return;
+        }
 
-        logger.LogDebug("Delivering webhook event {EventType} to {Count} subscriptions",
+        logger.LogDebug(
+            "Delivering webhook event {EventType} to {Count} subscriptions",
             evt.EventType, matching.Count);
 
-        var tasks = matching.Select(sub => DeliverAsync(sub, evt, db, ct));
-        await Task.WhenAll(tasks);
+        foreach (var sub in matching)
+        {
+            await DeliverAsync(sub, evt, db, ct);
+        }
     }
 
     private async Task DeliverAsync(
@@ -107,13 +113,14 @@ public sealed class WebhookService(
         AppDbContext db,
         CancellationToken ct)
     {
-        var envelope = JsonSerializer.Serialize(new
-        {
-            id = Guid.NewGuid().ToString(),
-            @event = evt.EventType,
-            timestamp = evt.Timestamp,
-            data = JsonSerializer.Deserialize<JsonElement>(evt.PayloadJson)
-        }, JsonOptions);
+        var envelope = JsonSerializer.Serialize(
+            new
+            {
+                id = Guid.NewGuid().ToString(),
+                @event = evt.EventType,
+                timestamp = evt.Timestamp,
+                data = JsonSerializer.Deserialize<JsonElement>(evt.PayloadJson)
+            }, JsonOptions);
 
         for (int attempt = 1; attempt <= MaxRetries; attempt++)
         {
@@ -139,7 +146,8 @@ public sealed class WebhookService(
                     var hash = HMACSHA256.HashData(
                         Encoding.UTF8.GetBytes(subscription.Secret),
                         Encoding.UTF8.GetBytes(envelope));
-                    request.Headers.Add("X-Webhook-Signature",
+                    request.Headers.Add(
+                        "X-Webhook-Signature",
                         $"sha256={Convert.ToHexStringLower(hash)}");
                 }
 
@@ -191,7 +199,10 @@ public sealed class WebhookService(
         AppDbContext db, Guid subscriptionId, bool success, CancellationToken ct)
     {
         var sub = await db.WebhookSubscriptions.FindAsync([subscriptionId], ct);
-        if (sub is null) return;
+        if (sub is null)
+        {
+            return;
+        }
 
         sub.LastDeliveryAt = DateTime.UtcNow;
 
@@ -215,7 +226,11 @@ public sealed class WebhookService(
 
     private static bool MatchesEventType(string subscribed, string eventType)
     {
-        if (subscribed == "*") return true;
+        if (subscribed == "*")
+        {
+            return true;
+        }
+
         var types = subscribed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return types.Contains(eventType, StringComparer.OrdinalIgnoreCase);
     }

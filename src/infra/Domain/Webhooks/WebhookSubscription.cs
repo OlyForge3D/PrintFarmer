@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain.Webhooks;
+﻿namespace Farm.Infrastructure.Domain.Webhooks;
 
 /// <summary>
 /// Represents a webhook subscription that receives event notifications via HTTP POST

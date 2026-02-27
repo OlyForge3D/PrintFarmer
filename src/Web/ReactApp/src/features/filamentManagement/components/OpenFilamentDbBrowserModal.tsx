@@ -188,7 +188,8 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
               <div className="max-h-96 overflow-y-auto border border-pf-border rounded-lg">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 p-2">
                   {filteredBrands.map(brand => (
-                    <button
+                    <Button
+                      variant="unstyled"
                       key={brand.id}
                       onClick={() => handleSelectBrand(brand)}
                       className="flex items-center gap-2 p-3 rounded-lg border border-pf-border hover:bg-pf-surface-hover hover:border-pf-accent transition-colors text-left"
@@ -197,7 +198,7 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
                         <div className="font-medium text-sm text-pf-text-primary truncate">{brand.name}</div>
                         <div className="text-xs text-pf-text-muted">{brand.materialCount} material{brand.materialCount !== 1 ? 's' : ''}</div>
                       </div>
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -215,14 +216,15 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
             <div className="max-h-96 overflow-y-auto border border-pf-border rounded-lg">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 p-2">
                 {brandDetail?.materials.map(mat => (
-                  <button
+                  <Button
+                    variant="unstyled"
                     key={mat.id}
                     onClick={() => handleSelectMaterial(mat)}
                     className="flex flex-col items-center justify-center p-4 rounded-lg border border-pf-border hover:bg-pf-surface-hover hover:border-pf-accent transition-colors"
                   >
                     <span className="font-medium text-sm text-pf-text-primary">{mat.material}</span>
                     <span className="text-xs text-pf-text-muted mt-1">{mat.filamentCount} filament{mat.filamentCount !== 1 ? 's' : ''}</span>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>

@@ -13,6 +13,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertIcon, WrenchIcon, GearIcon } from '@/common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui';
 import { useMaintenanceAlerts } from '@/features/maintenance/hooks/useMaintenanceAlerts';
 import { useMaintenanceComponents } from '@/features/maintenance/hooks/useMaintenanceComponents';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -100,13 +101,14 @@ export function CriticalAlertsBanner() {
           <Link to={item.link} className="flex-1 text-sm font-medium hover:underline">
             {item.message}
           </Link>
-          <button
+          <Button
+            variant="unstyled"
             onClick={() => setDismissed((prev) => new Set(prev).add(item.id))}
             className="text-xs opacity-60 hover:opacity-100 transition-opacity"
             aria-label={`Dismiss ${item.message}`}
           >
             Dismiss
-          </button>
+          </Button>
         </div>
       ))}
     </div>

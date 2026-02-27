@@ -9,6 +9,7 @@
 import React, { useRef, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Badge, Button } from '@/common/components/ui';
+import { FileUpload } from '@/common/components/ui/FileUpload';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
@@ -279,8 +280,8 @@ export function PartsInventoryTab() {
     }
   };
 
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleImportFile = async (files: FileList | null) => {
+    const file = files?.[0];
     if (!file) return;
     try {
       const text = await file.text();
@@ -296,7 +297,7 @@ export function PartsInventoryTab() {
     } catch {
       toast.error('Failed to import parts — check the JSON format');
     } finally {
-      e.target.value = '';
+      if (importFileRef.current) { importFileRef.current.value = ''; }
     }
   };
 
@@ -359,7 +360,7 @@ export function PartsInventoryTab() {
         <Button variant="secondary" size="sm" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending} className="shrink-0">
           Import
         </Button>
-        <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
+        <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
       </div>
 
       {/* Summary */}

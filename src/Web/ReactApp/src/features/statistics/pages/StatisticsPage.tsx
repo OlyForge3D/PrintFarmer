@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Card } from '@/common/components/ui/Card';
+import { Button } from '@/common/components/ui';
 import {
   useStatisticsSummary,
   useJobsOverTime,
@@ -33,7 +34,8 @@ export const StatisticsPage: React.FC = () => {
         <h1 className="text-2xl font-bold text-pf-text">Print Statistics</h1>
         <div className="flex gap-2" role="group" aria-label="Time period filter">
           {PERIOD_OPTIONS.map((opt) => (
-            <button
+            <Button
+              variant="unstyled"
               key={opt.label}
               onClick={() => setDays(opt.value)}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -44,7 +46,7 @@ export const StatisticsPage: React.FC = () => {
               aria-pressed={days === opt.value}
             >
               {opt.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

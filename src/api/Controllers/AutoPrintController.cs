@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.AutoPrint;
+﻿using Farm.Infrastructure.Services.AutoPrint;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

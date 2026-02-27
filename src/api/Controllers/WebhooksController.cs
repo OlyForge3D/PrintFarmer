@@ -43,7 +43,11 @@ public class WebhooksController(
     public async Task<IActionResult> GetByIdAsync(Guid id, CancellationToken ct)
     {
         var webhook = await db.WebhookSubscriptions.FindAsync([id], ct);
-        if (webhook is null) return NotFound(new { message = "Webhook not found" });
+        if (webhook is null)
+        {
+            return NotFound(new { message = "Webhook not found" });
+        }
+
         return Ok(ToDto(webhook));
     }
 
@@ -56,9 +60,14 @@ public class WebhooksController(
     public async Task<IActionResult> CreateAsync([FromBody] CreateWebhookDto dto, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
+        {
             return BadRequest(new { message = "Name is required" });
+        }
+
         if (string.IsNullOrWhiteSpace(dto.Url) || !Uri.TryCreate(dto.Url, UriKind.Absolute, out _))
+        {
             return BadRequest(new { message = "A valid absolute URL is required" });
+        }
 
         var webhook = new WebhookSubscription
         {
@@ -86,22 +95,51 @@ public class WebhooksController(
     public async Task<IActionResult> UpdateAsync(Guid id, [FromBody] UpdateWebhookDto dto, CancellationToken ct)
     {
         var webhook = await db.WebhookSubscriptions.FindAsync([id], ct);
-        if (webhook is null) return NotFound(new { message = "Webhook not found" });
+        if (webhook is null)
+        {
+            return NotFound(new { message = "Webhook not found" });
+        }
 
-        if (dto.Name is not null) webhook.Name = dto.Name.Trim();
+        if (dto.Name is not null)
+        {
+            webhook.Name = dto.Name.Trim();
+        }
+
         if (dto.Url is not null)
         {
             if (!Uri.TryCreate(dto.Url, UriKind.Absolute, out _))
+            {
                 return BadRequest(new { message = "A valid absolute URL is required" });
+            }
+
             webhook.Url = dto.Url.Trim();
         }
-        if (dto.Secret is not null) webhook.Secret = dto.Secret.Trim();
-        if (dto.EventTypes is not null) webhook.EventTypes = dto.EventTypes.Trim();
-        if (dto.IsActive.HasValue) webhook.IsActive = dto.IsActive.Value;
-        if (dto.MaxConsecutiveFailures.HasValue) webhook.MaxConsecutiveFailures = dto.MaxConsecutiveFailures.Value;
+
+        if (dto.Secret is not null)
+        {
+            webhook.Secret = dto.Secret.Trim();
+        }
+
+        if (dto.EventTypes is not null)
+        {
+            webhook.EventTypes = dto.EventTypes.Trim();
+        }
+
+        if (dto.IsActive.HasValue)
+        {
+            webhook.IsActive = dto.IsActive.Value;
+        }
+
+        if (dto.MaxConsecutiveFailures.HasValue)
+        {
+            webhook.MaxConsecutiveFailures = dto.MaxConsecutiveFailures.Value;
+        }
 
         // Reset failure counter if re-enabled
-        if (dto.IsActive == true) webhook.ConsecutiveFailures = 0;
+        if (dto.IsActive == true)
+        {
+            webhook.ConsecutiveFailures = 0;
+        }
 
         await db.SaveChangesAsync(ct);
         return Ok(ToDto(webhook));
@@ -116,7 +154,10 @@ public class WebhooksController(
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
     {
         var webhook = await db.WebhookSubscriptions.FindAsync([id], ct);
-        if (webhook is null) return NotFound(new { message = "Webhook not found" });
+        if (webhook is null)
+        {
+            return NotFound(new { message = "Webhook not found" });
+        }
 
         db.WebhookSubscriptions.Remove(webhook);
         await db.SaveChangesAsync(ct);
@@ -134,7 +175,10 @@ public class WebhooksController(
     public async Task<IActionResult> TestAsync(Guid id, CancellationToken ct)
     {
         var webhook = await db.WebhookSubscriptions.FindAsync([id], ct);
-        if (webhook is null) return NotFound(new { message = "Webhook not found" });
+        if (webhook is null)
+        {
+            return NotFound(new { message = "Webhook not found" });
+        }
 
         webhookService.Enqueue("webhook.test", new
         {
@@ -158,7 +202,10 @@ public class WebhooksController(
         CancellationToken ct = default)
     {
         var exists = await db.WebhookSubscriptions.AnyAsync(w => w.Id == id, ct);
-        if (!exists) return NotFound(new { message = "Webhook not found" });
+        if (!exists)
+        {
+            return NotFound(new { message = "Webhook not found" });
+        }
 
         var logs = await db.WebhookDeliveryLogs
             .Where(d => d.WebhookSubscriptionId == id)
@@ -210,47 +257,74 @@ public class WebhooksController(
 public record CreateWebhookDto
 {
     public string Name { get; init; } = string.Empty;
+
     public string Url { get; init; } = string.Empty;
+
     public string? Secret { get; init; }
+
     public string? EventTypes { get; init; }
+
     public bool? IsActive { get; init; }
+
     public int? MaxConsecutiveFailures { get; init; }
 }
 
 public record UpdateWebhookDto
 {
     public string? Name { get; init; }
+
     public string? Url { get; init; }
+
     public string? Secret { get; init; }
+
     public string? EventTypes { get; init; }
+
     public bool? IsActive { get; init; }
+
     public int? MaxConsecutiveFailures { get; init; }
 }
 
 public record WebhookSubscriptionDto
 {
     public Guid Id { get; init; }
+
     public string Name { get; init; } = string.Empty;
+
     public string Url { get; init; } = string.Empty;
+
     public bool HasSecret { get; init; }
+
     public string EventTypes { get; init; } = string.Empty;
+
     public bool IsActive { get; init; }
+
     public int ConsecutiveFailures { get; init; }
+
     public int MaxConsecutiveFailures { get; init; }
+
     public DateTime CreatedAt { get; init; }
+
     public DateTime? LastDeliveryAt { get; init; }
+
     public DateTime? LastSuccessAt { get; init; }
 }
 
 public record WebhookDeliveryDto
 {
     public Guid Id { get; init; }
+
     public string EventType { get; init; } = string.Empty;
+
     public int? StatusCode { get; init; }
+
     public bool Success { get; init; }
+
     public string? ErrorMessage { get; init; }
+
     public int Attempt { get; init; }
+
     public long? DurationMs { get; init; }
+
     public DateTime CreatedAt { get; init; }
 }
 
