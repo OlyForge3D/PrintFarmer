@@ -116,7 +116,7 @@ public sealed class WebhookService(
             "Delivering webhook event {EventType} to {Count} subscriptions",
             evt.EventType, matching.Count);
 
-        foreach (var sub in matching)
+        foreach (WebhookSubscription sub in matching)
         {
             await DeliverAsync(sub, evt, db, ct);
         }

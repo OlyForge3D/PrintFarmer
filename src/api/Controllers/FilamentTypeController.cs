@@ -508,6 +508,7 @@ public class FilamentTypeController(
     /// Imports selected filament entries from the Open Filament Database into Spoolman.
     /// </summary>
     [HttpPost("openfilamentdb/import")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(OfdImportResult), 200)]
     [ProducesResponseType(400)]
     public async Task<ActionResult<OfdImportResult>> ImportFromOfdAsync([FromBody] OfdImportRequest request, CancellationToken ct)

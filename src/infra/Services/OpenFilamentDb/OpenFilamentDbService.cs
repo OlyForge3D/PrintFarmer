@@ -51,7 +51,7 @@ public class OpenFilamentDbService : IOpenFilamentDbService
         OfdBrandsResponse? response = await _httpClient.GetFromJsonAsync<OfdBrandsResponse>(
             $"{BaseUrl}brands/index.json", JsonOptions, cts.Token);
 
-        ReadOnlyCollection<OfdBrand> brands = response?.Brands?.AsReadOnly() ?? new ReadOnlyCollection<OfdBrand>([]);
+        ReadOnlyCollection<OfdBrand> brands = response?.Brands?.AsReadOnly() ?? new List<OfdBrand>().AsReadOnly();
         _logger.LogDebug("Retrieved {Count} brands from Open Filament Database", brands.Count);
         _cache.Set(BrandsCacheKey, brands, CacheDuration);
         return brands;
@@ -88,7 +88,7 @@ public class OpenFilamentDbService : IOpenFilamentDbService
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(30));
+        cts.CancelAfter(TimeSpan.FromSeconds(120));
 
         // Fetch material detail to get filament list
         string materialUrl = $"{BaseUrl}brands/{brandSlug}/materials/{materialSlug}/index.json";
