@@ -117,7 +117,7 @@ function ComponentFormModal({ isOpen, component, categories, onClose }: Componen
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Part' : 'Add Part'} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Part' : 'Add Part'} size="xl">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -226,6 +226,19 @@ export function PartsInventoryTab() {
     [components]
   );
 
+  // Inventory value summary
+  const inventorySummary = useMemo(() => {
+    let totalValue = 0;
+    let totalParts = 0;
+    const categoriesSet = new Set<string>();
+    for (const c of components) {
+      totalParts += c.inStock;
+      if (c.unitCost != null) totalValue += c.inStock * c.unitCost;
+      categoriesSet.add(c.category);
+    }
+    return { totalValue, totalParts, categoryCount: categoriesSet.size, itemCount: components.length };
+  }, [components]);
+
   const handleDeleteConfirm = async () => {
     if (!deletingComponent) return;
     try {
@@ -290,9 +303,9 @@ export function PartsInventoryTab() {
           variant="primary"
           size="sm"
           onClick={() => { setEditingComponent(null); setIsFormOpen(true); }}
-          className="gap-1.5 shrink-0"
+          iconLeft={<PlusIcon className="h-4 w-4" />}
+          className="shrink-0"
         >
-          <PlusIcon className="h-4 w-4" />
           Add Part
         </Button>
       </div>
@@ -306,6 +319,28 @@ export function PartsInventoryTab() {
           <span className="text-amber-400"> • {lowStockCount} low stock</span>
         )}
       </p>
+
+      {/* Inventory Summary Bar */}
+      {components.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <div className="bg-pf-bg-2 border border-pf-border rounded-lg px-4 py-3 text-center">
+            <p className="text-2xl font-bold text-pf-text-primary">{inventorySummary.itemCount}</p>
+            <p className="text-xs text-pf-text-tertiary">Unique Parts</p>
+          </div>
+          <div className="bg-pf-bg-2 border border-pf-border rounded-lg px-4 py-3 text-center">
+            <p className="text-2xl font-bold text-pf-text-primary">{inventorySummary.totalParts}</p>
+            <p className="text-xs text-pf-text-tertiary">Total In Stock</p>
+          </div>
+          <div className="bg-pf-bg-2 border border-pf-border rounded-lg px-4 py-3 text-center">
+            <p className="text-2xl font-bold text-pf-text-primary">{inventorySummary.categoryCount}</p>
+            <p className="text-xs text-pf-text-tertiary">Categories</p>
+          </div>
+          <div className="bg-pf-bg-2 border border-pf-border rounded-lg px-4 py-3 text-center">
+            <p className="text-2xl font-bold text-pf-text-primary">${inventorySummary.totalValue.toFixed(2)}</p>
+            <p className="text-xs text-pf-text-tertiary">Inventory Value</p>
+          </div>
+        </div>
+      )}
 
       {/* Parts List */}
       {filtered.length === 0 ? (

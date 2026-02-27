@@ -18,6 +18,7 @@ export { Label, type LabelProps } from './Label';
 export { LoadedFilamentCard, type LoadedFilamentCardProps } from './LoadedFilamentCard';
 export { MoveDistanceSlider } from './MoveDistanceSlider';
 export { MovementInput, type MovementInputProps } from './MovementInput';
+export { NumberStepper } from './NumberStepper';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Radio, type RadioProps } from './Radio';
 export { RadioGroup, type RadioGroupProps, type RadioOption } from './RadioGroup';

@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
@@ -114,6 +115,177 @@ public class SpoolmanController(
         }
 
         return Ok(await spoolman.ListSpoolsAsync(ct, limit));
+    }
+
+    /// <summary>
+    /// Creates a new spool in Spoolman.
+    /// </summary>
+    /// <param name="request">Spool data</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>The created spool</returns>
+    /// <response code="201">Returns the created spool</response>
+    /// <response code="400">If the creation fails</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPost("spools")]
+    [ProducesResponseType(typeof(SpoolmanSpoolDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SpoolmanSpoolDto>> CreateSpoolAsync(
+        [FromBody] SpoolmanSpoolRequest request,
+        CancellationToken ct)
+    {
+        if (request?.FilamentId is null or <= 0)
+        {
+            return BadRequest(new { message = "FilamentId is required" });
+        }
+
+        try
+        {
+            SpoolmanSpoolDto result = await spoolman.CreateSpoolInSpoolmanAsync(request, ct);
+            return StatusCode(StatusCodes.Status201Created, result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating spool: {Message}", ex.Message);
+            return BadRequest(new { message = "Create failed. Check server logs for details." });
+        }
+    }
+
+    /// <summary>
+    /// Updates a single spool in Spoolman by its ID.
+    /// Only non-null fields in the request body are applied (PATCH semantics).
+    /// </summary>
+    /// <param name="id">Spool ID in Spoolman</param>
+    /// <param name="request">Fields to update</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Updated spool</returns>
+    /// <response code="200">Returns the updated spool</response>
+    /// <response code="400">If the update fails</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPatch("spools/{id:int}")]
+    [ProducesResponseType(typeof(SpoolmanSpoolDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SpoolmanSpoolDto>> UpdateSpoolAsync(
+        int id,
+        [FromBody] SpoolmanSpoolRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            SpoolmanSpoolDto result = await spoolman.UpdateSpoolInSpoolmanAsync(id, request, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating spool {Id}: {Message}", id, ex.Message);
+            return BadRequest(new { message = "Update failed. Check server logs for details." });
+        }
+    }
+
+    /// <summary>
+    /// Deletes a single spool from Spoolman by its ID.
+    /// </summary>
+    /// <param name="id">Spool ID in Spoolman</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="204">Spool deleted successfully</response>
+    /// <response code="400">If the delete fails</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpDelete("spools/{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteSpoolAsync(int id, CancellationToken ct)
+    {
+        try
+        {
+            await spoolman.DeleteSpoolFromSpoolmanAsync(id, ct);
+            return NoContent();
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Spool {Id} not found in Spoolman", id);
+            return NotFound(new { message = $"Spool {id} not found." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting spool {Id}", id);
+            return BadRequest(new { message = "Delete failed. Check server logs for details." });
+        }
+    }
+
+    /// <summary>
+    /// Bulk-updates multiple spools in Spoolman.
+    /// Only non-null fields in the request are applied to all specified spools.
+    /// </summary>
+    /// <param name="request">Bulk update request with spool IDs and fields to update</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Bulk update result with success/error counts</returns>
+    /// <response code="200">Returns the bulk update result</response>
+    /// <response code="400">If the request is invalid</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPatch("spools/bulk")]
+    [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SpoolmanBulkUpdateResult>> BulkUpdateSpoolsAsync(
+        [FromBody] SpoolmanBulkUpdateSpoolsRequest request,
+        CancellationToken ct)
+    {
+        if (request?.SpoolIds is not { Length: > 0 })
+        {
+            return BadRequest(new { message = "No spool IDs provided" });
+        }
+
+        if (request.SpoolIds.Length > 100)
+        {
+            return BadRequest(new { message = "Cannot process more than 100 spools at once." });
+        }
+
+        try
+        {
+            SpoolmanBulkUpdateResult result = await spoolman.BulkUpdateSpoolsAsync(request, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error bulk-updating spools");
+            return BadRequest(new { message = "Bulk update failed. Check server logs for details." });
+        }
+    }
+
+    /// <summary>
+    /// Bulk-deletes multiple spools from Spoolman.
+    /// Accepts a JSON body with an array of spool IDs.
+    /// </summary>
+    /// <param name="request">Object containing spoolIds array</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">Returns the bulk delete result</response>
+    /// <response code="400">If the request is invalid</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpDelete("spools/bulk")]
+    [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SpoolmanBulkUpdateResult>> BulkDeleteSpoolsAsync(
+        [FromBody] SpoolmanBulkDeleteSpoolsRequest request,
+        CancellationToken ct)
+    {
+        if (request?.SpoolIds is not { Length: > 0 })
+        {
+            return BadRequest(new { message = "No spool IDs provided" });
+        }
+
+        if (request.SpoolIds.Length > 100)
+        {
+            return BadRequest(new { message = "Cannot process more than 100 spools at once." });
+        }
+
+        try
+        {
+            SpoolmanBulkUpdateResult result = await spoolman.BulkDeleteSpoolsAsync(request.SpoolIds, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error bulk-deleting spools");
+            return BadRequest(new { message = "Bulk delete failed. Check server logs for details." });
+        }
     }
 
     /// <summary>

@@ -1,9 +1,10 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -24,47 +25,6 @@ public class MaintenancePlanController(
     private readonly IMaintenancePlanRepository _planRepository = planRepository;
     private readonly IMaintenanceTaskRepository _taskRepository = taskRepository;
 
-    // ───────────────────── Mapping Helpers ─────────────────────
-    private static MaintenancePlanResponse ToResponse(MaintenancePlan plan) => new(
-        plan.Id,
-        plan.Name,
-        plan.Description,
-        plan.PrinterId,
-        plan.Printer?.Name,
-        plan.PrinterModelId,
-        plan.PrinterModel?.Name,
-        plan.ManufacturerId,
-        plan.Manufacturer?.Name,
-        plan.MotionType,
-        plan.IsActive,
-        plan.IsDefault,
-        plan.CreatedAt,
-        plan.UpdatedAt,
-        plan.Tasks.Select(ToTaskResponse).ToList());
-
-    private static MaintenanceTaskResponse ToTaskResponse(MaintenanceTask task) => new(
-        task.Id,
-        task.MaintenancePlanId,
-        task.TaskName,
-        task.Description,
-        task.IntervalHours,
-        task.IntervalDays,
-        task.EstimatedDurationMinutes,
-        task.Priority,
-        task.IsActive,
-        task.SortOrder,
-        task.CreatedAt,
-        task.UpdatedAt,
-        task.TaskComponents.Select(ToTaskComponentResponse).ToList());
-
-    private static MaintenanceTaskComponentResponse ToTaskComponentResponse(MaintenanceTaskComponent tc) => new(
-        tc.Id,
-        tc.MaintenanceTaskId,
-        tc.MaintenanceComponentId,
-        tc.MaintenanceComponent?.Name,
-        tc.Quantity,
-        tc.Notes);
-
     // ───────────────────────── Plans ─────────────────────────
 
     /// <summary>
@@ -76,7 +36,7 @@ public class MaintenancePlanController(
         CancellationToken ct)
     {
         List<MaintenancePlan> plans = await _planRepository.GetAllAsync(activeOnly, ct);
-        return Ok(plans.Select(ToResponse).ToList());
+        return Ok(plans.Select(MaintenanceResponseMapper.ToPlanResponse).ToList());
     }
 
     /// <summary>
@@ -91,7 +51,7 @@ public class MaintenancePlanController(
             return NotFound();
         }
 
-        return Ok(ToResponse(plan));
+        return Ok(MaintenanceResponseMapper.ToPlanResponse(plan));
     }
 
     /// <summary>
@@ -101,7 +61,7 @@ public class MaintenancePlanController(
     public async Task<ActionResult<List<MaintenancePlanResponse>>> GetForPrinterAsync(Guid printerId, CancellationToken ct)
     {
         List<MaintenancePlan> plans = await _planRepository.GetPlansForPrinterAsync(printerId, ct);
-        return Ok(plans.Select(ToResponse).ToList());
+        return Ok(plans.Select(MaintenanceResponseMapper.ToPlanResponse).ToList());
     }
 
     /// <summary>
@@ -130,7 +90,7 @@ public class MaintenancePlanController(
         await _planRepository.AddAsync(plan, ct);
         _logger.LogInformation("Created maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
 
-        return Created($"/api/maintenance/plans/{plan.Id}", ToResponse(plan));
+        return Created($"/api/maintenance/plans/{plan.Id}", MaintenanceResponseMapper.ToPlanResponse(plan));
     }
 
     /// <summary>
@@ -161,7 +121,7 @@ public class MaintenancePlanController(
         await _planRepository.UpdateAsync(plan, ct);
         _logger.LogInformation("Updated maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
 
-        return Ok(ToResponse(plan));
+        return Ok(MaintenanceResponseMapper.ToPlanResponse(plan));
     }
 
     /// <summary>
@@ -176,19 +136,25 @@ public class MaintenancePlanController(
             return NotFound();
         }
 
-        await _planRepository.DeleteAsync(plan, ct);
-        _logger.LogInformation("Deleted maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
-
-        return NoContent();
+        try
+        {
+            await _planRepository.DeleteAsync(plan, ct);
+            _logger.LogInformation("Deleted maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
+            return NoContent();
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { message = "Cannot delete plan with active deployments. Remove all deployments first." });
+        }
     }
 
     // ───────────────────────── Tasks ─────────────────────────
 
     /// <summary>
-    /// Gets all tasks for a plan.
+    /// Gets all tasks linked to a plan (via PlanTask join).
     /// </summary>
     [HttpGet("{planId:guid}/tasks")]
-    public async Task<ActionResult<List<MaintenanceTaskResponse>>> GetTasksAsync(Guid planId, CancellationToken ct)
+    public async Task<ActionResult<List<PlanTaskResponse>>> GetTasksAsync(Guid planId, CancellationToken ct)
     {
         MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
         if (plan == null)
@@ -196,27 +162,32 @@ public class MaintenancePlanController(
             return NotFound();
         }
 
-        List<MaintenanceTask> tasks = await _taskRepository.GetByPlanIdAsync(planId, ct);
-        return Ok(tasks.Select(ToTaskResponse).ToList());
+        return Ok(plan.PlanTasks.OrderBy(pt => pt.SortOrder).Select(MaintenanceResponseMapper.ToPlanTaskResponse).ToList());
     }
 
     /// <summary>
-    /// Gets a single task by ID.
+    /// Gets a single task by ID (global catalog lookup).
     /// </summary>
     [HttpGet("{planId:guid}/tasks/{taskId:guid}")]
     public async Task<ActionResult<MaintenanceTaskResponse>> GetTaskAsync(Guid planId, Guid taskId, CancellationToken ct)
     {
-        MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
+        if (plan == null)
         {
             return NotFound();
         }
 
-        return Ok(ToTaskResponse(task));
+        PlanTask? planTask = plan.PlanTasks.FirstOrDefault(pt => pt.MaintenanceTaskId == taskId);
+        if (planTask == null)
+        {
+            return NotFound();
+        }
+
+        return Ok(MaintenanceResponseMapper.ToTaskResponse(planTask.MaintenanceTask));
     }
 
     /// <summary>
-    /// Creates a new task in a plan.
+    /// Creates a new task in the global catalog and links it to the plan.
     /// </summary>
     [HttpPost("{planId:guid}/tasks")]
     public async Task<ActionResult<MaintenanceTaskResponse>> CreateTaskAsync(
@@ -233,27 +204,51 @@ public class MaintenancePlanController(
         var task = new MaintenanceTask
         {
             Id = Guid.NewGuid(),
-            MaintenancePlanId = planId,
             TaskName = request.TaskName,
             Description = request.Description,
+            Category = request.Category,
             IntervalHours = request.IntervalHours,
             IntervalDays = request.IntervalDays,
             EstimatedDurationMinutes = request.EstimatedDurationMinutes,
             Priority = request.Priority,
             IsActive = request.IsActive,
-            SortOrder = request.SortOrder,
+            IsDefault = request.IsDefault,
+            RequiresEnclosure = request.RequiresEnclosure,
+            RequiresCarbonFilter = request.RequiresCarbonFilter,
+            RequiresHepaFilter = request.RequiresHepaFilter,
+            RequiresBowdenTube = request.RequiresBowdenTube,
+            RequiresPtfeLiner = request.RequiresPtfeLiner,
+            RequiresLinearRails = request.RequiresLinearRails,
+            RequiresLeadScrews = request.RequiresLeadScrews,
+            RequiresToolchanger = request.RequiresToolchanger,
+            RequiresFilamentCutter = request.RequiresFilamentCutter,
+            RequiresHeatedChamber = request.RequiresHeatedChamber,
+            RequiresHeatedBed = request.RequiresHeatedBed,
+            RequiresMultiMaterial = request.RequiresMultiMaterial,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _taskRepository.AddAsync(task, ct);
-        _logger.LogInformation("Created task {TaskId} '{TaskName}' in plan {PlanId}", task.Id, task.TaskName, planId);
 
-        return Created($"/api/maintenance/plans/{planId}/tasks/{task.Id}", ToTaskResponse(task));
+        // Link task to plan via PlanTask join
+        int maxSort = plan.PlanTasks.Count > 0 ? plan.PlanTasks.Max(pt => pt.SortOrder) : 0;
+        plan.PlanTasks.Add(new PlanTask
+        {
+            Id = Guid.NewGuid(),
+            MaintenancePlanId = planId,
+            MaintenanceTaskId = task.Id,
+            SortOrder = maxSort + 1
+        });
+        await _planRepository.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Created task {TaskId} '{TaskName}' and linked to plan {PlanId}", task.Id, task.TaskName, planId);
+
+        return Created($"/api/maintenance/plans/{planId}/tasks/{task.Id}", MaintenanceResponseMapper.ToTaskResponse(task));
     }
 
     /// <summary>
-    /// Updates a task.
+    /// Updates a task in the global catalog.
     /// </summary>
     [HttpPut("{planId:guid}/tasks/{taskId:guid}")]
     public async Task<ActionResult<MaintenanceTaskResponse>> UpdateTaskAsync(
@@ -262,42 +257,73 @@ public class MaintenancePlanController(
         [FromBody] UpdateMaintenanceTaskRequest request,
         CancellationToken ct)
     {
+        MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
+        if (plan == null)
+        {
+            return NotFound();
+        }
+
+        if (!plan.PlanTasks.Any(pt => pt.MaintenanceTaskId == taskId))
+        {
+            return NotFound();
+        }
+
         MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        if (task == null)
         {
             return NotFound();
         }
 
         task.TaskName = request.TaskName;
         task.Description = request.Description;
+        task.Category = request.Category;
         task.IntervalHours = request.IntervalHours;
         task.IntervalDays = request.IntervalDays;
         task.EstimatedDurationMinutes = request.EstimatedDurationMinutes;
         task.Priority = request.Priority;
         task.IsActive = request.IsActive;
-        task.SortOrder = request.SortOrder;
+        task.IsDefault = request.IsDefault;
+        task.RequiresEnclosure = request.RequiresEnclosure;
+        task.RequiresCarbonFilter = request.RequiresCarbonFilter;
+        task.RequiresHepaFilter = request.RequiresHepaFilter;
+        task.RequiresBowdenTube = request.RequiresBowdenTube;
+        task.RequiresPtfeLiner = request.RequiresPtfeLiner;
+        task.RequiresLinearRails = request.RequiresLinearRails;
+        task.RequiresLeadScrews = request.RequiresLeadScrews;
+        task.RequiresToolchanger = request.RequiresToolchanger;
+        task.RequiresFilamentCutter = request.RequiresFilamentCutter;
+        task.RequiresHeatedChamber = request.RequiresHeatedChamber;
+        task.RequiresHeatedBed = request.RequiresHeatedBed;
+        task.RequiresMultiMaterial = request.RequiresMultiMaterial;
         task.UpdatedAt = DateTime.UtcNow;
 
         await _taskRepository.UpdateAsync(task, ct);
         _logger.LogInformation("Updated task {TaskId} '{TaskName}'", task.Id, task.TaskName);
 
-        return Ok(ToTaskResponse(task));
+        return Ok(MaintenanceResponseMapper.ToTaskResponse(task));
     }
 
     /// <summary>
-    /// Deletes a task (cascades to component associations).
+    /// Removes a task from a plan (deletes PlanTask link). Does not delete the global task.
     /// </summary>
     [HttpDelete("{planId:guid}/tasks/{taskId:guid}")]
     public async Task<IActionResult> DeleteTaskAsync(Guid planId, Guid taskId, CancellationToken ct)
     {
-        MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
+        if (plan == null)
         {
             return NotFound();
         }
 
-        await _taskRepository.DeleteAsync(task, ct);
-        _logger.LogInformation("Deleted task {TaskId} from plan {PlanId}", taskId, planId);
+        PlanTask? planTask = plan.PlanTasks.FirstOrDefault(pt => pt.MaintenanceTaskId == taskId);
+        if (planTask == null)
+        {
+            return NotFound();
+        }
+
+        plan.PlanTasks.Remove(planTask);
+        await _planRepository.SaveChangesAsync(ct);
+        _logger.LogInformation("Removed task {TaskId} from plan {PlanId}", taskId, planId);
 
         return NoContent();
     }
@@ -313,14 +339,25 @@ public class MaintenancePlanController(
         Guid taskId,
         CancellationToken ct)
     {
+        MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
+        if (plan == null)
+        {
+            return NotFound();
+        }
+
+        if (!plan.PlanTasks.Any(pt => pt.MaintenanceTaskId == taskId))
+        {
+            return NotFound();
+        }
+
         MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        if (task == null)
         {
             return NotFound();
         }
 
         List<MaintenanceTaskComponent> components = await _taskRepository.GetTaskComponentsAsync(taskId, ct);
-        return Ok(components.Select(ToTaskComponentResponse).ToList());
+        return Ok(components.Select(MaintenanceResponseMapper.ToTaskComponentResponse).ToList());
     }
 
     /// <summary>
@@ -333,8 +370,19 @@ public class MaintenancePlanController(
         [FromBody] AddTaskComponentRequest request,
         CancellationToken ct)
     {
+        MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
+        if (plan == null)
+        {
+            return NotFound();
+        }
+
+        if (!plan.PlanTasks.Any(pt => pt.MaintenanceTaskId == taskId))
+        {
+            return NotFound();
+        }
+
         MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        if (task == null)
         {
             return NotFound();
         }
@@ -358,7 +406,7 @@ public class MaintenancePlanController(
         await _taskRepository.AddComponentAsync(taskComponent, ct);
         _logger.LogInformation("Added component {ComponentId} to task {TaskId}", request.ComponentId, taskId);
 
-        return Created($"/api/maintenance/plans/{planId}/tasks/{taskId}/components", ToTaskComponentResponse(taskComponent));
+        return Created($"/api/maintenance/plans/{planId}/tasks/{taskId}/components", MaintenanceResponseMapper.ToTaskComponentResponse(taskComponent));
     }
 
     /// <summary>
@@ -371,8 +419,19 @@ public class MaintenancePlanController(
         Guid componentId,
         CancellationToken ct)
     {
+        MaintenancePlan? plan = await _planRepository.GetByIdAsync(planId, ct);
+        if (plan == null)
+        {
+            return NotFound();
+        }
+
+        if (!plan.PlanTasks.Any(pt => pt.MaintenanceTaskId == taskId))
+        {
+            return NotFound();
+        }
+
         MaintenanceTask? task = await _taskRepository.GetByIdAsync(taskId, ct);
-        if (task == null || task.MaintenancePlanId != planId)
+        if (task == null)
         {
             return NotFound();
         }

@@ -33,6 +33,15 @@ public class PrinterModelConfiguration : IEntityTypeConfiguration<PrinterModel>
         // Capability defaults (nozzle diameter and max hotend temp are now on toolheads)
         _ = builder.Property(m => m.HasHeatedBed).HasDefaultValue(true);
         _ = builder.Property(m => m.HasEnclosure).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasCarbonFilter).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasHepaFilter).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasBowdenTube).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasPtfeLiner).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasLinearRails).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasLeadScrews).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasToolchanger).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasFilamentCutter).HasDefaultValue(false);
+        _ = builder.Property(m => m.HasHeatedChamber).HasDefaultValue(false);
         _ = builder.Property(m => m.MultiMaterial).HasDefaultValue(false);
         _ = builder.Property(m => m.SupportsAutoLeveling).HasDefaultValue(false);
         _ = builder.Property(m => m.MaxBedTemp).HasDefaultValue(120);

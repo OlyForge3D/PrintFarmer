@@ -21,14 +21,14 @@ public class MaintenanceLog
     public Printer Printer { get; set; } = null!;
 
     /// <summary>
-    /// Optional: Schedule this maintenance was performed for (null for unscheduled maintenance)
+    /// Optional: Deployment (printer × plan) this maintenance was performed for (null for unscheduled maintenance)
     /// </summary>
-    public Guid? MaintenanceScheduleId { get; set; }
+    public Guid? PrinterMaintenanceScheduleId { get; set; }
 
     /// <summary>
-    /// Navigation property to maintenance schedule
+    /// Navigation property to printer maintenance schedule deployment
     /// </summary>
-    public MaintenanceSchedule? MaintenanceSchedule { get; set; }
+    public PrinterMaintenanceSchedule? PrinterMaintenanceSchedule { get; set; }
 
     /// <summary>
     /// Optional: Alert this maintenance resolved (null if not performed in response to alert)
@@ -39,6 +39,16 @@ public class MaintenanceLog
     /// Navigation property to resolved alert
     /// </summary>
     public MaintenanceAlert? ResolvedAlert { get; set; }
+
+    /// <summary>
+    /// Optional: The maintenance task (from the global catalog) that was performed
+    /// </summary>
+    public Guid? MaintenanceTaskId { get; set; }
+
+    /// <summary>
+    /// Navigation property to maintenance task
+    /// </summary>
+    public MaintenanceTask? MaintenanceTask { get; set; }
 
     /// <summary>
     /// Name/title of the maintenance performed

@@ -22,7 +22,7 @@ import { apiClient } from '@/services/api';
 
 // Feature Pages
 import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
-import { SpoolsPage } from '@/features/catalog/pages/SpoolsPage';
+import { FilamentManagementPage } from '@/features/filamentManagement/pages/FilamentManagementPage';
 import { PrintersPage } from '@/features/printers/pages/PrintersPage';
 import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
@@ -165,7 +165,7 @@ function AuthenticatedAppRoutes() {
         <Route path="printers/:printerId/maintenance" element={<PrinterMaintenancePage />} />
         <Route path="printQueue" element={<PrintQueueDashboardPage />} />
         <Route path="files/*" element={<FilesPage />} />
-        <Route path="spools" element={<SpoolsPage />} />
+        <Route path="spools" element={<FilamentManagementPage />} />
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="nfc-devices" element={<NfcDevicesPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />

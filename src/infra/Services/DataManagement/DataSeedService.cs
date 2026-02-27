@@ -36,7 +36,9 @@ public class DataSeedService : IDataSeedService
         await SeedFilamentTypesAsync();
         await SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
         await SeedPrinterModelsAsync();
-        await SeedMaintenanceSchedulesAsync();
+        await SeedMaintenanceTasksAsync();
+        await SeedMaintenanceComponentsAsync();
+        await SeedMaintenancePlansAsync();
 
         _logger.LogInformation("[SeedData] Completed seed data load from YAML files");
     }
@@ -162,6 +164,15 @@ public class DataSeedService : IDataSeedService
                         MaxZ = dto.BuildVolume?.Z ?? 200,
                         HasHeatedBed = dto.HasHeatedBed,
                         HasEnclosure = dto.HasEnclosure,
+                        HasCarbonFilter = dto.HasCarbonFilter,
+                        HasHepaFilter = dto.HasHepaFilter,
+                        HasBowdenTube = dto.HasBowdenTube,
+                        HasPtfeLiner = dto.HasPtfeLiner,
+                        HasLinearRails = dto.HasLinearRails,
+                        HasLeadScrews = dto.HasLeadScrews,
+                        HasToolchanger = dto.HasToolchanger,
+                        HasFilamentCutter = dto.HasFilamentCutter,
+                        HasHeatedChamber = dto.HasHeatedChamber,
                         SupportsAutoLeveling = dto.SupportsAutoLeveling,
                         MultiMaterial = dto.MultiMaterial,
                         MaxBedTemp = dto.MaxBedTemp,
@@ -865,78 +876,51 @@ public class DataSeedService : IDataSeedService
         await _context.SaveChangesAsync();
     }
 
-    public async Task SeedMaintenanceSchedulesAsync()
+    public async Task SeedMaintenanceTasksAsync()
     {
         try
         {
-            List<MaintenanceScheduleSeedDto> schedulesData = await _yamlReader.ReadMaintenanceSchedulesAsync();
+            List<MaintenanceTaskSeedDto> tasksData = await _yamlReader.ReadMaintenanceTasksAsync();
 
-            if (schedulesData.Count == 0)
+            if (tasksData.Count == 0)
             {
-                _logger.LogInformation("[SeedData] No maintenance schedules found in YAML, skipping");
+                _logger.LogInformation("[SeedData] No maintenance tasks found in YAML, skipping");
                 return;
             }
 
-            _logger.LogInformation("[SeedData] Seeding {SchedulesDataCount} maintenance schedules from YAML", schedulesData.Count);
+            _logger.LogInformation("[SeedData] Seeding {TaskCount} maintenance tasks from YAML", tasksData.Count);
 
-            // Build manufacturer lookup
-            Dictionary<string, Guid> manufacturers = await _context.Manufacturers
-                .AsNoTracking()
-                .ToDictionaryAsync(m => m.Name, m => m.Id);
-
-            // Build printer model lookup
-            Dictionary<string, Guid> printerModels = await _context.PrinterModels
-                .AsNoTracking()
-                .ToDictionaryAsync(pm => pm.Name, pm => pm.Id);
-
-            foreach (MaintenanceScheduleSeedDto dto in schedulesData)
+            foreach (MaintenanceTaskSeedDto dto in tasksData)
             {
-                // Resolve optional FK references
-                Guid? printerId = null;
-                Guid? printerModelId = null;
-                Guid? manufacturerId = null;
-
-                if (!string.IsNullOrEmpty(dto.PrinterModel) && printerModels.TryGetValue(dto.PrinterModel, out Guid modelId))
-                {
-                    printerModelId = modelId;
-                }
-
-                if (!string.IsNullOrEmpty(dto.Manufacturer) && manufacturers.TryGetValue(dto.Manufacturer, out Guid mfgId))
-                {
-                    manufacturerId = mfgId;
-                }
-
-                int? motionType = null;
-                if (!string.IsNullOrWhiteSpace(dto.MotionType) && Enum.TryParse<MotionType>(dto.MotionType, true, out MotionType parsedMotionType))
-                {
-                    motionType = (int)parsedMotionType;
-                }
-
-                // Check if schedule already exists (match on TaskName + optional FKs)
-                bool exists = await _context.MaintenanceSchedules
-                    .AnyAsync(ms =>
-                        ms.TaskName == dto.TaskName &&
-                        ms.PrinterId == printerId &&
-                        ms.PrinterModelId == printerModelId &&
-                        ms.ManufacturerId == manufacturerId &&
-                        ms.MotionType == motionType);
+                bool exists = await _context.MaintenanceTasks
+                    .AnyAsync(t => t.TaskName == dto.TaskName);
 
                 if (!exists)
                 {
-                    _context.MaintenanceSchedules.Add(new MaintenanceSchedule
+                    _context.MaintenanceTasks.Add(new MaintenanceTask
                     {
                         Id = Guid.NewGuid(),
                         TaskName = dto.TaskName,
                         Description = dto.Description,
-                        Component = dto.Component,
+                        Category = dto.Category,
                         IntervalHours = dto.IntervalHours,
                         IntervalDays = dto.IntervalDays,
                         EstimatedDurationMinutes = dto.EstimatedDurationMinutes,
+                        Priority = dto.Priority,
                         IsActive = dto.IsActive,
-                        PrinterId = printerId,
-                        PrinterModelId = printerModelId,
-                        ManufacturerId = manufacturerId,
-                        MotionType = motionType,
+                        IsDefault = true,
+                        RequiresEnclosure = dto.RequiresEnclosure,
+                        RequiresCarbonFilter = dto.RequiresCarbonFilter,
+                        RequiresHepaFilter = dto.RequiresHepaFilter,
+                        RequiresBowdenTube = dto.RequiresBowdenTube,
+                        RequiresPtfeLiner = dto.RequiresPtfeLiner,
+                        RequiresLinearRails = dto.RequiresLinearRails,
+                        RequiresLeadScrews = dto.RequiresLeadScrews,
+                        RequiresToolchanger = dto.RequiresToolchanger,
+                        RequiresFilamentCutter = dto.RequiresFilamentCutter,
+                        RequiresHeatedChamber = dto.RequiresHeatedChamber,
+                        RequiresHeatedBed = dto.RequiresHeatedBed,
+                        RequiresMultiMaterial = dto.RequiresMultiMaterial,
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     });
@@ -944,11 +928,132 @@ public class DataSeedService : IDataSeedService
             }
 
             await _context.SaveChangesAsync();
-            _logger.LogInformation("[SeedData] Maintenance schedules seeded successfully");
+            _logger.LogInformation("[SeedData] Maintenance tasks seeded successfully");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SeedData] Error seeding maintenance schedules: {Message}", ex.Message);
+            _logger.LogError(ex, "[SeedData] Error seeding maintenance tasks: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    public async Task SeedMaintenanceComponentsAsync()
+    {
+        try
+        {
+            List<MaintenanceComponentSeedDto> componentsData = await _yamlReader.ReadMaintenanceComponentsAsync();
+
+            if (componentsData.Count == 0)
+            {
+                _logger.LogInformation("[SeedData] No maintenance components found in YAML, skipping");
+                return;
+            }
+
+            _logger.LogInformation("[SeedData] Seeding {ComponentCount} maintenance components from YAML", componentsData.Count);
+
+            foreach (MaintenanceComponentSeedDto dto in componentsData)
+            {
+                bool exists = await _context.MaintenanceComponents
+                    .AnyAsync(c => c.Name == dto.Name && c.Category == dto.Category);
+
+                if (!exists)
+                {
+                    _context.MaintenanceComponents.Add(new MaintenanceComponent
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = dto.Name,
+                        Category = dto.Category,
+                        Description = dto.Description,
+                        Sku = dto.Sku,
+                        UnitCost = dto.UnitCost,
+                        Supplier = dto.Supplier,
+                        Url = dto.Url,
+                        InStock = 0,
+                        MinimumStock = dto.RecommendedMinimumStock,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Maintenance components seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding maintenance components: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    public async Task SeedMaintenancePlansAsync()
+    {
+        try
+        {
+            List<MaintenancePlanSeedDto> plansData = await _yamlReader.ReadMaintenancePlansAsync();
+
+            if (plansData.Count == 0)
+            {
+                _logger.LogInformation("[SeedData] No maintenance plans found in YAML, skipping");
+                return;
+            }
+
+            _logger.LogInformation("[SeedData] Seeding {PlanCount} maintenance plans from YAML", plansData.Count);
+
+            // Pre-load all tasks by name for efficient lookup
+            Dictionary<string, MaintenanceTask> tasksByName = await _context.MaintenanceTasks
+                .ToDictionaryAsync(t => t.TaskName, StringComparer.OrdinalIgnoreCase);
+
+            foreach (MaintenancePlanSeedDto dto in plansData)
+            {
+                bool exists = await _context.MaintenancePlans
+                    .AnyAsync(p => p.Name == dto.Name);
+
+                if (exists)
+                {
+                    continue;
+                }
+
+                var plan = new MaintenancePlan
+                {
+                    Id = Guid.NewGuid(),
+                    Name = dto.Name,
+                    Description = dto.Description,
+                    IsActive = dto.IsActive,
+                    IsDefault = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                };
+
+                // Resolve task names to PlanTask join entities
+                int sortOrder = 0;
+                foreach (string taskName in dto.Tasks)
+                {
+                    if (tasksByName.TryGetValue(taskName, out MaintenanceTask? task))
+                    {
+                        plan.PlanTasks.Add(new PlanTask
+                        {
+                            Id = Guid.NewGuid(),
+                            MaintenancePlanId = plan.Id,
+                            MaintenanceTaskId = task.Id,
+                            SortOrder = sortOrder++,
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogWarning("[SeedData] Plan '{PlanName}' references unknown task '{TaskName}', skipping", dto.Name, taskName);
+                    }
+                }
+
+                _context.MaintenancePlans.Add(plan);
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Maintenance plans seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding maintenance plans: {Message}", ex.Message);
             throw;
         }
     }

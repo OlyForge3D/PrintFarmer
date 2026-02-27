@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -27,9 +27,9 @@ public class MaintenancePlanConfiguration : IEntityTypeConfiguration<Maintenance
             .HasForeignKey(p => p.ManufacturerId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        _ = builder.HasMany(p => p.Tasks)
-            .WithOne(t => t.MaintenancePlan)
-            .HasForeignKey(t => t.MaintenancePlanId)
+        _ = builder.HasMany(p => p.PlanTasks)
+            .WithOne(pt => pt.MaintenancePlan)
+            .HasForeignKey(pt => pt.MaintenancePlanId)
             .OnDelete(DeleteBehavior.Cascade);
 
         _ = builder.HasIndex(p => p.PrinterId);

@@ -1,5 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import React from 'react';
+import React, { useCallback } from 'react';
 import clsx from 'clsx';
 
 export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
@@ -7,20 +7,28 @@ export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputE
   label?: string;
   /** Whether the checkbox is in an invalid state */
   invalid?: boolean;
+  /** Whether the checkbox is in an indeterminate (mixed) state */
+  indeterminate?: boolean;
 }
 
 export const Checkbox: React.FC<CheckboxProps> = ({
   label,
   invalid,
+  indeterminate,
   className,
   id,
   ...rest
 }) => {
   const inputId = id || (label ? `checkbox-${label.replace(/\s+/g, '-').toLowerCase()}` : undefined);
+
+  const inputRef = useCallback((el: HTMLInputElement | null) => {
+    if (el) el.indeterminate = indeterminate ?? false;
+  }, [indeterminate]);
   
   const checkbox = (
     <input
       type="checkbox"
+      ref={inputRef}
       id={inputId}
       className={clsx(
         'w-4 h-4 rounded-sm border-pf-border bg-pf-bg-0 text-pf-accent',

@@ -21,10 +21,10 @@ public class MaintenanceLogConfiguration : IEntityTypeConfiguration<MaintenanceL
             .HasForeignKey(l => l.PrinterId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Relationship with MaintenanceSchedule (optional)
-        _ = builder.HasOne(l => l.MaintenanceSchedule)
+        // Relationship with PrinterMaintenanceSchedule (optional)
+        _ = builder.HasOne(l => l.PrinterMaintenanceSchedule)
             .WithMany()
-            .HasForeignKey(l => l.MaintenanceScheduleId)
+            .HasForeignKey(l => l.PrinterMaintenanceScheduleId)
             .OnDelete(DeleteBehavior.SetNull);
 
         // Relationship with MaintenanceAlert (optional)
@@ -33,10 +33,17 @@ public class MaintenanceLogConfiguration : IEntityTypeConfiguration<MaintenanceL
             .HasForeignKey(l => l.ResolvedAlertId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        // Relationship with MaintenanceTask (optional)
+        _ = builder.HasOne(l => l.MaintenanceTask)
+            .WithMany()
+            .HasForeignKey(l => l.MaintenanceTaskId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         // Indexes for efficient queries
         _ = builder.HasIndex(l => l.PrinterId);
-        _ = builder.HasIndex(l => l.MaintenanceScheduleId);
+        _ = builder.HasIndex(l => l.PrinterMaintenanceScheduleId);
         _ = builder.HasIndex(l => l.ResolvedAlertId);
+        _ = builder.HasIndex(l => l.MaintenanceTaskId);
         _ = builder.HasIndex(l => l.PerformedAt);
     }
 }

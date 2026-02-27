@@ -7,7 +7,6 @@ import { apiClient } from './api';
 import type {
   MaintenanceAlert,
   MaintenanceLog,
-  MaintenanceSchedule,
   PrinterStatistics,
   FleetPrinterStatistics,
   AcknowledgeAlertRequest,
@@ -15,10 +14,7 @@ import type {
   ResolveAlertRequest,
   ResolveAlertResponse,
   CreateMaintenanceLogRequest,
-  CreateMaintenanceScheduleRequest,
-  UpdateMaintenanceScheduleRequest,
-  UpdateMaintenanceModeRequest,
-  BulkScheduleOperationResponse
+  UpdateMaintenanceModeRequest
 } from '@/types/maintenance';
 
 // Analytics response types
@@ -51,12 +47,13 @@ export interface PrinterUptimeEntry {
 
 export interface UpcomingMaintenanceTaskDto {
   id: string;
-  scheduleId: string;
+  taskId: string;
   printerId: string;
   printerName: string;
   taskName: string;
   component?: string | null;
   description?: string | null;
+  category?: string | null;
   priority: number;
   intervalType: 'hours' | 'days';
   intervalValue: number;
@@ -215,16 +212,8 @@ export class MaintenanceService {
   }
 
   // ============================================================================
-  // Maintenance Schedules
+  // Upcoming Maintenance
   // ============================================================================
-
-  /**
-   * Gets all maintenance schedules.
-   */
-  async getAllSchedules(): Promise<MaintenanceSchedule[]> {
-    const response = await apiClient.get<MaintenanceSchedule[]>('/maintenance/schedules');
-    return response.data;
-  }
 
   /**
    * Gets upcoming maintenance tasks computed server-side.
@@ -244,95 +233,6 @@ export class MaintenanceService {
     const url = `/maintenance/upcoming${queryString ? `?${queryString}` : ''}`;
 
     const response = await apiClient.get<UpcomingMaintenanceTaskDto[]>(url);
-    return response.data;
-  }
-
-  /**
-   * Gets maintenance schedules for a specific printer (includes both printer-specific and model-wide).
-   * @param printerId - The printer ID
-   */
-  async getPrinterSchedules(printerId: string): Promise<MaintenanceSchedule[]> {
-    const response = await apiClient.get<MaintenanceSchedule[]>(`/maintenance/printers/${printerId}/schedules`);
-    return response.data;
-  }
-
-  /**
-   * Gets all active schedule templates (defaults not tied to a specific printer).
-   */
-  async getAllScheduleTemplates(): Promise<MaintenanceSchedule[]> {
-    const response = await apiClient.get<MaintenanceSchedule[]>('/maintenance/schedule-templates');
-    return response.data;
-  }
-
-  /**
-   * Gets all active schedule templates applicable to a specific printer.
-   * Includes model-wide, motion-type-wide, manufacturer-wide, and global defaults.
-   */
-  async getPrinterScheduleTemplates(printerId: string): Promise<MaintenanceSchedule[]> {
-    const response = await apiClient.get<MaintenanceSchedule[]>(`/maintenance/printers/${printerId}/schedule-templates`);
-    return response.data;
-  }
-
-  /**
-   * Creates a new maintenance schedule.
-   * @param request - The schedule details
-   */
-  async createSchedule(request: CreateMaintenanceScheduleRequest): Promise<MaintenanceSchedule> {
-    const response = await apiClient.post<MaintenanceSchedule>('/maintenance/schedules', request);
-    return response.data;
-  }
-
-  /**
-   * Updates an existing maintenance schedule.
-   * @param id - The schedule ID
-   * @param request - The updated schedule details
-   */
-  async updateSchedule(id: string, request: UpdateMaintenanceScheduleRequest): Promise<MaintenanceSchedule> {
-    const response = await apiClient.put<MaintenanceSchedule>(`/maintenance/schedules/${id}`, request);
-    return response.data;
-  }
-
-  /**
-   * Deletes a maintenance schedule.
-   * @param id - The schedule ID
-   */
-  async deleteSchedule(id: string): Promise<void> {
-    await apiClient.delete(`/maintenance/schedules/${id}`);
-  }
-
-  /**
-   * Applies recommended (template) schedules to multiple printers by creating printer-specific overrides.
-   */
-  async bulkApplyRecommendedSchedules(options: {
-    printerIds: string[];
-    overwriteExisting?: boolean;
-  }): Promise<BulkScheduleOperationResponse> {
-    const response = await apiClient.post<BulkScheduleOperationResponse>(
-      '/maintenance/bulk-schedules/apply-recommended',
-      {
-        printerIds: options.printerIds,
-        overwriteExisting: options.overwriteExisting ?? false,
-      }
-    );
-    return response.data;
-  }
-
-  /**
-   * Creates the same printer-specific schedule for multiple printers.
-   */
-  async bulkCreateScheduleForPrinters(options: {
-    printerIds: string[];
-    schedule: CreateMaintenanceScheduleRequest;
-    overwriteExisting?: boolean;
-  }): Promise<BulkScheduleOperationResponse> {
-    const response = await apiClient.post<BulkScheduleOperationResponse>(
-      '/maintenance/bulk-schedules/create',
-      {
-        printerIds: options.printerIds,
-        schedule: options.schedule,
-        overwriteExisting: options.overwriteExisting ?? false,
-      }
-    );
     return response.data;
   }
 

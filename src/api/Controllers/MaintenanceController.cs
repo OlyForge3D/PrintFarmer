@@ -26,7 +26,7 @@ public class MaintenanceController(
     ILogger<MaintenanceController> logger,
     IMaintenanceAlertRepository alertRepository,
     IMaintenanceLogRepository logRepository,
-    IMaintenanceScheduleRepository scheduleRepository,
+    IPrinterMaintenanceScheduleRepository deploymentRepository,
     IPrinterStatisticsRepository statisticsRepository,
     IMaintenanceAlertService alertService,
     IPrintersService printersService,
@@ -36,7 +36,7 @@ public class MaintenanceController(
     private readonly ILogger<MaintenanceController> _logger = logger;
     private readonly IMaintenanceAlertRepository _alertRepository = alertRepository;
     private readonly IMaintenanceLogRepository _logRepository = logRepository;
-    private readonly IMaintenanceScheduleRepository _scheduleRepository = scheduleRepository;
+    private readonly IPrinterMaintenanceScheduleRepository _deploymentRepository = deploymentRepository;
     private readonly IPrinterStatisticsRepository _statisticsRepository = statisticsRepository;
     private readonly IMaintenanceAlertService _alertService = alertService;
     private readonly IPrintersService _printersService = printersService;
@@ -180,7 +180,8 @@ public class MaintenanceController(
             {
                 Id = Guid.NewGuid(),
                 PrinterId = alert.PrinterId,
-                MaintenanceScheduleId = alert.MaintenanceScheduleId,
+                PrinterMaintenanceScheduleId = alert.PrinterMaintenanceScheduleId,
+                MaintenanceTaskId = alert.MaintenanceTaskId,
                 TaskName = alert.Title ?? "Scheduled Maintenance",
                 PerformedAt = DateTime.UtcNow,
                 PerformedBy = request.PerformedBy,
@@ -214,7 +215,7 @@ public class MaintenanceController(
             {
                 logId = createdLog.Id,
                 printerId = createdLog.PrinterId,
-                scheduleId = createdLog.MaintenanceScheduleId,
+                deploymentId = createdLog.PrinterMaintenanceScheduleId,
                 performedAt = createdLog.PerformedAt,
                 performedBy = createdLog.PerformedBy
             }, ct);
@@ -312,161 +313,182 @@ public class MaintenanceController(
 
             List<UpcomingMaintenanceTaskDto> tasks = [];
 
-            // Batch-load all data in 3 queries instead of 3 per printer
+            // Batch-load all data in 3 queries instead of N per printer
             List<Guid> printerIds = printers.Select(p => p.Id).ToList();
             List<PrinterStatistics> allStats = await _statisticsRepository.GetAllAsync(ct);
             Dictionary<Guid, PrinterStatistics> statsByPrinter = allStats
                 .Where(s => printerIds.Contains(s.PrinterId))
                 .ToDictionary(s => s.PrinterId);
-            List<MaintenanceSchedule> allSchedules = await _scheduleRepository.GetAllAsync(ct);
-            ILookup<Guid, MaintenanceSchedule> schedulesByPrinter = allSchedules
-                .Where(s => s.PrinterId.HasValue && s.IsActive && printerIds.Contains(s.PrinterId.Value))
-                .ToLookup(s => s.PrinterId!.Value);
-            List<MaintenanceLog> allLogs = await _logRepository.GetAllAsync(cancellationToken: ct);
+            List<MaintenanceLog> allLogs = await _logRepository.GetByPrinterIdsAsync(printerIds, ct);
             ILookup<Guid, MaintenanceLog> logsByPrinter = allLogs
-                .Where(l => printerIds.Contains(l.PrinterId))
                 .ToLookup(l => l.PrinterId);
+
+            // Load V3 deployments with deep PlanTasks → Tasks in a single batch query
+            List<PrinterMaintenanceSchedule> allDeployments = await _deploymentRepository
+                .GetActiveWithTasksAsync(printerIds, ct);
+
+            ILookup<Guid, PrinterMaintenanceSchedule> deploymentsByPrinter = allDeployments
+                .ToLookup(d => d.PrinterId);
 
             foreach (Printer printer in printers)
             {
                 statsByPrinter.TryGetValue(printer.Id, out PrinterStatistics? stats);
-                List<MaintenanceSchedule> schedules = schedulesByPrinter[printer.Id].ToList();
-                if (schedules.Count == 0)
+                List<PrinterMaintenanceSchedule> deployments = deploymentsByPrinter[printer.Id].ToList();
+                if (deployments.Count == 0)
                 {
                     continue;
                 }
 
-                Dictionary<Guid, MaintenanceLog> lastLogByScheduleId = logsByPrinter[printer.Id]
-                    .Where(l => l.MaintenanceScheduleId.HasValue)
-                    .GroupBy(l => l.MaintenanceScheduleId!.Value)
+                // Group last log by task ID for efficient lookup
+                Dictionary<Guid, MaintenanceLog> lastLogByTaskId = logsByPrinter[printer.Id]
+                    .Where(l => l.MaintenanceTaskId.HasValue)
+                    .GroupBy(l => l.MaintenanceTaskId!.Value)
                     .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.PerformedAt).First());
 
-                foreach (MaintenanceSchedule schedule in schedules)
+                // Track tasks already processed (avoid duplicates if same task in multiple plans)
+                HashSet<Guid> processedTasks = [];
+
+                foreach (PrinterMaintenanceSchedule deployment in deployments)
                 {
-                    if (!schedule.IntervalHours.HasValue && !schedule.IntervalDays.HasValue)
+                    if (deployment.MaintenancePlan?.PlanTasks == null)
                     {
                         continue;
                     }
 
-                    lastLogByScheduleId.TryGetValue(schedule.Id, out MaintenanceLog? lastLog);
-
-                    // Compute day-based due date (real calendar date)
-                    DateTime baselineDate = lastLog?.PerformedAt ?? schedule.CreatedAt;
-                    DateTime? dueDate = schedule.IntervalDays.HasValue
-                        ? baselineDate.AddDays(schedule.IntervalDays.Value)
-                        : null;
-                    int? daysUntilDue = dueDate.HasValue
-                        ? (int)(dueDate.Value.Date - now.Date).TotalDays
-                        : null;
-
-                    // Compute hour-based remaining time (no synthetic date)
-                    double? hoursUntilDue = null;
-                    if (schedule.IntervalHours.HasValue)
+                    foreach (PlanTask planTask in deployment.MaintenancePlan.PlanTasks)
                     {
-                        // If we can't compute hours (missing stats), skip hour-only schedules.
-                        if (stats == null && !schedule.IntervalDays.HasValue)
+                        MaintenanceTask task = planTask.MaintenanceTask;
+                        if (task == null || !task.IsActive || !processedTasks.Add(task.Id))
                         {
                             continue;
                         }
 
-                        if (stats != null)
+                        // Effective intervals: PlanTask overrides take precedence
+                        double? effectiveHours = planTask.IntervalHoursOverride ?? task.IntervalHours;
+                        int? effectiveDays = planTask.IntervalDaysOverride ?? task.IntervalDays;
+
+                        if (!effectiveHours.HasValue && !effectiveDays.HasValue)
                         {
-                            double hoursSinceLast = lastLog?.PrinterHoursAtMaintenance is double baselineHours
-                                ? Math.Max(0, stats.TotalPrintHours - baselineHours)
-                                : stats.TotalPrintHours;
-                            hoursUntilDue = schedule.IntervalHours.Value - hoursSinceLast;
+                            continue;
                         }
-                    }
 
-                    // Choose how to present either/or schedules: whichever is due sooner.
-                    string intervalType;
-                    double intervalValue;
-                    DateTime? effectiveDueDate;
-                    int? effectiveDaysUntilDue;
-                    double? effectiveHoursUntilDue;
+                        lastLogByTaskId.TryGetValue(task.Id, out MaintenanceLog? lastLog);
 
-                    if (schedule.IntervalDays.HasValue && !schedule.IntervalHours.HasValue)
-                    {
-                        intervalType = "days";
-                        intervalValue = schedule.IntervalDays.Value;
-                        effectiveDueDate = dueDate;
-                        effectiveDaysUntilDue = daysUntilDue;
-                        effectiveHoursUntilDue = null;
-                    }
-                    else if (schedule.IntervalHours.HasValue && !schedule.IntervalDays.HasValue)
-                    {
-                        intervalType = "hours";
-                        intervalValue = schedule.IntervalHours.Value;
-                        effectiveDueDate = null;
-                        effectiveDaysUntilDue = null;
-                        effectiveHoursUntilDue = hoursUntilDue;
-                    }
-                    else
-                    {
-                        // Both set
-                        if (hoursUntilDue.HasValue && daysUntilDue.HasValue)
+                        // Compute day-based due date (real calendar date)
+                        DateTime baselineDate = lastLog?.PerformedAt ?? deployment.DeployedAt;
+                        DateTime? dueDate = effectiveDays.HasValue
+                            ? baselineDate.AddDays(effectiveDays.Value)
+                            : null;
+                        int? daysUntilDue = dueDate.HasValue
+                            ? (int)(dueDate.Value.Date - now.Date).TotalDays
+                            : null;
+
+                        // Compute hour-based remaining time (no synthetic date)
+                        double? hoursUntilDue = null;
+                        if (effectiveHours.HasValue)
                         {
-                            double daysAsHours = daysUntilDue.Value * 24.0;
-                            bool hoursComesFirst = hoursUntilDue.Value <= daysAsHours;
+                            if (stats == null && !effectiveDays.HasValue)
+                            {
+                                continue;
+                            }
 
-                            intervalType = hoursComesFirst ? "hours" : "days";
-                            intervalValue = hoursComesFirst ? schedule.IntervalHours!.Value : schedule.IntervalDays!.Value;
-                            effectiveDueDate = hoursComesFirst ? null : dueDate;
-                            effectiveDaysUntilDue = hoursComesFirst ? null : daysUntilDue;
-                            effectiveHoursUntilDue = hoursComesFirst ? hoursUntilDue : null;
+                            if (stats != null)
+                            {
+                                double hoursSinceLast = lastLog?.PrinterHoursAtMaintenance is double baselineHours
+                                    ? Math.Max(0, stats.TotalPrintHours - baselineHours)
+                                    : stats.TotalPrintHours;
+                                hoursUntilDue = effectiveHours.Value - hoursSinceLast;
+                            }
                         }
-                        else
+
+                        // Choose how to present either/or: whichever is due sooner.
+                        string intervalType;
+                        double intervalValue;
+                        DateTime? effectiveDueDate;
+                        int? effectiveDaysUntilDue;
+                        double? effectiveHoursUntilDue;
+
+                        if (effectiveDays.HasValue && !effectiveHours.HasValue)
                         {
-                            // If we can't compare, prefer day-based (real due date).
                             intervalType = "days";
-                            intervalValue = schedule.IntervalDays!.Value;
+                            intervalValue = effectiveDays.Value;
                             effectiveDueDate = dueDate;
                             effectiveDaysUntilDue = daysUntilDue;
                             effectiveHoursUntilDue = null;
                         }
+                        else if (effectiveHours.HasValue && !effectiveDays.HasValue)
+                        {
+                            intervalType = "hours";
+                            intervalValue = effectiveHours.Value;
+                            effectiveDueDate = null;
+                            effectiveDaysUntilDue = null;
+                            effectiveHoursUntilDue = hoursUntilDue;
+                        }
+                        else
+                        {
+                            // Both set
+                            if (hoursUntilDue.HasValue && daysUntilDue.HasValue)
+                            {
+                                double daysAsHours = daysUntilDue.Value * 24.0;
+                                bool hoursComesFirst = hoursUntilDue.Value <= daysAsHours;
+
+                                intervalType = hoursComesFirst ? "hours" : "days";
+                                intervalValue = hoursComesFirst ? effectiveHours!.Value : effectiveDays!.Value;
+                                effectiveDueDate = hoursComesFirst ? null : dueDate;
+                                effectiveDaysUntilDue = hoursComesFirst ? null : daysUntilDue;
+                                effectiveHoursUntilDue = hoursComesFirst ? hoursUntilDue : null;
+                            }
+                            else
+                            {
+                                intervalType = "days";
+                                intervalValue = effectiveDays!.Value;
+                                effectiveDueDate = dueDate;
+                                effectiveDaysUntilDue = daysUntilDue;
+                                effectiveHoursUntilDue = null;
+                            }
+                        }
+
+                        bool isOverdue = intervalType == "days"
+                            ? (effectiveDaysUntilDue ?? 0) < 0
+                            : (effectiveHoursUntilDue ?? double.PositiveInfinity) <= 0;
+
+                        bool isDueToday = intervalType == "days" && effectiveDueDate.HasValue && effectiveDueDate.Value.Date == now.Date;
+
+                        if (!includeOverdue && isOverdue)
+                        {
+                            continue;
+                        }
+
+                        if (intervalType == "days" && effectiveDaysUntilDue.HasValue && effectiveDaysUntilDue.Value > lookaheadDays)
+                        {
+                            continue;
+                        }
+
+                        if (intervalType == "hours" && effectiveHoursUntilDue.HasValue && effectiveHoursUntilDue.Value > lookaheadDays * 24.0)
+                        {
+                            continue;
+                        }
+
+                        string taskId = $"{printer.Id}-{task.Id}";
+
+                        tasks.Add(new UpcomingMaintenanceTaskDto(
+                            taskId,
+                            task.Id,
+                            printer.Id,
+                            printer.Name ?? "Unknown Printer",
+                            task.TaskName,
+                            task.Category,
+                            task.Description,
+                            task.Priority,
+                            intervalType,
+                            intervalValue,
+                            effectiveDueDate,
+                            effectiveDaysUntilDue,
+                            effectiveHoursUntilDue,
+                            isOverdue,
+                            isDueToday,
+                            lastLog?.PerformedAt));
                     }
-
-                    bool isOverdue = intervalType == "days"
-                        ? (effectiveDaysUntilDue ?? 0) < 0
-                        : (effectiveHoursUntilDue ?? double.PositiveInfinity) <= 0;
-
-                    bool isDueToday = intervalType == "days" && effectiveDueDate.HasValue && effectiveDueDate.Value.Date == now.Date;
-
-                    if (!includeOverdue && isOverdue)
-                    {
-                        continue;
-                    }
-
-                    // Apply lookahead window.
-                    if (intervalType == "days" && effectiveDaysUntilDue.HasValue && effectiveDaysUntilDue.Value > lookaheadDays)
-                    {
-                        continue;
-                    }
-
-                    if (intervalType == "hours" && effectiveHoursUntilDue.HasValue && effectiveHoursUntilDue.Value > lookaheadDays * 24.0)
-                    {
-                        continue;
-                    }
-
-                    string taskId = $"{printer.Id}-{schedule.Id}";
-
-                    tasks.Add(new UpcomingMaintenanceTaskDto(
-                        taskId,
-                        schedule.Id,
-                        printer.Id,
-                        printer.Name ?? "Unknown Printer",
-                        schedule.TaskName,
-                        schedule.Component,
-                        schedule.Description,
-                        schedule.Priority,
-                        intervalType,
-                        intervalValue,
-                        effectiveDueDate,
-                        effectiveDaysUntilDue,
-                        effectiveHoursUntilDue,
-                        isOverdue,
-                        isDueToday,
-                        lastLog?.PerformedAt));
                 }
             }
 
@@ -554,7 +576,8 @@ public class MaintenanceController(
             {
                 Id = Guid.NewGuid(),
                 PrinterId = request.PrinterId,
-                MaintenanceScheduleId = request.ScheduleId,
+                PrinterMaintenanceScheduleId = request.DeploymentId,
+                MaintenanceTaskId = request.TaskId,
                 TaskName = request.TaskName ?? "Manual Maintenance",
                 Component = request.ComponentName,
                 PerformedAt = request.PerformedAt ?? DateTime.UtcNow,
@@ -573,7 +596,7 @@ public class MaintenanceController(
             {
                 logId = createdLog.Id,
                 printerId = createdLog.PrinterId,
-                scheduleId = createdLog.MaintenanceScheduleId,
+                taskId = createdLog.MaintenanceTaskId,
                 performedAt = createdLog.PerformedAt,
                 performedBy = createdLog.PerformedBy
             }, ct);
@@ -589,415 +612,9 @@ public class MaintenanceController(
 
     #endregion
 
-    #region Maintenance Schedules
-
-    /// <summary>
-    /// Gets all maintenance schedules.
-    /// </summary>
-    [HttpGet("schedules")]
-    [ProducesResponseType(typeof(IEnumerable<MaintenanceSchedule>), 200)]
-    public async Task<ActionResult<IEnumerable<MaintenanceSchedule>>> GetAllSchedulesAsync(CancellationToken ct)
-    {
-        try
-        {
-            List<MaintenanceSchedule> schedules = await _scheduleRepository.GetAllAsync(ct);
-            return Ok(schedules);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error getting all schedules");
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Gets maintenance schedules for a specific printer (includes both printer-specific and model-wide).
-    /// </summary>
-    [HttpGet("printers/{printerId:guid}/schedules")]
-    [ProducesResponseType(typeof(IEnumerable<MaintenanceSchedule>), 200)]
-    public async Task<ActionResult<IEnumerable<MaintenanceSchedule>>> GetPrinterSchedulesAsync(Guid printerId, CancellationToken ct)
-    {
-        try
-        {
-            List<MaintenanceSchedule> schedules = await _scheduleRepository.GetActivePrinterSchedulesAsync(printerId, ct);
-            return Ok(schedules);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error getting schedules for printer {PrinterId}", printerId);
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Gets all active template schedules (defaults not tied to a specific printer).
-    /// Useful for building preset dropdowns and admin-managed default schedules.
-    /// </summary>
-    [HttpGet("schedule-templates")]
-    [ProducesResponseType(typeof(IEnumerable<MaintenanceSchedule>), 200)]
-    public async Task<ActionResult<IEnumerable<MaintenanceSchedule>>> GetAllScheduleTemplatesAsync(CancellationToken ct)
-    {
-        try
-        {
-            List<MaintenanceSchedule> schedules = await _scheduleRepository.GetAllAsync(ct);
-            return Ok(schedules.Where(s => s.IsActive && s.PrinterId == null));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error getting schedule templates");
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Gets all active template schedules applicable to a specific printer.
-    /// Includes model-wide, motion-type-wide, manufacturer-wide, and global defaults.
-    /// </summary>
-    [HttpGet("printers/{printerId:guid}/schedule-templates")]
-    [ProducesResponseType(typeof(IEnumerable<MaintenanceSchedule>), 200)]
-    public async Task<ActionResult<IEnumerable<MaintenanceSchedule>>> GetPrinterScheduleTemplatesAsync(Guid printerId, CancellationToken ct)
-    {
-        try
-        {
-            List<MaintenanceSchedule> schedules = await _scheduleRepository.GetTemplateSchedulesForPrinterAsync(printerId, ct);
-            return Ok(schedules);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error getting schedule templates for printer {PrinterId}", printerId);
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Creates a new maintenance schedule.
-    /// </summary>
-    [HttpPost("schedules")]
-    [ProducesResponseType(typeof(MaintenanceSchedule), 201)]
-    public async Task<ActionResult<MaintenanceSchedule>> CreateScheduleAsync([FromBody] CreateMaintenanceScheduleRequest request, CancellationToken ct)
-    {
-        try
-        {
-            var schedule = new MaintenanceSchedule
-            {
-                Id = Guid.NewGuid(),
-                TaskName = request.TaskName,
-                Description = request.Description,
-                IntervalHours = request.IntervalHours,
-                IntervalDays = request.IntervalDays,
-                Component = request.ComponentName,
-                PrinterModelId = request.PrinterModelId,
-                PrinterId = request.PrinterId,
-                IsActive = request.IsActive ?? true
-            };
-
-            await _scheduleRepository.AddAsync(schedule, ct);
-            await _scheduleRepository.SaveChangesAsync(ct);
-
-            return CreatedAtAction(nameof(GetAllSchedulesAsync), new { id = schedule.Id }, schedule);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error creating schedule");
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Updates an existing maintenance schedule.
-    /// </summary>
-    [HttpPut("schedules/{id:guid}")]
-    [ProducesResponseType(typeof(MaintenanceSchedule), 200)]
-    [ProducesResponseType(404)]
-    public async Task<ActionResult<MaintenanceSchedule>> UpdateScheduleAsync(
-        Guid id,
-        [FromBody] UpdateMaintenanceScheduleRequest request,
-        CancellationToken ct)
-    {
-        try
-        {
-            MaintenanceSchedule? schedule = await _scheduleRepository.GetByIdAsync(id, ct);
-            if (schedule == null)
-            {
-                return NotFound($"Schedule with ID {id} not found");
-            }
-
-            schedule.TaskName = request.TaskName ?? schedule.TaskName;
-            schedule.Description = request.Description ?? schedule.Description;
-            schedule.IntervalHours = request.IntervalHours ?? schedule.IntervalHours;
-            schedule.IntervalDays = request.IntervalDays ?? schedule.IntervalDays;
-            schedule.Component = request.ComponentName ?? schedule.Component;
-            schedule.IsActive = request.IsActive ?? schedule.IsActive;
-
-            await _scheduleRepository.UpdateAsync(schedule, ct);
-            await _scheduleRepository.SaveChangesAsync(ct);
-
-            return Ok(schedule);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error updating schedule {Id}", id);
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Deletes a maintenance schedule.
-    /// </summary>
-    [HttpDelete("schedules/{id:guid}")]
-    [ProducesResponseType(204)]
-    [ProducesResponseType(404)]
-    public async Task<ActionResult> DeleteScheduleAsync(Guid id, CancellationToken ct)
-    {
-        try
-        {
-            MaintenanceSchedule? schedule = await _scheduleRepository.GetByIdAsync(id, ct);
-            if (schedule == null)
-            {
-                return NotFound($"Schedule with ID {id} not found");
-            }
-
-            await _scheduleRepository.DeleteAsync(id, ct);
-            await _scheduleRepository.SaveChangesAsync(ct);
-
-            return NoContent();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error deleting schedule {Id}", id);
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Applies recommended (template) schedules by materializing printer-specific overrides for each selected printer.
-    /// Does not create schedules automatically except when explicitly invoked.
-    /// </summary>
-    [HttpPost("bulk-schedules/apply-recommended")]
-    [ProducesResponseType(typeof(BulkScheduleOperationResponse), 200)]
-    public async Task<ActionResult<BulkScheduleOperationResponse>> ApplyRecommendedSchedulesAsync(
-        [FromBody] BulkApplyRecommendedSchedulesRequest request,
-        CancellationToken ct)
-    {
-        try
-        {
-            if (request.PrinterIds == null || request.PrinterIds.Count == 0)
-            {
-                return BadRequest("printerIds is required");
-            }
-
-            var printerIds = request.PrinterIds.Distinct().ToList();
-            bool overwriteExisting = request.OverwriteExisting ?? false;
-
-            Dictionary<Guid, List<MaintenanceSchedule>> templatesByPrinter =
-                await _scheduleRepository.GetTemplateSchedulesForPrintersAsync(printerIds, ct);
-
-            List<MaintenanceSchedule> existingPrinterSchedules =
-                await _scheduleRepository.GetPrinterSpecificSchedulesForPrintersAsync(printerIds, ct);
-
-            var existingByPrinter = existingPrinterSchedules
-                .Where(s => s.PrinterId != null)
-                .GroupBy(s => s.PrinterId!.Value)
-                .ToDictionary(g => g.Key, g => g.ToList());
-
-            int created = 0;
-            int updated = 0;
-            int skipped = 0;
-
-            foreach (Guid printerId in printerIds)
-            {
-                templatesByPrinter.TryGetValue(printerId, out List<MaintenanceSchedule>? templates);
-                templates ??= [];
-
-                existingByPrinter.TryGetValue(printerId, out List<MaintenanceSchedule>? existing);
-                existing ??= [];
-
-                var existingByKey = existing.ToDictionary(
-                    s => BuildOverrideKey(s.TaskName, s.Component),
-                    s => s,
-                    StringComparer.OrdinalIgnoreCase);
-
-                foreach (MaintenanceSchedule template in templates)
-                {
-                    string key = BuildOverrideKey(template.TaskName, template.Component);
-                    if (existingByKey.TryGetValue(key, out MaintenanceSchedule? existingSchedule))
-                    {
-                        if (!overwriteExisting)
-                        {
-                            skipped++;
-                            continue;
-                        }
-
-                        existingSchedule.TaskName = template.TaskName;
-                        existingSchedule.Description = template.Description;
-                        existingSchedule.Component = template.Component;
-                        existingSchedule.IntervalHours = template.IntervalHours;
-                        existingSchedule.IntervalDays = template.IntervalDays;
-                        existingSchedule.IsActive = template.IsActive;
-
-                        await _scheduleRepository.UpdateAsync(existingSchedule, ct);
-                        updated++;
-                        continue;
-                    }
-
-                    var newSchedule = new MaintenanceSchedule
-                    {
-                        Id = Guid.NewGuid(),
-                        PrinterId = printerId,
-                        TaskName = template.TaskName,
-                        Description = template.Description,
-                        Component = template.Component,
-                        IntervalHours = template.IntervalHours,
-                        IntervalDays = template.IntervalDays,
-                        IsActive = template.IsActive,
-                        IsDefault = false,
-                        PrinterModelId = null,
-                        ManufacturerId = null,
-                        MotionType = null,
-                        EstimatedDurationMinutes = template.EstimatedDurationMinutes,
-                        Priority = template.Priority
-                    };
-
-                    await _scheduleRepository.AddAsync(newSchedule, ct);
-                    created++;
-                }
-            }
-
-            await _scheduleRepository.SaveChangesAsync(ct);
-
-            return Ok(new BulkScheduleOperationResponse(
-                PrintersProcessed: printerIds.Count,
-                SchedulesCreated: created,
-                SchedulesUpdated: updated,
-                SchedulesSkipped: skipped));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error applying recommended schedules in bulk");
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Creates the same printer-specific maintenance schedule for multiple printers.
-    /// Does not create model/global templates.
-    /// </summary>
-    [HttpPost("bulk-schedules/create")]
-    [ProducesResponseType(typeof(BulkScheduleOperationResponse), 200)]
-    public async Task<ActionResult<BulkScheduleOperationResponse>> BulkCreateSchedulesAsync(
-        [FromBody] BulkCreateSchedulesRequest request,
-        CancellationToken ct)
-    {
-        try
-        {
-            if (request.PrinterIds == null || request.PrinterIds.Count == 0)
-            {
-                return BadRequest("printerIds is required");
-            }
-
-            if (request.Schedule == null)
-            {
-                return BadRequest("schedule is required");
-            }
-
-            if (string.IsNullOrWhiteSpace(request.Schedule.TaskName))
-            {
-                return BadRequest("schedule.taskName is required");
-            }
-
-            if ((request.Schedule.IntervalHours == null || request.Schedule.IntervalHours <= 0)
-                && (request.Schedule.IntervalDays == null || request.Schedule.IntervalDays <= 0))
-            {
-                return BadRequest("schedule intervalHours or intervalDays must be provided");
-            }
-
-            var printerIds = request.PrinterIds.Distinct().ToList();
-            bool overwriteExisting = request.OverwriteExisting ?? false;
-
-            List<MaintenanceSchedule> existingPrinterSchedules =
-                await _scheduleRepository.GetPrinterSpecificSchedulesForPrintersAsync(printerIds, ct);
-
-            var existingByPrinter = existingPrinterSchedules
-                .Where(s => s.PrinterId != null)
-                .GroupBy(s => s.PrinterId!.Value)
-                .ToDictionary(g => g.Key, g => g.ToList());
-
-            string desiredKey = BuildOverrideKey(request.Schedule.TaskName.Trim(), request.Schedule.ComponentName);
-
-            int created = 0;
-            int updated = 0;
-            int skipped = 0;
-
-            foreach (Guid printerId in printerIds)
-            {
-                existingByPrinter.TryGetValue(printerId, out List<MaintenanceSchedule>? existing);
-                existing ??= [];
-
-                MaintenanceSchedule? existingSchedule = existing
-                    .FirstOrDefault(s => string.Equals(BuildOverrideKey(s.TaskName, s.Component), desiredKey, StringComparison.OrdinalIgnoreCase));
-
-                if (existingSchedule != null)
-                {
-                    if (!overwriteExisting)
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    existingSchedule.TaskName = request.Schedule.TaskName.Trim();
-                    existingSchedule.Description = request.Schedule.Description;
-                    existingSchedule.Component = request.Schedule.ComponentName;
-                    existingSchedule.IntervalHours = request.Schedule.IntervalHours;
-                    existingSchedule.IntervalDays = request.Schedule.IntervalDays;
-                    existingSchedule.IsActive = request.Schedule.IsActive ?? true;
-
-                    await _scheduleRepository.UpdateAsync(existingSchedule, ct);
-                    updated++;
-                    continue;
-                }
-
-                var schedule = new MaintenanceSchedule
-                {
-                    Id = Guid.NewGuid(),
-                    TaskName = request.Schedule.TaskName.Trim(),
-                    Description = request.Schedule.Description,
-                    IntervalHours = request.Schedule.IntervalHours,
-                    IntervalDays = request.Schedule.IntervalDays,
-                    Component = request.Schedule.ComponentName,
-                    PrinterId = printerId,
-                    PrinterModelId = null,
-                    ManufacturerId = null,
-                    MotionType = null,
-                    IsActive = request.Schedule.IsActive ?? true,
-                    IsDefault = false
-                };
-
-                await _scheduleRepository.AddAsync(schedule, ct);
-                created++;
-            }
-
-            await _scheduleRepository.SaveChangesAsync(ct);
-
-            return Ok(new BulkScheduleOperationResponse(
-                PrintersProcessed: printerIds.Count,
-                SchedulesCreated: created,
-                SchedulesUpdated: updated,
-                SchedulesSkipped: skipped));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[MaintenanceController] Error bulk creating schedules");
-            return StatusCode(500, $"Internal Server Error: {ex.Message}");
-        }
-    }
-
-    private static string BuildOverrideKey(string taskName, string? component)
-    {
-        return $"{taskName}||{component ?? string.Empty}";
-    }
-
-    #endregion
-
+    // NOTE: Old flat MaintenanceSchedule CRUD endpoints removed (V3 migration).
+    // Schedule management is now handled by MaintenanceScheduleDeploymentController
+    // using the hierarchical Task → Plan → PrinterMaintenanceSchedule model.
     #region Printer Statistics
 
     /// <summary>
@@ -1015,69 +632,82 @@ public class MaintenanceController(
             // Get all printers with includes for manufacturer/model names
             var allPrinters = await _printersService.GetAllWithIncludesAsync(ct);
 
-            // Get all schedules to calculate next maintenance date
-            var allSchedules = await _scheduleRepository.GetAllAsync(ct);
-
             // Get recent logs to determine last performed dates (last 2 years)
             var twoYearsAgo = DateTime.UtcNow.AddYears(-2);
             var logs = await _logRepository.GetAllAsync(twoYearsAgo, null, ct);
             var logsByPrinter = logs.GroupBy(l => l.PrinterId).ToDictionary(g => g.Key, g => g.ToList());
 
-            // Handle nullable PrinterId by filtering out null values
-            var schedulesByPrinter = allSchedules
-                .Where(s => s.PrinterId.HasValue)
-                .GroupBy(s => s.PrinterId!.Value)
-                .ToDictionary(g => g.Key, g => g.ToList());
+            // Batch-load all deployments in one query instead of per-printer
+            var allPrinterIds = allPrinters.Select(p => p.Id).ToList();
+            var allDeployments = await _deploymentRepository.GetActiveWithTasksAsync(allPrinterIds, ct);
+            var deploymentsByPrinter = allDeployments.ToLookup(d => d.PrinterId);
 
             var result = new List<FleetPrinterStatisticsDto>();
 
             foreach (var printer in allPrinters)
             {
                 var stats = allStats.FirstOrDefault(s => s.PrinterId == printer.Id);
-                var printerSchedules = schedulesByPrinter.GetValueOrDefault(printer.Id, []);
+
+                var deployments = deploymentsByPrinter[printer.Id].ToList();
                 var printerLogs = logsByPrinter.GetValueOrDefault(printer.Id, []);
 
                 // Calculate days until next maintenance
                 int? daysUntilNextMaintenance = null;
                 string? nextMaintenanceTask = null;
 
-                foreach (var schedule in printerSchedules.Where(s => s.IsActive))
+                // Track tasks already evaluated (avoid duplicates from multiple plans)
+                HashSet<Guid> processedTasks = [];
+
+                foreach (var deployment in deployments)
                 {
-                    // Find the last log for this schedule's task name
-                    var lastLog = printerLogs
-                        .Where(l => l.TaskName == schedule.TaskName)
-                        .OrderByDescending(l => l.PerformedAt)
-                        .FirstOrDefault();
-
-                    DateTime lastPerformed = lastLog?.PerformedAt ?? schedule.CreatedAt;
-                    DateTime nextDue;
-
-                    if (schedule.IntervalHours.HasValue)
+                    if (deployment.MaintenancePlan?.PlanTasks == null)
                     {
-                        // For hours-based, use print hours if available
-                        double hoursSinceLastMaintenance = stats?.TotalPrintHours ?? 0;
-                        double hoursRemaining = schedule.IntervalHours.Value - hoursSinceLastMaintenance;
-
-                        // Estimate based on average 8 hours/day printing
-                        nextDue = DateTime.UtcNow.AddDays(hoursRemaining / 8.0);
-                    }
-                    else if (schedule.IntervalDays.HasValue)
-                    {
-                        // Days-based interval
-                        nextDue = lastPerformed.AddDays(schedule.IntervalDays.Value);
-                    }
-                    else
-                    {
-                        // No interval set, skip this schedule
                         continue;
                     }
 
-                    int daysTillDue = (int)(nextDue - DateTime.UtcNow).TotalDays;
-
-                    if (daysUntilNextMaintenance == null || daysTillDue < daysUntilNextMaintenance)
+                    foreach (var planTask in deployment.MaintenancePlan.PlanTasks)
                     {
-                        daysUntilNextMaintenance = daysTillDue;
-                        nextMaintenanceTask = schedule.TaskName;
+                        var task = planTask.MaintenanceTask;
+                        if (task == null || !task.IsActive || !processedTasks.Add(task.Id))
+                        {
+                            continue;
+                        }
+
+                        // Effective intervals: PlanTask overrides take precedence
+                        double? effectiveHours = planTask.IntervalHoursOverride ?? task.IntervalHours;
+                        int? effectiveDays = planTask.IntervalDaysOverride ?? task.IntervalDays;
+
+                        // Find the last log for this task
+                        var lastLog = printerLogs
+                            .Where(l => l.MaintenanceTaskId == task.Id)
+                            .OrderByDescending(l => l.PerformedAt)
+                            .FirstOrDefault();
+
+                        DateTime lastPerformed = lastLog?.PerformedAt ?? deployment.DeployedAt;
+                        DateTime nextDue;
+
+                        if (effectiveHours.HasValue)
+                        {
+                            double hoursSinceLastMaintenance = stats?.TotalPrintHours ?? 0;
+                            double hoursRemaining = effectiveHours.Value - hoursSinceLastMaintenance;
+                            nextDue = DateTime.UtcNow.AddDays(hoursRemaining / 8.0);
+                        }
+                        else if (effectiveDays.HasValue)
+                        {
+                            nextDue = lastPerformed.AddDays(effectiveDays.Value);
+                        }
+                        else
+                        {
+                            continue;
+                        }
+
+                        int daysTillDue = (int)(nextDue - DateTime.UtcNow).TotalDays;
+
+                        if (daysUntilNextMaintenance == null || daysTillDue < daysUntilNextMaintenance)
+                        {
+                            daysUntilNextMaintenance = daysTillDue;
+                            nextMaintenanceTask = task.TaskName;
+                        }
                     }
                 }
 
@@ -1310,7 +940,8 @@ public record ResolveAlertResponse(
 
 public record CreateMaintenanceLogRequest(
     Guid PrinterId,
-    Guid? ScheduleId,
+    Guid? DeploymentId,
+    Guid? TaskId,
     string? TaskName,
     string? ComponentName,
     DateTime? PerformedAt,
@@ -1319,39 +950,6 @@ public record CreateMaintenanceLogRequest(
     int? DurationMinutes,
     decimal? Cost,
     string? PartsReplaced);
-
-public record CreateMaintenanceScheduleRequest(
-    string TaskName,
-    string? Description,
-    double? IntervalHours,
-    int? IntervalDays,
-    string? ComponentName,
-    Guid? PrinterModelId,
-    Guid? PrinterId,
-    bool? IsActive);
-
-public record BulkApplyRecommendedSchedulesRequest(
-    List<Guid> PrinterIds,
-    bool? OverwriteExisting);
-
-public record BulkCreateSchedulesRequest(
-    List<Guid> PrinterIds,
-    CreateMaintenanceScheduleRequest Schedule,
-    bool? OverwriteExisting);
-
-public record BulkScheduleOperationResponse(
-    int PrintersProcessed,
-    int SchedulesCreated,
-    int SchedulesUpdated,
-    int SchedulesSkipped);
-
-public record UpdateMaintenanceScheduleRequest(
-    string? TaskName,
-    string? Description,
-    double? IntervalHours,
-    int? IntervalDays,
-    string? ComponentName,
-    bool? IsActive);
 
 public record UpdateMaintenanceModeRequest(bool InMaintenance);
 

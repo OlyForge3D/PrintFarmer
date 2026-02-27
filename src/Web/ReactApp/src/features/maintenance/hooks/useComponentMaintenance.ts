@@ -9,7 +9,9 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { maintenanceService } from '@/services/maintenanceService';
-import type { MaintenanceSchedule, MaintenanceLog } from '@/types/maintenance';
+import { maintenancePlanService } from '@/services/maintenancePlanService';
+import type { MaintenanceLog } from '@/types/maintenance';
+import type { MaintenanceTaskDto } from '@/types/maintenance';
 import { parseISO } from 'date-fns';
 
 /**
@@ -32,8 +34,8 @@ export interface ComponentMaintenanceData {
   lastMaintenanceDate: Date | null;
   /** Recent maintenance logs for this component */
   recentLogs: MaintenanceLog[];
-  /** Active schedules for this component */
-  schedules: MaintenanceSchedule[];
+  /** Active tasks for this component */
+  tasks: MaintenanceTaskDto[];
 }
 
 /**
@@ -122,12 +124,12 @@ function normalizeComponent(component: string | null | undefined): string {
 export function useComponentMaintenance(
   options: UseComponentMaintenanceOptions = {}
 ): UseComponentMaintenanceResult {
-  const { component, printerId, enabled = true } = options;
+  const { component, enabled = true } = options;
 
-  // Fetch all schedules
-  const schedulesQuery = useQuery({
-    queryKey: ['maintenance', 'schedules', 'all'],
-    queryFn: () => maintenanceService.getAllSchedules(),
+  // Fetch all tasks from the V3 task catalog
+  const tasksQuery = useQuery({
+    queryKey: ['taskCatalog', 'list', { activeOnly: true }],
+    queryFn: () => maintenancePlanService.getCatalogTasks(undefined, true),
     enabled,
     staleTime: 30000,
   });
@@ -142,35 +144,31 @@ export function useComponentMaintenance(
 
   // Process data into component-centric view
   const result = useMemo(() => {
-    const schedules = schedulesQuery.data || [];
+    const tasks = tasksQuery.data || [];
     // alerts data is used to trigger re-computation when alerts change
     const _alerts = alertsQuery.data || [];
     void _alerts; // Suppress unused variable warning - used for dependency tracking
 
-    // Group schedules by component
+    // Group tasks by category (equivalent to old component grouping)
     const componentMap = new Map<string, {
-      schedules: MaintenanceSchedule[];
+      tasks: MaintenanceTaskDto[];
       logs: MaintenanceLog[];
       printerIds: Set<string>;
     }>();
 
-    // Process schedules
-    schedules.forEach(schedule => {
-      const comp = normalizeComponent(schedule.component);
+    // Process tasks
+    tasks.forEach(task => {
+      const comp = normalizeComponent(task.category);
       
-      // Apply filters
+      // Apply component filter
       if (component && comp !== component) return;
-      if (printerId && schedule.printerId !== printerId) return;
 
       if (!componentMap.has(comp)) {
-        componentMap.set(comp, { schedules: [], logs: [], printerIds: new Set() });
+        componentMap.set(comp, { tasks: [], logs: [], printerIds: new Set() });
       }
       
       const data = componentMap.get(comp)!;
-      data.schedules.push(schedule);
-      if (schedule.printerId) {
-        data.printerIds.add(schedule.printerId);
-      }
+      data.tasks.push(task);
     });
 
     // Build component data array
@@ -179,17 +177,15 @@ export function useComponentMaintenance(
     let totalCost = 0;
 
     componentMap.forEach((data, comp) => {
-      // Calculate average interval from schedules
-      const intervalsInDays = data.schedules
-        .map(s => s.intervalDays || (s.intervalHours ? s.intervalHours / 24 : null))
+      // Calculate average interval from tasks
+      const intervalsInDays = data.tasks
+        .map(t => t.intervalDays || (t.intervalHours ? t.intervalHours / 24 : null))
         .filter((d): d is number => d !== null);
       
       const avgInterval = intervalsInDays.length > 0
         ? intervalsInDays.reduce((a, b) => a + b, 0) / intervalsInDays.length
         : null;
 
-      // Calculate cost from logs (we'd need to fetch logs per printer for accurate cost)
-      // For now, estimate based on schedules
       const componentCost = data.logs.reduce((sum, log) => sum + (log.cost || 0), 0);
       totalCost += componentCost;
 
@@ -202,14 +198,14 @@ export function useComponentMaintenance(
 
       componentData.push({
         component: comp,
-        scheduleCount: data.schedules.length,
+        scheduleCount: data.tasks.length,
         maintenanceCount: data.logs.length,
         averageIntervalDays: avgInterval,
         totalCost: componentCost,
         printerCount: data.printerIds.size,
         lastMaintenanceDate: lastLog ? parseISO(lastLog.performedAt) : null,
         recentLogs: data.logs.slice(0, 5),
-        schedules: data.schedules,
+        tasks: data.tasks,
       });
 
       // Extract replacements
@@ -245,14 +241,14 @@ export function useComponentMaintenance(
       componentNames,
       totalMaintenanceCost: totalCost,
     };
-  }, [schedulesQuery.data, alertsQuery.data, component, printerId]);
+  }, [tasksQuery.data, alertsQuery.data, component]);
 
   return {
     ...result,
-    isLoading: schedulesQuery.isLoading || alertsQuery.isLoading,
-    error: schedulesQuery.error || alertsQuery.error,
+    isLoading: tasksQuery.isLoading || alertsQuery.isLoading,
+    error: tasksQuery.error || alertsQuery.error,
     refetch: () => {
-      schedulesQuery.refetch();
+      tasksQuery.refetch();
       alertsQuery.refetch();
     },
   };

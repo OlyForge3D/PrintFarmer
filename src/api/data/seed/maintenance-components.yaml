@@ -1,0 +1,159 @@
+# Starter parts inventory — establishes category taxonomy and common spare parts
+# Categories align with maintenance task categories for consistent grouping
+#
+# Note: inStock is NOT seeded — every deployment starts at 0.
+# recommendedMinimumStock is a suggestion the admin can adjust per farm size.
+
+# ── Hotend ──────────────────────────────────────────────
+- name: "Hardened Steel Nozzle 0.4mm"
+  category: "Hotend"
+  description: "Standard 0.4mm hardened steel nozzle for abrasive filaments"
+  recommendedMinimumStock: 2
+
+- name: "Brass Nozzle 0.4mm"
+  category: "Hotend"
+  description: "Standard 0.4mm brass nozzle for PLA/PETG"
+  recommendedMinimumStock: 2
+
+- name: "Heater Block"
+  category: "Hotend"
+  description: "Replacement heater block for standard hotend assembly"
+  recommendedMinimumStock: 1
+
+- name: "Thermistor Cartridge"
+  category: "Hotend"
+  description: "NTC 100K thermistor for hotend temperature sensing"
+  recommendedMinimumStock: 1
+
+- name: "Heater Cartridge 40W"
+  category: "Hotend"
+  description: "40W heater cartridge for hotend"
+  recommendedMinimumStock: 1
+
+- name: "Heat Break (All-Metal)"
+  category: "Hotend"
+  description: "All-metal heat break for high-temp printing"
+  recommendedMinimumStock: 1
+
+# ── Extruder ────────────────────────────────────────────
+- name: "Extruder Gear Set"
+  category: "Extruder"
+  description: "Drive gear and idler gear set for direct drive extruder"
+  recommendedMinimumStock: 1
+
+- name: "PTFE Tube (1m)"
+  category: "Extruder"
+  description: "1 meter Capricorn-style PTFE tube for Bowden setup"
+  recommendedMinimumStock: 1
+
+- name: "Pneumatic Fitting PC4-M10"
+  category: "Extruder"
+  description: "Push-fit pneumatic connector for PTFE tube"
+  recommendedMinimumStock: 2
+
+# ── Motion System ───────────────────────────────────────
+- name: "GT2 Timing Belt (1m)"
+  category: "Motion System"
+  description: "6mm GT2 timing belt, sold per meter"
+  recommendedMinimumStock: 1
+
+- name: "LM8UU Linear Bearing"
+  category: "Motion System"
+  description: "8mm linear ball bearing for smooth rod motion systems"
+  recommendedMinimumStock: 2
+
+- name: "F623ZZ Flanged Bearing"
+  category: "Motion System"
+  description: "3×10×4mm flanged bearing for idler pulleys"
+  recommendedMinimumStock: 2
+
+- name: "GT2 20T Pulley"
+  category: "Motion System"
+  description: "20-tooth GT2 timing pulley, 5mm bore"
+  recommendedMinimumStock: 1
+
+- name: "Anti-Backlash Nut (T8)"
+  category: "Motion System"
+  description: "T8 lead screw anti-backlash nut for Z-axis"
+  recommendedMinimumStock: 1
+
+# ── Bed ─────────────────────────────────────────────────
+- name: "PEI Spring Steel Sheet"
+  category: "Bed"
+  description: "Textured PEI flexible build plate (256×256mm)"
+  recommendedMinimumStock: 1
+
+- name: "Magnetic Sheet (Sticker)"
+  category: "Bed"
+  description: "Adhesive magnetic base for flexible build plate"
+  recommendedMinimumStock: 1
+
+- name: "Bed Leveling Spring Set"
+  category: "Bed"
+  description: "Set of 4 bed leveling springs"
+  recommendedMinimumStock: 1
+
+# ── Cooling System ──────────────────────────────────────
+- name: "4010 Axial Fan (24V)"
+  category: "Cooling System"
+  description: "40×10mm axial cooling fan for hotend heat sink"
+  recommendedMinimumStock: 1
+
+- name: "5015 Blower Fan (24V)"
+  category: "Cooling System"
+  description: "50×15mm radial blower fan for part cooling"
+  recommendedMinimumStock: 1
+
+# ── Electronics ─────────────────────────────────────────
+- name: "Stepper Motor (NEMA 17)"
+  category: "Electronics"
+  description: "42×42mm NEMA 17 stepper motor, 1.8° step angle"
+  recommendedMinimumStock: 1
+
+- name: "Endstop Switch (Mechanical)"
+  category: "Electronics"
+  description: "Micro limit switch for axis homing"
+  recommendedMinimumStock: 2
+
+- name: "Stepper Driver (TMC2209)"
+  category: "Electronics"
+  description: "TMC2209 silent stepper driver module"
+  recommendedMinimumStock: 1
+
+# ── Filtration ──────────────────────────────────────────
+- name: "Carbon Filter Cartridge"
+  category: "Filtration"
+  description: "Activated carbon filter for VOC absorption"
+  recommendedMinimumStock: 1
+
+- name: "HEPA Filter Element"
+  category: "Filtration"
+  description: "HEPA filter replacement for particle filtration"
+  recommendedMinimumStock: 1
+
+# ── Enclosure ───────────────────────────────────────────
+- name: "Enclosure Door Seal (1m)"
+  category: "Enclosure"
+  description: "Silicone door seal strip for heated enclosure"
+  recommendedMinimumStock: 1
+
+- name: "Enclosure Hinge Set"
+  category: "Enclosure"
+  description: "Replacement hinge set for enclosure door"
+  recommendedMinimumStock: 1
+
+# ── General ─────────────────────────────────────────────
+- name: "Thermal Paste (5g)"
+  category: "General"
+  description: "Thermal compound for heat break and heater block contact"
+  recommendedMinimumStock: 1
+
+- name: "Lubricant — Super Lube (3ml)"
+  category: "General"
+  description: "PTFE-based lubricant for linear rails and lead screws"
+  recommendedMinimumStock: 1
+
+- name: "Assorted M3 Screw Kit"
+  category: "General"
+  description: "M3 socket head cap screws, various lengths (6–20mm)"
+  recommendedMinimumStock: 1

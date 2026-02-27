@@ -47,95 +47,6 @@ public class MaintenanceModelsTests
 
     #endregion
 
-    #region MaintenanceSchedule Tests
-
-    [Fact]
-    public void MaintenanceSchedule_Constructor_SetsDefaultValues()
-    {
-        var schedule = new MaintenanceSchedule();
-
-        schedule.Id.Should().Be(Guid.Empty);
-        schedule.TaskName.Should().BeEmpty();
-        schedule.Priority.Should().Be(2);
-        schedule.IsActive.Should().BeTrue();
-        schedule.IsDefault.Should().BeFalse();
-        schedule.CreatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
-        schedule.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
-    }
-
-    [Fact]
-    public void MaintenanceSchedule_CanSetHourBasedInterval()
-    {
-        var schedule = new MaintenanceSchedule
-        {
-            TaskName = "Hotend Replacement",
-            Component = "Hotend",
-            IntervalHours = 500.0,
-            Priority = 3
-        };
-
-        schedule.TaskName.Should().Be("Hotend Replacement");
-        schedule.Component.Should().Be("Hotend");
-        schedule.IntervalHours.Should().Be(500.0);
-        schedule.IntervalDays.Should().BeNull();
-        schedule.Priority.Should().Be(3);
-    }
-
-    [Fact]
-    public void MaintenanceSchedule_CanSetDayBasedInterval()
-    {
-        var schedule = new MaintenanceSchedule
-        {
-            TaskName = "General Inspection",
-            Component = "Overall",
-            IntervalDays = 90,
-            Priority = 2
-        };
-
-        schedule.TaskName.Should().Be("General Inspection");
-        schedule.Component.Should().Be("Overall");
-        schedule.IntervalDays.Should().Be(90);
-        schedule.IntervalHours.Should().BeNull();
-        schedule.Priority.Should().Be(2);
-    }
-
-    [Fact]
-    public void MaintenanceSchedule_CanBeModelWideDefault()
-    {
-        var modelId = Guid.NewGuid();
-        var schedule = new MaintenanceSchedule
-        {
-            PrinterModelId = modelId,
-            TaskName = "Belt Tension Check",
-            IntervalHours = 250.0,
-            IsDefault = true,
-            IsActive = true
-        };
-
-        schedule.PrinterModelId.Should().Be(modelId);
-        schedule.PrinterId.Should().BeNull();
-        schedule.IsDefault.Should().BeTrue();
-    }
-
-    [Fact]
-    public void MaintenanceSchedule_CanBePrinterSpecific()
-    {
-        var printerId = Guid.NewGuid();
-        var schedule = new MaintenanceSchedule
-        {
-            PrinterId = printerId,
-            TaskName = "Custom Maintenance",
-            IntervalHours = 100.0,
-            IsDefault = false
-        };
-
-        schedule.PrinterId.Should().Be(printerId);
-        schedule.PrinterModelId.Should().BeNull();
-        schedule.IsDefault.Should().BeFalse();
-    }
-
-    #endregion
-
     #region MaintenanceLog Tests
 
     [Fact]
@@ -153,14 +64,16 @@ public class MaintenanceModelsTests
     public void MaintenanceLog_CanSetAllProperties()
     {
         var printerId = Guid.NewGuid();
-        var scheduleId = Guid.NewGuid();
+        var deploymentId = Guid.NewGuid();
+        var taskId = Guid.NewGuid();
         var alertId = Guid.NewGuid();
         var performedAt = DateTime.UtcNow.AddHours(-2);
 
         var log = new MaintenanceLog
         {
             PrinterId = printerId,
-            MaintenanceScheduleId = scheduleId,
+            PrinterMaintenanceScheduleId = deploymentId,
+            MaintenanceTaskId = taskId,
             ResolvedAlertId = alertId,
             TaskName = "Hotend Replacement",
             Notes = "Replaced worn hotend",
@@ -174,7 +87,8 @@ public class MaintenanceModelsTests
         };
 
         log.PrinterId.Should().Be(printerId);
-        log.MaintenanceScheduleId.Should().Be(scheduleId);
+        log.PrinterMaintenanceScheduleId.Should().Be(deploymentId);
+        log.MaintenanceTaskId.Should().Be(taskId);
         log.ResolvedAlertId.Should().Be(alertId);
         log.TaskName.Should().Be("Hotend Replacement");
         log.Notes.Should().Be("Replaced worn hotend");
@@ -209,12 +123,14 @@ public class MaintenanceModelsTests
     public void MaintenanceAlert_CanSetAllProperties()
     {
         var printerId = Guid.NewGuid();
-        var scheduleId = Guid.NewGuid();
+        var deploymentId = Guid.NewGuid();
+        var taskId = Guid.NewGuid();
 
         var alert = new MaintenanceAlert
         {
             PrinterId = printerId,
-            MaintenanceScheduleId = scheduleId,
+            PrinterMaintenanceScheduleId = deploymentId,
+            MaintenanceTaskId = taskId,
             Title = "Hotend Maintenance Due",
             Message = "Printer has exceeded 500 hours",
             Severity = 3,
@@ -224,7 +140,8 @@ public class MaintenanceModelsTests
         };
 
         alert.PrinterId.Should().Be(printerId);
-        alert.MaintenanceScheduleId.Should().Be(scheduleId);
+        alert.PrinterMaintenanceScheduleId.Should().Be(deploymentId);
+        alert.MaintenanceTaskId.Should().Be(taskId);
         alert.Title.Should().Be("Hotend Maintenance Due");
         alert.Message.Should().Be("Printer has exceeded 500 hours");
         alert.Severity.Should().Be(3);

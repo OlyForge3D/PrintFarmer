@@ -72,10 +72,22 @@ public class YamlSeedDataReader : IYamlSeedDataReader
         return await ReadYamlFileAsync<List<NozzleModelSeedDto>>(filePath, "nozzles");
     }
 
-    public async Task<List<MaintenanceScheduleSeedDto>> ReadMaintenanceSchedulesAsync()
+    public async Task<List<MaintenanceTaskSeedDto>> ReadMaintenanceTasksAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "maintenance-schedules.yaml");
-        return await ReadYamlFileAsync<List<MaintenanceScheduleSeedDto>>(filePath, "maintenance schedules");
+        string filePath = Path.Combine(_seedDataPath, "maintenance-tasks.yaml");
+        return await ReadYamlFileAsync<List<MaintenanceTaskSeedDto>>(filePath, "maintenance tasks");
+    }
+
+    public async Task<List<MaintenanceComponentSeedDto>> ReadMaintenanceComponentsAsync()
+    {
+        string filePath = Path.Combine(_seedDataPath, "maintenance-components.yaml");
+        return await ReadYamlFileAsync<List<MaintenanceComponentSeedDto>>(filePath, "maintenance components");
+    }
+
+    public async Task<List<MaintenancePlanSeedDto>> ReadMaintenancePlansAsync()
+    {
+        string filePath = Path.Combine(_seedDataPath, "maintenance-plans.yaml");
+        return await ReadYamlFileAsync<List<MaintenancePlanSeedDto>>(filePath, "maintenance plans");
     }
 
     private async Task<T> ReadYamlFileAsync<T>(string filePath, string dataType)

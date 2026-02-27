@@ -21,31 +21,31 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
     {
         return await _context.MaintenanceLogs
             .Include(l => l.Printer)
-            .Include(l => l.MaintenanceSchedule)
+            .Include(l => l.MaintenanceTask)
             .FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
     }
 
     public async Task<List<MaintenanceLog>> GetByPrinterIdAsync(Guid printerId, CancellationToken cancellationToken = default)
     {
         return await _context.MaintenanceLogs
-            .Include(l => l.MaintenanceSchedule)
+            .Include(l => l.MaintenanceTask)
             .Where(l => l.PrinterId == printerId)
             .OrderByDescending(l => l.PerformedAt)
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<List<MaintenanceLog>> GetByPrinterAndScheduleAsync(Guid printerId, Guid scheduleId, CancellationToken cancellationToken = default)
+    public async Task<List<MaintenanceLog>> GetByPrinterAndTaskAsync(Guid printerId, Guid taskId, CancellationToken cancellationToken = default)
     {
         return await _context.MaintenanceLogs
-            .Where(l => l.PrinterId == printerId && l.MaintenanceScheduleId == scheduleId)
+            .Where(l => l.PrinterId == printerId && l.MaintenanceTaskId == taskId)
             .OrderByDescending(l => l.PerformedAt)
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<MaintenanceLog?> GetLastMaintenanceAsync(Guid printerId, Guid scheduleId, CancellationToken cancellationToken = default)
+    public async Task<MaintenanceLog?> GetLastMaintenanceAsync(Guid printerId, Guid taskId, CancellationToken cancellationToken = default)
     {
         return await _context.MaintenanceLogs
-            .Where(l => l.PrinterId == printerId && l.MaintenanceScheduleId == scheduleId)
+            .Where(l => l.PrinterId == printerId && l.MaintenanceTaskId == taskId)
             .OrderByDescending(l => l.PerformedAt)
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -54,7 +54,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
     {
         IQueryable<MaintenanceLog> query = _context.MaintenanceLogs
             .Include(l => l.Printer)
-            .Include(l => l.MaintenanceSchedule);
+            .Include(l => l.MaintenanceTask);
 
         if (startDate.HasValue)
         {
@@ -67,6 +67,16 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
         }
 
         return await query
+            .OrderByDescending(l => l.PerformedAt)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<List<MaintenanceLog>> GetByPrinterIdsAsync(IEnumerable<Guid> printerIds, CancellationToken cancellationToken = default)
+    {
+        List<Guid> idList = printerIds.ToList();
+        return await _context.MaintenanceLogs
+            .AsNoTracking()
+            .Where(l => idList.Contains(l.PrinterId))
             .OrderByDescending(l => l.PerformedAt)
             .ToListAsync(cancellationToken);
     }

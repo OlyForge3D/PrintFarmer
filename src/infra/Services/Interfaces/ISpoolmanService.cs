@@ -66,6 +66,31 @@ public interface ISpoolmanService
     Task<SpoolmanSpoolDto?> GetSpoolByIdAsync(int spoolId, CancellationToken ct);
 
     /// <summary>
+    /// Creates a new spool in Spoolman. Returns the created spool with its ID.
+    /// </summary>
+    Task<SpoolmanSpoolDto> CreateSpoolInSpoolmanAsync(SpoolmanSpoolRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Updates an existing spool in Spoolman by its ID.
+    /// </summary>
+    Task<SpoolmanSpoolDto> UpdateSpoolInSpoolmanAsync(int spoolId, SpoolmanSpoolRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes a spool from Spoolman by its ID.
+    /// </summary>
+    Task DeleteSpoolFromSpoolmanAsync(int spoolId, CancellationToken ct);
+
+    /// <summary>
+    /// Bulk-updates multiple spools in Spoolman. Only non-null fields in the request are applied.
+    /// </summary>
+    Task<SpoolmanBulkUpdateResult> BulkUpdateSpoolsAsync(SpoolmanBulkUpdateSpoolsRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Bulk-deletes multiple spools from Spoolman. Returns success/error counts.
+    /// </summary>
+    Task<SpoolmanBulkUpdateResult> BulkDeleteSpoolsAsync(int[] spoolIds, CancellationToken ct);
+
+    /// <summary>
     /// Scans the provided network ranges for Spoolman instances.
     /// </summary>
     /// <param name="networkRanges">Enumerable of CIDR or IP ranges to scan</param>

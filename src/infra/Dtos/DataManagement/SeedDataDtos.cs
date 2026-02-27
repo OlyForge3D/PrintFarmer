@@ -32,6 +32,24 @@ public class PrinterModelSeedDto
 
     public bool HasEnclosure { get; set; }
 
+    public bool HasCarbonFilter { get; set; }
+
+    public bool HasHepaFilter { get; set; }
+
+    public bool HasBowdenTube { get; set; }
+
+    public bool HasPtfeLiner { get; set; }
+
+    public bool HasLinearRails { get; set; }
+
+    public bool HasLeadScrews { get; set; }
+
+    public bool HasToolchanger { get; set; }
+
+    public bool HasFilamentCutter { get; set; }
+
+    public bool HasHeatedChamber { get; set; }
+
     public bool SupportsAutoLeveling { get; set; }
 
     public bool MultiMaterial { get; set; }
@@ -203,33 +221,93 @@ public class NozzleModelSeedDto
 }
 
 /// <summary>
-/// DTO for maintenance schedule seed data from YAML
+/// DTO for deserializing maintenance component (spare part) seed data from YAML.
+/// Establishes initial parts inventory with category taxonomy.
+/// Note: inStock is NOT seeded — every deployment starts at 0.
 /// </summary>
-public class MaintenanceScheduleSeedDto
+public class MaintenanceComponentSeedDto
+{
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    public string Category { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public string? Sku { get; set; }
+
+    public decimal? UnitCost { get; set; }
+
+    public string? Supplier { get; set; }
+
+    public string? Url { get; set; }
+
+    public int RecommendedMinimumStock { get; set; }
+}
+
+/// <summary>\n/// DTO for global maintenance task catalog seed data from YAML.\n/// </summary>
+public class MaintenanceTaskSeedDto
 {
     [Required]
     public string TaskName { get; set; } = string.Empty;
 
     [Required]
-    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
 
-    [Required]
-    public string Component { get; set; } = string.Empty;
+    public string? Description { get; set; }
 
     public double? IntervalHours { get; set; }
 
     public int? IntervalDays { get; set; }
 
-    public int EstimatedDurationMinutes { get; set; }
+    public int? EstimatedDurationMinutes { get; set; }
+
+    public int Priority { get; set; } = 2;
+
+    public bool IsActive { get; set; } = true;
+
+    // Scope rules — nullable bools
+    public bool? RequiresEnclosure { get; set; }
+
+    public bool? RequiresCarbonFilter { get; set; }
+
+    public bool? RequiresHepaFilter { get; set; }
+
+    public bool? RequiresBowdenTube { get; set; }
+
+    public bool? RequiresPtfeLiner { get; set; }
+
+    public bool? RequiresLinearRails { get; set; }
+
+    public bool? RequiresLeadScrews { get; set; }
+
+    public bool? RequiresToolchanger { get; set; }
+
+    public bool? RequiresFilamentCutter { get; set; }
+
+    public bool? RequiresHeatedChamber { get; set; }
+
+    public bool? RequiresHeatedBed { get; set; }
+
+    public bool? RequiresMultiMaterial { get; set; }
+}
+
+/// <summary>
+/// DTO for deserializing maintenance plan seed data from YAML.
+/// Plans reference tasks by name — resolved to IDs at seed time.
+/// </summary>
+public class MaintenancePlanSeedDto
+{
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
 
     public bool IsActive { get; set; } = true;
 
     /// <summary>
-    /// Optional: Printer motion type this schedule applies to (e.g., "CoreXY", "Cartesian", "Delta").
+    /// List of task names to include in this plan (resolved by name at seed time).
     /// </summary>
-    public string? MotionType { get; set; }
-
-    public string? PrinterModel { get; set; }
-
-    public string? Manufacturer { get; set; }
+    public List<string> Tasks { get; set; } = [];
 }

@@ -122,8 +122,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Printer Maintenance Module
     public DbSet<PrinterStatistics> PrinterStatisticsSet => Set<PrinterStatistics>();
 
-    public DbSet<MaintenanceSchedule> MaintenanceSchedules => Set<MaintenanceSchedule>();
-
     public DbSet<MaintenanceLog> MaintenanceLogs => Set<MaintenanceLog>();
 
     public DbSet<MaintenanceAlert> MaintenanceAlerts => Set<MaintenanceAlert>();
@@ -136,6 +134,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MaintenanceComponent> MaintenanceComponents => Set<MaintenanceComponent>();
 
     public DbSet<MaintenanceTaskComponent> MaintenanceTaskComponents => Set<MaintenanceTaskComponent>();
+
+    public DbSet<PlanTask> PlanTasks => Set<PlanTask>();
+
+    public DbSet<PrinterMaintenanceSchedule> PrinterMaintenanceSchedules => Set<PrinterMaintenanceSchedule>();
 
     // Cameras (standalone webcams not attached to printers)
     public DbSet<Camera> Cameras => Set<Camera>();

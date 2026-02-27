@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Threading;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -864,6 +865,221 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<SpoolmanSpoolDto> CreateSpoolInSpoolmanAsync(SpoolmanSpoolRequest request, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}{SpoolApiPath}";
+        string jsonBody = BuildSpoolJson(request);
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+        HttpResponseMessage response = await http.PostAsync(url, content, cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        string json = await response.Content.ReadAsStringAsync(cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return SpoolmanJsonParser.ParseSpool(doc.RootElement);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanSpoolDto> UpdateSpoolInSpoolmanAsync(int spoolId, SpoolmanSpoolRequest request, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}{SpoolApiPath}/{spoolId}";
+        string jsonBody = BuildSpoolJson(request);
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Patch, url)
+        {
+            Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json")
+        };
+        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        string json = await response.Content.ReadAsStringAsync(cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return SpoolmanJsonParser.ParseSpool(doc.RootElement);
+    }
+
+    /// <inheritdoc/>
+    public async Task DeleteSpoolFromSpoolmanAsync(int spoolId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}{SpoolApiPath}/{spoolId}";
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Delete, url);
+        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanBulkUpdateResult> BulkUpdateSpoolsAsync(SpoolmanBulkUpdateSpoolsRequest request, CancellationToken ct)
+    {
+        if (request.SpoolIds is not { Length: > 0 })
+        {
+            return new SpoolmanBulkUpdateResult(0, 0, []);
+        }
+
+        var patch = new SpoolmanSpoolRequest
+        {
+            Location = request.Location,
+            LotNumber = request.LotNumber,
+            Price = request.Price,
+            Comment = request.Comment,
+            Archived = request.Archived,
+        };
+
+        int updated = 0;
+        int errorCount = 0;
+        List<string> errors = [];
+
+        using var semaphore = new SemaphoreSlim(5);
+        var tasks = request.SpoolIds.Select(async id =>
+        {
+            await semaphore.WaitAsync(ct);
+            try
+            {
+                await UpdateSpoolInSpoolmanAsync(id, patch, ct);
+                Interlocked.Increment(ref updated);
+            }
+            catch (Exception ex)
+            {
+                lock (errors)
+                {
+                    errors.Add($"Spool {id}: {ex.Message}");
+                }
+
+                Interlocked.Increment(ref errorCount);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        return new SpoolmanBulkUpdateResult(updated, errorCount, [.. errors]);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanBulkUpdateResult> BulkDeleteSpoolsAsync(int[] spoolIds, CancellationToken ct)
+    {
+        if (spoolIds is not { Length: > 0 })
+        {
+            return new SpoolmanBulkUpdateResult(0, 0, []);
+        }
+
+        int deleted = 0;
+        int errorCount = 0;
+        List<string> errors = [];
+
+        using var semaphore = new SemaphoreSlim(5);
+        var tasks = spoolIds.Select(async id =>
+        {
+            await semaphore.WaitAsync(ct);
+            try
+            {
+                await DeleteSpoolFromSpoolmanAsync(id, ct);
+                Interlocked.Increment(ref deleted);
+            }
+            catch (Exception ex)
+            {
+                lock (errors)
+                {
+                    errors.Add($"Spool {id}: {ex.Message}");
+                }
+
+                Interlocked.Increment(ref errorCount);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        return new SpoolmanBulkUpdateResult(deleted, errorCount, [.. errors]);
+    }
+
+    // Manual JSON construction required: this DTO deserializes from camelCase (frontend)
+    // but must serialize to snake_case with non-standard key "lot_nr" for Spoolman API.
+    private static string BuildSpoolJson(SpoolmanSpoolRequest request)
+    {
+        var body = new Dictionary<string, object?>();
+
+        if (request.FilamentId.HasValue)
+        {
+            body["filament_id"] = request.FilamentId.Value;
+        }
+
+        if (request.RemainingWeight.HasValue)
+        {
+            body["remaining_weight"] = request.RemainingWeight.Value;
+        }
+
+        if (request.InitialWeight.HasValue)
+        {
+            body["initial_weight"] = request.InitialWeight.Value;
+        }
+
+        if (request.SpoolWeight.HasValue)
+        {
+            body["spool_weight"] = request.SpoolWeight.Value;
+        }
+
+        if (request.Location != null)
+        {
+            body["location"] = request.Location;
+        }
+
+        if (request.LotNumber != null)
+        {
+            body["lot_nr"] = request.LotNumber;
+        }
+
+        if (request.Price.HasValue)
+        {
+            body["price"] = request.Price.Value;
+        }
+
+        if (request.Comment != null)
+        {
+            body["comment"] = request.Comment;
+        }
+
+        if (request.Archived.HasValue)
+        {
+            body["archived"] = request.Archived.Value;
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(body);
+    }
+
     private static async Task<JsonDocument?> TryParseJsonAsync(HttpContent content, CancellationToken ct)
     {
         try
@@ -1028,6 +1244,8 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             throw;
         }
     }
+
+    private const string SpoolApiPath = "/api/v1/spool";
 
     private static readonly JsonSerializerOptions ExternalJsonOptions = new()
     {

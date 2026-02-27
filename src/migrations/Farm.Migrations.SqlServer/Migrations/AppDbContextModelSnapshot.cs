@@ -1154,7 +1154,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double?>("HoursSinceLastMaintenance")
                         .HasColumnType("float");
 
-                    b.Property<Guid>("MaintenanceScheduleId")
+                    b.Property<Guid?>("MaintenanceTaskId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Message")
@@ -1166,6 +1166,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("float");
 
                     b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PrinterMaintenanceScheduleId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ResolvedAt")
@@ -1193,9 +1196,11 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("CreatedAt");
 
-                    b.HasIndex("MaintenanceScheduleId");
+                    b.HasIndex("MaintenanceTaskId");
 
                     b.HasIndex("PrinterId");
+
+                    b.HasIndex("PrinterMaintenanceScheduleId");
 
                     b.HasIndex("Status", "Severity");
 
@@ -1277,7 +1282,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("DurationMinutes")
                         .HasColumnType("int");
 
-                    b.Property<Guid?>("MaintenanceScheduleId")
+                    b.Property<Guid?>("MaintenanceTaskId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Notes")
@@ -1304,6 +1309,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("PrinterId1")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("PrinterMaintenanceScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("ResolvedAlertId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1314,13 +1322,15 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("MaintenanceScheduleId");
+                    b.HasIndex("MaintenanceTaskId");
 
                     b.HasIndex("PerformedAt");
 
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("PrinterId1");
+
+                    b.HasIndex("PrinterMaintenanceScheduleId");
 
                     b.HasIndex("ResolvedAlertId");
 
@@ -1379,77 +1389,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("MaintenancePlans");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceSchedule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Component")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<int?>("EstimatedDurationMinutes")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("IntervalDays")
-                        .HasColumnType("int");
-
-                    b.Property<double?>("IntervalHours")
-                        .HasColumnType("float");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDefault")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("ManufacturerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("MotionType")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("PrinterId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("PrinterModelId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("int");
-
-                    b.Property<string>("TaskName")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrinterId");
-
-                    b.HasIndex("PrinterModelId");
-
-                    b.HasIndex("IsActive", "IsDefault");
-
-                    b.ToTable("MaintenanceSchedules");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceTask", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -1470,14 +1419,47 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
-                    b.Property<Guid>("MaintenancePlanId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("bit");
 
                     b.Property<int>("Priority")
                         .HasColumnType("int");
 
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("int");
+                    b.Property<bool?>("RequiresBowdenTube")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresCarbonFilter")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresEnclosure")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresFilamentCutter")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresHeatedBed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresHeatedChamber")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresHepaFilter")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresLeadScrews")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresLinearRails")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresMultiMaterial")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresPtfeLiner")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequiresToolchanger")
+                        .HasColumnType("bit");
 
                     b.Property<string>("TaskName")
                         .IsRequired()
@@ -1489,9 +1471,11 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Category");
+
                     b.HasIndex("IsActive");
 
-                    b.HasIndex("MaintenancePlanId");
+                    b.HasIndex("TaskName");
 
                     b.ToTable("MaintenanceTasks");
                 });
@@ -1909,6 +1893,37 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("PasswordResetTokens");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PlanTask", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("IntervalDaysOverride")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("IntervalHoursOverride")
+                        .HasColumnType("float");
+
+                    b.Property<Guid>("MaintenancePlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("MaintenanceTaskId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MaintenanceTaskId");
+
+                    b.HasIndex("MaintenancePlanId", "MaintenanceTaskId")
+                        .IsUnique();
+
+                    b.ToTable("PlanTasks");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintApproval", b =>
@@ -2511,6 +2526,46 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Printers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("DeployedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("MaintenancePlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("PrinterId");
+
+                    b.HasIndex("MaintenancePlanId", "PrinterId")
+                        .IsUnique();
+
+                    b.ToTable("PrinterMaintenanceSchedules");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2526,7 +2581,22 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("DefaultBackend")
                         .HasColumnType("int");
 
+                    b.Property<bool>("HasBowdenTube")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasCarbonFilter")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("HasEnclosure")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasFilamentCutter")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
@@ -2535,6 +2605,36 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
+
+                    b.Property<bool>("HasHeatedChamber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasHepaFilter")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasLeadScrews")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasLinearRails")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasPtfeLiner")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasToolchanger")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -3657,11 +3757,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceAlert", b =>
                 {
-                    b.HasOne("Farm.Infrastructure.Domain.MaintenanceSchedule", "MaintenanceSchedule")
+                    b.HasOne("Farm.Infrastructure.Domain.MaintenanceTask", "MaintenanceTask")
                         .WithMany()
-                        .HasForeignKey("MaintenanceScheduleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("MaintenanceTaskId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
                         .WithMany()
@@ -3669,16 +3768,23 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("MaintenanceSchedule");
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", "PrinterMaintenanceSchedule")
+                        .WithMany()
+                        .HasForeignKey("PrinterMaintenanceScheduleId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
+
+                    b.Navigation("PrinterMaintenanceSchedule");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceLog", b =>
                 {
-                    b.HasOne("Farm.Infrastructure.Domain.MaintenanceSchedule", "MaintenanceSchedule")
+                    b.HasOne("Farm.Infrastructure.Domain.MaintenanceTask", "MaintenanceTask")
                         .WithMany()
-                        .HasForeignKey("MaintenanceScheduleId")
+                        .HasForeignKey("MaintenanceTaskId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
@@ -3691,14 +3797,21 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .WithMany("MaintenanceLogs")
                         .HasForeignKey("PrinterId1");
 
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", "PrinterMaintenanceSchedule")
+                        .WithMany()
+                        .HasForeignKey("PrinterMaintenanceScheduleId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Farm.Infrastructure.Domain.MaintenanceAlert", "ResolvedAlert")
                         .WithMany()
                         .HasForeignKey("ResolvedAlertId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.Navigation("MaintenanceSchedule");
+                    b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
+
+                    b.Navigation("PrinterMaintenanceSchedule");
 
                     b.Navigation("ResolvedAlert");
                 });
@@ -3725,34 +3838,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Printer");
 
                     b.Navigation("PrinterModel");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceSchedule", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany()
-                        .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("Farm.Infrastructure.Domain.PrinterModel", "PrinterModel")
-                        .WithMany()
-                        .HasForeignKey("PrinterModelId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.Navigation("Printer");
-
-                    b.Navigation("PrinterModel");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceTask", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.MaintenancePlan", "MaintenancePlan")
-                        .WithMany("Tasks")
-                        .HasForeignKey("MaintenancePlanId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("MaintenancePlan");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceTaskComponent", b =>
@@ -3855,6 +3940,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PlanTask", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.MaintenancePlan", "MaintenancePlan")
+                        .WithMany("PlanTasks")
+                        .HasForeignKey("MaintenancePlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.MaintenanceTask", "MaintenanceTask")
+                        .WithMany("PlanTasks")
+                        .HasForeignKey("MaintenanceTaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MaintenancePlan");
+
+                    b.Navigation("MaintenanceTask");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintApproval", b =>
@@ -3962,6 +4066,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Manufacturer");
 
                     b.Navigation("Model");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.MaintenancePlan", "MaintenancePlan")
+                        .WithMany()
+                        .HasForeignKey("MaintenancePlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MaintenancePlan");
+
+                    b.Navigation("Printer");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
@@ -4267,11 +4390,13 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenancePlan", b =>
                 {
-                    b.Navigation("Tasks");
+                    b.Navigation("PlanTasks");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceTask", b =>
                 {
+                    b.Navigation("PlanTasks");
+
                     b.Navigation("TaskComponents");
                 });
 

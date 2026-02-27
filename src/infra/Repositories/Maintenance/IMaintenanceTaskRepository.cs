@@ -1,16 +1,16 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Repositories.Maintenance;
 
 /// <summary>
-/// Repository for maintenance task CRUD operations within a plan.
+/// Repository for maintenance task CRUD operations (global task catalog).
 /// </summary>
 public interface IMaintenanceTaskRepository
 {
     /// <summary>
-    /// Gets all tasks for a specific plan.
+    /// Gets all tasks in the global catalog, optionally filtered.
     /// </summary>
-    Task<List<MaintenanceTask>> GetByPlanIdAsync(Guid planId, CancellationToken ct = default);
+    Task<List<MaintenanceTask>> GetAllAsync(string? category = null, bool? activeOnly = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets a task by ID, including its component associations.
@@ -51,6 +51,11 @@ public interface IMaintenanceTaskRepository
     /// Finds a specific task-component association.
     /// </summary>
     Task<MaintenanceTaskComponent?> FindTaskComponentAsync(Guid taskId, Guid componentId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets all distinct task categories, ordered alphabetically.
+    /// </summary>
+    Task<List<string>> GetCategoriesAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Persists changes to the database.

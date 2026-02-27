@@ -1,0 +1,255 @@
+# ============================================================================
+# Global Maintenance Task Catalog
+# Seeded into MaintenanceTasks table on first run.
+# Tasks use scope rules (nullable bools) to indicate which printer features
+# they apply to:  null = don't care, true = required, false = excluded
+# ============================================================================
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Hotend
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Hotend Replacement"
+  category: "Hotend"
+  description: "Replace the hotend assembly. Signs include inconsistent extrusion, temperature fluctuations, or visible wear/damage to heating block or heat break."
+  intervalHours: 1500
+  estimatedDurationMinutes: 45
+  priority: 2
+
+- taskName: "Nozzle Replacement"
+  category: "Hotend"
+  description: "Replace the nozzle. Required when experiencing clogs, poor layer adhesion, or visible nozzle wear/deformation. More frequent for abrasive filaments."
+  intervalHours: 750
+  estimatedDurationMinutes: 15
+  priority: 2
+
+- taskName: "Heat Break Inspection"
+  category: "Hotend"
+  description: "Inspect heat break for thermal paste degradation, micro-cracks, or bore contamination. Replace if extrusion becomes inconsistent at higher temperatures."
+  intervalHours: 1000
+  estimatedDurationMinutes: 30
+  priority: 2
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Bed
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Bed Surface Cleaning"
+  category: "Bed"
+  description: "Deep clean the print bed surface. Remove residue, oils, and buildup using isopropyl alcohol and appropriate cleaning solution for bed type (PEI, glass, etc.)."
+  intervalHours: 100
+  estimatedDurationMinutes: 10
+  priority: 2
+  requiresHeatedBed: true
+
+- taskName: "Bed Leveling & Calibration"
+  category: "Bed"
+  description: "Perform manual or automatic bed leveling/tramming. Ensure first layer consistency across entire build surface. Adjust Z-offset if needed."
+  intervalHours: 250
+  estimatedDurationMinutes: 20
+  priority: 3
+  requiresHeatedBed: true
+
+- taskName: "PEI Sheet Replacement"
+  category: "Bed"
+  description: "Replace PEI-coated steel sheet or PEI adhesive when surface shows significant wear, scratches, or loss of adhesion. Have spare sheet available."
+  intervalHours: 2000
+  estimatedDurationMinutes: 10
+  priority: 1
+  requiresHeatedBed: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Motion System
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Belt Tension Check"
+  category: "Motion System"
+  description: "Inspect and adjust belt tension on X/Y/Z axes. Belts should have slight tension without being overly tight. Check for fraying or wear."
+  intervalHours: 500
+  estimatedDurationMinutes: 15
+  priority: 2
+
+- taskName: "Linear Rail Lubrication"
+  category: "Motion System"
+  description: "Lubricate MGN linear rails with PTFE-based lubricant. Remove old lubricant first. Precision rails require regular maintenance for smooth motion."
+  intervalHours: 200
+  estimatedDurationMinutes: 30
+  priority: 2
+  requiresLinearRails: true
+
+- taskName: "Lead Screw Lubrication"
+  category: "Motion System"
+  description: "Lubricate Z-axis lead screws with white lithium grease. Remove old lubricant and debris first. Check for backlash or binding."
+  intervalHours: 250
+  estimatedDurationMinutes: 20
+  priority: 2
+  requiresLeadScrews: true
+
+- taskName: "Gantry Squareness Check"
+  category: "Motion System"
+  description: "Verify gantry is square and belt paths are aligned. Re-square frame/gantry if needed to prevent dimensional skew and ringing artifacts."
+  intervalHours: 1000
+  estimatedDurationMinutes: 30
+  priority: 2
+
+- taskName: "Linear Rod Lubrication"
+  category: "Motion System"
+  description: "Clean and lubricate smooth rods with PTFE-based lubricant if your printer uses rod-and-bearing motion (not linear rails)."
+  intervalHours: 200
+  estimatedDurationMinutes: 20
+  priority: 2
+  requiresLinearRails: false
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Extruder
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Extruder Gear Cleaning"
+  category: "Extruder"
+  description: "Clean extruder drive gear/hobbed bolt. Remove filament dust and debris that can cause inconsistent extrusion. Inspect for wear on gear teeth."
+  intervalHours: 250
+  estimatedDurationMinutes: 10
+  priority: 2
+
+- taskName: "Bowden Tube Replacement"
+  category: "Extruder"
+  description: "Replace PTFE Bowden tube. Signs of wear include increased stringing, retracts becoming less effective, or visible deformation at the hot end fitting."
+  intervalHours: 500
+  estimatedDurationMinutes: 20
+  priority: 2
+  requiresBowdenTube: true
+
+- taskName: "PTFE Liner Replacement"
+  category: "Extruder"
+  description: "Replace internal PTFE liner in the hotend or heat break. The liner degrades over time, especially above 240°C, causing clogs and poor extrusion."
+  intervalHours: 400
+  estimatedDurationMinutes: 25
+  priority: 2
+  requiresPtfeLiner: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Filtration
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "HEPA Filter Replacement"
+  category: "Filtration"
+  description: "Replace HEPA filter in enclosure air filtration system. Critical for removing fine particulates, especially with ABS/ASA/Nylon printing."
+  intervalDays: 180
+  estimatedDurationMinutes: 10
+  priority: 3
+  requiresHepaFilter: true
+
+- taskName: "Carbon Filter Replacement"
+  category: "Filtration"
+  description: "Replace activated carbon filter in enclosure or air filtration system. Critical for removing VOCs, especially with ABS/ASA printing."
+  intervalDays: 90
+  estimatedDurationMinutes: 10
+  priority: 3
+  requiresCarbonFilter: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Enclosure
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Enclosure Seal Inspection"
+  category: "Enclosure"
+  description: "Inspect door seals, gaskets, and panel joints for air leaks. Proper sealing is critical for chamber temperature stability and filtration effectiveness."
+  intervalDays: 180
+  estimatedDurationMinutes: 15
+  priority: 2
+  requiresEnclosure: true
+
+- taskName: "Chamber Heater Inspection"
+  category: "Enclosure"
+  description: "Inspect chamber heating elements and thermistor. Verify temperature accuracy and heating uniformity. Check wiring connections."
+  intervalDays: 180
+  estimatedDurationMinutes: 20
+  priority: 2
+  requiresHeatedChamber: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Cooling System
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Cooling Fan Inspection"
+  category: "Cooling System"
+  description: "Inspect part cooling fans, hotend fan, and electronics cooling fans. Clean dust/debris, check for bearing noise, verify proper airflow. Replace if failing."
+  intervalHours: 500
+  estimatedDurationMinutes: 20
+  priority: 2
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Electronics
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Power Supply Inspection"
+  category: "Electronics"
+  description: "Inspect power supply connections, check for loose wires, verify proper ventilation. Listen for abnormal fan noise. Check voltage output if issues suspected."
+  intervalHours: 1000
+  estimatedDurationMinutes: 15
+  priority: 2
+
+- taskName: "Wiring & Connector Inspection"
+  category: "Electronics"
+  description: "Inspect all wiring harnesses and connectors for wear, chafing, or loose connections. Pay attention to moving cables on the toolhead and heated bed."
+  intervalHours: 1000
+  estimatedDurationMinutes: 20
+  priority: 3
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Toolchanger
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Tool Dock Alignment"
+  category: "Toolchanger"
+  description: "Verify tool dock alignment and parking accuracy. Check magnets and electrical contacts. Critical for reliable multi-tool printing."
+  intervalHours: 500
+  estimatedDurationMinutes: 30
+  priority: 3
+  requiresToolchanger: true
+
+- taskName: "Tool Coupling Inspection"
+  category: "Toolchanger"
+  description: "Inspect mechanical coupling mechanism for wear. Clean contact surfaces, check for debris, and verify secure electrical connections between tools and carriage."
+  intervalHours: 500
+  estimatedDurationMinutes: 20
+  priority: 2
+  requiresToolchanger: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: Multi-Material
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "AMS / MMU Filament Path Cleaning"
+  category: "Multi-Material"
+  description: "Clean filament paths in multi-material unit (AMS, MMU, etc.). Inspect PTFE tubes for wear, lubricate gears if needed. Check filament sensors for dust."
+  intervalHours: 500
+  estimatedDurationMinutes: 30
+  priority: 2
+  requiresMultiMaterial: true
+
+- taskName: "Filament Cutter Blade Inspection"
+  category: "Multi-Material"
+  description: "Inspect filament cutter blade for dulling or damage. A worn blade causes failed cuts and tip-shaping issues during tool changes."
+  intervalHours: 500
+  estimatedDurationMinutes: 15
+  priority: 2
+  requiresFilamentCutter: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Category: General
+# ─────────────────────────────────────────────────────────────────────
+
+- taskName: "Full Mechanical Inspection"
+  category: "General"
+  description: "Comprehensive inspection of all mechanical components. Check frame for loose bolts, inspect wiring for damage, verify all connections are secure."
+  intervalDays: 180
+  estimatedDurationMinutes: 60
+  priority: 2
+
+- taskName: "Firmware Update Check"
+  category: "General"
+  description: "Check for available firmware updates from manufacturer. Review changelog for bug fixes, new features, or critical updates. Backup settings before updating."
+  intervalDays: 90
+  estimatedDurationMinutes: 30
+  priority: 1

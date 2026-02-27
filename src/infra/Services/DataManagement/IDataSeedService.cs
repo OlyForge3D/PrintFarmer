@@ -31,9 +31,21 @@ public interface IDataSeedService
     Task SeedComponentModelsAsync();
 
     /// <summary>
-    /// Load and seed maintenance schedule templates from YAML file.
+    /// Load and seed global maintenance task catalog from YAML file.
     /// </summary>
-    Task SeedMaintenanceSchedulesAsync();
+    Task SeedMaintenanceTasksAsync();
+
+    /// <summary>
+    /// Load and seed maintenance components (spare parts) from YAML file.
+    /// Establishes initial parts inventory with category taxonomy.
+    /// </summary>
+    Task SeedMaintenanceComponentsAsync();
+
+    /// <summary>
+    /// Load and seed default maintenance plans from YAML file.
+    /// Plans reference tasks by name and create PlanTask join entities.
+    /// </summary>
+    Task SeedMaintenancePlansAsync();
 
     /// <summary>
     /// Reload seed data from YAML files (for admin use)

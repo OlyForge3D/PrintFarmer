@@ -19,7 +19,7 @@ public class EfMaintenanceAlertRepository(AppDbContext context) : IMaintenanceAl
             .AsNoTracking()
             .Where(a => a.PrinterId == printerId && a.Status == MaintenanceAlertStatus.Active)
             .Include(a => a.Printer)
-            .Include(a => a.MaintenanceSchedule)
+            .Include(a => a.MaintenanceTask)
             .OrderByDescending(a => a.Severity)
             .ThenBy(a => a.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -33,7 +33,7 @@ public class EfMaintenanceAlertRepository(AppDbContext context) : IMaintenanceAl
             .AsNoTracking()
             .Where(a => a.PrinterId == printerId)
             .Include(a => a.Printer)
-            .Include(a => a.MaintenanceSchedule)
+            .Include(a => a.MaintenanceTask)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync(cancellationToken);
     }
@@ -45,7 +45,7 @@ public class EfMaintenanceAlertRepository(AppDbContext context) : IMaintenanceAl
             .AsNoTracking()
             .Where(a => a.Status == MaintenanceAlertStatus.Active)
             .Include(a => a.Printer)
-            .Include(a => a.MaintenanceSchedule)
+            .Include(a => a.MaintenanceTask)
             .OrderByDescending(a => a.Severity)
             .ThenBy(a => a.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -58,19 +58,21 @@ public class EfMaintenanceAlertRepository(AppDbContext context) : IMaintenanceAl
         return await _context.MaintenanceAlerts
             .AsNoTracking()
             .Include(a => a.Printer)
-            .Include(a => a.MaintenanceSchedule)
+            .Include(a => a.MaintenanceTask)
             .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
     }
 
     public async Task<bool> HasActiveAlertAsync(
         Guid printerId,
-        Guid scheduleId,
+        Guid taskId,
+        Guid deploymentId,
         CancellationToken cancellationToken = default)
     {
         return await _context.MaintenanceAlerts
             .AnyAsync(
                 a => a.PrinterId == printerId
-                    && a.MaintenanceScheduleId == scheduleId
+                    && a.MaintenanceTaskId == taskId
+                    && a.PrinterMaintenanceScheduleId == deploymentId
                     && a.Status == MaintenanceAlertStatus.Active,
                 cancellationToken);
     }

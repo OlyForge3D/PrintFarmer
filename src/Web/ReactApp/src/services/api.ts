@@ -73,6 +73,8 @@ import {
   SpoolmanBulkUpdateFilamentsRequest,
   SpoolmanBulkUpdateResult,
   SpoolmanUpdateFilamentRequest,
+  SpoolmanUpdateSpoolRequest,
+  SpoolmanBulkUpdateSpoolsRequest,
   FilamentCsvImportResult,
   SpoolmanDbFilamentEntry,
   SpoolmanDbMaterialEntry,
@@ -2544,6 +2546,51 @@ export class ApiClient {
   async bulkDeleteFilaments(filamentIds: number[]): Promise<SpoolmanBulkUpdateResult> {
     const response = await this.client.delete<SpoolmanBulkUpdateResult>('/spoolman/filaments/bulk', {
       data: { filamentIds },
+    });
+    return response.data;
+  }
+
+  // ---- Spool CRUD ----
+
+  /**
+   * Create a new spool in Spoolman.
+   */
+  async createSpool(request: SpoolmanUpdateSpoolRequest): Promise<SpoolmanSpool> {
+    const response = await this.client.post<SpoolmanSpool>('/spoolman/spools', request);
+    return response.data;
+  }
+
+  /**
+   * Update a single spool in Spoolman by ID.
+   * Only non-null fields are applied (PATCH semantics).
+   */
+  async updateSpool(id: number, request: SpoolmanUpdateSpoolRequest): Promise<SpoolmanSpool> {
+    const response = await this.client.patch<SpoolmanSpool>(`/spoolman/spools/${id}`, request);
+    return response.data;
+  }
+
+  /**
+   * Delete a single spool from Spoolman by ID.
+   */
+  async deleteSpool(id: number): Promise<void> {
+    await this.client.delete(`/spoolman/spools/${id}`);
+  }
+
+  /**
+   * Bulk-update multiple spools in Spoolman.
+   * Only non-null fields are applied.
+   */
+  async bulkUpdateSpools(request: SpoolmanBulkUpdateSpoolsRequest): Promise<SpoolmanBulkUpdateResult> {
+    const response = await this.client.patch<SpoolmanBulkUpdateResult>('/spoolman/spools/bulk', request);
+    return response.data;
+  }
+
+  /**
+   * Bulk-delete multiple spools from Spoolman.
+   */
+  async bulkDeleteSpools(spoolIds: number[]): Promise<SpoolmanBulkUpdateResult> {
+    const response = await this.client.delete<SpoolmanBulkUpdateResult>('/spoolman/spools/bulk', {
+      data: { spoolIds },
     });
     return response.data;
   }

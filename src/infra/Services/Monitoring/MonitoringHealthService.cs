@@ -53,9 +53,9 @@ public class MonitoringHealthService(
         var clientErrorRate = QueryPrometheusAsync(client, prometheusUrl,
             "(sum(rate(printfarmer_api_calls_total{status_class=\"4xx\"}[5m])) or vector(0)) / (sum(rate(printfarmer_api_calls_total[5m])) or vector(1)) * 100", cancellationToken);
         var p95Latency = QueryPrometheusAsync(client, prometheusUrl,
-            "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000", cancellationToken);
+            "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le))", cancellationToken);
         var p99Latency = QueryPrometheusAsync(client, prometheusUrl,
-            "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000", cancellationToken);
+            "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le))", cancellationToken);
         var memoryUsage = QueryPrometheusAsync(client, prometheusUrl,
             "dotnet_process_memory_working_set_bytes / 1024 / 1024", cancellationToken);
         var printerOps = QueryPrometheusAsync(client, prometheusUrl,
@@ -114,8 +114,8 @@ public class MonitoringHealthService(
             WrapTopEndpointAsync(() => QueryPrometheusTopEndpointAsync(client, prometheusUrl, cancellationToken)),
             QAsync("errorRatePercent", "(sum(rate(printfarmer_api_calls_total{status_class=\"5xx\"}[5m])) or vector(0)) / (sum(rate(printfarmer_api_calls_total[5m])) or vector(1)) * 100"),
             QAsync("clientErrorRatePercent", "(sum(rate(printfarmer_api_calls_total{status_class=\"4xx\"}[5m])) or vector(0)) / (sum(rate(printfarmer_api_calls_total[5m])) or vector(1)) * 100"),
-            QAsync("p95LatencyMs", "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000"),
-            QAsync("p99LatencyMs", "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le)) * 1000"),
+            QAsync("p95LatencyMs", "histogram_quantile(0.95, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le))"),
+            QAsync("p99LatencyMs", "histogram_quantile(0.99, sum(rate(printfarmer_api_call_duration_seconds_bucket[5m])) by (le))"),
             QAsync("memoryUsageMb", "dotnet_process_memory_working_set_bytes / 1024 / 1024"),
             QAsync("activePrinters", "count(count by (printer_id) (printfarmer_printer_operations_total))", asInt: true),
             QAsync("printerSuccessRatePercent", "(sum(rate(printfarmer_printer_operations_total{success=\"true\"}[24h])) or vector(0)) / (sum(rate(printfarmer_printer_operations_total[24h])) or vector(1)) * 100"),

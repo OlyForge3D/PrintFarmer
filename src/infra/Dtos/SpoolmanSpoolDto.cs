@@ -31,7 +31,8 @@ public record SpoolmanSpoolDto(
     string? Location = null,
     string? LotNumber = null,
     bool? Archived = null,
-    double? Price = null)
+    double? Price = null,
+    string? Comment = null)
 {
     public double? UsedPercent
     {
@@ -58,4 +59,72 @@ public record SpoolmanSpoolDto(
         => InitialWeightG.HasValue && InitialWeightG.Value > 0 && RemainingWeightG.HasValue
             ? RemainingWeightG.Value / InitialWeightG.Value * 100.0
             : null;
+}
+
+/// <summary>
+/// Request to create or update a spool in Spoolman via its REST API.
+/// Only non-null fields are sent (PATCH semantics for updates).
+/// </summary>
+public record SpoolmanSpoolRequest
+{
+    /// <summary>ID of the filament product this spool contains (required for create).</summary>
+    public int? FilamentId { get; init; }
+
+    /// <summary>Remaining weight of filament on the spool in grams.</summary>
+    public double? RemainingWeight { get; init; }
+
+    /// <summary>Initial (full) weight of filament on the spool in grams.</summary>
+    public double? InitialWeight { get; init; }
+
+    /// <summary>Weight of the empty spool itself in grams.</summary>
+    public double? SpoolWeight { get; init; }
+
+    /// <summary>Physical storage location of the spool.</summary>
+    public string? Location { get; init; }
+
+    /// <summary>Manufacturing lot/batch number.</summary>
+    public string? LotNumber { get; init; }
+
+    /// <summary>Purchase price of the spool.</summary>
+    public double? Price { get; init; }
+
+    /// <summary>Free-form user comment.</summary>
+    public string? Comment { get; init; }
+
+    /// <summary>Whether the spool is archived (no longer in active use).</summary>
+    public bool? Archived { get; init; }
+}
+
+/// <summary>
+/// Request to bulk-update a set of spools in Spoolman.
+/// Only non-null fields are applied to each spool.
+/// </summary>
+public record SpoolmanBulkUpdateSpoolsRequest
+{
+    /// <summary>IDs of spools to update (required).</summary>
+    public int[] SpoolIds { get; init; } = [];
+
+    /// <summary>Location to set on all selected spools (null = no change).</summary>
+    public string? Location { get; init; }
+
+    /// <summary>Lot number to set (null = no change).</summary>
+    public string? LotNumber { get; init; }
+
+    /// <summary>Price to set (null = no change).</summary>
+    public double? Price { get; init; }
+
+    /// <summary>Comment to set (null = no change).</summary>
+    public string? Comment { get; init; }
+
+    /// <summary>Archived status to set (null = no change).</summary>
+    public bool? Archived { get; init; }
+}
+
+/// <summary>
+/// Request to bulk-delete a set of spools from Spoolman.
+/// </summary>
+public record SpoolmanBulkDeleteSpoolsRequest
+{
+    /// <summary>IDs of spools to delete (required).</summary>
+    public int[] SpoolIds { get; init; } = [];
 }

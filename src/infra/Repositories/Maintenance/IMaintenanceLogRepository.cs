@@ -29,22 +29,22 @@ public interface IMaintenanceLogRepository
     Task<List<MaintenanceLog>> GetByPrinterIdAsync(Guid printerId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets all maintenance logs for a specific printer and schedule combination.
+    /// Gets all maintenance logs for a specific printer and task combination.
     /// </summary>
     /// <param name="printerId">The printer ID.</param>
-    /// <param name="scheduleId">The maintenance schedule ID.</param>
+    /// <param name="taskId">The maintenance task ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of maintenance logs for the printer and schedule.</returns>
-    Task<List<MaintenanceLog>> GetByPrinterAndScheduleAsync(Guid printerId, Guid scheduleId, CancellationToken cancellationToken = default);
+    /// <returns>List of maintenance logs for the printer and task.</returns>
+    Task<List<MaintenanceLog>> GetByPrinterAndTaskAsync(Guid printerId, Guid taskId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets the most recent maintenance log for a specific printer and schedule combination.
+    /// Gets the most recent maintenance log for a specific printer and task combination.
     /// </summary>
     /// <param name="printerId">The printer ID.</param>
-    /// <param name="scheduleId">The maintenance schedule ID.</param>
+    /// <param name="taskId">The maintenance task ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The most recent maintenance log, or null if none found.</returns>
-    Task<MaintenanceLog?> GetLastMaintenanceAsync(Guid printerId, Guid scheduleId, CancellationToken cancellationToken = default);
+    Task<MaintenanceLog?> GetLastMaintenanceAsync(Guid printerId, Guid taskId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets all maintenance logs, optionally filtered by date range.
@@ -54,6 +54,12 @@ public interface IMaintenanceLogRepository
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of all maintenance logs matching the criteria.</returns>
     Task<List<MaintenanceLog>> GetAllAsync(DateTime? startDate = null, DateTime? endDate = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets maintenance logs for a set of printers, ordered by date descending.
+    /// Batch alternative to calling <see cref="GetByPrinterIdAsync"/> per printer.
+    /// </summary>
+    Task<List<MaintenanceLog>> GetByPrinterIdsAsync(IEnumerable<Guid> printerIds, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Adds a new maintenance log entry.

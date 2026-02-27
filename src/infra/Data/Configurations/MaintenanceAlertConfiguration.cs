@@ -22,15 +22,22 @@ public class MaintenanceAlertConfiguration : IEntityTypeConfiguration<Maintenanc
             .HasForeignKey(a => a.PrinterId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Relationship with MaintenanceSchedule (required)
-        _ = builder.HasOne(a => a.MaintenanceSchedule)
+        // Relationship with PrinterMaintenanceSchedule (optional — alerts can outlive removed deployments)
+        _ = builder.HasOne(a => a.PrinterMaintenanceSchedule)
             .WithMany()
-            .HasForeignKey(a => a.MaintenanceScheduleId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .HasForeignKey(a => a.PrinterMaintenanceScheduleId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // Relationship with MaintenanceTask (optional)
+        _ = builder.HasOne(a => a.MaintenanceTask)
+            .WithMany()
+            .HasForeignKey(a => a.MaintenanceTaskId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         // Indexes for efficient queries
         _ = builder.HasIndex(a => a.PrinterId);
-        _ = builder.HasIndex(a => a.MaintenanceScheduleId);
+        _ = builder.HasIndex(a => a.PrinterMaintenanceScheduleId);
+        _ = builder.HasIndex(a => a.MaintenanceTaskId);
         _ = builder.HasIndex(a => new { a.Status, a.Severity });
         _ = builder.HasIndex(a => a.CreatedAt);
     }

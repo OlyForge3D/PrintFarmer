@@ -43,7 +43,17 @@ public interface IYamlSeedDataReader
     Task<List<NozzleModelSeedDto>> ReadNozzlesAsync();
 
     /// <summary>
-    /// Read maintenance schedules from YAML file
+    /// Read global maintenance task catalog from YAML file
     /// </summary>
-    Task<List<MaintenanceScheduleSeedDto>> ReadMaintenanceSchedulesAsync();
+    Task<List<MaintenanceTaskSeedDto>> ReadMaintenanceTasksAsync();
+
+    /// <summary>
+    /// Read maintenance components (spare parts) from YAML file
+    /// </summary>
+    Task<List<MaintenanceComponentSeedDto>> ReadMaintenanceComponentsAsync();
+
+    /// <summary>
+    /// Read default maintenance plans from YAML file
+    /// </summary>
+    Task<List<MaintenancePlanSeedDto>> ReadMaintenancePlansAsync();
 }
