@@ -48,6 +48,16 @@ public interface IAutoPrintService
     /// Enables or disables auto-print for a printer.
     /// </summary>
     Task<AutoPrintStatusDto> SetEnabledAsync(Guid printerId, bool enabled, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets auto-print status for all printers.
+    /// </summary>
+    Task<List<AutoPrintStatusDto>> GetAllStatusAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Enables or disables auto-print for all printers at once.
+    /// </summary>
+    Task<List<AutoPrintStatusDto>> SetAllEnabledAsync(bool enabled, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -323,6 +333,56 @@ public class AutoPrintService(
             enabled ? "enabled" : "disabled", printerId, printer.Name);
 
         return await BuildStatusDtoAsync(printer, ct);
+    }
+
+    public async Task<List<AutoPrintStatusDto>> GetAllStatusAsync(CancellationToken ct = default)
+    {
+        List<Printer> printers = await db.Printers.ToListAsync(ct);
+        Dictionary<Guid, int> queuedCounts = await GetQueuedCountsByPrinterAsync(printers.Select(p => p.Id), ct);
+        return printers.Select(p => BuildStatusDto(p, queuedCounts.GetValueOrDefault(p.Id))).ToList();
+    }
+
+    public async Task<List<AutoPrintStatusDto>> SetAllEnabledAsync(bool enabled, CancellationToken ct = default)
+    {
+        List<Printer> printers = await db.Printers.ToListAsync(ct);
+        foreach (Printer printer in printers)
+        {
+            printer.AutoPrintEnabled = enabled;
+            if (!enabled)
+            {
+                printer.AutoPrintState = AutoPrintState.None;
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation(
+            "[AutoPrint] Auto-print {Action} for ALL {Count} printers",
+            enabled ? "enabled" : "disabled",
+            printers.Count);
+
+        Dictionary<Guid, int> queuedCounts = await GetQueuedCountsByPrinterAsync(printers.Select(p => p.Id), ct);
+        return printers.Select(p => BuildStatusDto(p, queuedCounts.GetValueOrDefault(p.Id))).ToList();
+    }
+
+    private async Task<Dictionary<Guid, int>> GetQueuedCountsByPrinterAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+    {
+        List<Guid> ids = printerIds.ToList();
+        return await db.PrintJobs
+            .Where(j => ids.Contains(j.AssignedPrinterId!.Value) && j.Status == PrintJobStatus.Queued)
+            .GroupBy(j => j.AssignedPrinterId!.Value)
+            .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
+    }
+
+    private static AutoPrintStatusDto BuildStatusDto(Printer printer, int queuedJobCount)
+    {
+        return new AutoPrintStatusDto
+        {
+            PrinterId = printer.Id,
+            AutoPrintEnabled = printer.AutoPrintEnabled,
+            State = printer.AutoPrintState.ToString(),
+            QueuedJobCount = queuedJobCount,
+        };
     }
 
     private async Task<AutoPrintStatusDto> BuildStatusDtoAsync(Printer printer, CancellationToken ct)

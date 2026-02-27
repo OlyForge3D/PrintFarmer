@@ -41,17 +41,19 @@ public class StatisticsController(AppDbContext db) : ControllerBase
         int failed = await query.CountAsync(j => j.Status == PrintJobStatus.Failed, ct);
         int cancelled = await query.CountAsync(j => j.Status == PrintJobStatus.Cancelled, ct);
 
+        // Compute cost and filament sums in SQL; only materialize ticks for TimeSpan conversion
         decimal totalCost = await query
             .Where(j => j.ActualCost.HasValue)
             .SumAsync(j => j.ActualCost!.Value, ct);
-
         double totalFilamentGrams = await query
             .Where(j => j.ActualFilamentUsage.HasValue)
             .SumAsync(j => j.ActualFilamentUsage!.Value, ct);
 
-        double totalPrintHours = await query
+        var ticksList = await query
             .Where(j => j.ActualPrintTime.HasValue)
-            .SumAsync(j => j.ActualPrintTime!.Value.TotalHours, ct);
+            .Select(j => j.ActualPrintTime!.Value.Ticks)
+            .ToListAsync(ct);
+        double totalPrintHours = ticksList.Sum(t => TimeSpan.FromTicks(t).TotalHours);
 
         int finishedJobs = completed + failed + cancelled;
         double successRate = finishedJobs > 0 ? (double)completed / finishedJobs * 100 : 0;
@@ -155,12 +157,14 @@ public class StatisticsController(AppDbContext db) : ControllerBase
             .Select(g => new FilamentByMaterialDto
             {
                 Material = g.Key,
-                Grams = Math.Round(g.Sum(j => j.ActualFilamentUsage!.Value), 1),
+                Grams = g.Sum(j => j.ActualFilamentUsage!.Value),
             })
             .OrderByDescending(r => r.Grams)
             .ToListAsync(ct);
 
-        return Ok(rows);
+        // Round in-memory since Math.Round is not translatable by all providers
+        var result = rows.Select(r => r with { Grams = Math.Round(r.Grams, 1) }).ToList();
+        return Ok(result);
     }
 
     /// <summary>
@@ -180,18 +184,28 @@ public class StatisticsController(AppDbContext db) : ControllerBase
             query = query.Where(j => j.QueuedAt >= since);
         }
 
-        var rows = await query
-            .GroupBy(j => new { PrinterId = j.AssignedPrinterId!.Value })
+        // Select raw data; TimeSpan.TotalHours is not translatable in SQL
+        var rawJobs = await query
+            .Select(j => new
+            {
+                PrinterId = j.AssignedPrinterId!.Value,
+                j.Status,
+                PrintTimeTicks = j.ActualPrintTime.HasValue ? j.ActualPrintTime.Value.Ticks : (long?)null,
+            })
+            .ToListAsync(ct);
+
+        var rows = rawJobs
+            .GroupBy(j => j.PrinterId)
             .Select(g => new
             {
-                PrinterId = g.Key.PrinterId,
+                PrinterId = g.Key,
                 TotalJobs = g.Count(),
                 Completed = g.Count(j => j.Status == PrintJobStatus.Completed),
                 Failed = g.Count(j => j.Status == PrintJobStatus.Failed),
-                TotalHours = g.Where(j => j.ActualPrintTime.HasValue)
-                    .Sum(j => j.ActualPrintTime!.Value.TotalHours),
+                TotalHours = g.Where(j => j.PrintTimeTicks.HasValue)
+                    .Sum(j => TimeSpan.FromTicks(j.PrintTimeTicks!.Value).TotalHours),
             })
-            .ToListAsync(ct);
+            .ToList();
 
         // Get printer names
         var printerIds = rows.Select(r => r.PrinterId).ToList();

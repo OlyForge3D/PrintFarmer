@@ -118,3 +118,4 @@ src/api/data-protection-keys/
 # TLS certificates (self-signed, generated locally)
 deploy/nginx/certs/
 src/api/farm.db-journal
+.playwright-mcp/*

@@ -29,6 +29,7 @@ import {
   CameraIcon,
   NfcIcon,
   ChartIcon,
+  ExternalLinkIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -142,6 +143,12 @@ const navigation: NavigationElement[] = [
     name: 'Tags',
     href: '/admin/tags',
     icon: TagIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Webhooks',
+    href: '/admin/webhooks',
+    icon: ExternalLinkIcon,
     requiredRole: 'farm_admin'
   },
   {

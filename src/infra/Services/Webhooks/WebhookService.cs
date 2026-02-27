@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -151,6 +152,19 @@ public sealed class WebhookService(
 
             try
             {
+                // SSRF protection: resolve hostname and reject private/reserved IPs
+                if (!await IsUrlSafeAsync(subscription.Url, ct))
+                {
+                    sw.Stop();
+                    log.DurationMs = sw.ElapsedMilliseconds;
+                    log.Success = false;
+                    log.ErrorMessage = "URL resolves to a private or reserved IP address";
+                    db.WebhookDeliveryLogs.Add(log);
+                    await db.SaveChangesAsync(ct);
+                    await UpdateSubscriptionStatusAsync(db, subscription.Id, false, ct);
+                    return;
+                }
+
                 using var client = httpClientFactory.CreateClient("WebhookDelivery");
                 using var request = new HttpRequestMessage(HttpMethod.Post, subscription.Url);
                 request.Content = new StringContent(envelope, Encoding.UTF8, "application/json");
@@ -255,6 +269,51 @@ public sealed class WebhookService(
 
         var types = subscribed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return types.Contains(eventType, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static async Task<bool> IsUrlSafeAsync(string url, CancellationToken ct)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
+        {
+            return false;
+        }
+
+        if (uri.Scheme is not ("http" or "https"))
+        {
+            return false;
+        }
+
+        IPAddress[] addresses;
+        if (IPAddress.TryParse(uri.Host, out IPAddress? directIp))
+        {
+            addresses = [directIp];
+        }
+        else
+        {
+            addresses = await Dns.GetHostAddressesAsync(uri.Host, ct);
+        }
+
+        return addresses.Length > 0 && addresses.All(ip => !IsPrivateOrReserved(ip));
+    }
+
+    private static bool IsPrivateOrReserved(IPAddress ip)
+    {
+        if (IPAddress.IsLoopback(ip))
+        {
+            return true;
+        }
+
+        byte[] bytes = ip.GetAddressBytes();
+        return bytes.Length switch
+        {
+            4 => bytes[0] == 10
+                || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+                || (bytes[0] == 192 && bytes[1] == 168)
+                || (bytes[0] == 169 && bytes[1] == 254)
+                || bytes[0] == 0,
+            16 => ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || bytes.All(b => b == 0),
+            _ => false,
+        };
     }
 
     private async Task CleanupOldDeliveryLogsAsync(CancellationToken ct)

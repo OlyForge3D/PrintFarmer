@@ -48,6 +48,7 @@ import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMain
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
+import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
@@ -182,6 +183,7 @@ function AuthenticatedAppRoutes() {
           <Route path="file-health" element={<FileHealthDashboard />} />
           <Route path="slicer-profiles" element={<RouteSuspense><LazySlicerProfilesPage /></RouteSuspense>} />
           <Route path="tags" element={<TagAdminPage />} />
+          <Route path="webhooks" element={<WebhooksAdminPage />} />
           <Route path="data" element={<DataManagementPage />} />
           <Route path="system" element={<SystemDashboardPage />} />
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />

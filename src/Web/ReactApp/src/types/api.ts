@@ -2720,3 +2720,59 @@ export interface MonitoringMetricsSummaryDto {
   slicerSuccessRatePercent: number;
   timestamp: string;
 }
+
+// ── Webhooks ──────────────────────────────────────────────────
+
+export interface WebhookSubscription {
+  id: string;
+  name: string;
+  url: string;
+  hasSecret: boolean;
+  eventTypes: string;
+  isActive: boolean;
+  consecutiveFailures: number;
+  maxConsecutiveFailures: number;
+  createdAt: string;
+  lastDeliveryAt?: string;
+  lastSuccessAt?: string;
+}
+
+export interface CreateWebhookDto {
+  name: string;
+  url: string;
+  secret?: string;
+  eventTypes?: string;
+  isActive?: boolean;
+  maxConsecutiveFailures?: number;
+}
+
+export interface UpdateWebhookDto {
+  name?: string;
+  url?: string;
+  secret?: string;
+  eventTypes?: string;
+  isActive?: boolean;
+  maxConsecutiveFailures?: number;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  eventType: string;
+  statusCode?: number;
+  success: boolean;
+  errorMessage?: string;
+  attempt: number;
+  durationMs?: number;
+  createdAt: string;
+}
+
+// ── Auto-Print ──────────────────────────────────────────────
+
+export type AutoPrintState = 'None' | 'PendingReady' | 'Ready';
+
+export interface AutoPrintStatus {
+  printerId: string;
+  autoPrintEnabled: boolean;
+  state: AutoPrintState;
+  queuedJobCount: number;
+}

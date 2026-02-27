@@ -14,12 +14,14 @@ import {
   ImageIcon,
   VideoIcon
 } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { Button, Toggle } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
+import { useAutoPrintStatus, useSetAutoPrintEnabled } from '@/features/printers/hooks/useAutoPrint';
+import { toast } from 'sonner';
 import {
   canCancel,
   canEmergencyStop,
@@ -50,6 +52,20 @@ export function CollapsedPrinterCard({
   const [showFiles, setShowFiles] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
+
+  // Auto-print status
+  const { data: autoPrintStatus } = useAutoPrintStatus(printer.id);
+  const setAutoPrintEnabled = useSetAutoPrintEnabled();
+
+  const handleAutoPrintToggle = async () => {
+    const newEnabled = !(autoPrintStatus?.autoPrintEnabled ?? false);
+    try {
+      await setAutoPrintEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
+      toast.success(newEnabled ? 'Auto-print enabled' : 'Auto-print disabled');
+    } catch {
+      toast.error('Failed to toggle auto-print');
+    }
+  };
 
   // Use printer data directly (already contains merged realtime status from API)
   const isOnline = printer.isOnline ?? false;
@@ -271,6 +287,18 @@ export function CollapsedPrinterCard({
         >
           {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
         </ControlPadButton>
+      </div>
+
+      {/* Auto-print toggle */}
+      <div className="flex items-center justify-between mb-2 px-1">
+        <span className="text-xs text-pf-text-secondary">Auto-print</span>
+        <Toggle
+          checked={autoPrintStatus?.autoPrintEnabled ?? false}
+          onChange={handleAutoPrintToggle}
+          disabled={setAutoPrintEnabled.isPending}
+          size="sm"
+          aria-label={`Toggle auto-print for ${printer.name}`}
+        />
       </div>
 
       {/* Progress bar for active prints */}

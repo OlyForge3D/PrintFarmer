@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
+import { Toggle } from "@/common/components/ui/Toggle";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { Tabs } from "@/common/components/ui/Tabs";
 import { useKeyboardNavigation } from "@/common/hooks/useKeyboardNavigation";
@@ -10,9 +12,8 @@ import { useKeyboardShortcuts } from "@/common/hooks/useKeyboardShortcuts";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
 import JobDetailsModal from "../components/JobDetailsModal";
-import ModelFilteredJobsTab from "../components/ModelFilteredJobsTab";
 import QueueHistoryTab from "../components/QueueHistoryTab";
-import TimingTab from "../components/TimingTab";
+import { useAllAutoPrintStatuses, useSetAllAutoPrintEnabled } from "@/features/printers/hooks/useAutoPrint";
 import { apiClient } from "@/services/api";
 import { printerSignalRService } from "@/services/printer-signalr";
 import type { DispatchUploadProgressDto } from "@/types/api";
@@ -23,7 +24,66 @@ import type {
 
 // localStorage keys for persisting user preferences
 const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
-const VALID_TABS = ['all-jobs', 'by-model', 'timing', 'history'] as const;
+const VALID_TABS = ['print-queue', 'history'] as const;
+
+function AutoPrintGlobalToggle() {
+  const { data: statuses, isError } = useAllAutoPrintStatuses();
+  const setAllEnabled = useSetAllAutoPrintEnabled();
+
+  const totalPrinters = statuses?.length ?? 0;
+  const enabledCount = statuses?.filter(s => s.autoPrintEnabled).length ?? 0;
+  const allEnabled = totalPrinters > 0 && enabledCount === totalPrinters;
+  const isIndeterminate = enabledCount > 0 && enabledCount < totalPrinters;
+
+  const handleToggle = async () => {
+    const newEnabled = !allEnabled;
+    try {
+      await setAllEnabled.mutateAsync(newEnabled);
+      toast.success(newEnabled
+        ? `Auto-print enabled for all ${totalPrinters} printers`
+        : 'Auto-print disabled for all printers');
+    } catch {
+      toast.error('Failed to update auto-print');
+    }
+  };
+
+  if (isError) {
+    return (
+      <div className="flex items-center gap-2 shrink-0">
+        <Toggle
+          checked={false}
+          onChange={() => {}}
+          disabled
+          size="sm"
+          aria-label="Auto-print unavailable"
+        />
+        <span className="text-xs text-pf-text-secondary">Auto-print unavailable</span>
+      </div>
+    );
+  }
+
+  if (totalPrinters === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2 shrink-0">
+      <Toggle
+        checked={allEnabled}
+        onChange={handleToggle}
+        disabled={setAllEnabled.isPending}
+        size="sm"
+        aria-label="Toggle auto-print for all printers"
+      />
+      <div className="flex flex-col">
+        <span className="text-xs font-medium text-pf-text-primary">
+          Auto-print{isIndeterminate && ' (partial)'}
+        </span>
+        <span className="text-xs text-pf-text-secondary">
+          {enabledCount}/{totalPrinters} printers
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export function PrintQueueDashboardPage() {
   const queryClient = useQueryClient();
@@ -41,7 +101,7 @@ export function PrintQueueDashboardPage() {
     const fromUrl = searchParams.get('tab');
     if (fromUrl && VALID_TABS.includes(fromUrl as typeof VALID_TABS[number])) return fromUrl;
     const saved = localStorage.getItem(STORAGE_KEY_ACTIVE_TAB);
-    return saved && VALID_TABS.includes(saved as typeof VALID_TABS[number]) ? saved : 'all-jobs';
+    return saved && VALID_TABS.includes(saved as typeof VALID_TABS[number]) ? saved : 'print-queue';
   });
   
   const setActiveTab = useCallback((tab: string) => {
@@ -332,25 +392,28 @@ export function PrintQueueDashboardPage() {
       {/* Tabbed Interface */}
       <Tabs activeTab={activeTab} onTabChange={setActiveTab}>
         <Tabs.List>
-          <Tabs.Tab id="all-jobs">All Jobs</Tabs.Tab>
-          <Tabs.Tab id="by-model">By Model</Tabs.Tab>
-          <Tabs.Tab id="timing">Timing & Analytics</Tabs.Tab>
+          <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
           <Tabs.Tab id="history">History</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panels>
-          {/* Tab 1: All Jobs */}
-          <Tabs.Panel id="all-jobs">
+          {/* Tab 1: Queue */}
+          <Tabs.Panel id="print-queue">
             <div className="flex flex-col h-full w-full min-h-0">
-              {/* Filters */}
+              {/* Filters + Auto-print global toggle */}
               <div className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
-                <TableFiltersBar
-                  onStatusChange={setStatusFilter}
-                  onModelChange={setModelFilter}
-                  onMaterialChange={setMaterialFilter}
-                  onRefresh={invalidateQueue}
-                  isLoading={loading || isRefreshing}
-                />
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <TableFiltersBar
+                      onStatusChange={setStatusFilter}
+                      onModelChange={setModelFilter}
+                      onMaterialChange={setMaterialFilter}
+                      onRefresh={invalidateQueue}
+                      isLoading={loading || isRefreshing}
+                    />
+                  </div>
+                  <AutoPrintGlobalToggle />
+                </div>
               </div>
 
               {/* Jobs Table */}
@@ -376,39 +439,7 @@ export function PrintQueueDashboardPage() {
             </div>
           </Tabs.Panel>
 
-          {/* Tab 2: By Model */}
-          <Tabs.Panel id="by-model">
-            <ModelFilteredJobsTab
-              onViewAllJobs={(modelName) => {
-                setModelFilter(modelName);
-                setActiveTab("all-jobs");
-              }}
-              onJobAction={async (jobId, action) => {
-                switch (action) {
-                  case "pause":
-                    await handlePauseJob(jobId);
-                    break;
-                  case "resume":
-                    await handleResumeJob(jobId);
-                    break;
-                  case "cancel":
-                    await handleCancelJob(jobId);
-                    break;
-                  case "priority":
-                    // Priority change would require a UI dialog to select priority
-                    // For now, we'll skip this in the model cards
-                    break;
-                }
-              }}
-            />
-          </Tabs.Panel>
-
-          {/* Tab 3: Timing & Analytics */}
-          <Tabs.Panel id="timing">
-            <TimingTab />
-          </Tabs.Panel>
-
-          {/* Tab 4: History */}
+          {/* Tab 2: History */}
           <Tabs.Panel id="history">
             <QueueHistoryTab
               onRerun={handleRerunJob}

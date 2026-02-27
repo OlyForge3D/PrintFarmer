@@ -119,6 +119,31 @@ public class AutoPrintController(
             return NotFound(new { error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Get auto-print status for all printers.
+    /// </summary>
+    [HttpGet("status")]
+    [ProducesResponseType(typeof(List<AutoPrintStatusDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<AutoPrintStatusDto>>> GetAllStatusAsync(CancellationToken ct)
+    {
+        var statuses = await autoPrintService.GetAllStatusAsync(ct);
+        return Ok(statuses);
+    }
+
+    /// <summary>
+    /// Enable or disable auto-print for all printers at once.
+    /// </summary>
+    [HttpPut("enabled")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(List<AutoPrintStatusDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<AutoPrintStatusDto>>> SetAllEnabledAsync(
+        [FromBody] SetAutoPrintEnabledRequest request,
+        CancellationToken ct)
+    {
+        var statuses = await autoPrintService.SetAllEnabledAsync(request.Enabled, ct);
+        return Ok(statuses);
+    }
 }
 
 public class SetAutoPrintEnabledRequest

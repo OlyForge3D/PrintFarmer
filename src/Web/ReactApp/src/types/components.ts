@@ -4,7 +4,7 @@
  */
 
 import type { Model } from './models';
-import type { HistoryJob, HistoryStats, ModelStats, JobAction, JobStatus, JobDetails } from './queue';
+import type { HistoryJob, HistoryStats, JobAction, JobStatus, JobDetails } from './queue';
 import type { FileEntry, HarvestDiscoveredFile, HarvestOptions, FileImportStatus } from './gcode';
 import type { MachineProfile, SliceCompleteResult } from './slicer';
 import type { GcodeFile, Printer, JobQueuePrintJob } from './api';
@@ -89,45 +89,6 @@ export interface ModelFiltersBarProps {
   onSortChange: (sort: "name" | "queue" | "waitTime" | "printing") => void;
   onRefresh: () => void;
   isLoading: boolean;
-}
-
-export interface CompletionPredictionProps {
-  jobId: string;
-  estimatedCompletionTime?: string;
-}
-
-export interface JobTimelineProps {
-  jobId: string;
-  events?: Array<{ timestamp: string; event: string }>;
-}
-
-export interface JobStateHistoryViewProps {
-  jobId: string;
-  stateHistory?: Array<{ state: string; timestamp: string }>;
-}
-
-export interface DurationComparisonProps {
-  estimatedDuration: number;
-  actualDuration?: number;
-}
-
-export interface ModelFilteredJobsTabProps {
-  onViewAllJobs?: (modelName: string) => void;
-  onJobAction?: (jobId: string, action: JobAction) => Promise<void>;
-}
-
-export interface JobDetailsSectionProps {
-  jobDetails: JobDetails;
-}
-
-export interface ModelJobsCardProps {
-  modelStats: ModelStats;
-  onViewAllJobs?: (modelName: string) => void;
-  onJobAction?: (jobId: string, action: JobAction) => Promise<void>;
-}
-
-export interface ModelStatisticsPanelProps {
-  stats: ModelStats[];
 }
 
 export interface QueueHistoryTabProps {
