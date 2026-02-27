@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Dtos.Maintenance;
+﻿namespace Farm.Infrastructure.Dtos.Maintenance;
 
 /// <summary>
 /// Result of a maintenance JSON import operation.

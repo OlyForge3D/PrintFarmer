@@ -116,8 +116,10 @@ public sealed class WebhookService(
             "Delivering webhook event {EventType} to {Count} subscriptions",
             evt.EventType, matching.Count);
 
-        Task[] tasks = matching.Select(sub => DeliverAsync(sub, evt, db, ct)).ToArray();
-        await Task.WhenAll(tasks);
+        foreach (WebhookSubscription sub in matching)
+        {
+            await DeliverAsync(sub, evt, db, ct);
+        }
     }
 
     private async Task DeliverAsync(

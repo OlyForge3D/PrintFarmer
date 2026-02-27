@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Maintenance;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Microsoft.Extensions.Logging;
@@ -174,13 +174,13 @@ public class MaintenanceImportExportService(
                         {
                             await taskRepository.AddComponentAsync(
                                 new MaintenanceTaskComponent
-                            {
-                                Id = Guid.NewGuid(),
-                                MaintenanceTaskId = task.Id,
-                                MaintenanceComponentId = comp.Id,
-                                Quantity = compRef.Quantity,
-                                Notes = compRef.Notes
-                            }, ct);
+                                {
+                                    Id = Guid.NewGuid(),
+                                    MaintenanceTaskId = task.Id,
+                                    MaintenanceComponentId = comp.Id,
+                                    Quantity = compRef.Quantity,
+                                    Notes = compRef.Notes
+                                }, ct);
                         }
 
                         // existing link — leave as-is (don't overwrite quantity/notes for existing links)

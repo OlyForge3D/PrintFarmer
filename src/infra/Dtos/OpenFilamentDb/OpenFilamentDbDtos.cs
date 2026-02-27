@@ -7,7 +7,9 @@
 public record OfdBrandsResponse
 {
     public string Version { get; init; } = string.Empty;
+
     public int Count { get; init; }
+
     public List<OfdBrand> Brands { get; init; } = [];
 }
 
@@ -17,11 +19,17 @@ public record OfdBrandsResponse
 public record OfdBrand
 {
     public string Id { get; init; } = string.Empty;
+
     public string Name { get; init; } = string.Empty;
+
     public string Slug { get; init; } = string.Empty;
+
     public string? Origin { get; init; }
+
     public int MaterialCount { get; init; }
+
     public string? Path { get; init; }
+
     public string? LogoSlug { get; init; }
 }
 
@@ -32,10 +40,15 @@ public record OfdBrand
 public record OfdBrandDetailResponse
 {
     public string Id { get; init; } = string.Empty;
+
     public string Name { get; init; } = string.Empty;
+
     public string Slug { get; init; } = string.Empty;
+
     public string? Website { get; init; }
+
     public string? Origin { get; init; }
+
     public List<OfdMaterialSummary> Materials { get; init; } = [];
 }
 
@@ -45,9 +58,13 @@ public record OfdBrandDetailResponse
 public record OfdMaterialSummary
 {
     public string Id { get; init; } = string.Empty;
+
     public string Material { get; init; } = string.Empty;
+
     public string Slug { get; init; } = string.Empty;
+
     public int FilamentCount { get; init; }
+
     public string? Path { get; init; }
 }
 
@@ -58,9 +75,13 @@ public record OfdMaterialSummary
 public record OfdMaterialDetailResponse
 {
     public string Id { get; init; } = string.Empty;
+
     public string BrandId { get; init; } = string.Empty;
+
     public string Material { get; init; } = string.Empty;
+
     public string Slug { get; init; } = string.Empty;
+
     public List<OfdFilamentSummary> Filaments { get; init; } = [];
 }
 
@@ -70,9 +91,13 @@ public record OfdMaterialDetailResponse
 public record OfdFilamentSummary
 {
     public string Id { get; init; } = string.Empty;
+
     public string Name { get; init; } = string.Empty;
+
     public string Slug { get; init; } = string.Empty;
+
     public int VariantCount { get; init; }
+
     public string? Path { get; init; }
 }
 
@@ -83,18 +108,31 @@ public record OfdFilamentSummary
 public record OfdFilamentDetailResponse
 {
     public string Id { get; init; } = string.Empty;
+
     public string BrandId { get; init; } = string.Empty;
+
     public string MaterialId { get; init; } = string.Empty;
+
     public string Name { get; init; } = string.Empty;
+
     public string Slug { get; init; } = string.Empty;
+
     public string Material { get; init; } = string.Empty;
+
     public double? Density { get; init; }
+
     public double? DiameterTolerance { get; init; }
+
     public int? MinPrintTemperature { get; init; }
+
     public int? MaxPrintTemperature { get; init; }
+
     public int? MinBedTemperature { get; init; }
+
     public int? MaxBedTemperature { get; init; }
+
     public bool Discontinued { get; init; }
+
     public List<OfdVariantSummary> Variants { get; init; } = [];
 }
 
@@ -104,10 +142,15 @@ public record OfdFilamentDetailResponse
 public record OfdVariantSummary
 {
     public string Id { get; init; } = string.Empty;
+
     public string ColorName { get; init; } = string.Empty;
+
     public string? ColorHex { get; init; }
+
     public string Slug { get; init; } = string.Empty;
+
     public int SizeCount { get; init; }
+
     public string? Path { get; init; }
 }
 
@@ -118,12 +161,19 @@ public record OfdVariantSummary
 public record OfdVariantDetailResponse
 {
     public string Id { get; init; } = string.Empty;
+
     public string FilamentId { get; init; } = string.Empty;
+
     public string Slug { get; init; } = string.Empty;
+
     public string ColorName { get; init; } = string.Empty;
+
     public string? ColorHex { get; init; }
+
     public OfdTraits? Traits { get; init; }
+
     public bool Discontinued { get; init; }
+
     public List<OfdSize> Sizes { get; init; } = [];
 }
 
@@ -133,10 +183,15 @@ public record OfdVariantDetailResponse
 public record OfdTraits
 {
     public bool Translucent { get; init; }
+
     public bool Glow { get; init; }
+
     public bool Matte { get; init; }
+
     public bool Recycled { get; init; }
+
     public bool Recyclable { get; init; }
+
     public bool Biodegradable { get; init; }
 }
 
@@ -146,9 +201,13 @@ public record OfdTraits
 public record OfdSize
 {
     public string Id { get; init; } = string.Empty;
+
     public string VariantId { get; init; } = string.Empty;
+
     public double FilamentWeight { get; init; }
+
     public double Diameter { get; init; }
+
     public bool Discontinued { get; init; }
 }
 
@@ -164,19 +223,33 @@ public record OfdFlattenedEntry
     public string EntryId { get; init; } = string.Empty;
 
     public string BrandName { get; init; } = string.Empty;
+
     public string FilamentName { get; init; } = string.Empty;
+
     public string Material { get; init; } = string.Empty;
+
     public string ColorName { get; init; } = string.Empty;
+
     public string? ColorHex { get; init; }
+
     public double? Density { get; init; }
+
     public double Diameter { get; init; }
+
     public double Weight { get; init; }
+
     public int? MinPrintTemp { get; init; }
+
     public int? MaxPrintTemp { get; init; }
+
     public int? MinBedTemp { get; init; }
+
     public int? MaxBedTemp { get; init; }
+
     public bool Translucent { get; init; }
+
     public bool Glow { get; init; }
+
     public bool Matte { get; init; }
 }
 
