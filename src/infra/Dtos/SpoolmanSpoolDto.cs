@@ -65,7 +65,7 @@ public record SpoolmanSpoolDto(
 /// Request to create or update a spool in Spoolman via its REST API.
 /// Only non-null fields are sent (PATCH semantics for updates).
 /// </summary>
-public record SpoolmanCreateSpoolRequest
+public record SpoolmanSpoolRequest
 {
     /// <summary>ID of the filament product this spool contains (required for create).</summary>
     public int? FilamentId { get; init; }

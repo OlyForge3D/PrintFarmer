@@ -65,12 +65,14 @@ public class EfMaintenanceAlertRepository(AppDbContext context) : IMaintenanceAl
     public async Task<bool> HasActiveAlertAsync(
         Guid printerId,
         Guid taskId,
+        Guid deploymentId,
         CancellationToken cancellationToken = default)
     {
         return await _context.MaintenanceAlerts
             .AnyAsync(
                 a => a.PrinterId == printerId
                     && a.MaintenanceTaskId == taskId
+                    && a.PrinterMaintenanceScheduleId == deploymentId
                     && a.Status == MaintenanceAlertStatus.Active,
                 cancellationToken);
     }

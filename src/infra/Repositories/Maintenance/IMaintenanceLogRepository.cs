@@ -56,6 +56,12 @@ public interface IMaintenanceLogRepository
     Task<List<MaintenanceLog>> GetAllAsync(DateTime? startDate = null, DateTime? endDate = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets maintenance logs for a set of printers, ordered by date descending.
+    /// Batch alternative to calling <see cref="GetByPrinterIdAsync"/> per printer.
+    /// </summary>
+    Task<List<MaintenanceLog>> GetByPrinterIdsAsync(IEnumerable<Guid> printerIds, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Adds a new maintenance log entry.
     /// </summary>
     /// <param name="log">The maintenance log to add.</param>

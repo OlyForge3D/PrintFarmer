@@ -95,10 +95,16 @@ function AddSpoolFormModal({ isOpen, onClose, sourceSpool, onSuccess }: AddSpool
 
     try {
       const count = Math.max(1, Math.min(quantity, 100));
-      for (let i = 0; i < count; i++) {
-        await createMutation.mutateAsync(request);
+      const results = await Promise.allSettled(
+        Array.from({ length: count }, () => createMutation.mutateAsync(request))
+      );
+      const created = results.filter(r => r.status === 'fulfilled').length;
+      const failed = count - created;
+      if (failed > 0) {
+        toast.warning(`${created}/${count} spools created, ${failed} failed.`);
+      } else {
+        toast.success(count === 1 ? 'Spool created.' : `${count} spools created.`);
       }
-      toast.success(count === 1 ? 'Spool created.' : `${count} spools created.`);
       onSuccess();
       onClose();
     } catch (err) {

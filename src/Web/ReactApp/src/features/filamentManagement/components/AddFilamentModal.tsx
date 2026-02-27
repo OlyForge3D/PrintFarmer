@@ -95,19 +95,23 @@ function AddFilamentFormModal({ isOpen, onClose, sourceFilament, onSuccess }: Ad
       const filament = await createMutation.mutateAsync(request);
       if (spoolCount > 0) {
         const count = Math.min(spoolCount, 100);
-        let created = 0;
-        for (let i = 0; i < count; i++) {
-          try {
-            await apiClient.createSpool({
+        const results = await Promise.allSettled(
+          Array.from({ length: count }, () =>
+            apiClient.createSpool({
               filamentId: filament.id,
               initialWeight: filament.weight ?? undefined,
               remainingWeight: filament.weight ?? undefined,
               spoolWeight: filament.spoolWeight ?? undefined,
-            });
-            created++;
-          } catch { /* continue */ }
+            })
+          )
+        );
+        const created = results.filter(r => r.status === 'fulfilled').length;
+        const failed = count - created;
+        if (failed > 0) {
+          toast.warning(`Filament "${name.trim()}" created. ${created}/${count} spools created, ${failed} failed.`);
+        } else {
+          toast.success(`Filament "${name.trim()}" created with ${created} spool${created !== 1 ? 's' : ''}.`);
         }
-        toast.success(`Filament "${name.trim()}" created with ${created} spool${created !== 1 ? 's' : ''}.`);
       } else {
         toast.success(`Filament "${name.trim()}" created.`);
       }

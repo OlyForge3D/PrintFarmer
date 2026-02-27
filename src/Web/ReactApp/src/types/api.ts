@@ -2417,6 +2417,7 @@ export interface SpoolmanSpool {
   usedPercent?: number | null;
   remainingPercent?: number | null;
   price?: number | null;
+  comment?: string | null;
 }
 
 /**

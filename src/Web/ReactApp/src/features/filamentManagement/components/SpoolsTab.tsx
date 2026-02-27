@@ -17,7 +17,6 @@ import {
   DeleteIcon,
 } from '@/common/components/icons/MdiIcons';
 import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
-import { normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
@@ -299,7 +298,7 @@ export function SpoolsTab() {
   }), [spools, filters.search, filters.material, filters.vendor, filters.color, filters.location, filters.showEmpty]);
 
   const displayedSpools = useMemo((): SpoolmanSpoolDto[] => {
-    let filtered = [...filteredSpools];
+    const filtered = [...filteredSpools];
     filtered.sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1;
       const col = tableColumns.find(c => c.id === sortField);
@@ -369,7 +368,7 @@ export function SpoolsTab() {
   };
 
   const someSelected = selectedIds.size > 0;
-  const allSelected = displayedSpools.length > 0 && selectedIds.size === displayedSpools.length;
+  const allSelected = displayedSpools.length > 0 && displayedSpools.every(s => selectedIds.has(s.id));
   const toggleSelectAll = () => {
     if (allSelected) setSelectedIds(new Set());
     else setSelectedIds(new Set(displayedSpools.map(s => s.id)));

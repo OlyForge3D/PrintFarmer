@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -43,6 +43,20 @@ public class EfPrinterMaintenanceScheduleRepository(AppDbContext context) : IPri
         return await _context.PrinterMaintenanceSchedules
             .AsNoTracking()
             .Where(s => s.PrinterId == printerId && s.IsActive)
+            .Include(s => s.Printer)
+            .Include(s => s.MaintenancePlan)
+                .ThenInclude(p => p.PlanTasks)
+                    .ThenInclude(pt => pt.MaintenanceTask)
+            .OrderByDescending(s => s.DeployedAt)
+            .ToListAsync(ct);
+    }
+
+    public async Task<List<PrinterMaintenanceSchedule>> GetActiveWithTasksAsync(IEnumerable<Guid> printerIds, CancellationToken ct = default)
+    {
+        List<Guid> idList = printerIds.ToList();
+        return await _context.PrinterMaintenanceSchedules
+            .AsNoTracking()
+            .Where(s => idList.Contains(s.PrinterId) && s.IsActive)
             .Include(s => s.Printer)
             .Include(s => s.MaintenancePlan)
                 .ThenInclude(p => p.PlanTasks)

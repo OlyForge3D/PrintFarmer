@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Repositories.Maintenance;
 
@@ -17,6 +17,12 @@ public interface IPrinterMaintenanceScheduleRepository
     /// Used by the alert engine to evaluate maintenance intervals.
     /// </summary>
     Task<List<PrinterMaintenanceSchedule>> GetActiveWithTasksAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets active deployments for multiple printers with deep-loaded PlanTasks and MaintenanceTasks.
+    /// Batch alternative to calling <see cref="GetActiveWithTasksAsync(Guid, CancellationToken)"/> per printer.
+    /// </summary>
+    Task<List<PrinterMaintenanceSchedule>> GetActiveWithTasksAsync(IEnumerable<Guid> printerIds, CancellationToken ct = default);
 
     /// <summary>
     /// Gets a schedule deployment by ID, including plan and printer navigation.

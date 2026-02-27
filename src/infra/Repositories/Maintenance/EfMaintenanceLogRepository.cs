@@ -71,6 +71,16 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<List<MaintenanceLog>> GetByPrinterIdsAsync(IEnumerable<Guid> printerIds, CancellationToken cancellationToken = default)
+    {
+        List<Guid> idList = printerIds.ToList();
+        return await _context.MaintenanceLogs
+            .AsNoTracking()
+            .Where(l => idList.Contains(l.PrinterId))
+            .OrderByDescending(l => l.PerformedAt)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<MaintenanceLog> AddAsync(MaintenanceLog log, CancellationToken cancellationToken = default)
     {
         _context.MaintenanceLogs.Add(log);

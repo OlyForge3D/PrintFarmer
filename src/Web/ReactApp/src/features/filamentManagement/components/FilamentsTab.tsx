@@ -304,7 +304,7 @@ export function FilamentsTab() {
     }
   };
 
-  const allSelected = pagedFilaments.length > 0 && selectedIds.size === pagedFilaments.length;
+  const allSelected = pagedFilaments.length > 0 && pagedFilaments.every(f => selectedIds.has(f.id));
   const someSelected = selectedIds.size > 0;
 
   const handleConfirmDelete = async () => {

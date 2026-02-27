@@ -866,7 +866,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     }
 
     /// <inheritdoc/>
-    public async Task<SpoolmanSpoolDto> CreateSpoolInSpoolmanAsync(SpoolmanCreateSpoolRequest request, CancellationToken ct)
+    public async Task<SpoolmanSpoolDto> CreateSpoolInSpoolmanAsync(SpoolmanSpoolRequest request, CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
@@ -890,7 +890,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     }
 
     /// <inheritdoc/>
-    public async Task<SpoolmanSpoolDto> UpdateSpoolInSpoolmanAsync(int spoolId, SpoolmanCreateSpoolRequest request, CancellationToken ct)
+    public async Task<SpoolmanSpoolDto> UpdateSpoolInSpoolmanAsync(int spoolId, SpoolmanSpoolRequest request, CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
@@ -943,7 +943,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             return new SpoolmanBulkUpdateResult(0, 0, []);
         }
 
-        var patch = new SpoolmanCreateSpoolRequest
+        var patch = new SpoolmanSpoolRequest
         {
             Location = request.Location,
             LotNumber = request.LotNumber,
@@ -1028,7 +1028,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
     // Manual JSON construction required: this DTO deserializes from camelCase (frontend)
     // but must serialize to snake_case with non-standard key "lot_nr" for Spoolman API.
-    private static string BuildSpoolJson(SpoolmanCreateSpoolRequest request)
+    private static string BuildSpoolJson(SpoolmanSpoolRequest request)
     {
         var body = new Dictionary<string, object?>();
 

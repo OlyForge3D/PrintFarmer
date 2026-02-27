@@ -130,7 +130,7 @@ public class SpoolmanController(
     [ProducesResponseType(typeof(SpoolmanSpoolDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<SpoolmanSpoolDto>> CreateSpoolAsync(
-        [FromBody] SpoolmanCreateSpoolRequest request,
+        [FromBody] SpoolmanSpoolRequest request,
         CancellationToken ct)
     {
         if (request?.FilamentId is null or <= 0)
@@ -166,7 +166,7 @@ public class SpoolmanController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<SpoolmanSpoolDto>> UpdateSpoolAsync(
         int id,
-        [FromBody] SpoolmanCreateSpoolRequest request,
+        [FromBody] SpoolmanSpoolRequest request,
         CancellationToken ct)
     {
         try

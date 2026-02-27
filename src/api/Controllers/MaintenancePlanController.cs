@@ -4,6 +4,7 @@ using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -135,10 +136,16 @@ public class MaintenancePlanController(
             return NotFound();
         }
 
-        await _planRepository.DeleteAsync(plan, ct);
-        _logger.LogInformation("Deleted maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
-
-        return NoContent();
+        try
+        {
+            await _planRepository.DeleteAsync(plan, ct);
+            _logger.LogInformation("Deleted maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
+            return NoContent();
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { message = "Cannot delete plan with active deployments. Remove all deployments first." });
+        }
     }
 
     // ───────────────────────── Tasks ─────────────────────────

@@ -319,17 +319,13 @@ public class MaintenanceController(
             Dictionary<Guid, PrinterStatistics> statsByPrinter = allStats
                 .Where(s => printerIds.Contains(s.PrinterId))
                 .ToDictionary(s => s.PrinterId);
-            List<MaintenanceLog> allLogs = await _logRepository.GetAllAsync(cancellationToken: ct);
+            List<MaintenanceLog> allLogs = await _logRepository.GetByPrinterIdsAsync(printerIds, ct);
             ILookup<Guid, MaintenanceLog> logsByPrinter = allLogs
-                .Where(l => printerIds.Contains(l.PrinterId))
                 .ToLookup(l => l.PrinterId);
 
-            // Load V3 deployments with deep PlanTasks → Tasks for all relevant printers
-            List<PrinterMaintenanceSchedule> allDeployments = [];
-            foreach (Guid pid in printerIds)
-            {
-                allDeployments.AddRange(await _deploymentRepository.GetActiveWithTasksAsync(pid, ct));
-            }
+            // Load V3 deployments with deep PlanTasks → Tasks in a single batch query
+            List<PrinterMaintenanceSchedule> allDeployments = await _deploymentRepository
+                .GetActiveWithTasksAsync(printerIds, ct);
 
             ILookup<Guid, PrinterMaintenanceSchedule> deploymentsByPrinter = allDeployments
                 .ToLookup(d => d.PrinterId);
@@ -641,14 +637,18 @@ public class MaintenanceController(
             var logs = await _logRepository.GetAllAsync(twoYearsAgo, null, ct);
             var logsByPrinter = logs.GroupBy(l => l.PrinterId).ToDictionary(g => g.Key, g => g.ToList());
 
+            // Batch-load all deployments in one query instead of per-printer
+            var allPrinterIds = allPrinters.Select(p => p.Id).ToList();
+            var allDeployments = await _deploymentRepository.GetActiveWithTasksAsync(allPrinterIds, ct);
+            var deploymentsByPrinter = allDeployments.ToLookup(d => d.PrinterId);
+
             var result = new List<FleetPrinterStatisticsDto>();
 
             foreach (var printer in allPrinters)
             {
                 var stats = allStats.FirstOrDefault(s => s.PrinterId == printer.Id);
 
-                // Load V3 deployments with deep PlanTasks → Tasks
-                var deployments = await _deploymentRepository.GetActiveWithTasksAsync(printer.Id, ct);
+                var deployments = deploymentsByPrinter[printer.Id].ToList();
                 var printerLogs = logsByPrinter.GetValueOrDefault(printer.Id, []);
 
                 // Calculate days until next maintenance

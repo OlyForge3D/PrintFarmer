@@ -97,10 +97,11 @@ public class MaintenanceAlertEngine(
 
                 if (shouldAlert)
                 {
-                    // Check if alert already exists (dedup by printer + task)
+                    // Check if alert already exists (dedup by printer + task + deployment)
                     bool hasActiveAlert = await _alertRepo.HasActiveAlertAsync(
                         printerId,
                         task.Id,
+                        deployment.Id,
                         cancellationToken);
 
                     if (!hasActiveAlert)

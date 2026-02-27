@@ -68,12 +68,12 @@ public interface ISpoolmanService
     /// <summary>
     /// Creates a new spool in Spoolman. Returns the created spool with its ID.
     /// </summary>
-    Task<SpoolmanSpoolDto> CreateSpoolInSpoolmanAsync(SpoolmanCreateSpoolRequest request, CancellationToken ct);
+    Task<SpoolmanSpoolDto> CreateSpoolInSpoolmanAsync(SpoolmanSpoolRequest request, CancellationToken ct);
 
     /// <summary>
     /// Updates an existing spool in Spoolman by its ID.
     /// </summary>
-    Task<SpoolmanSpoolDto> UpdateSpoolInSpoolmanAsync(int spoolId, SpoolmanCreateSpoolRequest request, CancellationToken ct);
+    Task<SpoolmanSpoolDto> UpdateSpoolInSpoolmanAsync(int spoolId, SpoolmanSpoolRequest request, CancellationToken ct);
 
     /// <summary>
     /// Deletes a spool from Spoolman by its ID.

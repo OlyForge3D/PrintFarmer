@@ -41,7 +41,6 @@ export const NumberStepper: React.FC<NumberStepperProps> = ({
         onClick={() => onChange(clamp(value - step))}
         disabled={value <= min}
         aria-label="Decrease"
-        tabIndex={-1}
       >
         −
       </Button>
@@ -63,7 +62,6 @@ export const NumberStepper: React.FC<NumberStepperProps> = ({
         onClick={() => onChange(clamp(value + step))}
         disabled={value >= max}
         aria-label="Increase"
-        tabIndex={-1}
       >
         +
       </Button>

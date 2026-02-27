@@ -18,7 +18,7 @@ public class PlanTaskConfiguration : IEntityTypeConfiguration<PlanTask>
         _ = builder.HasOne(pt => pt.MaintenanceTask)
             .WithMany(t => t.PlanTasks)
             .HasForeignKey(pt => pt.MaintenanceTaskId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.Restrict);
 
         _ = builder.HasIndex(pt => new { pt.MaintenancePlanId, pt.MaintenanceTaskId }).IsUnique();
         _ = builder.HasIndex(pt => pt.MaintenanceTaskId);

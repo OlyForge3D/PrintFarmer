@@ -46,16 +46,18 @@ public interface IMaintenanceAlertRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Checks if an active alert already exists for a printer and task.
+    /// Checks if an active alert already exists for a printer, task, and deployment.
     /// Prevents duplicate alerts from being created.
     /// </summary>
     /// <param name="printerId">The printer ID</param>
     /// <param name="taskId">The maintenance task ID</param>
+    /// <param name="deploymentId">The deployment (printer × plan) ID</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if an active alert exists</returns>
     Task<bool> HasActiveAlertAsync(
         Guid printerId,
         Guid taskId,
+        Guid deploymentId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
