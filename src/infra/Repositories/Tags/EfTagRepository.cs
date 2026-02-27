@@ -243,6 +243,10 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
                 .Where(x => x.TagsId == tagId)
                 .Select(x => x.Model3DId)
                 .ToListAsync(ct),
+            "Printer" => await _dbContext.Printers
+                .Where(p => p.Tags.Any(t => t.Id == tagId))
+                .Select(p => p.Id)
+                .ToListAsync(ct),
             _ => []
         };
     }
@@ -270,6 +274,10 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
                     .Where(g => g.Count() == tagIdList.Count)
                     .Select(g => g.Key)
                     .ToListAsync(ct),
+                "Printer" => await _dbContext.Printers
+                    .Where(p => tagIdList.All(tagId => p.Tags.Any(t => t.Id == tagId)))
+                    .Select(p => p.Id)
+                    .ToListAsync(ct),
                 _ => []
             };
     }
@@ -296,6 +304,10 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
                     .Select(x => x.Model3DId)
                     .Distinct()
                     .ToListAsync(ct),
+                "Printer" => await _dbContext.Printers
+                    .Where(p => p.Tags.Any(t => tagIdList.Contains(t.Id)))
+                    .Select(p => p.Id)
+                    .ToListAsync(ct),
                 _ => []
             };
     }
@@ -316,6 +328,9 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
                 .AnyAsync(g => g.Tags.Any(t => t.Id == tagId), ct),
             "Model3D" => await Model3DTags
                 .AnyAsync(x => x.Model3DId == objectId && x.TagsId == tagId, ct),
+            "Printer" => await _dbContext.Printers
+                .Where(p => p.Id == objectId)
+                .AnyAsync(p => p.Tags.Any(t => t.Id == tagId), ct),
             _ => false
         };
     }
@@ -356,6 +371,17 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
                 }
 
                 break;
+
+            case "Printer":
+                Printer? printerToTag = await _dbContext.Printers
+                    .Include(p => p.Tags)
+                    .FirstOrDefaultAsync(p => p.Id == objectId, ct);
+                if (printerToTag != null && !printerToTag.Tags.Any(t => t.Id == tagId))
+                {
+                    printerToTag.Tags.Add(tag);
+                }
+
+                break;
         }
     }
 
@@ -392,6 +418,17 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
                     .Where(x => x.Model3DId == objectId && x.TagsId == tagId)
                     .ExecuteDeleteAsync(ct);
                 break;
+
+            case "Printer":
+                Printer? printerToUntag = await _dbContext.Printers
+                    .Include(p => p.Tags)
+                    .FirstOrDefaultAsync(p => p.Id == objectId, ct);
+                if (printerToUntag != null)
+                {
+                    printerToUntag.Tags.Remove(tag);
+                }
+
+                break;
         }
     }
 
@@ -420,6 +457,17 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
                 await Model3DTags
                     .Where(x => x.Model3DId == objectId)
                     .ExecuteDeleteAsync(ct);
+                break;
+
+            case "Printer":
+                Printer? printerToClear = await _dbContext.Printers
+                    .Include(p => p.Tags)
+                    .FirstOrDefaultAsync(p => p.Id == objectId, ct);
+                if (printerToClear != null)
+                {
+                    printerToClear.Tags.Clear();
+                }
+
                 break;
         }
     }
@@ -452,6 +500,21 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
             }
         }
 
+        // Remove from all Printers
+        List<Printer> printersWithTag = await _dbContext.Printers
+            .Include(p => p.Tags)
+            .Where(p => p.Tags.Any(t => t.Id == tagId))
+            .ToListAsync(ct);
+
+        foreach (Printer? printer in printersWithTag)
+        {
+            Tag? tagToRemove = printer.Tags.FirstOrDefault(t => t.Id == tagId);
+            if (tagToRemove != null)
+            {
+                printer.Tags.Remove(tagToRemove);
+            }
+        }
+
         // Remove from all Model3Ds via join table
         await Model3DTags
             .Where(x => x.TagsId == tagId)
@@ -477,6 +540,10 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
                 .Include(x => x.Tag)
                 .Select(x => x.Tag!)
                 .ToListAsync(ct),
+            "Printer" => await _dbContext.Printers
+                .Where(p => p.Id == objectId)
+                .SelectMany(p => p.Tags)
+                .ToListAsync(ct),
             _ => []
         };
     }
@@ -492,13 +559,17 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
             .Where(g => g.Tags.Any(t => t.Id == tagId))
             .CountAsync(ct);
 
+        int printerCount = await _dbContext.Printers
+            .Where(p => p.Tags.Any(t => t.Id == tagId))
+            .CountAsync(ct);
+
         int model3dCount = await Model3DTags
             .Where(x => x.TagsId == tagId)
             .Select(x => x.Model3DId)
             .Distinct()
             .CountAsync(ct);
 
-        return gcodeCount + model3dCount;
+        return gcodeCount + printerCount + model3dCount;
     }
 
     /// <summary>
@@ -543,6 +614,9 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
             "Model3D" => _model3DQuery is not null
                 ? await _model3DQuery.GetAllIdsAsync(ct)
                 : [],
+            "Printer" => await _dbContext.Printers
+                .Select(p => p.Id)
+                .ToListAsync(ct),
             _ => []
         };
     }

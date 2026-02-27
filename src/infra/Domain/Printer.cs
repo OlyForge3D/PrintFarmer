@@ -220,6 +220,12 @@ public class Printer
     /// </summary>
     public PrinterStatistics? Statistics { get; set; }
 
+    /// <summary>
+    /// Tags assigned to this printer for categorization and filtering.
+    /// Uses EF Core skip-navigation (many-to-many without explicit join entity).
+    /// </summary>
+    public ICollection<Tag> Tags { get; set; } = new List<Tag>();
+
     public bool InMaintenance { get; set; } = false;
 
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin

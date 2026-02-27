@@ -319,9 +319,9 @@ public class TagsController(
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile"))
+            if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile" && objectType != "Printer"))
             {
-                return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D' or 'GcodeFile'" });
+                return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D', 'GcodeFile', or 'Printer'" });
             }
 
             await _tagService.AssignTagAsync(objectId, tagId, objectType, ct);
@@ -370,9 +370,9 @@ public class TagsController(
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile"))
+            if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile" && objectType != "Printer"))
             {
-                return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D' or 'GcodeFile'" });
+                return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D', 'GcodeFile', or 'Printer'" });
             }
 
             await _tagService.RemoveTagAsync(objectId, tagId, objectType, ct);

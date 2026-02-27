@@ -3583,6 +3583,21 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("GcodeFileTag");
                 });
 
+            modelBuilder.Entity("PrinterTag", b =>
+                {
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TagsId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("PrinterId", "TagsId");
+
+                    b.HasIndex("TagsId");
+
+                    b.ToTable("PrinterTag");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.AuthAuditLog", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
@@ -4353,6 +4368,21 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.GcodeFile", null)
                         .WithMany()
                         .HasForeignKey("GcodeFileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagsId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("PrinterTag", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
