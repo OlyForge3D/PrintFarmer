@@ -1,10 +1,12 @@
 ﻿using Farm.Infrastructure.Contracts.Auth;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Notifications;
@@ -138,6 +140,7 @@ public class NotificationService(
     INotificationRepository notificationRepository,
     IUsersRepository usersRepository,
     ILogger<NotificationService> logger,
+    AppDbContext dbContext,
     IHubContext<PrinterHub>? hubContext = null,
     IWebhookService? webhookService = null) : INotificationService
 {
@@ -235,6 +238,11 @@ public class NotificationService(
 
             foreach (UserDto user in activeUsers)
             {
+                if (!await ShouldNotifyUserAsync(user.Id, type, cancellationToken))
+                {
+                    continue;
+                }
+
                 await SendNotificationAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
             }
 
@@ -341,31 +349,92 @@ public class NotificationService(
         return await notificationRepository.GetUnreadCountAsync(userId, cancellationToken);
     }
 
-    public Task<NotificationPreferences?> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default)
+    public async Task<NotificationPreferences?> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        // TODO: Implement after creating NotificationPreferencesRepository
-        logger.LogInformation("Get preferences for user {UserId}", userId);
-        return Task.FromResult<NotificationPreferences?>(null);
+        return await dbContext.NotificationPreferences
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
     }
 
-    public Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, CancellationToken cancellationToken = default)
+    public async Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, CancellationToken cancellationToken = default)
     {
-        // TODO: Implement after creating NotificationPreferencesRepository
-        logger.LogInformation("Update preferences for user {UserId}", userId);
-        return Task.CompletedTask;
+        var existing = await dbContext.NotificationPreferences
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+
+        if (existing is null)
+        {
+            preferences.Id = Guid.NewGuid().ToString();
+            preferences.UserId = userId;
+            preferences.CreatedAt = DateTime.UtcNow;
+            preferences.UpdatedAt = DateTime.UtcNow;
+            dbContext.NotificationPreferences.Add(preferences);
+        }
+        else
+        {
+            existing.EnableEmailNotifications = preferences.EnableEmailNotifications;
+            existing.EnablePushNotifications = preferences.EnablePushNotifications;
+            existing.EnableInAppNotifications = preferences.EnableInAppNotifications;
+            existing.NotifyOnCompletion = preferences.NotifyOnCompletion;
+            existing.NotifyOnFailure = preferences.NotifyOnFailure;
+            existing.NotifyOnStart = preferences.NotifyOnStart;
+            existing.NotifyOnPause = preferences.NotifyOnPause;
+            existing.Frequency = preferences.Frequency;
+            existing.RetentionDays = preferences.RetentionDays;
+            existing.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Updated notification preferences for user {UserId}", userId);
     }
 
     public async Task CleanupOldNotificationsAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            // Delete notifications older than default retention (30 days)
-            await notificationRepository.DeleteOldAsync(30, cancellationToken);
-            logger.LogInformation("Notification cleanup completed");
+            // Use the minimum retention across all user preferences, fallback to 30 days
+            var allPrefs = await dbContext.NotificationPreferences.ToListAsync(cancellationToken);
+            int retentionDays = allPrefs.Count > 0
+                ? allPrefs.Min(p => p.RetentionDays)
+                : 30;
+
+            await notificationRepository.DeleteOldAsync(retentionDays, cancellationToken);
+            logger.LogInformation("Notification cleanup completed (retention: {Days} days)", retentionDays);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error during notification cleanup");
         }
+    }
+
+    /// <summary>
+    /// Checks if a user should receive a notification of the given type based on their preferences.
+    /// If no preferences are stored, the user receives all notifications (opt-out model).
+    /// </summary>
+    private async Task<bool> ShouldNotifyUserAsync(Guid userId, NotificationType type, CancellationToken cancellationToken)
+    {
+        var prefs = await dbContext.NotificationPreferences
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+
+        if (prefs is null)
+        {
+            return true; // no preferences set — default to all enabled
+        }
+
+        if (!prefs.EnableInAppNotifications)
+        {
+            return false;
+        }
+
+        return type switch
+        {
+            NotificationType.JobStarted => prefs.NotifyOnStart,
+            NotificationType.JobCompleted => prefs.NotifyOnCompletion,
+            NotificationType.JobFailed => prefs.NotifyOnFailure,
+            NotificationType.JobPaused => prefs.NotifyOnPause,
+            NotificationType.JobResumed => prefs.NotifyOnPause, // resume follows pause preference
+            NotificationType.QueueAlert => true,                // always notify
+            NotificationType.SystemAlert => true,               // always notify
+            _ => true
+        };
     }
 }
