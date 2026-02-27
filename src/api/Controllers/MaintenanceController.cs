@@ -6,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Webhooks;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.Authorization;
@@ -30,7 +31,8 @@ public class MaintenanceController(
     IPrinterStatisticsRepository statisticsRepository,
     IMaintenanceAlertService alertService,
     IPrintersService printersService,
-    IHubContext<MaintenanceHub> maintenanceHub)
+    IHubContext<MaintenanceHub> maintenanceHub,
+    IWebhookService webhookService)
     : ControllerBase
 {
     private readonly ILogger<MaintenanceController> _logger = logger;
@@ -41,6 +43,7 @@ public class MaintenanceController(
     private readonly IMaintenanceAlertService _alertService = alertService;
     private readonly IPrintersService _printersService = printersService;
     private readonly IHubContext<MaintenanceHub> _maintenanceHub = maintenanceHub;
+    private readonly IWebhookService _webhookService = webhookService;
 
     #region Maintenance Alerts
 
@@ -219,6 +222,14 @@ public class MaintenanceController(
                 performedAt = createdLog.PerformedAt,
                 performedBy = createdLog.PerformedBy
             }, ct);
+
+            _webhookService.Enqueue("maintenance.completed", new
+            {
+                logId = createdLog.Id,
+                printerId = createdLog.PrinterId,
+                performedAt = createdLog.PerformedAt,
+                performedBy = createdLog.PerformedBy
+            });
 
             return Ok(new ResolveAlertResponse(alert, createdLog));
         }
@@ -600,6 +611,15 @@ public class MaintenanceController(
                 performedAt = createdLog.PerformedAt,
                 performedBy = createdLog.PerformedBy
             }, ct);
+
+            _webhookService.Enqueue("maintenance.completed", new
+            {
+                logId = createdLog.Id,
+                printerId = createdLog.PrinterId,
+                taskId = createdLog.MaintenanceTaskId,
+                performedAt = createdLog.PerformedAt,
+                performedBy = createdLog.PerformedBy
+            });
 
             return CreatedAtAction(nameof(GetPrinterMaintenanceLogsAsync), new { printerId = createdLog.PrinterId }, createdLog);
         }

@@ -3,6 +3,7 @@ using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -137,7 +138,8 @@ public class NotificationService(
     INotificationRepository notificationRepository,
     IUsersRepository usersRepository,
     ILogger<NotificationService> logger,
-    IHubContext<PrinterHub>? hubContext = null) : INotificationService
+    IHubContext<PrinterHub>? hubContext = null,
+    IWebhookService? webhookService = null) : INotificationService
 {
     public async Task SendJobStartedAsync(
         string jobId,
@@ -243,6 +245,21 @@ public class NotificationService(
                     "notificationreceived",
                     new { type = type.ToString(), subject, body, jobId = parsedJobId },
                     cancellationToken);
+            }
+
+            // Dispatch webhook for job events
+            var webhookEventType = type switch
+            {
+                NotificationType.JobStarted => "job.started",
+                NotificationType.JobCompleted => "job.completed",
+                NotificationType.JobFailed => "job.failed",
+                NotificationType.JobPaused => "job.paused",
+                NotificationType.JobResumed => "job.resumed",
+                _ => null
+            };
+            if (webhookEventType != null)
+            {
+                webhookService?.Enqueue(webhookEventType, new { jobId = parsedJobId, subject, body });
             }
 
             logger.LogInformation(

@@ -50,6 +50,18 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Repositories.Notifications.INotificationRepository, Farm.Infrastructure.Repositories.Notifications.EfNotificationRepository>();
         services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationService, Farm.Infrastructure.Services.Notifications.NotificationService>();
 
+        // Webhooks (event delivery via HTTP POST to external consumers)
+        services.AddSingleton<Farm.Infrastructure.Services.Webhooks.WebhookService>();
+        services.AddSingleton<Farm.Infrastructure.Services.Webhooks.IWebhookService>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.Webhooks.WebhookService>());
+        services.AddHostedService(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.Webhooks.WebhookService>());
+        services.AddHttpClient("WebhookDelivery", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer-Webhook/1.0");
+        });
+
         // Job Scheduling Service (Phase 4.1)
         services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();
 
