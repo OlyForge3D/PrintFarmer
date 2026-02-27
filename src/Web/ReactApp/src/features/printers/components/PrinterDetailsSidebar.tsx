@@ -281,6 +281,16 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
 
+  const extrudeMinTemp = (() => {
+    const material = printer.spoolInfo?.material;
+    if (material) {
+      const preset = materialPresets.find(p => p.value.toLowerCase() === material.toLowerCase());
+      if (preset && preset.hotend > 0) return preset.hotend;
+    }
+    return 210;
+  })();
+  const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
+
   // Use state values to track last known values for display (fallback when data is undefined)
   const lastKnownHotendTemp = lastKnownValues.hotendTemp;
   const lastKnownBedTemp = lastKnownValues.bedTemp;
@@ -436,6 +446,24 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       console.error(`Error during filament ${action}:`, error);
     } finally {
       setFilamentActionPending(false);
+    }
+  };
+
+  const handleExtrude = async (direction: 'extrude' | 'retract') => {
+    if (movementActionPending) return;
+
+    setMovementActionPending(true);
+    try {
+      const distance = direction === 'extrude' ? step : -step;
+      const gcode = `M83\nG1 E${distance} F300`;
+      const result = await apiClient.sendGcode(printer.id, gcode);
+      if (!result.success) {
+        console.error(`Failed to ${direction}:`, result.error);
+      }
+    } catch (error) {
+      console.error(`Error ${direction}ing:`, error);
+    } finally {
+      setMovementActionPending(false);
     }
   };
 
@@ -847,6 +875,27 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 padSize="small"
               >
                 Z-
+              </ControlPadButton>
+            </div>
+
+            {/* Extrude Pad */}
+            <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
+              <ControlPadButton
+                disabled={movementActionPending || !canExtrudeNow}
+                onClick={() => handleExtrude('extrude')}
+                title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                padSize="small"
+              >
+                E+
+              </ControlPadButton>
+              <div className="h-8 w-8" />
+              <ControlPadButton
+                disabled={movementActionPending || !canExtrudeNow}
+                onClick={() => handleExtrude('retract')}
+                title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                padSize="small"
+              >
+                E-
               </ControlPadButton>
             </div>
 

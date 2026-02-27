@@ -718,6 +718,19 @@ export class ApiClient {
   }
 
   /**
+   * Sends an arbitrary G-code command to the printer.
+   * @param printerId The printer's GUID
+   * @param command The G-code command string
+   */
+  async sendGcode(printerId: string, command: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/gcode`,
+      { command }
+    );
+    return response.data;
+  }
+
+  /**
    * Set the active spool on a printer via Spoolman.
    * @param printerId The printer's GUID
    * @param spoolId The Spoolman spool ID to activate
