@@ -289,6 +289,124 @@ public class SpoolmanController(
     }
 
     /// <summary>
+    /// Imports spools from an uploaded CSV file into Spoolman.
+    /// Creates or updates spools based on ID matching. Requires a FilamentId column for new spools.
+    /// </summary>
+    /// <param name="file">CSV file with spool data</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Import result with counts</returns>
+    /// <response code="200">Returns import result</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPost("spools/import")]
+    [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SpoolmanBulkUpdateResult>> ImportSpoolsCsvAsync(
+        IFormFile file,
+        CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { message = "No file provided" });
+        }
+
+        try
+        {
+            using StreamReader reader = new(file.OpenReadStream(), Encoding.UTF8);
+            string? headerLine = await reader.ReadLineAsync(ct);
+            if (string.IsNullOrWhiteSpace(headerLine))
+            {
+                return Ok(new SpoolmanBulkUpdateResult(0, 1, ["CSV file is empty or missing header row"]));
+            }
+
+            string[] headers = ParseCsvLine(headerLine);
+            Dictionary<string, int> headerMap = new(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < headers.Length; i++)
+            {
+                headerMap[headers[i].Trim()] = i;
+            }
+
+            bool hasId = headerMap.ContainsKey("Id");
+            bool hasFilamentId = headerMap.ContainsKey("FilamentId") || headerMap.ContainsKey("filament_id");
+            if (!hasId && !hasFilamentId)
+            {
+                return Ok(new SpoolmanBulkUpdateResult(0, 1, ["CSV must contain at least an 'Id' or 'FilamentId' column"]));
+            }
+
+            int imported = 0;
+            int errorCount = 0;
+            List<string> errors = [];
+            int rowNum = 0;
+
+            string remaining = await reader.ReadToEndAsync(ct);
+            List<string> records = SplitCsvRecords(remaining);
+
+            foreach (string record in records)
+            {
+                if (string.IsNullOrWhiteSpace(record))
+                {
+                    continue;
+                }
+
+                rowNum++;
+
+                try
+                {
+                    string[] values = ParseCsvLine(record);
+
+                    SpoolmanSpoolRequest req = new()
+                    {
+                        FilamentId = ParseIntOrNull(GetCsvValue(values, headerMap, "FilamentId"))
+                                  ?? ParseIntOrNull(GetCsvValue(values, headerMap, "filament_id")),
+                        RemainingWeight = ParseDoubleOrNull(GetCsvValue(values, headerMap, "RemainingWeightG"))
+                                       ?? ParseDoubleOrNull(GetCsvValue(values, headerMap, "RemainingWeight")),
+                        InitialWeight = ParseDoubleOrNull(GetCsvValue(values, headerMap, "InitialWeightG"))
+                                     ?? ParseDoubleOrNull(GetCsvValue(values, headerMap, "InitialWeight")),
+                        SpoolWeight = ParseDoubleOrNull(GetCsvValue(values, headerMap, "SpoolWeightG"))
+                                   ?? ParseDoubleOrNull(GetCsvValue(values, headerMap, "SpoolWeight")),
+                        Price = ParseDoubleOrNull(GetCsvValue(values, headerMap, "Price")),
+                        Location = NullIfEmpty(GetCsvValue(values, headerMap, "Location")),
+                        LotNumber = NullIfEmpty(GetCsvValue(values, headerMap, "LotNumber"))
+                                 ?? NullIfEmpty(GetCsvValue(values, headerMap, "lot_number")),
+                        Comment = NullIfEmpty(GetCsvValue(values, headerMap, "Comment")),
+                        Archived = ParseBoolOrNull(GetCsvValue(values, headerMap, "Archived")),
+                    };
+
+                    string idStr = GetCsvValue(values, headerMap, "Id");
+                    if (int.TryParse(idStr, out int existingId) && existingId > 0)
+                    {
+                        await spoolman.UpdateSpoolInSpoolmanAsync(existingId, req, ct);
+                    }
+                    else
+                    {
+                        if (req.FilamentId is null or <= 0)
+                        {
+                            errors.Add($"Row {rowNum}: FilamentId is required for new spools");
+                            errorCount++;
+                            continue;
+                        }
+
+                        await spoolman.CreateSpoolInSpoolmanAsync(req, ct);
+                    }
+
+                    imported++;
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"Row {rowNum}: {ex.Message}");
+                    errorCount++;
+                }
+            }
+
+            return Ok(new SpoolmanBulkUpdateResult(imported, errorCount, [.. errors]));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error importing Spoolman spools from CSV: {Message}", ex.Message);
+            return BadRequest(new { message = $"Import failed: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
     /// Gets all filament types (product definitions) from the connected Spoolman server.
     /// Filaments represent the product class (e.g., "PolyTerra PLA Charcoal Black"),
     /// while spools represent physical instances.
@@ -923,6 +1041,21 @@ public class SpoolmanController(
     private static string? NullIfEmpty(string value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static bool? ParseBoolOrNull(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim().ToUpperInvariant() switch
+        {
+            "TRUE" or "1" or "YES" => true,
+            "FALSE" or "0" or "NO" => false,
+            _ => null,
+        };
     }
 
     #endregion

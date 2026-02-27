@@ -9,7 +9,7 @@ import { CloseIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
 import { TaggingModal } from '@/components/TaggingModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
-import { Button } from '@/common/components/ui';
+import { Button, Select } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
 import { apiClient } from '@/services/api';
 import type { GcodeFile } from '@/types/api';
@@ -114,57 +114,36 @@ export const GcodeLibraryPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Tag Filter */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
+            <div className="flex flex-wrap gap-4 items-end">
+              {/* Tag Filter */}
+              <div className="flex-1 min-w-48 space-y-1">
                 <label className="text-xs font-medium text-pf-text-secondary">Tags</label>
-                {selectedTags.length > 0 && (
-                  <Button onClick={() => setSelectedTags([])} variant="secondary" size="sm" className="text-xs">
-                    Clear ({selectedTags.length})
-                  </Button>
-                )}
+                <TagInput
+                  selectedTags={allTags && Array.isArray(allTags) ? allTags.filter((t: ModelTag) => selectedTags.includes((t as unknown as { id: string }).id)) : []}
+                  onChange={(tags) => setSelectedTags(tags.map(t => t.id))}
+                  placeholder="Select tags..."
+                  maxTags={undefined}
+                />
               </div>
-              <TagInput
-                selectedTags={allTags && Array.isArray(allTags) ? allTags.filter((t: ModelTag) => selectedTags.includes((t as unknown as { id: string }).id)) : []}
-                onChange={(tags) => setSelectedTags(tags.map(t => t.id))}
-                placeholder="Select tags..."
-                maxTags={undefined}
-              />
-            </div>
 
-            {/* Printer Model Filter */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-pf-text-secondary">Printer Models</label>
-                {selectedPrinterModels.length > 0 && (
-                  <Button onClick={() => setSelectedPrinterModels([])} variant="secondary" size="sm" className="text-xs">
-                    Clear ({selectedPrinterModels.length})
-                  </Button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {availablePrinterModels.length === 0 ? (
-                  <p className="text-xs text-pf-text-secondary">No printer models found in current files</p>
-                ) : (
-                  availablePrinterModels.map((model) => (
-                    <Button
-                      key={model.name}
-                      type="button"
-                      variant={selectedPrinterModels.includes(model.name) ? 'primary' : 'secondary'}
-                      size="sm"
-                      onClick={() => {
-                        setSelectedPrinterModels(prev =>
-                          prev.includes(model.name)
-                            ? prev.filter(m => m !== model.name)
-                            : [...prev, model.name]
-                        );
-                      }}
-                      className="text-xs"
-                    >
+              {/* Printer Model Filter */}
+              <div className="min-w-48 space-y-1">
+                <label htmlFor="printer-model-filter" className="text-xs font-medium text-pf-text-secondary">Printer Model</label>
+                <Select
+                  id="printer-model-filter"
+                  value={selectedPrinterModels[0] ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedPrinterModels(value ? [value] : []);
+                  }}
+                >
+                  <option value="">All models</option>
+                  {availablePrinterModels.map((model) => (
+                    <option key={model.name} value={model.name}>
                       {model.name}
-                    </Button>
-                  ))
-                )}
+                    </option>
+                  ))}
+                </Select>
               </div>
             </div>
           </div>

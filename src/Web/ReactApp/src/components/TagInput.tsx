@@ -235,7 +235,7 @@ export const TagInput: React.FC<TagInputProps> = ({
     <div className={`w-full ${className}`}>
       {/* Selected Tags */}
       {selectedTags.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3 p-2 bg-gray-50 rounded-lg">
+        <div className="flex flex-wrap gap-2 mb-3 p-2 bg-pf-bg-2 rounded-md">
           {selectedTags.map(tag => (
             <TagDisplay
               key={tag.id}
@@ -268,9 +268,9 @@ export const TagInput: React.FC<TagInputProps> = ({
           aria-controls="tag-suggestions"
           aria-autocomplete="list"
           aria-haspopup="listbox"
-          className={`w-full px-4 py-2 border-2 border-gray-300 rounded-lg transition-colors duration-200 focus:outline-hidden focus:border-indigo-500 ${
-            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-          } ${error ? 'border-red-500' : ''}`}
+          className={`w-full px-3 py-1.5 text-sm border border-pf-border rounded-md transition-colors duration-200 focus:outline-hidden focus:border-pf-accent text-pf-text-primary ${
+            disabled ? 'bg-pf-bg-2 cursor-not-allowed' : 'bg-pf-bg-1'
+          } ${error ? 'border-pf-error' : ''}`}
         />
 
         {isLoading && (
@@ -285,7 +285,7 @@ export const TagInput: React.FC<TagInputProps> = ({
             ref={suggestionsRef}
             id="tag-suggestions"
             role="listbox"
-            className="absolute top-full left-0 right-0 mt-2 bg-white border-2 border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto"
+            className="absolute top-full left-0 right-0 mt-2 bg-pf-bg-1 border border-pf-border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto"
           >
             {currentSuggestions.map((suggestion, index) => (
               <Button
@@ -294,14 +294,14 @@ export const TagInput: React.FC<TagInputProps> = ({
                 variant={index === selectedSuggestionIndex ? 'primary' : 'subtle'}
                 className={`w-full px-4 py-2 text-left justify-between flex items-center ${
                   index === selectedSuggestionIndex
-                    ? 'bg-indigo-100 text-indigo-900'
-                    : 'hover:bg-gray-100'
+                    ? 'bg-pf-accent-bg text-pf-accent'
+                    : 'hover:bg-pf-bg-2'
                 }`}
                 aria-selected={index === selectedSuggestionIndex}
                 role="option"
               >
                 <span>{suggestion.name}</span>
-                <span className="text-xs text-gray-500">({suggestion.usageCount})</span>
+                <span className="text-xs text-pf-text-secondary">({suggestion.usageCount})</span>
               </Button>
             ))}
           </div>
@@ -309,22 +309,22 @@ export const TagInput: React.FC<TagInputProps> = ({
 
         {/* Empty State */}
         {showSuggestions && currentSuggestions.length === 0 && inputValue.trim() && !isLoading && (
-          <div className="absolute top-full left-0 right-0 mt-2 bg-white border-2 border-gray-300 rounded-lg shadow-lg p-4 text-center text-gray-500 z-50">
-            No tags found. Press Enter to create "{inputValue.trim()}"
+          <div className="absolute top-full left-0 right-0 mt-2 bg-pf-bg-1 border border-pf-border rounded-md shadow-lg p-4 text-center text-pf-text-secondary z-50">
+            No tags found. Press Enter to create &quot;{inputValue.trim()}&quot;
           </div>
         )}
       </div>
 
       {/* Error Message */}
       {error && (
-        <div className="mt-2 text-sm text-red-600" role="alert">
+        <div className="mt-2 text-sm text-pf-error" role="alert">
           {error}
         </div>
       )}
 
       {/* Helper Text */}
       {maxTags && (
-        <div className="mt-2 text-xs text-gray-500">
+        <div className="mt-2 text-xs text-pf-text-secondary">
           {selectedTags.length} / {maxTags} tags
         </div>
       )}

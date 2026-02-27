@@ -1,4 +1,4 @@
-import { useState, useEffect, useTransition, useCallback, useMemo } from 'react';
+import { useState, useEffect, useTransition, useCallback, useMemo, useRef } from 'react';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import {
   FilterIcon,
@@ -11,13 +11,14 @@ import {
   GearIcon,
   CloseIcon,
   DownloadIcon,
+  UploadIcon,
   ArrowUpIcon,
   ArrowDownIcon,
   PlusIcon,
   DeleteIcon,
 } from '@/common/components/icons/MdiIcons';
 import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
-import { Button, Checkbox, Select } from '@/common/components/ui';
+import { Button, Checkbox, Select, FileUpload } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
@@ -27,7 +28,7 @@ import { EditSpoolModal } from '@/features/filamentManagement/components/EditSpo
 import { AddSpoolModal } from '@/features/filamentManagement/components/AddSpoolModal';
 import { BulkEditSpoolsModal } from '@/features/filamentManagement/components/BulkEditSpoolsModal';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
-import { useDeleteSpool, useBulkDeleteSpools } from '@/common/hooks/useApi';
+import { useDeleteSpool, useBulkDeleteSpools, useImportSpoolmanSpoolsCsv } from '@/common/hooks/useApi';
 import { formatSpoolWeight, getUsagePercentage, getRemainingPercentage } from '@/features/filamentManagement/utils/formatters';
 import type { SpoolmanSpoolDto, SpoolTableColumn } from '@/features/filamentManagement/types';
 import { apiClient } from '@/services/api';
@@ -53,6 +54,8 @@ export function SpoolsTab() {
   const [loading, setLoading] = useState(true);
   const [spoolmanError, setSpoolmanError] = useState<string | null>(null);
   const [spoolmanBaseUrl, setSpoolmanBaseUrl] = useState('');
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
+  const importCsvMutation = useImportSpoolmanSpoolsCsv();
   const [,startTransition] = useTransition();
   const [filters, setFilters] = useState<FilterState>({
     search: '',
@@ -367,6 +370,7 @@ export function SpoolsTab() {
     URL.revokeObjectURL(url);
   };
 
+
   const someSelected = selectedIds.size > 0;
   const allSelected = displayedSpools.length > 0 && displayedSpools.every(s => selectedIds.has(s.id));
   const toggleSelectAll = () => {
@@ -428,6 +432,24 @@ export function SpoolsTab() {
 
   return (
     <div className="space-y-4">
+      <FileUpload
+        ref={csvFileInputRef}
+        accept=".csv"
+        className="hidden"
+        label="Import spools from CSV file"
+        onChange={(files) => {
+          const file = files?.[0];
+          if (!file) return;
+          importCsvMutation.mutateAsync(file).then((result) => {
+            toast.success(`CSV import: ${result.updatedCount} imported, ${result.errorCount} errors.`);
+            reload();
+          }).catch(() => {
+            toast.error('Failed to import spools from CSV.');
+          });
+          if (csvFileInputRef.current) csvFileInputRef.current.value = '';
+        }}
+      />
+
       {health && (!health.configured || !health.success) && (
         <div className="bg-amber-900/40 border border-amber-700 text-amber-200 px-4 py-3 rounded-sm">
           {!health.configured ? (
@@ -448,6 +470,15 @@ export function SpoolsTab() {
             title="Export spools to CSV"
           >
             <DownloadIcon className="h-4 w-4 mr-1" />
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            title="Import spools from CSV file"
+            disabled={importCsvMutation.isPending}
+            onClick={() => csvFileInputRef.current?.click()}
+          >
+            <UploadIcon className="h-4 w-4 mr-1" />
           </Button>
           <Button
             variant="primary"

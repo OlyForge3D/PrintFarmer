@@ -945,6 +945,12 @@ export function useImportSpoolmanFilamentsCsv() {
   });
 }
 
+export function useImportSpoolmanSpoolsCsv() {
+  return useMutation<SpoolmanBulkUpdateResult, ApiError, File>({
+    mutationFn: (file: File) => apiClient.importSpoolmanSpoolsCsv(file),
+  });
+}
+
 export function useSyncExternalMaterials() {
   const queryClient = useQueryClient();
 

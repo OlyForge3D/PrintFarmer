@@ -2619,6 +2619,20 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Import spools from a CSV file into Spoolman.
+   */
+  async importSpoolmanSpoolsCsv(file: File): Promise<SpoolmanBulkUpdateResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await this.client.post<SpoolmanBulkUpdateResult>(
+      '/spoolman/spools/import',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+    return response.data;
+  }
+
   // ============ Settings API methods ============
 
   /**

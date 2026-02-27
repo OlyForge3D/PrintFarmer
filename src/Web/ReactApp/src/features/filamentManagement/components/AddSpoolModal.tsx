@@ -107,7 +107,7 @@ function AddSpoolFormModal({ isOpen, onClose, sourceSpool, onSuccess }: AddSpool
       }
       onSuccess();
       onClose();
-    } catch (err) {
+    } catch {
       toast.error('Failed to create spool(s).');
     }
   };
