@@ -1171,6 +1171,63 @@ export interface SpoolmanDbImportResult {
   errors: string[];
 }
 
+// ─── Open Filament Database types ────────────────────────────────────────
+
+export interface OfdBrand {
+  id: string;
+  name: string;
+  slug: string;
+  origin?: string;
+  materialCount: number;
+  logoSlug?: string;
+}
+
+export interface OfdBrandDetail {
+  id: string;
+  name: string;
+  slug: string;
+  website?: string;
+  origin?: string;
+  materials: OfdMaterialSummary[];
+}
+
+export interface OfdMaterialSummary {
+  id: string;
+  material: string;
+  slug: string;
+  filamentCount: number;
+}
+
+export interface OfdFlattenedEntry {
+  entryId: string;
+  brandName: string;
+  filamentName: string;
+  material: string;
+  colorName: string;
+  colorHex?: string;
+  density?: number;
+  diameter: number;
+  weight: number;
+  minPrintTemp?: number;
+  maxPrintTemp?: number;
+  minBedTemp?: number;
+  maxBedTemp?: number;
+  translucent: boolean;
+  glow: boolean;
+  matte: boolean;
+}
+
+export interface OfdImportRequest {
+  entries: OfdFlattenedEntry[];
+}
+
+export interface OfdImportResult {
+  createdCount: number;
+  updatedCount: number;
+  errorCount: number;
+  errors: string[];
+}
+
 export interface UpdateModelRequest {
   name: string;
   motionType?: MotionTypeString;

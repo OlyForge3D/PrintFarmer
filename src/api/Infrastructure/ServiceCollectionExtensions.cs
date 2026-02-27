@@ -423,6 +423,9 @@ public static class ServiceCollectionExtensions
 
         // SpoolmanDB community database service (GitHub Pages primary for temp ranges, Spoolman external fallback)
         _ = services.AddHttpClient<Farm.Infrastructure.Services.Spoolman.ISpoolmanDbService, Farm.Infrastructure.Services.Spoolman.SpoolmanDbService>();
+
+        // Open Filament Database community service (static JSON on GitHub Pages)
+        _ = services.AddHttpClient<Farm.Infrastructure.Services.OpenFilamentDb.IOpenFilamentDbService, Farm.Infrastructure.Services.OpenFilamentDb.OpenFilamentDbService>();
     }
 
     #endregion
