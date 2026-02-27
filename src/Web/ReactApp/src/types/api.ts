@@ -1945,6 +1945,7 @@ export interface QueueGcodeFileMetaDto {
   estimatedPrintTimeSeconds?: number;
   estimatedFilamentUsageGrams?: number;
   createdAtUtc: string;
+  thumbnailUrl?: string;
 }
 
 export interface QueuePrinterMetaDto {

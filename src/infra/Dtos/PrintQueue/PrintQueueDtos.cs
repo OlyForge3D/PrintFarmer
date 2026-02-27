@@ -157,6 +157,8 @@ public class QueueGcodeFileMetaDto
     public int? EstimatedFilamentUsageGrams { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }
+
+    public string? ThumbnailUrl { get; set; }
 }
 
 /// <summary>

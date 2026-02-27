@@ -6,6 +6,7 @@
  */
 
 import React from 'react';
+import { Link } from 'react-router';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { 
@@ -28,9 +29,11 @@ interface StatsCardProps {
   value: number;
   icon: React.ComponentType<{ className?: string }>;
   color: 'blue' | 'green' | 'yellow' | 'gray';
+  /** Optional link — wraps the card in a clickable link */
+  linkTo?: string;
 }
 
-function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
+function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) {
   const colorClasses: Record<string, string> = {
     blue: 'bg-pf-loading text-pf-text-primary',
     green: 'bg-pf-status-online-bg text-pf-status-online-text',
@@ -38,8 +41,8 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
     gray: 'bg-pf-border-medium text-pf-text-secondary',
   };
 
-  return (
-    <div className="bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl shadow-lg">
+  const card = (
+    <div className={`bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl shadow-lg ${linkTo ? 'hover:border-pf-accent transition-colors cursor-pointer' : ''}`}>
       <div className="p-5">
         <div className="flex items-center">
           <div className="shrink-0">
@@ -57,6 +60,12 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
       </div>
     </div>
   );
+
+  if (linkTo) {
+    return <Link to={linkTo}>{card}</Link>;
+  }
+
+  return card;
 }
 
 export const PrinterDashboard: React.FC = () => {
@@ -81,15 +90,19 @@ export const PrinterDashboard: React.FC = () => {
       icon={DashboardIcon}
     >
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
         <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircleIcon} />
         <StatsCard title="Printing" value={stats.printing} color="yellow" icon={PlayIcon} />
         <StatsCard title="Paused" value={stats.paused} color="yellow" icon={PauseIcon} />
         <StatsCard title="Offline" value={stats.offline} color="gray" icon={SettingsIcon} />
-        {stats.maintenance > 0 && (
-          <StatsCard title="In Maintenance" value={stats.maintenance} color="gray" icon={WrenchIcon} />
-        )}
+        <StatsCard
+          title="In Maintenance"
+          value={stats.maintenance}
+          color="gray"
+          icon={WrenchIcon}
+          linkTo={stats.maintenance > 0 ? '/maintenance' : undefined}
+        />
       </div>
 
       {/* Critical Alerts — only shows when actionable items exist */}
@@ -126,14 +139,12 @@ export const PrinterDashboard: React.FC = () => {
       ) : (
         /* Main Dashboard Content */
         <div className="space-y-6">
-          {/* Row 1: Tasks and Active Jobs */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <TasksWidget />
-            <ActiveJobsWidget />
-          </div>
+          {/* Row 1: Tasks */}
+          <TasksWidget />
 
-          {/* Row 2: Recent Prints */}
-          <div>
+          {/* Row 2: Active Jobs + Recent Prints */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ActiveJobsWidget />
             <RecentPrintsWidget />
           </div>
         </div>

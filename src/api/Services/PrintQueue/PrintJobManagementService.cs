@@ -3,6 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
@@ -23,6 +24,7 @@ public class PrintJobManagementService(
     IPrintersService printersService,
     IStoragePathService storagePathService,
     IHubContext<PrinterHub> hubContext,
+    IStoredFileOperationsService fileOperations,
     INotificationService? notificationService = null,
     IRetryService? retryService = null) : IPrintJobManagementService
 {
@@ -31,6 +33,7 @@ public class PrintJobManagementService(
     private readonly IPrintersService _printersService = printersService ?? throw new ArgumentNullException(nameof(printersService));
     private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
     private readonly IHubContext<PrinterHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
+    private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
     private readonly INotificationService? _notificationService = notificationService;
     private readonly IRetryService? _retryService = retryService;
 
@@ -1560,7 +1563,8 @@ public class PrintJobManagementService(
             NozzleDiameter = (int?)file.RequiredNozzleDiameter,
             EstimatedPrintTimeSeconds = (int?)(file.EstimatedPrintTimeMinutes.HasValue ? file.EstimatedPrintTimeMinutes * 60 : null),
             EstimatedFilamentUsageGrams = (int?)file.EstimatedFilamentWeightG,
-            CreatedAtUtc = file.CreatedAt
+            CreatedAtUtc = file.CreatedAt,
+            ThumbnailUrl = _fileOperations.BuildGcodeThumbnailUrl(file.Id)
         };
     }
 

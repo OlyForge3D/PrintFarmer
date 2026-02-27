@@ -11,7 +11,7 @@
  */
 
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { AlertIcon, WrenchIcon, GearIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { useMaintenanceAlerts } from '@/features/maintenance/hooks/useMaintenanceAlerts';

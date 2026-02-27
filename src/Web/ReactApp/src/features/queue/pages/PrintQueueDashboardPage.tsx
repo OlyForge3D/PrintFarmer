@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
@@ -26,6 +27,7 @@ const VALID_TABS = ['all-jobs', 'by-model', 'timing', 'history'] as const;
 
 export function PrintQueueDashboardPage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState<string | null>(null);
@@ -34,8 +36,10 @@ export function PrintQueueDashboardPage() {
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
   const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
   
-  // Persist active tab to localStorage
+  // Persist active tab — URL search param takes priority, then localStorage
   const [activeTab, setActiveTabState] = useState(() => {
+    const fromUrl = searchParams.get('tab');
+    if (fromUrl && VALID_TABS.includes(fromUrl as typeof VALID_TABS[number])) return fromUrl;
     const saved = localStorage.getItem(STORAGE_KEY_ACTIVE_TAB);
     return saved && VALID_TABS.includes(saved as typeof VALID_TABS[number]) ? saved : 'all-jobs';
   });
@@ -43,7 +47,13 @@ export function PrintQueueDashboardPage() {
   const setActiveTab = useCallback((tab: string) => {
     setActiveTabState(tab);
     localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, tab);
-  }, []);
+    // Remove tab param from URL after applying it
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('tab');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
