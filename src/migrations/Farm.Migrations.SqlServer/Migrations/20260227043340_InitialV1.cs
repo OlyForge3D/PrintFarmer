@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialV1 : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -41,26 +41,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_AppSettingsEntities", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "Artifacts",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    JobId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    WorkerId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    Kind = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    FileName = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    RelativePath = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: false),
-                    ContentType = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    SizeBytes = table.Column<long>(type: "bigint", nullable: false),
-                    Sha256 = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Artifacts", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -141,7 +121,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Folders",
+                name: "FolderNode",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
@@ -152,7 +132,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Folders", x => x.Id);
+                    table.PrimaryKey("PK_FolderNode", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -170,6 +150,62 @@ namespace Farm.Migrations.SqlServer.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Locations", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "MaintenanceComponents",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                    Sku = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
+                    Category = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    UnitCost = table.Column<decimal>(type: "decimal(10,2)", nullable: true),
+                    Supplier = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
+                    Url = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    InStock = table.Column<int>(type: "int", nullable: false),
+                    MinimumStock = table.Column<int>(type: "int", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MaintenanceComponents", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "MaintenanceTasks",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    TaskName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
+                    Category = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    IntervalHours = table.Column<double>(type: "float", nullable: true),
+                    IntervalDays = table.Column<int>(type: "int", nullable: true),
+                    EstimatedDurationMinutes = table.Column<int>(type: "int", nullable: true),
+                    Priority = table.Column<int>(type: "int", nullable: false),
+                    IsActive = table.Column<bool>(type: "bit", nullable: false),
+                    IsDefault = table.Column<bool>(type: "bit", nullable: false),
+                    RequiresEnclosure = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresCarbonFilter = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresHepaFilter = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresBowdenTube = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresPtfeLiner = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresLinearRails = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresLeadScrews = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresToolchanger = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresFilamentCutter = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresHeatedChamber = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresHeatedBed = table.Column<bool>(type: "bit", nullable: true),
+                    RequiresMultiMaterial = table.Column<bool>(type: "bit", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MaintenanceTasks", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -204,6 +240,48 @@ namespace Farm.Migrations.SqlServer.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_PasswordPolicies", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PrintProjects",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: true),
+                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
+                    Status = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    Priority = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    DueDate = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    Notes = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    CompletedAt = table.Column<DateTime>(type: "datetime2", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PrintProjects", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PrintProjectTemplates",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: true),
+                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
+                    Category = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    DefaultPriority = table.Column<int>(type: "int", nullable: false),
+                    DefaultNotes = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
+                    IsSystemTemplate = table.Column<bool>(type: "bit", nullable: false),
+                    SortOrder = table.Column<int>(type: "int", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PrintProjectTemplates", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -262,47 +340,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "SlicerServices",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    Version = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    Host = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    UiManifestUrl = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    CapabilitiesJson = table.Column<string>(type: "TEXT", nullable: true),
-                    MaxConcurrentJobs = table.Column<int>(type: "int", nullable: false),
-                    Status = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    LastSeen = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    ApiKey = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    ApiKeyRotatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Tags = table.Column<string>(type: "nvarchar(max)", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_SlicerServices", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "SlicerSettings",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    Enabled = table.Column<bool>(type: "bit", nullable: false),
-                    PerEngineJson = table.Column<string>(type: "TEXT", nullable: true),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    JitterPercent = table.Column<double>(type: "float", nullable: false, defaultValue: 15.0)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_SlicerSettings", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "SpoolmanConfigs",
                 columns: table => new
                 {
@@ -335,7 +372,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Tags",
+                name: "Tag",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
@@ -347,7 +384,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Tags", x => x.Id);
+                    table.PrimaryKey("PK_Tag", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -394,37 +431,30 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Workers",
+                name: "MaintenanceTaskComponents",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    ServiceId = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    EndpointUrl = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: false),
-                    CapabilitiesJson = table.Column<string>(type: "TEXT", nullable: false),
-                    Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                    TotalSlots = table.Column<int>(type: "int", nullable: false),
-                    ActiveJobs = table.Column<int>(type: "int", nullable: false),
-                    CompletedJobs = table.Column<int>(type: "int", nullable: false),
-                    FailedJobs = table.Column<int>(type: "int", nullable: false),
-                    AverageProcessingTimeSeconds = table.Column<double>(type: "float", nullable: true),
-                    LastHeartbeat = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    RegisteredAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    OnlineAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    OfflineAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    ApiKey = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    Version = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
-                    MetadataJson = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    IsDisabled = table.Column<bool>(type: "bit", nullable: false),
-                    DisabledReason = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: true),
-                    ArtifactsProduced = table.Column<int>(type: "int", nullable: false),
-                    ArtifactBytesProduced = table.Column<long>(type: "bigint", nullable: false)
+                    MaintenanceTaskId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    MaintenanceComponentId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    Quantity = table.Column<int>(type: "int", nullable: false),
+                    Notes = table.Column<string>(type: "nvarchar(max)", nullable: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Workers", x => x.Id);
+                    table.PrimaryKey("PK_MaintenanceTaskComponents", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_MaintenanceTaskComponents_MaintenanceComponents_MaintenanceComponentId",
+                        column: x => x.MaintenanceComponentId,
+                        principalTable: "MaintenanceComponents",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_MaintenanceTaskComponents_MaintenanceTasks_MaintenanceTaskId",
+                        column: x => x.MaintenanceTaskId,
+                        principalTable: "MaintenanceTasks",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -514,6 +544,15 @@ namespace Farm.Migrations.SqlServer.Migrations
                     DefaultBackend = table.Column<int>(type: "int", nullable: true),
                     HasHeatedBed = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
                     HasEnclosure = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasCarbonFilter = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasHepaFilter = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasBowdenTube = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasPtfeLiner = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasLinearRails = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasLeadScrews = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasToolchanger = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasFilamentCutter = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    HasHeatedChamber = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
                     MultiMaterial = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
                     SupportsAutoLeveling = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
                     MaxBedTemp = table.Column<int>(type: "int", nullable: true, defaultValue: 120),
@@ -531,6 +570,49 @@ namespace Farm.Migrations.SqlServer.Migrations
                         column: x => x.ManufacturerId,
                         principalTable: "Manufacturers",
                         principalColumn: "Id");
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PrintProjectTemplateFiles",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    PrintProjectTemplateId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
+                    FileNamePattern = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
+                    ColorRequirement = table.Column<int>(type: "int", nullable: false),
+                    MaterialRequirement = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    PrintCount = table.Column<int>(type: "int", nullable: false),
+                    SortOrder = table.Column<int>(type: "int", nullable: false),
+                    Notes = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PrintProjectTemplateFiles", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_PrintProjectTemplateFiles_PrintProjectTemplates_PrintProjectTemplateId",
+                        column: x => x.PrintProjectTemplateId,
+                        principalTable: "PrintProjectTemplates",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "Model3DTag",
+                columns: table => new
+                {
+                    Model3DId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    TagsId = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Model3DTag", x => new { x.Model3DId, x.TagsId });
+                    table.ForeignKey(
+                        name: "FK_Model3DTag_Tag_TagsId",
+                        column: x => x.TagsId,
+                        principalTable: "Tag",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -591,88 +673,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         principalTable: "Users",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "FilamentProfiles",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    Material = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    Manufacturer = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
-                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    NozzleTemperature = table.Column<int>(type: "int", nullable: false),
-                    BedTemperature = table.Column<int>(type: "int", nullable: false),
-                    PrintSpeed = table.Column<int>(type: "int", nullable: false),
-                    RawJson = table.Column<string>(type: "TEXT", nullable: true),
-                    SettingsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Hash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    CompatiblePrinters = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    IsSystem = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
-                    IsDefault = table.Column<bool>(type: "bit", nullable: false),
-                    IsPublic = table.Column<bool>(type: "bit", nullable: false),
-                    SlicerVersion = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_FilamentProfiles", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_FilamentProfiles_Users_CreatedByUserId",
-                        column: x => x.CreatedByUserId,
-                        principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "Models3D",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    FileFormat = table.Column<int>(type: "int", nullable: false),
-                    DimensionX = table.Column<double>(type: "float", nullable: true),
-                    DimensionY = table.Column<double>(type: "float", nullable: true),
-                    DimensionZ = table.Column<double>(type: "float", nullable: true),
-                    TriangleCount = table.Column<int>(type: "int", nullable: true),
-                    IsValid = table.Column<bool>(type: "bit", nullable: false),
-                    ValidationErrors = table.Column<string>(type: "TEXT", nullable: true),
-                    UploadedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: true),
-                    Name = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    FileName = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    FolderId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    FilePath = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: false),
-                    ThumbnailFileName = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
-                    FileSizeBytes = table.Column<long>(type: "bigint", nullable: false),
-                    FileHash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    UploadedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    LastHealthCheckDate = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    HealthStatus = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
-                    LastVerificationResult = table.Column<string>(type: "TEXT", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Models3D", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Models3D_Folders_FolderId",
-                        column: x => x.FolderId,
-                        principalTable: "Folders",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_Models3D_Users_UploadedByUserId",
-                        column: x => x.UploadedByUserId,
-                        principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
                 });
 
             migrationBuilder.CreateTable(
@@ -906,34 +906,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "MachineModelProfiles",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    Manufacturer = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: true),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    PrinterModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    RawJson = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    Hash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    IsSystem = table.Column<bool>(type: "bit", nullable: false),
-                    IsPublic = table.Column<bool>(type: "bit", nullable: false),
-                    SlicerVersion = table.Column<string>(type: "nvarchar(32)", maxLength: 32, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_MachineModelProfiles", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_MachineModelProfiles_PrinterModels_PrinterModelId",
-                        column: x => x.PrinterModelId,
-                        principalTable: "PrinterModels",
-                        principalColumn: "Id");
-                });
-
-            migrationBuilder.CreateTable(
                 name: "PrinterModelAliases",
                 columns: table => new
                 {
@@ -941,8 +913,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     PrinterModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     SlicerModelName = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
                     SlicerType = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    PrinterModelId1 = table.Column<Guid>(type: "uniqueidentifier", nullable: true)
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -953,35 +924,69 @@ namespace Farm.Migrations.SqlServer.Migrations
                         principalTable: "PrinterModels",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_PrinterModelAliases_PrinterModels_PrinterModelId1",
-                        column: x => x.PrinterModelId1,
-                        principalTable: "PrinterModels",
-                        principalColumn: "Id");
                 });
 
             migrationBuilder.CreateTable(
-                name: "Model3DTag",
+                name: "Printers",
                 columns: table => new
                 {
-                    Model3DId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    TagsId = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: true),
+                    Name = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
+                    ServerUrl = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
+                    OriginalServerUrl = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
+                    BackendPort = table.Column<int>(type: "int", nullable: false),
+                    FrontendPort = table.Column<int>(type: "int", nullable: true),
+                    Notes = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    Backend = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    ApiKey = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    Username = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    Password = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    CameraStreamUrl = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    CameraSnapshotUrl = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    ManufacturerId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    ModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    TemplateMachineProfileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    LocationId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    DateAcquired = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    MaxBuildVolumeX = table.Column<double>(type: "float", nullable: true),
+                    MaxBuildVolumeY = table.Column<double>(type: "float", nullable: true),
+                    MaxBuildVolumeZ = table.Column<double>(type: "float", nullable: true),
+                    HasHeatedBed = table.Column<bool>(type: "bit", nullable: false),
+                    HasEnclosure = table.Column<bool>(type: "bit", nullable: false),
+                    MultiMaterial = table.Column<bool>(type: "bit", nullable: false),
+                    SupportsAutoLeveling = table.Column<bool>(type: "bit", nullable: false),
+                    MaxPrintSpeed = table.Column<int>(type: "int", nullable: true),
+                    MaxBedTemp = table.Column<int>(type: "int", nullable: true),
+                    CurrentMaterial = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    CurrentSpoolId = table.Column<int>(type: "int", nullable: true),
+                    IsAvailable = table.Column<bool>(type: "bit", nullable: false),
+                    LastCapabilityUpdate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    InMaintenance = table.Column<bool>(type: "bit", nullable: false),
+                    IsEnabled = table.Column<bool>(type: "bit", nullable: false),
+                    LastHistorySeedUtc = table.Column<DateTime>(type: "datetime2", nullable: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Model3DTag", x => new { x.Model3DId, x.TagsId });
+                    table.PrimaryKey("PK_Printers", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_Model3DTag_Models3D_Model3DId",
-                        column: x => x.Model3DId,
-                        principalTable: "Models3D",
+                        name: "FK_Printers_Locations_LocationId",
+                        column: x => x.LocationId,
+                        principalTable: "Locations",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
-                        name: "FK_Model3DTag_Tags_TagsId",
-                        column: x => x.TagsId,
-                        principalTable: "Tags",
+                        name: "FK_Printers_Manufacturers_ManufacturerId",
+                        column: x => x.ManufacturerId,
+                        principalTable: "Manufacturers",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_Printers_PrinterModels_ModelId",
+                        column: x => x.ModelId,
+                        principalTable: "PrinterModels",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -1035,116 +1040,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "MachineProfiles",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    Manufacturer = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    PrinterModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    MachineModelProfileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    RawJson = table.Column<string>(type: "TEXT", nullable: true),
-                    SettingsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Hash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    IsSystem = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
-                    IsDefault = table.Column<bool>(type: "bit", nullable: false),
-                    IsPublic = table.Column<bool>(type: "bit", nullable: false),
-                    SlicerVersion = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_MachineProfiles", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_MachineProfiles_MachineModelProfiles_MachineModelProfileId",
-                        column: x => x.MachineModelProfileId,
-                        principalTable: "MachineModelProfiles",
-                        principalColumn: "Id");
-                    table.ForeignKey(
-                        name: "FK_MachineProfiles_PrinterModels_PrinterModelId",
-                        column: x => x.PrinterModelId,
-                        principalTable: "PrinterModels",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_MachineProfiles_Users_CreatedByUserId",
-                        column: x => x.CreatedByUserId,
-                        principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "Printers",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: true),
-                    Name = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    ServerUrl = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    OriginalServerUrl = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
-                    BackendPort = table.Column<int>(type: "int", nullable: false),
-                    FrontendPort = table.Column<int>(type: "int", nullable: true),
-                    Notes = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    Backend = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
-                    ApiKey = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CameraStreamUrl = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CameraSnapshotUrl = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    ManufacturerId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    ModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    TemplateMachineProfileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    LocationId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    DateAcquired = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    MaxBuildVolumeX = table.Column<double>(type: "float", nullable: true),
-                    MaxBuildVolumeY = table.Column<double>(type: "float", nullable: true),
-                    MaxBuildVolumeZ = table.Column<double>(type: "float", nullable: true),
-                    HasHeatedBed = table.Column<bool>(type: "bit", nullable: false),
-                    HasEnclosure = table.Column<bool>(type: "bit", nullable: false),
-                    MultiMaterial = table.Column<bool>(type: "bit", nullable: false),
-                    SupportsAutoLeveling = table.Column<bool>(type: "bit", nullable: false),
-                    MaxPrintSpeed = table.Column<int>(type: "int", nullable: true),
-                    MaxBedTemp = table.Column<int>(type: "int", nullable: true),
-                    CurrentMaterial = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CurrentSpoolId = table.Column<int>(type: "int", nullable: true),
-                    IsAvailable = table.Column<bool>(type: "bit", nullable: false),
-                    LastCapabilityUpdate = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    InMaintenance = table.Column<bool>(type: "bit", nullable: false),
-                    IsEnabled = table.Column<bool>(type: "bit", nullable: false),
-                    LastHistorySeedUtc = table.Column<DateTime>(type: "datetime2", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Printers", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Printers_Locations_LocationId",
-                        column: x => x.LocationId,
-                        principalTable: "Locations",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_Printers_MachineProfiles_TemplateMachineProfileId",
-                        column: x => x.TemplateMachineProfileId,
-                        principalTable: "MachineProfiles",
-                        principalColumn: "Id");
-                    table.ForeignKey(
-                        name: "FK_Printers_Manufacturers_ManufacturerId",
-                        column: x => x.ManufacturerId,
-                        principalTable: "Manufacturers",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_Printers_PrinterModels_ModelId",
-                        column: x => x.ModelId,
-                        principalTable: "PrinterModels",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "GcodeFiles",
                 columns: table => new
                 {
@@ -1189,9 +1084,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                 {
                     table.PrimaryKey("PK_GcodeFiles", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_GcodeFiles_Folders_FolderId",
+                        name: "FK_GcodeFiles_FolderNode_FolderId",
                         column: x => x.FolderId,
-                        principalTable: "Folders",
+                        principalTable: "FolderNode",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
@@ -1277,20 +1172,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "MaintenanceSchedules",
+                name: "MaintenancePlans",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
                     PrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                     PrinterModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    TaskName = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    Component = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    IntervalHours = table.Column<double>(type: "float", nullable: true),
-                    IntervalDays = table.Column<int>(type: "int", nullable: true),
                     ManufacturerId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    EstimatedDurationMinutes = table.Column<int>(type: "int", nullable: true),
-                    Priority = table.Column<int>(type: "int", nullable: false),
+                    MotionType = table.Column<int>(type: "int", nullable: true),
                     IsActive = table.Column<bool>(type: "bit", nullable: false),
                     IsDefault = table.Column<bool>(type: "bit", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
@@ -1298,19 +1189,54 @@ namespace Farm.Migrations.SqlServer.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_MaintenanceSchedules", x => x.Id);
+                    table.PrimaryKey("PK_MaintenancePlans", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_MaintenanceSchedules_PrinterModels_PrinterModelId",
+                        name: "FK_MaintenancePlans_Manufacturers_ManufacturerId",
+                        column: x => x.ManufacturerId,
+                        principalTable: "Manufacturers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.SetNull);
+                    table.ForeignKey(
+                        name: "FK_MaintenancePlans_PrinterModels_PrinterModelId",
                         column: x => x.PrinterModelId,
                         principalTable: "PrinterModels",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
-                        name: "FK_MaintenanceSchedules_Printers_PrinterId",
+                        name: "FK_MaintenancePlans_Printers_PrinterId",
                         column: x => x.PrinterId,
                         principalTable: "Printers",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.SetNull);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "NfcDevices",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
+                    IpAddress = table.Column<string>(type: "nvarchar(45)", maxLength: 45, nullable: true),
+                    PrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    FirmwareVersion = table.Column<string>(type: "nvarchar(32)", maxLength: 32, nullable: true),
+                    WifiRssi = table.Column<int>(type: "int", nullable: true),
+                    NfcReaderOk = table.Column<bool>(type: "bit", nullable: false),
+                    FreeHeap = table.Column<int>(type: "int", nullable: true),
+                    LastHeartbeat = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    LastScanAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    LastScannedSpoolId = table.Column<int>(type: "int", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_NfcDevices", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_NfcDevices_Printers_PrinterId",
+                        column: x => x.PrinterId,
+                        principalTable: "Printers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.SetNull);
                 });
 
             migrationBuilder.CreateTable(
@@ -1343,57 +1269,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         column: x => x.PrinterId1,
                         principalTable: "Printers",
                         principalColumn: "Id");
-                });
-
-            migrationBuilder.CreateTable(
-                name: "ProcessProfiles",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    PrinterModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    SpecificPrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    LayerHeight = table.Column<double>(type: "float", nullable: false),
-                    InfillPercentage = table.Column<int>(type: "int", nullable: false),
-                    PrintSpeed = table.Column<double>(type: "float", nullable: false),
-                    EnableSupports = table.Column<bool>(type: "bit", nullable: false),
-                    Quality = table.Column<int>(type: "int", nullable: false),
-                    AdvancedSettings = table.Column<string>(type: "TEXT", nullable: true),
-                    SlicerVersion = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    RawJson = table.Column<string>(type: "TEXT", nullable: true),
-                    SettingsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Hash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    CompatiblePrinters = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    IsDefault = table.Column<bool>(type: "bit", nullable: false),
-                    IsPublic = table.Column<bool>(type: "bit", nullable: false),
-                    IsSystem = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
-                    CreatedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ProcessProfiles", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_ProcessProfiles_PrinterModels_PrinterModelId",
-                        column: x => x.PrinterModelId,
-                        principalTable: "PrinterModels",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_ProcessProfiles_Printers_SpecificPrinterId",
-                        column: x => x.SpecificPrinterId,
-                        principalTable: "Printers",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_ProcessProfiles_Users_CreatedByUserId",
-                        column: x => x.CreatedByUserId,
-                        principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
                 });
 
             migrationBuilder.CreateTable(
@@ -1487,9 +1362,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_GcodeFileTag_Tags_TagsId",
+                        name: "FK_GcodeFileTag_Tag_TagsId",
                         column: x => x.TagsId,
-                        principalTable: "Tags",
+                        principalTable: "Tag",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -1524,7 +1399,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                     QueuedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
                     ExternalJobId = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
                     SourcePrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    WasSeededFromHistory = table.Column<bool>(type: "bit", nullable: false, defaultValue: false)
+                    WasSeededFromHistory = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    ProjectId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    ProjectName = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
+                    SpoolmanFilamentId = table.Column<int>(type: "int", nullable: true),
+                    FilamentName = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
+                    FilamentVendor = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
+                    FilamentColor = table.Column<string>(type: "nvarchar(32)", maxLength: 32, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -1578,40 +1459,57 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "MaintenanceAlerts",
+                name: "PlanTasks",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    MaintenancePlanId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    MaintenanceTaskId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    SortOrder = table.Column<int>(type: "int", nullable: false),
+                    IntervalHoursOverride = table.Column<double>(type: "float", nullable: true),
+                    IntervalDaysOverride = table.Column<int>(type: "int", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PlanTasks", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_PlanTasks_MaintenancePlans_MaintenancePlanId",
+                        column: x => x.MaintenancePlanId,
+                        principalTable: "MaintenancePlans",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_PlanTasks_MaintenanceTasks_MaintenanceTaskId",
+                        column: x => x.MaintenanceTaskId,
+                        principalTable: "MaintenanceTasks",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PrinterMaintenanceSchedules",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    MaintenancePlanId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     PrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    MaintenanceScheduleId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Title = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Message = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: false),
-                    Severity = table.Column<int>(type: "int", nullable: false),
-                    Status = table.Column<int>(type: "int", nullable: false),
-                    PrinterHoursAtTrigger = table.Column<double>(type: "float", nullable: false),
-                    HoursSinceLastMaintenance = table.Column<double>(type: "float", nullable: true),
-                    DaysSinceLastMaintenance = table.Column<int>(type: "int", nullable: true),
+                    IsActive = table.Column<bool>(type: "bit", nullable: false),
+                    DeployedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    Notes = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    AcknowledgedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    AcknowledgedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    ResolvedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    ResolvedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    DismissedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    DismissedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    DismissalReason = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
                     UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_MaintenanceAlerts", x => x.Id);
+                    table.PrimaryKey("PK_PrinterMaintenanceSchedules", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_MaintenanceAlerts_MaintenanceSchedules_MaintenanceScheduleId",
-                        column: x => x.MaintenanceScheduleId,
-                        principalTable: "MaintenanceSchedules",
+                        name: "FK_PrinterMaintenanceSchedules_MaintenancePlans_MaintenancePlanId",
+                        column: x => x.MaintenancePlanId,
+                        principalTable: "MaintenancePlans",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
-                        name: "FK_MaintenanceAlerts_Printers_PrinterId",
+                        name: "FK_PrinterMaintenanceSchedules_Printers_PrinterId",
                         column: x => x.PrinterId,
                         principalTable: "Printers",
                         principalColumn: "Id",
@@ -1619,50 +1517,27 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "SliceJobs",
+                name: "NfcScanEvents",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    PrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    ModelFileUrl = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: false),
-                    ModelFileName = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: false),
-                    SlicerEngine = table.Column<int>(type: "int", nullable: false),
-                    SlicerProfileJson = table.Column<string>(type: "TEXT", nullable: true),
-                    SlicerProfileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    RequiredCapabilitiesJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                    Priority = table.Column<int>(type: "int", nullable: false),
-                    QueuedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    CorrelationId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    Checksum = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    StartedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    CompletedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    ResultFileUrl = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: true),
-                    ErrorMessage = table.Column<string>(type: "TEXT", nullable: true),
-                    ProgressPercent = table.Column<int>(type: "int", nullable: false),
-                    ProgressMessage = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    EstimatedPrintTimeSeconds = table.Column<int>(type: "int", nullable: true),
-                    FilamentUsedGrams = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
-                    WorkerId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    ClaimedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    LeaseExpiresAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    ArtifactIdsCsv = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    ArtifactsCount = table.Column<int>(type: "int", nullable: true),
-                    ArtifactsTotalBytes = table.Column<long>(type: "bigint", nullable: true),
-                    RetryCount = table.Column<int>(type: "int", nullable: false)
+                    NfcDeviceId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    SpoolId = table.Column<int>(type: "int", nullable: true),
+                    TagFormat = table.Column<string>(type: "nvarchar(32)", maxLength: 32, nullable: false),
+                    MaterialType = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
+                    BrandName = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
+                    Action = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
+                    ScannedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_SliceJobs", x => x.Id);
+                    table.PrimaryKey("PK_NfcScanEvents", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_SliceJobs_ProcessProfiles_SlicerProfileId",
-                        column: x => x.SlicerProfileId,
-                        principalTable: "ProcessProfiles",
+                        name: "FK_NfcScanEvents_NfcDevices_NfcDeviceId",
+                        column: x => x.NfcDeviceId,
+                        principalTable: "NfcDevices",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -1852,6 +1727,49 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "PrintProjectFiles",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: true),
+                    PrintProjectId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    GcodeFileId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    SpoolmanFilamentId = table.Column<int>(type: "int", nullable: true),
+                    MaterialRequirement = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
+                    PrintCount = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
+                    PrintedCount = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    Status = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    SortOrder = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    Notes = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    LastPrintedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    LastPrintJobId = table.Column<Guid>(type: "uniqueidentifier", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PrintProjectFiles", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_PrintProjectFiles_GcodeFiles_GcodeFileId",
+                        column: x => x.GcodeFileId,
+                        principalTable: "GcodeFiles",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_PrintProjectFiles_PrintJobs_LastPrintJobId",
+                        column: x => x.LastPrintJobId,
+                        principalTable: "PrintJobs",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.SetNull);
+                    table.ForeignKey(
+                        name: "FK_PrintProjectFiles_PrintProjects_PrintProjectId",
+                        column: x => x.PrintProjectId,
+                        principalTable: "PrintProjects",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "HarvestFileGcodeFileMappings",
                 columns: table => new
                 {
@@ -1891,51 +1809,51 @@ namespace Farm.Migrations.SqlServer.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "MaintenanceLogs",
+                name: "MaintenanceAlerts",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     PrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    MaintenanceScheduleId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    ResolvedAlertId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    TaskName = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Notes = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
-                    Component = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    PerformedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    PerformedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    DurationMinutes = table.Column<int>(type: "int", nullable: true),
-                    PartsReplaced = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    Cost = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
-                    PrinterHoursAtMaintenance = table.Column<double>(type: "float", nullable: true),
+                    PrinterMaintenanceScheduleId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    MaintenanceTaskId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    Title = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
+                    Message = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: false),
+                    Severity = table.Column<int>(type: "int", nullable: false),
+                    Status = table.Column<int>(type: "int", nullable: false),
+                    PrinterHoursAtTrigger = table.Column<double>(type: "float", nullable: false),
+                    HoursSinceLastMaintenance = table.Column<double>(type: "float", nullable: true),
+                    DaysSinceLastMaintenance = table.Column<int>(type: "int", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    PrinterId1 = table.Column<Guid>(type: "uniqueidentifier", nullable: true)
+                    AcknowledgedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    AcknowledgedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
+                    ResolvedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    ResolvedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
+                    DismissedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    DismissedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
+                    DismissalReason = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_MaintenanceLogs", x => x.Id);
+                    table.PrimaryKey("PK_MaintenanceAlerts", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_MaintenanceLogs_MaintenanceAlerts_ResolvedAlertId",
-                        column: x => x.ResolvedAlertId,
-                        principalTable: "MaintenanceAlerts",
+                        name: "FK_MaintenanceAlerts_MaintenanceTasks_MaintenanceTaskId",
+                        column: x => x.MaintenanceTaskId,
+                        principalTable: "MaintenanceTasks",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
-                        name: "FK_MaintenanceLogs_MaintenanceSchedules_MaintenanceScheduleId",
-                        column: x => x.MaintenanceScheduleId,
-                        principalTable: "MaintenanceSchedules",
+                        name: "FK_MaintenanceAlerts_PrinterMaintenanceSchedules_PrinterMaintenanceScheduleId",
+                        column: x => x.PrinterMaintenanceScheduleId,
+                        principalTable: "PrinterMaintenanceSchedules",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
-                        name: "FK_MaintenanceLogs_Printers_PrinterId",
+                        name: "FK_MaintenanceAlerts_Printers_PrinterId",
                         column: x => x.PrinterId,
                         principalTable: "Printers",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_MaintenanceLogs_Printers_PrinterId1",
-                        column: x => x.PrinterId1,
-                        principalTable: "Printers",
-                        principalColumn: "Id");
                 });
 
             migrationBuilder.CreateTable(
@@ -1961,6 +1879,61 @@ namespace Farm.Migrations.SqlServer.Migrations
                         principalTable: "JobSchedules",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "MaintenanceLogs",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    PrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    PrinterMaintenanceScheduleId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    ResolvedAlertId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    MaintenanceTaskId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    TaskName = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
+                    Notes = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
+                    Component = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
+                    PerformedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
+                    PerformedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    DurationMinutes = table.Column<int>(type: "int", nullable: true),
+                    PartsReplaced = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
+                    Cost = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
+                    PrinterHoursAtMaintenance = table.Column<double>(type: "float", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    PrinterId1 = table.Column<Guid>(type: "uniqueidentifier", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MaintenanceLogs", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_MaintenanceLogs_MaintenanceAlerts_ResolvedAlertId",
+                        column: x => x.ResolvedAlertId,
+                        principalTable: "MaintenanceAlerts",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.SetNull);
+                    table.ForeignKey(
+                        name: "FK_MaintenanceLogs_MaintenanceTasks_MaintenanceTaskId",
+                        column: x => x.MaintenanceTaskId,
+                        principalTable: "MaintenanceTasks",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.SetNull);
+                    table.ForeignKey(
+                        name: "FK_MaintenanceLogs_PrinterMaintenanceSchedules_PrinterMaintenanceScheduleId",
+                        column: x => x.PrinterMaintenanceScheduleId,
+                        principalTable: "PrinterMaintenanceSchedules",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.SetNull);
+                    table.ForeignKey(
+                        name: "FK_MaintenanceLogs_Printers_PrinterId",
+                        column: x => x.PrinterId,
+                        principalTable: "Printers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_MaintenanceLogs_Printers_PrinterId1",
+                        column: x => x.PrinterId1,
+                        principalTable: "Printers",
+                        principalColumn: "Id");
                 });
 
             migrationBuilder.InsertData(
@@ -1989,26 +1962,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 table: "AppSettingsEntities",
                 column: "Key",
                 unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Artifacts_CreatedAt",
-                table: "Artifacts",
-                column: "CreatedAt");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Artifacts_JobId",
-                table: "Artifacts",
-                column: "JobId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Artifacts_JobId_Kind",
-                table: "Artifacts",
-                columns: new[] { "JobId", "Kind" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Artifacts_WorkerId",
-                table: "Artifacts",
-                column: "WorkerId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_AuthAuditLogs_EventType",
@@ -2061,39 +2014,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "Name");
 
             migrationBuilder.CreateIndex(
-                name: "IX_FilamentProfiles_CreatedByUserId",
-                table: "FilamentProfiles",
-                column: "CreatedByUserId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FilamentProfiles_Hash",
-                table: "FilamentProfiles",
-                column: "Hash",
-                unique: true,
-                filter: "[Hash] IS NOT NULL");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FilamentProfiles_IsSystem",
-                table: "FilamentProfiles",
-                column: "IsSystem");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FilamentProfiles_Material",
-                table: "FilamentProfiles",
-                column: "Material");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FilamentProfiles_Name_Material_SlicerType",
-                table: "FilamentProfiles",
-                columns: new[] { "Name", "Material", "SlicerType" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FilamentProfiles_SlicerType",
-                table: "FilamentProfiles",
-                column: "SlicerType");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_FilamentTypePrinterModel_SupportedFilamentTypesId",
                 table: "FilamentTypePrinterModel",
                 column: "SupportedFilamentTypesId");
@@ -2127,8 +2047,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "HasIssues");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Folders_Path_FolderType",
-                table: "Folders",
+                name: "IX_FolderNode_Path_FolderType",
+                table: "FolderNode",
                 columns: new[] { "Path", "FolderType" },
                 unique: true);
 
@@ -2358,62 +2278,14 @@ namespace Farm.Migrations.SqlServer.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_MachineModelProfiles_PrinterModelId",
-                table: "MachineModelProfiles",
-                column: "PrinterModelId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MachineProfiles_CreatedByUserId",
-                table: "MachineProfiles",
-                column: "CreatedByUserId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MachineProfiles_Hash",
-                table: "MachineProfiles",
-                column: "Hash",
-                unique: true,
-                filter: "[Hash] IS NOT NULL");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MachineProfiles_IsSystem",
-                table: "MachineProfiles",
-                column: "IsSystem");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MachineProfiles_MachineModelProfileId",
-                table: "MachineProfiles",
-                column: "MachineModelProfileId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MachineProfiles_Manufacturer",
-                table: "MachineProfiles",
-                column: "Manufacturer");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MachineProfiles_Name_SlicerType",
-                table: "MachineProfiles",
-                columns: new[] { "Name", "SlicerType" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MachineProfiles_PrinterModelId",
-                table: "MachineProfiles",
-                column: "PrinterModelId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MachineProfiles_SlicerType",
-                table: "MachineProfiles",
-                column: "SlicerType");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_MaintenanceAlerts_CreatedAt",
                 table: "MaintenanceAlerts",
                 column: "CreatedAt");
 
             migrationBuilder.CreateIndex(
-                name: "IX_MaintenanceAlerts_MaintenanceScheduleId",
+                name: "IX_MaintenanceAlerts_MaintenanceTaskId",
                 table: "MaintenanceAlerts",
-                column: "MaintenanceScheduleId");
+                column: "MaintenanceTaskId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_MaintenanceAlerts_PrinterId",
@@ -2421,14 +2293,29 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "PrinterId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceAlerts_PrinterMaintenanceScheduleId",
+                table: "MaintenanceAlerts",
+                column: "PrinterMaintenanceScheduleId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_MaintenanceAlerts_Status_Severity",
                 table: "MaintenanceAlerts",
                 columns: new[] { "Status", "Severity" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_MaintenanceLogs_MaintenanceScheduleId",
+                name: "IX_MaintenanceComponents_Category",
+                table: "MaintenanceComponents",
+                column: "Category");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceComponents_Name",
+                table: "MaintenanceComponents",
+                column: "Name");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceLogs_MaintenanceTaskId",
                 table: "MaintenanceLogs",
-                column: "MaintenanceScheduleId");
+                column: "MaintenanceTaskId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_MaintenanceLogs_PerformedAt",
@@ -2446,24 +2333,60 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "PrinterId1");
 
             migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceLogs_PrinterMaintenanceScheduleId",
+                table: "MaintenanceLogs",
+                column: "PrinterMaintenanceScheduleId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_MaintenanceLogs_ResolvedAlertId",
                 table: "MaintenanceLogs",
                 column: "ResolvedAlertId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_MaintenanceSchedules_IsActive_IsDefault",
-                table: "MaintenanceSchedules",
-                columns: new[] { "IsActive", "IsDefault" });
+                name: "IX_MaintenancePlans_IsActive",
+                table: "MaintenancePlans",
+                column: "IsActive");
 
             migrationBuilder.CreateIndex(
-                name: "IX_MaintenanceSchedules_PrinterId",
-                table: "MaintenanceSchedules",
+                name: "IX_MaintenancePlans_ManufacturerId",
+                table: "MaintenancePlans",
+                column: "ManufacturerId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MaintenancePlans_PrinterId",
+                table: "MaintenancePlans",
                 column: "PrinterId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_MaintenanceSchedules_PrinterModelId",
-                table: "MaintenanceSchedules",
+                name: "IX_MaintenancePlans_PrinterModelId",
+                table: "MaintenancePlans",
                 column: "PrinterModelId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceTaskComponents_MaintenanceComponentId",
+                table: "MaintenanceTaskComponents",
+                column: "MaintenanceComponentId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceTaskComponents_MaintenanceTaskId_MaintenanceComponentId",
+                table: "MaintenanceTaskComponents",
+                columns: new[] { "MaintenanceTaskId", "MaintenanceComponentId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceTasks_Category",
+                table: "MaintenanceTasks",
+                column: "Category");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceTasks_IsActive",
+                table: "MaintenanceTasks",
+                column: "IsActive");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MaintenanceTasks_TaskName",
+                table: "MaintenanceTasks",
+                column: "TaskName");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Manufacturers_NameLowered",
@@ -2477,45 +2400,21 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "TagsId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Models3D_FileFormat",
-                table: "Models3D",
-                column: "FileFormat");
+                name: "IX_NfcDevices_PrinterId",
+                table: "NfcDevices",
+                column: "PrinterId",
+                unique: true,
+                filter: "\"PrinterId\" IS NOT NULL");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Models3D_FileHash",
-                table: "Models3D",
-                column: "FileHash",
-                unique: true);
+                name: "IX_NfcScanEvents_NfcDeviceId",
+                table: "NfcScanEvents",
+                column: "NfcDeviceId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Models3D_FolderId",
-                table: "Models3D",
-                column: "FolderId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Models3D_HealthStatus",
-                table: "Models3D",
-                column: "HealthStatus");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Models3D_IsValid",
-                table: "Models3D",
-                column: "IsValid");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Models3D_LastHealthCheckDate",
-                table: "Models3D",
-                column: "LastHealthCheckDate");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Models3D_UploadedAt",
-                table: "Models3D",
-                column: "UploadedAt");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Models3D_UploadedByUserId",
-                table: "Models3D",
-                column: "UploadedByUserId");
+                name: "IX_NfcScanEvents_ScannedAt",
+                table: "NfcScanEvents",
+                column: "ScannedAt");
 
             migrationBuilder.CreateIndex(
                 name: "IX_NotificationPreferences_UserId",
@@ -2586,6 +2485,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "UserId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_PlanTasks_MaintenancePlanId_MaintenanceTaskId",
+                table: "PlanTasks",
+                columns: new[] { "MaintenancePlanId", "MaintenanceTaskId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PlanTasks_MaintenanceTaskId",
+                table: "PlanTasks",
+                column: "MaintenanceTaskId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_PrintApprovals_CreatedAt",
                 table: "PrintApprovals",
                 column: "CreatedAt",
@@ -2597,16 +2507,27 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "PrintJobId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_PrinterMaintenanceSchedules_IsActive",
+                table: "PrinterMaintenanceSchedules",
+                column: "IsActive");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrinterMaintenanceSchedules_MaintenancePlanId_PrinterId",
+                table: "PrinterMaintenanceSchedules",
+                columns: new[] { "MaintenancePlanId", "PrinterId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrinterMaintenanceSchedules_PrinterId",
+                table: "PrinterMaintenanceSchedules",
+                column: "PrinterId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_PrinterModelAliases_PrinterModelId_SlicerModelName_SlicerType",
                 table: "PrinterModelAliases",
                 columns: new[] { "PrinterModelId", "SlicerModelName", "SlicerType" },
                 unique: true,
                 filter: "[SlicerType] IS NOT NULL");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_PrinterModelAliases_PrinterModelId1",
-                table: "PrinterModelAliases",
-                column: "PrinterModelId1");
 
             migrationBuilder.CreateIndex(
                 name: "IX_PrinterModels_ManufacturerId_NameLowered",
@@ -2666,11 +2587,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_Printers_TemplateMachineProfileId",
-                table: "Printers",
-                column: "TemplateMachineProfileId");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_PrinterStatisticsSet_LastSyncTime",
                 table: "PrinterStatisticsSet",
                 column: "LastSyncTime");
@@ -2692,6 +2608,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "IX_PrintJobs_AssignedPrinterId",
                 table: "PrintJobs",
                 column: "AssignedPrinterId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintJobs_AssignedPrinterId_Status",
+                table: "PrintJobs",
+                columns: new[] { "AssignedPrinterId", "Status" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_PrintJobs_ExternalJobId_SourcePrinterId",
@@ -2752,53 +2673,80 @@ namespace Farm.Migrations.SqlServer.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_CreatedByUserId",
-                table: "ProcessProfiles",
-                column: "CreatedByUserId");
+                name: "IX_PrintProjectFiles_GcodeFileId",
+                table: "PrintProjectFiles",
+                column: "GcodeFileId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_Hash",
-                table: "ProcessProfiles",
-                column: "Hash",
-                unique: true,
-                filter: "[Hash] IS NOT NULL");
+                name: "IX_PrintProjectFiles_LastPrintJobId",
+                table: "PrintProjectFiles",
+                column: "LastPrintJobId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_IsDefault",
-                table: "ProcessProfiles",
-                column: "IsDefault");
+                name: "IX_PrintProjectFiles_PrintProjectId",
+                table: "PrintProjectFiles",
+                column: "PrintProjectId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_IsPublic",
-                table: "ProcessProfiles",
-                column: "IsPublic");
+                name: "IX_PrintProjectFiles_ProjectId_GcodeFileId",
+                table: "PrintProjectFiles",
+                columns: new[] { "PrintProjectId", "GcodeFileId" },
+                unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_IsSystem",
-                table: "ProcessProfiles",
-                column: "IsSystem");
+                name: "IX_PrintProjectFiles_SpoolmanFilamentId",
+                table: "PrintProjectFiles",
+                column: "SpoolmanFilamentId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_Name_SlicerType_PrinterModelId",
-                table: "ProcessProfiles",
-                columns: new[] { "Name", "SlicerType", "PrinterModelId" },
-                unique: true,
-                filter: "[PrinterModelId] IS NOT NULL");
+                name: "IX_PrintProjectFiles_Status",
+                table: "PrintProjectFiles",
+                column: "Status");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_PrinterModelId",
-                table: "ProcessProfiles",
-                column: "PrinterModelId");
+                name: "IX_PrintProjects_CreatedAt",
+                table: "PrintProjects",
+                column: "CreatedAt");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_SlicerType",
-                table: "ProcessProfiles",
-                column: "SlicerType");
+                name: "IX_PrintProjects_DueDate",
+                table: "PrintProjects",
+                column: "DueDate");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessProfiles_SpecificPrinterId",
-                table: "ProcessProfiles",
-                column: "SpecificPrinterId");
+                name: "IX_PrintProjects_Priority",
+                table: "PrintProjects",
+                column: "Priority");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintProjects_Status",
+                table: "PrintProjects",
+                column: "Status");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintProjectTemplateFiles_PrintProjectTemplateId",
+                table: "PrintProjectTemplateFiles",
+                column: "PrintProjectTemplateId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintProjectTemplateFiles_SortOrder",
+                table: "PrintProjectTemplateFiles",
+                column: "SortOrder");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintProjectTemplates_Category",
+                table: "PrintProjectTemplates",
+                column: "Category");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintProjectTemplates_Name",
+                table: "PrintProjectTemplates",
+                column: "Name");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrintProjectTemplates_SortOrder",
+                table: "PrintProjectTemplates",
+                column: "SortOrder");
 
             migrationBuilder.CreateIndex(
                 name: "IX_RefreshTokens_ExpiresAt",
@@ -2896,56 +2844,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_SliceJobs_PrinterId",
-                table: "SliceJobs",
-                column: "PrinterId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SliceJobs_QueuedAt",
-                table: "SliceJobs",
-                column: "QueuedAt");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SliceJobs_SlicerProfileId",
-                table: "SliceJobs",
-                column: "SlicerProfileId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SliceJobs_Status",
-                table: "SliceJobs",
-                column: "Status");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SliceJobs_Status_Priority_QueuedAt",
-                table: "SliceJobs",
-                columns: new[] { "Status", "Priority", "QueuedAt" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SliceJobs_UserId",
-                table: "SliceJobs",
-                column: "UserId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SliceJobs_WorkerId",
-                table: "SliceJobs",
-                column: "WorkerId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SlicerServices_Name",
-                table: "SlicerServices",
-                column: "Name");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SlicerServices_SlicerType",
-                table: "SlicerServices",
-                column: "SlicerType");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SlicerServices_Status",
-                table: "SlicerServices",
-                column: "Status");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_Spools_AssignedPrinterId",
                 table: "Spools",
                 column: "AssignedPrinterId");
@@ -2961,13 +2859,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "Timestamp");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Tags_CreatedAt",
-                table: "Tags",
+                name: "IX_Tag_CreatedAt",
+                table: "Tag",
                 column: "CreatedAt");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Tags_Name",
-                table: "Tags",
+                name: "IX_Tag_Name",
+                table: "Tag",
                 column: "Name",
                 unique: true);
 
@@ -3079,22 +2977,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "IX_UserTasks_DismissedByUserId",
                 table: "UserTasks",
                 column: "DismissedByUserId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Workers_LastHeartbeat",
-                table: "Workers",
-                column: "LastHeartbeat");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Workers_ServiceId",
-                table: "Workers",
-                column: "ServiceId",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Workers_Status",
-                table: "Workers",
-                column: "Status");
         }
 
         /// <inheritdoc />
@@ -3107,9 +2989,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "AppSettingsEntities");
 
             migrationBuilder.DropTable(
-                name: "Artifacts");
-
-            migrationBuilder.DropTable(
                 name: "AuthAuditLogs");
 
             migrationBuilder.DropTable(
@@ -3117,9 +2996,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             migrationBuilder.DropTable(
                 name: "FailedLoginAttempts");
-
-            migrationBuilder.DropTable(
-                name: "FilamentProfiles");
 
             migrationBuilder.DropTable(
                 name: "FilamentTypePrinterModel");
@@ -3149,7 +3025,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "MaintenanceLogs");
 
             migrationBuilder.DropTable(
+                name: "MaintenanceTaskComponents");
+
+            migrationBuilder.DropTable(
                 name: "Model3DTag");
+
+            migrationBuilder.DropTable(
+                name: "NfcScanEvents");
 
             migrationBuilder.DropTable(
                 name: "NotificationPreferences");
@@ -3162,6 +3044,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             migrationBuilder.DropTable(
                 name: "PasswordResetTokens");
+
+            migrationBuilder.DropTable(
+                name: "PlanTasks");
 
             migrationBuilder.DropTable(
                 name: "PrintApprovals");
@@ -3179,6 +3064,12 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "PrintJobStatistics");
 
             migrationBuilder.DropTable(
+                name: "PrintProjectFiles");
+
+            migrationBuilder.DropTable(
+                name: "PrintProjectTemplateFiles");
+
+            migrationBuilder.DropTable(
                 name: "RefreshTokens");
 
             migrationBuilder.DropTable(
@@ -3189,15 +3080,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             migrationBuilder.DropTable(
                 name: "RolePermissions");
-
-            migrationBuilder.DropTable(
-                name: "SliceJobs");
-
-            migrationBuilder.DropTable(
-                name: "SlicerServices");
-
-            migrationBuilder.DropTable(
-                name: "SlicerSettings");
 
             migrationBuilder.DropTable(
                 name: "SpoolmanConfigs");
@@ -3218,9 +3100,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "UserTasks");
 
             migrationBuilder.DropTable(
-                name: "Workers");
-
-            migrationBuilder.DropTable(
                 name: "FilamentTypes");
 
             migrationBuilder.DropTable(
@@ -3233,10 +3112,19 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "MaintenanceAlerts");
 
             migrationBuilder.DropTable(
-                name: "Models3D");
+                name: "MaintenanceComponents");
 
             migrationBuilder.DropTable(
-                name: "Tags");
+                name: "Tag");
+
+            migrationBuilder.DropTable(
+                name: "NfcDevices");
+
+            migrationBuilder.DropTable(
+                name: "PrintProjects");
+
+            migrationBuilder.DropTable(
+                name: "PrintProjectTemplates");
 
             migrationBuilder.DropTable(
                 name: "Resources");
@@ -3245,13 +3133,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "UserActions");
 
             migrationBuilder.DropTable(
-                name: "ProcessProfiles");
-
-            migrationBuilder.DropTable(
                 name: "ToolheadModelDefinitions");
 
             migrationBuilder.DropTable(
                 name: "Roles");
+
+            migrationBuilder.DropTable(
+                name: "Users");
 
             migrationBuilder.DropTable(
                 name: "GcodeHarvestOperations");
@@ -3260,7 +3148,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "PrintJobs");
 
             migrationBuilder.DropTable(
-                name: "MaintenanceSchedules");
+                name: "MaintenanceTasks");
+
+            migrationBuilder.DropTable(
+                name: "PrinterMaintenanceSchedules");
 
             migrationBuilder.DropTable(
                 name: "ExtruderModelDefinitions");
@@ -3275,22 +3166,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                 name: "GcodeFiles");
 
             migrationBuilder.DropTable(
-                name: "Folders");
+                name: "MaintenancePlans");
+
+            migrationBuilder.DropTable(
+                name: "FolderNode");
 
             migrationBuilder.DropTable(
                 name: "Printers");
 
             migrationBuilder.DropTable(
                 name: "Locations");
-
-            migrationBuilder.DropTable(
-                name: "MachineProfiles");
-
-            migrationBuilder.DropTable(
-                name: "MachineModelProfiles");
-
-            migrationBuilder.DropTable(
-                name: "Users");
 
             migrationBuilder.DropTable(
                 name: "PrinterModels");

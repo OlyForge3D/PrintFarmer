@@ -1,12 +1,13 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Farm.Slicer.Migrations.SqlServer.Migrations
+namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialV1 : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -19,16 +20,16 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    JobId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    WorkerId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    Kind = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    FileName = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    RelativePath = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: false),
-                    ContentType = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    JobId = table.Column<Guid>(type: "uuid", nullable: false),
+                    WorkerId = table.Column<Guid>(type: "uuid", nullable: true),
+                    Kind = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    FileName = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
+                    RelativePath = table.Column<string>(type: "character varying(1024)", maxLength: 1024, nullable: false),
+                    ContentType = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
                     SizeBytes = table.Column<long>(type: "bigint", nullable: false),
-                    Sha256 = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Sha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -40,26 +41,26 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    Material = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    Manufacturer = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
-                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    NozzleTemperature = table.Column<int>(type: "int", nullable: false),
-                    BedTemperature = table.Column<int>(type: "int", nullable: false),
-                    PrintSpeed = table.Column<int>(type: "int", nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    Material = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    Manufacturer = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
+                    Description = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
+                    SlicerType = table.Column<int>(type: "integer", nullable: false),
+                    NozzleTemperature = table.Column<int>(type: "integer", nullable: false),
+                    BedTemperature = table.Column<int>(type: "integer", nullable: false),
+                    PrintSpeed = table.Column<int>(type: "integer", nullable: false),
                     RawJson = table.Column<string>(type: "TEXT", nullable: true),
                     SettingsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Hash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    CompatiblePrinters = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    IsSystem = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
-                    IsDefault = table.Column<bool>(type: "bit", nullable: false),
-                    IsPublic = table.Column<bool>(type: "bit", nullable: false),
-                    SlicerVersion = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    CompatiblePrinters = table.Column<string>(type: "text", nullable: true),
+                    IsSystem = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    IsDefault = table.Column<bool>(type: "boolean", nullable: false),
+                    IsPublic = table.Column<bool>(type: "boolean", nullable: false),
+                    SlicerVersion = table.Column<string>(type: "text", nullable: true),
+                    CreatedByUserId = table.Column<Guid>(type: "uuid", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -71,19 +72,19 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    Manufacturer = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: true),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    PrinterModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
+                    Manufacturer = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
+                    Description = table.Column<string>(type: "character varying(1024)", maxLength: 1024, nullable: true),
+                    SlicerType = table.Column<int>(type: "integer", nullable: false),
+                    PrinterModelId = table.Column<Guid>(type: "uuid", nullable: true),
                     RawJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Hash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    IsSystem = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
-                    IsPublic = table.Column<bool>(type: "bit", nullable: false),
-                    SlicerVersion = table.Column<string>(type: "nvarchar(32)", maxLength: 32, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    IsSystem = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    IsPublic = table.Column<bool>(type: "boolean", nullable: false),
+                    SlicerVersion = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -95,29 +96,29 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    FileFormat = table.Column<int>(type: "int", nullable: false),
-                    DimensionX = table.Column<double>(type: "float", nullable: true),
-                    DimensionY = table.Column<double>(type: "float", nullable: true),
-                    DimensionZ = table.Column<double>(type: "float", nullable: true),
-                    TriangleCount = table.Column<int>(type: "int", nullable: true),
-                    IsValid = table.Column<bool>(type: "bit", nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    FileFormat = table.Column<int>(type: "integer", nullable: false),
+                    DimensionX = table.Column<double>(type: "double precision", nullable: true),
+                    DimensionY = table.Column<double>(type: "double precision", nullable: true),
+                    DimensionZ = table.Column<double>(type: "double precision", nullable: true),
+                    TriangleCount = table.Column<int>(type: "integer", nullable: true),
+                    IsValid = table.Column<bool>(type: "boolean", nullable: false),
                     ValidationErrors = table.Column<string>(type: "TEXT", nullable: true),
-                    UploadedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: true),
-                    Name = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    FileName = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    FolderId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    FilePath = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: false),
-                    ThumbnailFileName = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
+                    UploadedByUserId = table.Column<Guid>(type: "uuid", nullable: true),
+                    RowVersion = table.Column<byte[]>(type: "bytea", rowVersion: true, nullable: true),
+                    Name = table.Column<string>(type: "text", nullable: false),
+                    FileName = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    FolderId = table.Column<Guid>(type: "uuid", nullable: false),
+                    FilePath = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: false),
+                    ThumbnailFileName = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     FileSizeBytes = table.Column<long>(type: "bigint", nullable: false),
-                    FileHash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    UploadedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    LastHealthCheckDate = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    HealthStatus = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    FileHash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    UploadedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    Description = table.Column<string>(type: "text", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    LastHealthCheckDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    HealthStatus = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     LastVerificationResult = table.Column<string>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
@@ -130,29 +131,29 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    PrinterModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    SpecificPrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    LayerHeight = table.Column<double>(type: "float", nullable: false),
-                    InfillPercentage = table.Column<int>(type: "int", nullable: false),
-                    PrintSpeed = table.Column<double>(type: "float", nullable: false),
-                    EnableSupports = table.Column<bool>(type: "bit", nullable: false),
-                    Quality = table.Column<int>(type: "int", nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    Description = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
+                    SlicerType = table.Column<int>(type: "integer", nullable: false),
+                    PrinterModelId = table.Column<Guid>(type: "uuid", nullable: true),
+                    SpecificPrinterId = table.Column<Guid>(type: "uuid", nullable: true),
+                    LayerHeight = table.Column<double>(type: "double precision", nullable: false),
+                    InfillPercentage = table.Column<int>(type: "integer", nullable: false),
+                    PrintSpeed = table.Column<double>(type: "double precision", nullable: false),
+                    EnableSupports = table.Column<bool>(type: "boolean", nullable: false),
+                    Quality = table.Column<int>(type: "integer", nullable: false),
                     AdvancedSettings = table.Column<string>(type: "TEXT", nullable: true),
-                    SlicerVersion = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    SlicerVersion = table.Column<string>(type: "text", nullable: true),
                     RawJson = table.Column<string>(type: "TEXT", nullable: true),
                     SettingsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Hash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    CompatiblePrinters = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    IsDefault = table.Column<bool>(type: "bit", nullable: false),
-                    IsPublic = table.Column<bool>(type: "bit", nullable: false),
-                    IsSystem = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
-                    CreatedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    CompatiblePrinters = table.Column<string>(type: "text", nullable: true),
+                    IsDefault = table.Column<bool>(type: "boolean", nullable: false),
+                    IsPublic = table.Column<bool>(type: "boolean", nullable: false),
+                    IsSystem = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    CreatedByUserId = table.Column<Guid>(type: "uuid", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -164,21 +165,22 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    Version = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    Host = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    UiManifestUrl = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    SlicerType = table.Column<int>(type: "integer", nullable: false),
+                    Version = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    Host = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: true),
+                    UiManifestUrl = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: true),
                     CapabilitiesJson = table.Column<string>(type: "TEXT", nullable: true),
-                    MaxConcurrentJobs = table.Column<int>(type: "int", nullable: false),
-                    Status = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    LastSeen = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    ApiKey = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    ApiKeyRotatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Tags = table.Column<string>(type: "nvarchar(max)", nullable: true)
+                    MaxConcurrentJobs = table.Column<int>(type: "integer", nullable: false),
+                    Status = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    LastSeen = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    ApiKey = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
+                    ApiKeyRotatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    Tags = table.Column<string>(type: "text", nullable: true),
+                    InstanceId = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -190,12 +192,12 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    Enabled = table.Column<bool>(type: "bit", nullable: false),
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Enabled = table.Column<bool>(type: "boolean", nullable: false),
                     PerEngineJson = table.Column<string>(type: "TEXT", nullable: true),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    JitterPercent = table.Column<double>(type: "float", nullable: false, defaultValue: 15.0)
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    JitterPercent = table.Column<double>(type: "double precision", nullable: false, defaultValue: 15.0)
                 },
                 constraints: table =>
                 {
@@ -207,29 +209,29 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    ServiceId = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
-                    EndpointUrl = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ServiceId = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
+                    Name = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
+                    EndpointUrl = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: false),
                     CapabilitiesJson = table.Column<string>(type: "TEXT", nullable: false),
-                    Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                    TotalSlots = table.Column<int>(type: "int", nullable: false),
-                    ActiveJobs = table.Column<int>(type: "int", nullable: false),
-                    CompletedJobs = table.Column<int>(type: "int", nullable: false),
-                    FailedJobs = table.Column<int>(type: "int", nullable: false),
-                    AverageProcessingTimeSeconds = table.Column<double>(type: "float", nullable: true),
-                    LastHeartbeat = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    RegisteredAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    OnlineAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    OfflineAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    ApiKey = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    Version = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
+                    Status = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
+                    TotalSlots = table.Column<int>(type: "integer", nullable: false),
+                    ActiveJobs = table.Column<int>(type: "integer", nullable: false),
+                    CompletedJobs = table.Column<int>(type: "integer", nullable: false),
+                    FailedJobs = table.Column<int>(type: "integer", nullable: false),
+                    AverageProcessingTimeSeconds = table.Column<double>(type: "double precision", nullable: true),
+                    LastHeartbeat = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    RegisteredAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    OnlineAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    OfflineAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    ApiKey = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: true),
+                    Version = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
                     MetadataJson = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    IsDisabled = table.Column<bool>(type: "bit", nullable: false),
-                    DisabledReason = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: true),
-                    ArtifactsProduced = table.Column<int>(type: "int", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    IsDisabled = table.Column<bool>(type: "boolean", nullable: false),
+                    DisabledReason = table.Column<string>(type: "character varying(1024)", maxLength: 1024, nullable: true),
+                    ArtifactsProduced = table.Column<int>(type: "integer", nullable: false),
                     ArtifactBytesProduced = table.Column<long>(type: "bigint", nullable: false)
                 },
                 constraints: table =>
@@ -242,23 +244,23 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    Manufacturer = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
-                    SlicerType = table.Column<int>(type: "int", nullable: false),
-                    PrinterModelId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    MachineModelProfileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    Manufacturer = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    Description = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
+                    SlicerType = table.Column<int>(type: "integer", nullable: false),
+                    PrinterModelId = table.Column<Guid>(type: "uuid", nullable: true),
+                    MachineModelProfileId = table.Column<Guid>(type: "uuid", nullable: true),
                     RawJson = table.Column<string>(type: "TEXT", nullable: true),
                     SettingsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Hash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    IsSystem = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
-                    IsDefault = table.Column<bool>(type: "bit", nullable: false),
-                    IsPublic = table.Column<bool>(type: "bit", nullable: false),
-                    SlicerVersion = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    IsSystem = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    IsDefault = table.Column<bool>(type: "boolean", nullable: false),
+                    IsPublic = table.Column<bool>(type: "boolean", nullable: false),
+                    SlicerVersion = table.Column<string>(type: "text", nullable: true),
+                    CreatedByUserId = table.Column<Guid>(type: "uuid", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -277,37 +279,37 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    PrinterId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    ModelFileUrl = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: false),
-                    ModelFileName = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: false),
-                    SlicerEngine = table.Column<int>(type: "int", nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    PrinterId = table.Column<Guid>(type: "uuid", nullable: true),
+                    ModelFileUrl = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: false),
+                    ModelFileName = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: false),
+                    SlicerEngine = table.Column<int>(type: "integer", nullable: false),
                     SlicerProfileJson = table.Column<string>(type: "TEXT", nullable: true),
-                    SlicerProfileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    SlicerProfileId = table.Column<Guid>(type: "uuid", nullable: true),
                     RequiredCapabilitiesJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                    Priority = table.Column<int>(type: "int", nullable: false),
-                    QueuedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    CorrelationId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    Checksum = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                    StartedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    CompletedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    ResultFileUrl = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: true),
+                    Status = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
+                    Priority = table.Column<int>(type: "integer", nullable: false),
+                    QueuedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    CorrelationId = table.Column<Guid>(type: "uuid", nullable: true),
+                    Checksum = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
+                    StartedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    CompletedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    ResultFileUrl = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: true),
                     ErrorMessage = table.Column<string>(type: "TEXT", nullable: true),
-                    ProgressPercent = table.Column<int>(type: "int", nullable: false),
-                    ProgressMessage = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    EstimatedPrintTimeSeconds = table.Column<int>(type: "int", nullable: true),
-                    FilamentUsedGrams = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
-                    WorkerId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    ClaimedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    LeaseExpiresAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    ArtifactIdsCsv = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    ArtifactsCount = table.Column<int>(type: "int", nullable: true),
+                    ProgressPercent = table.Column<int>(type: "integer", nullable: false),
+                    ProgressMessage = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: true),
+                    EstimatedPrintTimeSeconds = table.Column<int>(type: "integer", nullable: true),
+                    FilamentUsedGrams = table.Column<decimal>(type: "numeric", nullable: true),
+                    WorkerId = table.Column<Guid>(type: "uuid", nullable: true),
+                    ClaimedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    LeaseExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    ArtifactIdsCsv = table.Column<string>(type: "text", nullable: true),
+                    ArtifactsCount = table.Column<int>(type: "integer", nullable: true),
                     ArtifactsTotalBytes = table.Column<long>(type: "bigint", nullable: true),
-                    RetryCount = table.Column<int>(type: "int", nullable: false)
+                    RetryCount = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -356,8 +358,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 table: "FilamentProfiles",
                 column: "Hash",
-                unique: true,
-                filter: "[Hash] IS NOT NULL");
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_FilamentProfiles_IsSystem",
@@ -389,8 +390,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 table: "MachineModelProfiles",
                 column: "Hash",
-                unique: true,
-                filter: "[Hash] IS NOT NULL");
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_MachineModelProfiles_IsSystem",
@@ -428,8 +428,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 table: "MachineProfiles",
                 column: "Hash",
-                unique: true,
-                filter: "[Hash] IS NOT NULL");
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_MachineProfiles_IsSystem",
@@ -528,8 +527,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 table: "ProcessProfiles",
                 column: "Hash",
-                unique: true,
-                filter: "[Hash] IS NOT NULL");
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_ProcessProfiles_IsDefault",
@@ -554,8 +552,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 schema: "slicer",
                 table: "ProcessProfiles",
                 columns: new[] { "Name", "SlicerType", "PrinterModelId" },
-                unique: true,
-                filter: "[PrinterModelId] IS NOT NULL");
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_ProcessProfiles_PrinterModelId",

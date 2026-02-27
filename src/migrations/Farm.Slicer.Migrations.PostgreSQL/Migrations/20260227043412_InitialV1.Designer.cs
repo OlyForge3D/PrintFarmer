@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(SlicerDbContext))]
-    [Migration("20260216174108_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260227043412_InitialV1")]
+    partial class InitialV1
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -682,6 +682,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<string>("Host")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
+
+                    b.Property<string>("InstanceId")
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("LastSeen")
                         .HasColumnType("timestamp with time zone");

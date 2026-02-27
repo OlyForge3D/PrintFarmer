@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Slicer.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(SlicerDbContext))]
-    [Migration("20260221231831_AddSlicerServiceInstanceId")]
-    partial class AddSlicerServiceInstanceId
+    [Migration("20260227043420_InitialV1")]
+    partial class InitialV1
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
