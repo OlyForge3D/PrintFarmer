@@ -1,5 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.Maintenance;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -18,12 +20,14 @@ namespace Farm.Web.Api.Controllers;
 public class MaintenancePlanController(
     ILogger<MaintenancePlanController> logger,
     IMaintenancePlanRepository planRepository,
-    IMaintenanceTaskRepository taskRepository)
+    IMaintenanceTaskRepository taskRepository,
+    IMaintenanceImportExportService importExportService)
     : ControllerBase
 {
     private readonly ILogger<MaintenancePlanController> _logger = logger;
     private readonly IMaintenancePlanRepository _planRepository = planRepository;
     private readonly IMaintenanceTaskRepository _taskRepository = taskRepository;
+    private readonly IMaintenanceImportExportService _importExportService = importExportService;
 
     // ───────────────────────── Plans ─────────────────────────
 
@@ -446,5 +450,64 @@ public class MaintenancePlanController(
         _logger.LogInformation("Removed component {ComponentId} from task {TaskId}", componentId, taskId);
 
         return NoContent();
+    }
+
+    // ───────────────────── Import / Export ────────────────────
+
+    /// <summary>
+    /// Exports all maintenance plans as a JSON file (includes task associations by name).
+    /// </summary>
+    [HttpGet("export")]
+    public async Task<ActionResult<MaintenanceExportEnvelope>> ExportAsync(CancellationToken ct)
+    {
+        MaintenanceExportEnvelope envelope = await _importExportService.ExportPlansAsync(ct);
+        return Ok(envelope);
+    }
+
+    /// <summary>
+    /// Imports maintenance plans from a JSON file. Tasks are linked by name.
+    /// </summary>
+    [HttpPost("import")]
+    public async Task<ActionResult<MaintenanceImportResult>> ImportAsync(
+        [FromBody] MaintenanceExportEnvelope envelope,
+        CancellationToken ct)
+    {
+        if (envelope.Plans is not { Count: > 0 })
+        {
+            return BadRequest(new { message = "No plans found in import data." });
+        }
+
+        MaintenanceImportResult result = await _importExportService.ImportPlansAsync(envelope.Plans, ct);
+        _logger.LogInformation("Plan import: {Created} created, {Updated} updated, {Errors} errors",
+            result.CreatedCount, result.UpdatedCount, result.ErrorCount);
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Exports all maintenance data (components, tasks, plans) as a single JSON bundle.
+    /// </summary>
+    [HttpGet("/api/maintenance/export")]
+    public async Task<ActionResult<MaintenanceExportEnvelope>> ExportBundleAsync(CancellationToken ct)
+    {
+        MaintenanceExportEnvelope envelope = await _importExportService.ExportBundleAsync(ct);
+        return Ok(envelope);
+    }
+
+    /// <summary>
+    /// Imports a full maintenance bundle (components, tasks, plans with relationships).
+    /// Import order: components → tasks → plans.
+    /// </summary>
+    [HttpPost("/api/maintenance/import")]
+    public async Task<ActionResult<MaintenanceImportResult>> ImportBundleAsync(
+        [FromBody] MaintenanceExportEnvelope envelope,
+        CancellationToken ct)
+    {
+        MaintenanceImportResult result = await _importExportService.ImportBundleAsync(envelope, ct);
+        _logger.LogInformation(
+            "Bundle import: {Created} created, {Updated} updated, {Errors} errors",
+            result.CreatedCount, result.UpdatedCount, result.ErrorCount);
+
+        return Ok(result);
     }
 }

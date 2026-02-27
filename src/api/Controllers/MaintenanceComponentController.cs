@@ -1,5 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.Maintenance;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -16,11 +18,13 @@ namespace Farm.Web.Api.Controllers;
 [Authorize(Roles = "farm_admin")]
 public class MaintenanceComponentController(
     ILogger<MaintenanceComponentController> logger,
-    IMaintenanceComponentRepository componentRepository)
+    IMaintenanceComponentRepository componentRepository,
+    IMaintenanceImportExportService importExportService)
     : ControllerBase
 {
     private readonly ILogger<MaintenanceComponentController> _logger = logger;
     private readonly IMaintenanceComponentRepository _componentRepository = componentRepository;
+    private readonly IMaintenanceImportExportService _importExportService = importExportService;
 
     private static MaintenanceComponentResponse ToResponse(MaintenanceComponent c) => new(
         c.Id, c.Name, c.Category, c.Sku, c.Description,
@@ -158,5 +162,37 @@ public class MaintenanceComponentController(
         _logger.LogInformation("Deleted maintenance component {ComponentId} '{ComponentName}'", component.Id, component.Name);
 
         return NoContent();
+    }
+
+    // ───────────────────── Import / Export ────────────────────
+
+    /// <summary>
+    /// Exports all components (spare parts) as a JSON file.
+    /// </summary>
+    [HttpGet("export")]
+    public async Task<ActionResult<MaintenanceExportEnvelope>> ExportAsync(CancellationToken ct)
+    {
+        MaintenanceExportEnvelope envelope = await _importExportService.ExportComponentsAsync(ct);
+        return Ok(envelope);
+    }
+
+    /// <summary>
+    /// Imports components from a JSON file. Name-based matching: existing components are updated, new ones are created.
+    /// </summary>
+    [HttpPost("import")]
+    public async Task<ActionResult<MaintenanceImportResult>> ImportAsync(
+        [FromBody] MaintenanceExportEnvelope envelope,
+        CancellationToken ct)
+    {
+        if (envelope.Components is not { Count: > 0 })
+        {
+            return BadRequest(new { message = "No components found in import data." });
+        }
+
+        MaintenanceImportResult result = await _importExportService.ImportComponentsAsync(envelope.Components, ct);
+        _logger.LogInformation("Component import: {Created} created, {Updated} updated, {Errors} errors",
+            result.CreatedCount, result.UpdatedCount, result.ErrorCount);
+
+        return Ok(result);
     }
 }

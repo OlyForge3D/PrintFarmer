@@ -6,7 +6,7 @@
  * Supports category filtering, low-stock badges, and inline stock editing.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Badge, Button } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
@@ -22,6 +22,8 @@ import {
   AlertIcon,
   GearIcon,
   ExternalLinkIcon,
+  DownloadIcon,
+  UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
   useMaintenanceComponents,
@@ -29,11 +31,14 @@ import {
   useCreateComponent,
   useUpdateComponent,
   useDeleteComponent,
+  useExportComponents,
+  useImportComponents,
 } from '../hooks/useMaintenanceComponents';
 import type {
   MaintenanceComponentDto,
   CreateMaintenanceComponentDto,
   UpdateMaintenanceComponentDto,
+  MaintenanceExportEnvelope,
 } from '@/types/maintenance';
 
 // ──────────────────────── Component Form Modal ────────────────────────
@@ -196,6 +201,9 @@ export function PartsInventoryTab() {
   const { data: components = [], isLoading, error } = useMaintenanceComponents();
   const { data: categories = [] } = useComponentCategories();
   const deleteComponent = useDeleteComponent();
+  const exportMutation = useExportComponents();
+  const importMutation = useImportComponents();
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -255,6 +263,43 @@ export function PartsInventoryTab() {
     setDeletingComponent(null);
   };
 
+  const handleExport = async () => {
+    try {
+      const envelope = await exportMutation.mutateAsync();
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `maintenance-parts-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${envelope.components?.length ?? 0} parts`);
+    } catch {
+      toast.error('Failed to export parts');
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const envelope = JSON.parse(text) as MaintenanceExportEnvelope;
+      const result = await importMutation.mutateAsync(envelope);
+      toast.success(`Import complete: ${result.createdCount} created, ${result.updatedCount} updated`);
+      if (result.warnings.length > 0) {
+        toast.warning(result.warnings.join('\n'));
+      }
+      if (result.errorCount > 0) {
+        toast.error(`${result.errorCount} errors: ${result.errors.join(', ')}`);
+      }
+    } catch {
+      toast.error('Failed to import parts — check the JSON format');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -308,6 +353,13 @@ export function PartsInventoryTab() {
         >
           Add Part
         </Button>
+        <Button variant="secondary" size="sm" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending} className="shrink-0">
+          Export
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending} className="shrink-0">
+          Import
+        </Button>
+        <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
       </div>
 
       {/* Summary */}

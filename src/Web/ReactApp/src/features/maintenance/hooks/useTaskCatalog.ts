@@ -11,6 +11,7 @@ import type {
   CreateMaintenanceTaskDto,
   UpdateMaintenanceTaskDto,
   AddTaskComponentDto,
+  MaintenanceExportEnvelope,
 } from '@/types/maintenance';
 
 // ──────────────────────── Query Keys ────────────────────────
@@ -98,6 +99,23 @@ export function useRemoveCatalogTaskComponent() {
   return useMutation({
     mutationFn: ({ taskId, componentId }: { taskId: string; componentId: string }) =>
       maintenancePlanService.removeCatalogTaskComponent(taskId, componentId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: taskCatalogKeys.all });
+    },
+  });
+}
+
+export function useExportTasks() {
+  return useMutation({
+    mutationFn: () => maintenancePlanService.exportTasks(),
+  });
+}
+
+export function useImportTasks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (envelope: MaintenanceExportEnvelope) =>
+      maintenancePlanService.importTasks(envelope),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: taskCatalogKeys.all });
     },

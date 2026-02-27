@@ -19,6 +19,8 @@ import type {
   UpdateScheduleDeploymentDto,
   CreateMaintenanceComponentDto,
   UpdateMaintenanceComponentDto,
+  MaintenanceExportEnvelope,
+  MaintenanceImportResult,
 } from '@/types/maintenance';
 
 /**
@@ -220,6 +222,48 @@ export class MaintenancePlanService {
 
   async deleteScheduleDeployment(id: string): Promise<void> {
     await apiClient.delete(`/maintenance/schedules/${id}`);
+  }
+
+  // ──────────────────── Import / Export ────────────────────
+
+  async exportTasks(): Promise<MaintenanceExportEnvelope> {
+    const res = await apiClient.get<MaintenanceExportEnvelope>('/maintenance/tasks/export');
+    return res.data;
+  }
+
+  async importTasks(envelope: MaintenanceExportEnvelope): Promise<MaintenanceImportResult> {
+    const res = await apiClient.post<MaintenanceImportResult>('/maintenance/tasks/import', envelope);
+    return res.data;
+  }
+
+  async exportComponents(): Promise<MaintenanceExportEnvelope> {
+    const res = await apiClient.get<MaintenanceExportEnvelope>('/maintenance/components/export');
+    return res.data;
+  }
+
+  async importComponents(envelope: MaintenanceExportEnvelope): Promise<MaintenanceImportResult> {
+    const res = await apiClient.post<MaintenanceImportResult>('/maintenance/components/import', envelope);
+    return res.data;
+  }
+
+  async exportPlans(): Promise<MaintenanceExportEnvelope> {
+    const res = await apiClient.get<MaintenanceExportEnvelope>('/maintenance/plans/export');
+    return res.data;
+  }
+
+  async importPlans(envelope: MaintenanceExportEnvelope): Promise<MaintenanceImportResult> {
+    const res = await apiClient.post<MaintenanceImportResult>('/maintenance/plans/import', envelope);
+    return res.data;
+  }
+
+  async exportBundle(): Promise<MaintenanceExportEnvelope> {
+    const res = await apiClient.get<MaintenanceExportEnvelope>('/maintenance/export');
+    return res.data;
+  }
+
+  async importBundle(envelope: MaintenanceExportEnvelope): Promise<MaintenanceImportResult> {
+    const res = await apiClient.post<MaintenanceImportResult>('/maintenance/import', envelope);
+    return res.data;
   }
 }
 

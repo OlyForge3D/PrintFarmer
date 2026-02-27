@@ -22,6 +22,8 @@ import {
   PlusIcon,
   SearchIcon,
   FilterIcon,
+  DownloadIcon,
+  UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
   useTaskCatalog,
@@ -31,6 +33,8 @@ import {
   useDeleteCatalogTask,
   useAddCatalogTaskComponent,
   useRemoveCatalogTaskComponent,
+  useExportTasks,
+  useImportTasks,
 } from '../hooks/useTaskCatalog';
 import { useMaintenanceComponents } from '../hooks/useMaintenanceComponents';
 import type {
@@ -39,6 +43,7 @@ import type {
   MaintenanceComponentDto,
   CreateMaintenanceTaskDto,
   UpdateMaintenanceTaskDto,
+  MaintenanceExportEnvelope,
 } from '@/types/maintenance';
 
 // ──────────────────────── Helpers ────────────────────────
@@ -569,6 +574,9 @@ export function TaskCatalogTab() {
   const { data: tasks = [], isLoading, error } = useTaskCatalog();
   const { data: categories = [] } = useTaskCategories();
   const deleteTask = useDeleteCatalogTask();
+  const exportMutation = useExportTasks();
+  const importMutation = useImportTasks();
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -623,6 +631,43 @@ export function TaskCatalogTab() {
     }
   };
 
+  const handleExport = async () => {
+    try {
+      const envelope = await exportMutation.mutateAsync();
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `maintenance-tasks-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${envelope.tasks?.length ?? 0} tasks`);
+    } catch {
+      toast.error('Failed to export tasks');
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const envelope = JSON.parse(text) as MaintenanceExportEnvelope;
+      const result = await importMutation.mutateAsync(envelope);
+      toast.success(`Import complete: ${result.createdCount} created, ${result.updatedCount} updated`);
+      if (result.warnings.length > 0) {
+        toast.warning(result.warnings.join('\n'));
+      }
+      if (result.errorCount > 0) {
+        toast.error(`${result.errorCount} errors: ${result.errors.join(', ')}`);
+      }
+    } catch {
+      toast.error('Failed to import tasks — check the JSON format');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   if (error) {
     return (
       <div className="text-center py-12 text-red-400" role="alert">
@@ -662,6 +707,13 @@ export function TaskCatalogTab() {
         <Button variant="primary" size="sm" onClick={handleCreate} iconLeft={<PlusIcon className="h-4 w-4" />} className="shrink-0">
           New Task
         </Button>
+        <Button variant="secondary" size="sm" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending} className="shrink-0">
+          Export
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending} className="shrink-0">
+          Import
+        </Button>
+        <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
       </div>
 
       {/* Summary */}

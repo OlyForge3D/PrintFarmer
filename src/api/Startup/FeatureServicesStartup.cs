@@ -64,6 +64,7 @@ public static class FeatureServicesStartup
 
         // Maintenance Module - Services
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
         // SPA services (only for monolithic deployments)
         bool isMonolithicDeployment = configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";

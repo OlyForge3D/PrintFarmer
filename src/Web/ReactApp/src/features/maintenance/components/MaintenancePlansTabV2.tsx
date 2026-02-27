@@ -6,7 +6,7 @@
  * reveal the task list with interval and priority details.
  */
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Badge, Button } from '@/common/components/ui';
@@ -26,6 +26,8 @@ import {
   AlertIcon,
   ChevronRightIcon,
   ChevronDownIcon,
+  DownloadIcon,
+  UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
   useMaintenancePlans,
@@ -35,6 +37,8 @@ import {
   useCreateTask,
   useUpdateTask,
   useDeleteTask,
+  useExportPlans,
+  useImportPlans,
 } from '../hooks/useMaintenancePlans';
 import type {
   MaintenancePlanDto,
@@ -43,6 +47,7 @@ import type {
   UpdateMaintenancePlanDto,
   CreateMaintenanceTaskDto,
   UpdateMaintenanceTaskDto,
+  MaintenanceExportEnvelope,
 } from '@/types/maintenance';
 import { useTaskCategories } from '../hooks/useTaskCatalog';
 
@@ -478,6 +483,9 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
 export function MaintenancePlansTab() {
   const { data: plans = [], isLoading, error } = useMaintenancePlans();
   const deletePlan = useDeletePlan();
+  const exportMutation = useExportPlans();
+  const importMutation = useImportPlans();
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   const [search, setSearch] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -520,6 +528,43 @@ export function MaintenancePlansTab() {
       toast.error(err instanceof Error ? err.message : 'Failed to delete plan');
     }
     setDeletingPlan(null);
+  };
+
+  const handleExport = async () => {
+    try {
+      const envelope = await exportMutation.mutateAsync();
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `maintenance-plans-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${envelope.plans?.length ?? 0} plans`);
+    } catch {
+      toast.error('Failed to export plans');
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const envelope = JSON.parse(text) as MaintenanceExportEnvelope;
+      const result = await importMutation.mutateAsync(envelope);
+      toast.success(`Import complete: ${result.createdCount} created, ${result.updatedCount} updated`);
+      if (result.warnings.length > 0) {
+        toast.warning(result.warnings.join('\n'));
+      }
+      if (result.errorCount > 0) {
+        toast.error(`${result.errorCount} errors: ${result.errors.join(', ')}`);
+      }
+    } catch {
+      toast.error('Failed to import plans — check the JSON format');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   if (isLoading) {
@@ -565,6 +610,13 @@ export function MaintenancePlansTab() {
         >
           New Plan
         </Button>
+        <Button variant="secondary" size="sm" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending} className="shrink-0">
+          Export
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending} className="shrink-0">
+          Import
+        </Button>
+        <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
       </div>
 
       {/* Summary */}

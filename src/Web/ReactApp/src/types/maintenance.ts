@@ -430,3 +430,68 @@ export interface UpdateMaintenanceComponentDto {
   inStock?: number;
   minimumStock?: number;
 }
+
+// ============================================================================
+// Import / Export DTOs
+// ============================================================================
+
+export interface MaintenanceImportResult {
+  createdCount: number;
+  updatedCount: number;
+  errorCount: number;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface MaintenanceExportEnvelope {
+  version: number;
+  exportType: string;
+  exportedAt: string;
+  components?: ComponentExportDto[];
+  tasks?: TaskExportDto[];
+  plans?: PlanExportDto[];
+}
+
+export interface ComponentExportDto {
+  name: string;
+  category: string;
+  sku?: string | null;
+  description?: string | null;
+  unitCost?: number | null;
+  supplier?: string | null;
+  url?: string | null;
+  inStock: number;
+  minimumStock: number;
+}
+
+export interface TaskExportDto {
+  taskName: string;
+  category: string;
+  description?: string | null;
+  intervalHours?: number | null;
+  intervalDays?: number | null;
+  estimatedDurationMinutes?: number | null;
+  priority: number;
+  isActive: boolean;
+  components?: TaskComponentRefDto[];
+}
+
+export interface TaskComponentRefDto {
+  name: string;
+  quantity: number;
+  notes?: string | null;
+}
+
+export interface PlanExportDto {
+  name: string;
+  description?: string | null;
+  isActive: boolean;
+  tasks?: PlanTaskRefDto[];
+}
+
+export interface PlanTaskRefDto {
+  taskName: string;
+  sortOrder: number;
+  intervalHoursOverride?: number | null;
+  intervalDaysOverride?: number | null;
+}

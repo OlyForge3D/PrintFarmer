@@ -10,6 +10,7 @@ import { maintenancePlanService } from '@/services/maintenancePlanService';
 import type {
   CreateMaintenanceComponentDto,
   UpdateMaintenanceComponentDto,
+  MaintenanceExportEnvelope,
 } from '@/types/maintenance';
 
 // ──────────────────────── Query Keys ────────────────────────
@@ -68,6 +69,23 @@ export function useDeleteComponent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => maintenancePlanService.deleteComponent(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: componentKeys.all });
+    },
+  });
+}
+
+export function useExportComponents() {
+  return useMutation({
+    mutationFn: () => maintenancePlanService.exportComponents(),
+  });
+}
+
+export function useImportComponents() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (envelope: MaintenanceExportEnvelope) =>
+      maintenancePlanService.importComponents(envelope),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: componentKeys.all });
     },

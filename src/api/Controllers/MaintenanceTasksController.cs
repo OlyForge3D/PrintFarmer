@@ -1,5 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.Maintenance;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -16,11 +18,13 @@ namespace Farm.Web.Api.Controllers;
 [Authorize(Roles = "farm_admin")]
 public class MaintenanceTasksController(
     ILogger<MaintenanceTasksController> logger,
-    IMaintenanceTaskRepository taskRepository)
+    IMaintenanceTaskRepository taskRepository,
+    IMaintenanceImportExportService importExportService)
     : ControllerBase
 {
     private readonly ILogger<MaintenanceTasksController> _logger = logger;
     private readonly IMaintenanceTaskRepository _taskRepository = taskRepository;
+    private readonly IMaintenanceImportExportService _importExportService = importExportService;
 
     // ───────────────────────── Tasks ─────────────────────────
 
@@ -252,5 +256,37 @@ public class MaintenanceTasksController(
         _logger.LogInformation("Removed component {ComponentId} from task {TaskId}", componentId, taskId);
 
         return NoContent();
+    }
+
+    // ───────────────────── Import / Export ────────────────────
+
+    /// <summary>
+    /// Exports all tasks as a JSON file.
+    /// </summary>
+    [HttpGet("export")]
+    public async Task<ActionResult<MaintenanceExportEnvelope>> ExportAsync(CancellationToken ct)
+    {
+        MaintenanceExportEnvelope envelope = await _importExportService.ExportTasksAsync(ct);
+        return Ok(envelope);
+    }
+
+    /// <summary>
+    /// Imports tasks from a JSON file. Name-based matching: existing tasks are updated, new tasks are created.
+    /// </summary>
+    [HttpPost("import")]
+    public async Task<ActionResult<MaintenanceImportResult>> ImportAsync(
+        [FromBody] MaintenanceExportEnvelope envelope,
+        CancellationToken ct)
+    {
+        if (envelope.Tasks is not { Count: > 0 })
+        {
+            return BadRequest(new { message = "No tasks found in import data." });
+        }
+
+        MaintenanceImportResult result = await _importExportService.ImportTasksAsync(envelope.Tasks, ct);
+        _logger.LogInformation("Task import: {Created} created, {Updated} updated, {Errors} errors",
+            result.CreatedCount, result.UpdatedCount, result.ErrorCount);
+
+        return Ok(result);
     }
 }

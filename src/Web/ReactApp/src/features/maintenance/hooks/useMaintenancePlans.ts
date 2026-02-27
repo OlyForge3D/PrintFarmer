@@ -13,6 +13,7 @@ import type {
   CreateMaintenanceTaskDto,
   UpdateMaintenanceTaskDto,
   AddTaskComponentDto,
+  MaintenanceExportEnvelope,
 } from '@/types/maintenance';
 
 // ──────────────────────── Query Keys ────────────────────────
@@ -128,5 +129,39 @@ export function useRemoveTaskComponent(planId: string, taskId: string) {
     mutationFn: (componentId: string) =>
       maintenancePlanService.removeTaskComponent(planId, taskId, componentId),
     onSuccess: () => qc.invalidateQueries({ queryKey: planKeys.detail(planId) }),
+  });
+}
+
+export function useExportPlans() {
+  return useMutation({
+    mutationFn: () => maintenancePlanService.exportPlans(),
+  });
+}
+
+export function useImportPlans() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (envelope: MaintenanceExportEnvelope) =>
+      maintenancePlanService.importPlans(envelope),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: planKeys.all });
+    },
+  });
+}
+
+export function useExportMaintenanceBundle() {
+  return useMutation({
+    mutationFn: () => maintenancePlanService.exportBundle(),
+  });
+}
+
+export function useImportMaintenanceBundle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (envelope: MaintenanceExportEnvelope) =>
+      maintenancePlanService.importBundle(envelope),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: planKeys.all });
+    },
   });
 }
