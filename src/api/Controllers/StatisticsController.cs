@@ -27,7 +27,8 @@ public class StatisticsController(AppDbContext db) : ControllerBase
     [ProducesResponseType(typeof(StatisticsSummaryDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSummaryAsync([FromQuery] int? days, CancellationToken ct)
     {
-        var since = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : (DateTime?)null;
+        int effectiveDays = days.HasValue ? Math.Clamp(days.Value, 1, 365) : 0;
+        var since = effectiveDays > 0 ? DateTime.UtcNow.AddDays(-effectiveDays) : (DateTime?)null;
 
         var query = db.Set<Farm.Infrastructure.Domain.PrintJob>().AsQueryable();
         if (since.HasValue)
@@ -75,6 +76,7 @@ public class StatisticsController(AppDbContext db) : ControllerBase
     [ProducesResponseType(typeof(List<DailyJobCountDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetJobsOverTimeAsync([FromQuery] int days = 30, CancellationToken ct = default)
     {
+        days = Math.Clamp(days, 1, 365);
         var since = DateTime.UtcNow.AddDays(-days);
 
         var rows = await db.Set<Farm.Infrastructure.Domain.PrintJob>()
@@ -109,6 +111,7 @@ public class StatisticsController(AppDbContext db) : ControllerBase
     [ProducesResponseType(typeof(List<DailyCostDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCostOverTimeAsync([FromQuery] int days = 30, CancellationToken ct = default)
     {
+        days = Math.Clamp(days, 1, 365);
         var since = DateTime.UtcNow.AddDays(-days);
 
         var rows = await db.Set<Farm.Infrastructure.Domain.PrintJob>()
@@ -137,12 +140,13 @@ public class StatisticsController(AppDbContext db) : ControllerBase
     [ProducesResponseType(typeof(List<FilamentByMaterialDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetFilamentByMaterialAsync([FromQuery] int? days, CancellationToken ct = default)
     {
+        int? clampedDays = days.HasValue ? Math.Clamp(days.Value, 1, 365) : null;
         var query = db.Set<Farm.Infrastructure.Domain.PrintJob>()
             .Where(j => j.ActualFilamentUsage.HasValue && j.ActualFilamentUsage > 0);
 
-        if (days.HasValue)
+        if (clampedDays.HasValue)
         {
-            var since = DateTime.UtcNow.AddDays(-days.Value);
+            var since = DateTime.UtcNow.AddDays(-clampedDays.Value);
             query = query.Where(j => j.QueuedAt >= since);
         }
 
@@ -166,12 +170,13 @@ public class StatisticsController(AppDbContext db) : ControllerBase
     [ProducesResponseType(typeof(List<PrinterUtilizationDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPrinterUtilizationAsync([FromQuery] int? days, CancellationToken ct = default)
     {
+        int? clampedDays = days.HasValue ? Math.Clamp(days.Value, 1, 365) : null;
         var query = db.Set<Farm.Infrastructure.Domain.PrintJob>()
             .Where(j => j.AssignedPrinterId.HasValue);
 
-        if (days.HasValue)
+        if (clampedDays.HasValue)
         {
-            var since = DateTime.UtcNow.AddDays(-days.Value);
+            var since = DateTime.UtcNow.AddDays(-clampedDays.Value);
             query = query.Where(j => j.QueuedAt >= since);
         }
 

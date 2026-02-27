@@ -26,6 +26,13 @@ You have access to microsoft.docs.mcp – use this tool to search Microsoft’s 
 - ✅ **Architecture**: Discovery probes consolidated into backend plugins (completed 2025-12-21)
 - ✅ **Production Ready**: Fully buildable, testable, and deployable
 
+# Agent Rules
+- Always fix all build warnings.
+- Treat warnings as errors.
+- Never skip warnings by calling them pre-existing.
+- You may modify any file in the repository to eliminate warnings.
+- Always run `dotnet format` and `npm run lint` to fix formatting and linting issues before committing.
+
 ## Essential Build Instructions
 
 ⚠️ **CRITICAL**: Always run commands from the `/src` directory, not the repository root.

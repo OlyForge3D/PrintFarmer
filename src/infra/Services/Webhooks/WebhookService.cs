@@ -4,7 +4,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain.Webhooks;
+using Farm.Infrastructure.Services.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -29,6 +31,7 @@ public interface IWebhookService
 public sealed class WebhookService(
     IServiceScopeFactory scopeFactory,
     IHttpClientFactory httpClientFactory,
+    ISensitiveDataProtector sensitiveDataProtector,
     ILogger<WebhookService> logger) : BackgroundService, IWebhookService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -38,6 +41,7 @@ public sealed class WebhookService(
     };
 
     private const int MaxRetries = 3;
+    private const int MaxQueueSize = 10_000;
     private static readonly TimeSpan[] RetryDelays =
     [
         TimeSpan.FromSeconds(5),
@@ -45,11 +49,20 @@ public sealed class WebhookService(
         TimeSpan.FromMinutes(5)
     ];
 
+    private static readonly TimeSpan DeliveryLogRetention = TimeSpan.FromDays(90);
+    private DateTime _lastCleanup = DateTime.MinValue;
+
     private readonly ConcurrentQueue<WebhookEvent> _queue = new();
 
     /// <inheritdoc />
     public void Enqueue(string eventType, object payload)
     {
+        if (_queue.Count >= MaxQueueSize)
+        {
+            logger.LogWarning("Webhook queue full ({MaxSize}), dropping event {EventType}", MaxQueueSize, eventType);
+            return;
+        }
+
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         _queue.Enqueue(new WebhookEvent(eventType, json, DateTime.UtcNow));
     }
@@ -73,6 +86,8 @@ public sealed class WebhookService(
             }
             else
             {
+                // Periodically clean up old delivery logs during idle time
+                await CleanupOldDeliveryLogsAsync(stoppingToken);
                 await Task.Delay(500, stoppingToken);
             }
         }
@@ -140,15 +155,22 @@ public sealed class WebhookService(
                 using var request = new HttpRequestMessage(HttpMethod.Post, subscription.Url);
                 request.Content = new StringContent(envelope, Encoding.UTF8, "application/json");
 
-                // HMAC-SHA256 signature
+                // HMAC-SHA256 signature (decrypt secret from encrypted storage)
                 if (!string.IsNullOrEmpty(subscription.Secret))
                 {
-                    var hash = HMACSHA256.HashData(
-                        Encoding.UTF8.GetBytes(subscription.Secret),
-                        Encoding.UTF8.GetBytes(envelope));
-                    request.Headers.Add(
-                        "X-Webhook-Signature",
-                        $"sha256={Convert.ToHexStringLower(hash)}");
+                    string? plaintextSecret = SensitiveDataEncryptionInterceptor.IsAlreadyEncrypted(subscription.Secret)
+                        ? sensitiveDataProtector.Unprotect(subscription.Secret)
+                        : subscription.Secret;
+
+                    if (!string.IsNullOrEmpty(plaintextSecret))
+                    {
+                        var hash = HMACSHA256.HashData(
+                            Encoding.UTF8.GetBytes(plaintextSecret),
+                            Encoding.UTF8.GetBytes(envelope));
+                        request.Headers.Add(
+                            "X-Webhook-Signature",
+                            $"sha256={Convert.ToHexStringLower(hash)}");
+                    }
                 }
 
                 request.Headers.Add("X-Webhook-Event", evt.EventType);
@@ -233,6 +255,37 @@ public sealed class WebhookService(
 
         var types = subscribed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return types.Contains(eventType, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task CleanupOldDeliveryLogsAsync(CancellationToken ct)
+    {
+        // Run cleanup at most once per hour
+        if (DateTime.UtcNow - _lastCleanup < TimeSpan.FromHours(1))
+        {
+            return;
+        }
+
+        _lastCleanup = DateTime.UtcNow;
+
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var cutoff = DateTime.UtcNow - DeliveryLogRetention;
+            int deleted = await db.WebhookDeliveryLogs
+                .Where(d => d.CreatedAt < cutoff)
+                .ExecuteDeleteAsync(ct);
+
+            if (deleted > 0)
+            {
+                logger.LogInformation("Cleaned up {Count} webhook delivery logs older than {Days} days", deleted, DeliveryLogRetention.TotalDays);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to clean up old webhook delivery logs");
+        }
     }
 
     private sealed record WebhookEvent(string EventType, string PayloadJson, DateTime Timestamp);

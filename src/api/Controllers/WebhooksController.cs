@@ -231,7 +231,7 @@ public class WebhooksController(
     /// List all supported webhook event types
     /// </summary>
     [HttpGet("event-types")]
-    [AllowAnonymous]
+    [Authorize]
     [ProducesResponseType(typeof(List<string>), 200)]
     public IActionResult GetEventTypes()
     {
