@@ -225,6 +225,10 @@ public class JobQueuePrintJobDto
 
     public string? FilamentColor { get; set; }
 
+    public decimal? EstimatedCost { get; set; }
+
+    public decimal? ActualCost { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }

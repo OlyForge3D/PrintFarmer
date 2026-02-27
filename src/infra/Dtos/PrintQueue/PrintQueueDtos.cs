@@ -123,6 +123,16 @@ public class QueuedPrintJobDto
     /// Name of the project this job belongs to (denormalized for display)
     /// </summary>
     public string? ProjectName { get; set; }
+
+    /// <summary>
+    /// Estimated cost of the print job (from spool price and filament usage)
+    /// </summary>
+    public decimal? EstimatedCost { get; set; }
+
+    /// <summary>
+    /// Actual cost of the print job (calculated on completion)
+    /// </summary>
+    public decimal? ActualCost { get; set; }
 }
 
 /// <summary>

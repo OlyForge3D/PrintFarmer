@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -10,7 +11,10 @@ namespace Farm.Infrastructure.Services.SignalR;
 /// This is a marker hub that servers use to send messages to connected clients.
 /// Client groups are managed externally by services like PrinterDiscoveryService and MoonrakerSubscriptionService.
 /// </summary>
-public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHub> logger) : Hub
+public class PrinterHub(
+    IDiscoveryProgressCache progressCache,
+    ILogger<PrinterHub> logger,
+    IWebhookService? webhookService = null) : Hub
 {
     // Marker hub for broadcasting printer updates and discovery progress.
 
@@ -95,6 +99,13 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
 
         // Broadcast to all clients in the discovery session group
         await Clients.Group($"discovery-{found.SessionId}").SendAsync("discoveryprinterfound", found);
+
+        webhookService?.Enqueue("discovery.printer_found", new
+        {
+            sessionId = found.SessionId,
+            printerName = found.Printer.Name,
+            printerIp = found.Printer.ServerUrl
+        });
     }
 
     /// <summary>
@@ -110,5 +121,13 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
 
         // Broadcast to all clients in the discovery session group
         await Clients.Group($"discovery-{completed.SessionId}").SendAsync("discoverycompleted", completed);
+
+        webhookService?.Enqueue("discovery.completed", new
+        {
+            sessionId = completed.SessionId,
+            totalPrintersFound = completed.TotalPrintersFound,
+            totalPrintersExcluded = completed.TotalPrintersExcluded,
+            wasCancelled = completed.WasCancelled
+        });
     }
 }

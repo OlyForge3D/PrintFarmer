@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
+using Farm.Infrastructure.Domain.Webhooks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -146,6 +147,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<NfcDevice> NfcDevices => Set<NfcDevice>();
 
     public DbSet<NfcScanEvent> NfcScanEvents => Set<NfcScanEvent>();
+
+    // Webhooks
+    public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
+
+    public DbSet<WebhookDeliveryLog> WebhookDeliveryLogs => Set<WebhookDeliveryLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

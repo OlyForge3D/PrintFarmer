@@ -48,5 +48,8 @@ public class PrinterConfiguration : IEntityTypeConfiguration<Printer>
             .WithOne(t => t.Printer)
             .HasForeignKey(t => t.PrinterId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // Tags - many-to-many via skip-navigation (auto-creates join table)
+        builder.HasMany(p => p.Tags).WithMany();
     }
 }

@@ -2172,19 +2172,19 @@ export class ApiClient {
     return response.data || null;
   }
 
-  async assignTagToObject(objectId: string, tagId: string, objectType: 'Model3D' | 'GcodeFile'): Promise<void> {
+  async assignTagToObject(objectId: string, tagId: string, objectType: 'Model3D' | 'GcodeFile' | 'Printer'): Promise<void> {
     await this.client.post(`/tags/${objectId}/${tagId}/assign`, null, {
       params: { objectType }
     });
   }
 
-  async removeTagFromObject(objectId: string, tagId: string, objectType: 'Model3D' | 'GcodeFile'): Promise<void> {
+  async removeTagFromObject(objectId: string, tagId: string, objectType: 'Model3D' | 'GcodeFile' | 'Printer'): Promise<void> {
     await this.client.delete(`/tags/${objectId}/${tagId}/remove`, {
       params: { objectType }
     });
   }
 
-  async getObjectTags(objectId: string, objectType: 'Model3D' | 'GcodeFile'): Promise<Record<string, unknown>[]> {
+  async getObjectTags(objectId: string, objectType: 'Model3D' | 'GcodeFile' | 'Printer'): Promise<Record<string, unknown>[]> {
     const response = await this.client.get(`/tags/object/${objectId}`, {
       params: { objectType }
     });

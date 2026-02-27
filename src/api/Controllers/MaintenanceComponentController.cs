@@ -190,7 +190,8 @@ public class MaintenanceComponentController(
         }
 
         MaintenanceImportResult result = await _importExportService.ImportComponentsAsync(envelope.Components, ct);
-        _logger.LogInformation("Component import: {Created} created, {Updated} updated, {Errors} errors",
+        _logger.LogInformation(
+            "Component import: {Created} created, {Updated} updated, {Errors} errors",
             result.CreatedCount, result.UpdatedCount, result.ErrorCount);
 
         return Ok(result);

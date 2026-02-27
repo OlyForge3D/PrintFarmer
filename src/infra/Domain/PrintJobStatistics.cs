@@ -41,6 +41,11 @@ public class PrintJobStatistics
 
     public string? FailureReason { get; set; }         // Why it failed if IsSuccess=false
 
+    // Cost tracking
+    public decimal? EstimatedCost { get; set; }        // Cost estimated at queue time
+
+    public decimal? ActualCost { get; set; }           // Cost calculated at completion
+
     public DateTime? CompletedAtUtc { get; set; }
 
     // Audit

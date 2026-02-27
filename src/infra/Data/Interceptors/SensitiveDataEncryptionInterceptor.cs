@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Domain.Webhooks;
 using Farm.Infrastructure.Services.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -7,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Infrastructure.Data.Interceptors;
 
 /// <summary>
-/// EF Core interceptor that encrypts sensitive data (ApiKey, Password) before saving to the database.
+/// EF Core interceptor that encrypts sensitive data (ApiKey, Password, Webhook Secret) before saving to the database.
 /// Works in conjunction with SensitiveDataDecryptionInterceptor for symmetric encryption/decryption.
 /// </summary>
 public class SensitiveDataEncryptionInterceptor : SaveChangesInterceptor
@@ -47,6 +48,12 @@ public class SensitiveDataEncryptionInterceptor : SaveChangesInterceptor
             return;
         }
 
+        EncryptPrinterCredentials(context);
+        EncryptWebhookSecrets(context);
+    }
+
+    private void EncryptPrinterCredentials(DbContext context)
+    {
         var entries = context.ChangeTracker.Entries<Printer>()
             .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified);
 
@@ -76,11 +83,31 @@ public class SensitiveDataEncryptionInterceptor : SaveChangesInterceptor
         }
     }
 
+    private void EncryptWebhookSecrets(DbContext context)
+    {
+        var entries = context.ChangeTracker.Entries<WebhookSubscription>()
+            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified);
+
+        foreach (var entry in entries)
+        {
+            var webhook = entry.Entity;
+
+            if (entry.State == EntityState.Added || entry.Property(w => w.Secret).IsModified)
+            {
+                if (!string.IsNullOrEmpty(webhook.Secret) && !IsAlreadyEncrypted(webhook.Secret))
+                {
+                    webhook.Secret = _protector.Protect(webhook.Secret);
+                    _logger.LogDebug("Encrypted Secret for webhook {WebhookId}", webhook.Id);
+                }
+            }
+        }
+    }
+
     /// <summary>
     /// Simple heuristic to check if data is already encrypted.
     /// Data Protection produces Base64-encoded strings that are typically longer than plain text credentials.
     /// </summary>
-    private static bool IsAlreadyEncrypted(string value)
+    internal static bool IsAlreadyEncrypted(string value)
     {
         // Data Protection output is Base64 and typically starts with "CfDJ8" for default configuration
         // It's also significantly longer than typical plaintext passwords/API keys

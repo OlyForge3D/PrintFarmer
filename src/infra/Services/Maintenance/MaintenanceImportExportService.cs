@@ -17,8 +17,7 @@ public class MaintenanceImportExportService(
     : IMaintenanceImportExportService
 {
     // ═══════════════════════════════ EXPORT ═══════════════════════════════
-
-    public async Task<MaintenanceExportEnvelope> ExportComponentsAsync(CancellationToken ct)
+    public async Task<MaintenanceExportEnvelope> ExportComponentsAsync(CancellationToken ct = default)
     {
         List<MaintenanceComponent> components = await componentRepository.GetAllAsync(null, ct);
         return new MaintenanceExportEnvelope
@@ -28,7 +27,7 @@ public class MaintenanceImportExportService(
         };
     }
 
-    public async Task<MaintenanceExportEnvelope> ExportTasksAsync(CancellationToken ct)
+    public async Task<MaintenanceExportEnvelope> ExportTasksAsync(CancellationToken ct = default)
     {
         List<MaintenanceTask> tasks = await taskRepository.GetAllAsync(null, null, ct);
         return new MaintenanceExportEnvelope
@@ -38,7 +37,7 @@ public class MaintenanceImportExportService(
         };
     }
 
-    public async Task<MaintenanceExportEnvelope> ExportPlansAsync(CancellationToken ct)
+    public async Task<MaintenanceExportEnvelope> ExportPlansAsync(CancellationToken ct = default)
     {
         List<MaintenancePlan> plans = await planRepository.GetAllAsync(null, ct);
         return new MaintenanceExportEnvelope
@@ -48,7 +47,7 @@ public class MaintenanceImportExportService(
         };
     }
 
-    public async Task<MaintenanceExportEnvelope> ExportBundleAsync(CancellationToken ct)
+    public async Task<MaintenanceExportEnvelope> ExportBundleAsync(CancellationToken ct = default)
     {
         List<MaintenanceComponent> components = await componentRepository.GetAllAsync(null, ct);
         List<MaintenanceTask> tasks = await taskRepository.GetAllAsync(null, null, ct);
@@ -64,9 +63,8 @@ public class MaintenanceImportExportService(
     }
 
     // ═══════════════════════════════ IMPORT ═══════════════════════════════
-
     public async Task<MaintenanceImportResult> ImportComponentsAsync(
-        List<ComponentExportDto> items, CancellationToken ct)
+        List<ComponentExportDto> items, CancellationToken ct = default)
     {
         int created = 0, updated = 0;
         var errors = new List<string>();
@@ -107,14 +105,15 @@ public class MaintenanceImportExportService(
             }
         }
 
-        logger.LogInformation("Component import complete: {Created} created, {Updated} updated, {Errors} errors",
+        logger.LogInformation(
+            "Component import complete: {Created} created, {Updated} updated, {Errors} errors",
             created, updated, errors.Count);
 
         return new MaintenanceImportResult(created, updated, errors.Count, errors.ToArray(), []);
     }
 
     public async Task<MaintenanceImportResult> ImportTasksAsync(
-        List<TaskExportDto> items, CancellationToken ct)
+        List<TaskExportDto> items, CancellationToken ct = default)
     {
         int created = 0, updated = 0;
         var errors = new List<string>();
@@ -173,7 +172,8 @@ public class MaintenanceImportExportService(
 
                         if (link is null)
                         {
-                            await taskRepository.AddComponentAsync(new MaintenanceTaskComponent
+                            await taskRepository.AddComponentAsync(
+                                new MaintenanceTaskComponent
                             {
                                 Id = Guid.NewGuid(),
                                 MaintenanceTaskId = task.Id,
@@ -182,6 +182,7 @@ public class MaintenanceImportExportService(
                                 Notes = compRef.Notes
                             }, ct);
                         }
+
                         // existing link — leave as-is (don't overwrite quantity/notes for existing links)
                     }
                 }
@@ -192,14 +193,15 @@ public class MaintenanceImportExportService(
             }
         }
 
-        logger.LogInformation("Task import complete: {Created} created, {Updated} updated, {Errors} errors, {Warnings} warnings",
+        logger.LogInformation(
+            "Task import complete: {Created} created, {Updated} updated, {Errors} errors, {Warnings} warnings",
             created, updated, errors.Count, warnings.Count);
 
         return new MaintenanceImportResult(created, updated, errors.Count, errors.ToArray(), warnings.ToArray());
     }
 
     public async Task<MaintenanceImportResult> ImportPlansAsync(
-        List<PlanExportDto> items, CancellationToken ct)
+        List<PlanExportDto> items, CancellationToken ct = default)
     {
         int created = 0, updated = 0;
         var errors = new List<string>();
@@ -283,14 +285,15 @@ public class MaintenanceImportExportService(
             }
         }
 
-        logger.LogInformation("Plan import complete: {Created} created, {Updated} updated, {Errors} errors, {Warnings} warnings",
+        logger.LogInformation(
+            "Plan import complete: {Created} created, {Updated} updated, {Errors} errors, {Warnings} warnings",
             created, updated, errors.Count, warnings.Count);
 
         return new MaintenanceImportResult(created, updated, errors.Count, errors.ToArray(), warnings.ToArray());
     }
 
     public async Task<MaintenanceImportResult> ImportBundleAsync(
-        MaintenanceExportEnvelope envelope, CancellationToken ct)
+        MaintenanceExportEnvelope envelope, CancellationToken ct = default)
     {
         int totalCreated = 0, totalUpdated = 0;
         var allErrors = new List<string>();
@@ -324,7 +327,8 @@ public class MaintenanceImportExportService(
             allWarnings.AddRange(r.Warnings);
         }
 
-        logger.LogInformation("Bundle import complete: {Created} created, {Updated} updated, {Errors} errors, {Warnings} warnings",
+        logger.LogInformation(
+            "Bundle import complete: {Created} created, {Updated} updated, {Errors} errors, {Warnings} warnings",
             totalCreated, totalUpdated, allErrors.Count, allWarnings.Count);
 
         return new MaintenanceImportResult(totalCreated, totalUpdated, allErrors.Count,
@@ -332,7 +336,6 @@ public class MaintenanceImportExportService(
     }
 
     // ═══════════════════════════════ MAPPING ═══════════════════════════════
-
     private static ComponentExportDto ToComponentDto(MaintenanceComponent c) => new()
     {
         Name = c.Name,

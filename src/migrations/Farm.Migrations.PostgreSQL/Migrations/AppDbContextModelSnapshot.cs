@@ -1961,6 +1961,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("ActualCost")
+                        .HasColumnType("numeric");
+
                     b.Property<DateTime?>("ActualEndTime")
                         .HasColumnType("timestamp with time zone");
 
@@ -1978,6 +1981,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("EstimatedCost")
+                        .HasColumnType("numeric");
 
                     b.Property<double?>("EstimatedFilamentUsage")
                         .HasColumnType("double precision");
@@ -2101,6 +2107,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("ActualCost")
+                        .HasColumnType("numeric");
+
                     b.Property<long?>("ActualDurationMs")
                         .HasColumnType("bigint");
 
@@ -2112,6 +2121,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("EstimatedCost")
+                        .HasColumnType("numeric");
 
                     b.Property<long?>("EstimatedDurationMs")
                         .HasColumnType("bigint");
@@ -2402,6 +2414,12 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("ApiKey")
                         .HasColumnType("text");
+
+                    b.Property<bool>("AutoPrintEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("AutoPrintState")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Backend")
                         .ValueGeneratedOnAdd()
@@ -3541,6 +3559,116 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("UserTasks");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Webhooks.WebhookDeliveryLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempt")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("StatusCode")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("WebhookSubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .IsDescending();
+
+                    b.HasIndex("EventType");
+
+                    b.HasIndex("Success");
+
+                    b.HasIndex("WebhookSubscriptionId");
+
+                    b.ToTable("WebhookDeliveryLogs");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Webhooks.WebhookSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventTypes")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime?>("LastDeliveryAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastSuccessAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MaxConsecutiveFailures")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(10);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Secret")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .IsDescending();
+
+                    b.HasIndex("IsActive");
+
+                    b.ToTable("WebhookSubscriptions");
+                });
+
             modelBuilder.Entity("FilamentTypePrinterModel", b =>
                 {
                     b.Property<Guid>("PrinterModelsId")
@@ -3569,6 +3697,21 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("TagsId");
 
                     b.ToTable("GcodeFileTag");
+                });
+
+            modelBuilder.Entity("PrinterTag", b =>
+                {
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TagsId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("PrinterId", "TagsId");
+
+                    b.HasIndex("TagsId");
+
+                    b.ToTable("PrinterTag");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.AuthAuditLog", b =>
@@ -4321,6 +4464,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("DismissedByUser");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Webhooks.WebhookDeliveryLog", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Webhooks.WebhookSubscription", "Subscription")
+                        .WithMany()
+                        .HasForeignKey("WebhookSubscriptionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Subscription");
+                });
+
             modelBuilder.Entity("FilamentTypePrinterModel", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrinterModel", null)
@@ -4341,6 +4495,21 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.GcodeFile", null)
                         .WithMany()
                         .HasForeignKey("GcodeFileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagsId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("PrinterTag", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

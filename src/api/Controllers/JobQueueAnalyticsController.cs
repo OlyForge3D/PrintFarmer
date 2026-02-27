@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,10 +15,12 @@ namespace Farm.Api.Controllers;
 [Produces("application/json")]
 public class JobQueueAnalyticsController(
     IPrintJobManagementService printJobManagementService,
-    ILogger<JobQueueAnalyticsController> logger) : ControllerBase
+    ILogger<JobQueueAnalyticsController> logger,
+    IWebhookService webhookService) : ControllerBase
 {
     private readonly IPrintJobManagementService _printJobManagementService = printJobManagementService ?? throw new ArgumentNullException(nameof(printJobManagementService));
     private readonly ILogger<JobQueueAnalyticsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IWebhookService _webhookService = webhookService;
 
     /// <summary>
     /// Get all queued and printing jobs with file metadata
@@ -219,6 +222,8 @@ public class JobQueueAnalyticsController(
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
             QueuedPrintJobDto job = await _printJobManagementService.EnqueueJobAsync(request, userId, cancellationToken);
+
+            _webhookService.Enqueue("job.queued", new { jobId = job.Id, jobName = job.Name, priority = job.Priority });
 
             return CreatedAtAction(nameof(GetAllQueueAsync), new { id = job.Id }, job);
         }
