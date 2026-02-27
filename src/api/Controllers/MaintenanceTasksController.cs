@@ -284,7 +284,8 @@ public class MaintenanceTasksController(
         }
 
         MaintenanceImportResult result = await _importExportService.ImportTasksAsync(envelope.Tasks, ct);
-        _logger.LogInformation("Task import: {Created} created, {Updated} updated, {Errors} errors",
+        _logger.LogInformation(
+            "Task import: {Created} created, {Updated} updated, {Errors} errors",
             result.CreatedCount, result.UpdatedCount, result.ErrorCount);
 
         return Ok(result);

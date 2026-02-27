@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.SignalR;
@@ -248,15 +248,17 @@ public class AutoPrintService(
         {
             nextJob.Status = PrintJobStatus.Cancelled;
             nextJob.UpdatedAt = DateTime.UtcNow;
-            logger.LogInformation("[AutoPrint] Skipped (cancelled) job {JobId} ({JobName}) for printer {PrinterId}",
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation(
+                "[AutoPrint] Skipped (cancelled) job {JobId} ({JobName}) for printer {PrinterId}",
                 nextJob.Id, nextJob.Name, printerId);
         }
 
-        // Check if there are more queued jobs
+        // Check if there are more queued jobs (cancelled job already persisted above)
         bool hasMoreJobs = await db.PrintJobs
-            .AnyAsync(j => j.AssignedPrinterId == printerId
-                        && j.Status == PrintJobStatus.Queued
-                        && (nextJob == null || j.Id != nextJob.Id), ct);
+            .AnyAsync(
+                j => j.AssignedPrinterId == printerId
+                        && j.Status == PrintJobStatus.Queued, ct);
 
         printer.AutoPrintState = hasMoreJobs ? AutoPrintState.PendingReady : AutoPrintState.None;
         await db.SaveChangesAsync(ct);
@@ -316,7 +318,8 @@ public class AutoPrintService(
 
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("[AutoPrint] Auto-print {Action} for printer {PrinterId} ({Name})",
+        logger.LogInformation(
+            "[AutoPrint] Auto-print {Action} for printer {PrinterId} ({Name})",
             enabled ? "enabled" : "disabled", printerId, printer.Name);
 
         return await BuildStatusDtoAsync(printer, ct);
