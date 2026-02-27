@@ -28,6 +28,7 @@ import {
   CheckIcon,
   CameraIcon,
   NfcIcon,
+  ChartIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -106,6 +107,11 @@ const navigation: NavigationElement[] = [
     href: '/maintenance',
     icon: WrenchIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
+  },
+  {
+    name: 'Statistics',
+    href: '/statistics',
+    icon: ChartIcon,
   },
   { name: '', isDivider: true },
   {

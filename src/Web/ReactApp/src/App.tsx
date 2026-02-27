@@ -47,6 +47,7 @@ import { MaintenanceDashboardPage } from '@/features/maintenance/pages/Maintenan
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
+import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
 import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
@@ -168,6 +169,7 @@ function AuthenticatedAppRoutes() {
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="nfc-devices" element={<NfcDevicesPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
+        <Route path="statistics" element={<StatisticsPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
