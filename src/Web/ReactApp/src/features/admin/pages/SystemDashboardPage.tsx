@@ -3,18 +3,20 @@ import { useSearchParams } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Tabs } from '@/common/components/ui';
 import { SystemLogsContent } from '../components/SystemLogsContent';
-import { ObservabilityContent } from '../components/ObservabilityContent';
+import { MonitoringContent } from '../components/MonitoringContent';
 import { FileHealthContent } from '../components/FileHealthContent';
 import { ConnectionHealthContent } from '../components/ConnectionHealthContent';
-import { ActivityIcon, HistoryIcon, DatabaseIcon, WiFiIcon } from '@/common/components/icons/MdiIcons';
+import { BackgroundServicesWidget } from '../components/BackgroundServicesWidget';
+import { ActivityIcon, HistoryIcon, DatabaseIcon, WiFiIcon, ChartIcon, GearIcon } from '@/common/components/icons/MdiIcons';
 
-type TabId = 'logs' | 'observability' | 'connections' | 'file-health';
+type TabId = 'logs' | 'monitoring' | 'connections' | 'file-health' | 'services';
 
 const TAB_CONFIG: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'logs', label: 'System Logs', icon: <HistoryIcon className="w-4 h-4" /> },
-  { id: 'observability', label: 'Observability', icon: <ActivityIcon className="w-4 h-4" /> },
+  { id: 'monitoring', label: 'Monitoring', icon: <ChartIcon className="w-4 h-4" /> },
   { id: 'connections', label: 'Connections', icon: <WiFiIcon className="w-4 h-4" /> },
   { id: 'file-health', label: 'File Health', icon: <DatabaseIcon className="w-4 h-4" /> },
+  { id: 'services', label: 'Background Services', icon: <GearIcon className="w-4 h-4" /> },
 ];
 
 export function SystemDashboardPage() {
@@ -46,8 +48,8 @@ export function SystemDashboardPage() {
             <SystemLogsContent />
           </Tabs.Panel>
 
-          <Tabs.Panel id="observability">
-            <ObservabilityContent />
+          <Tabs.Panel id="monitoring">
+            <MonitoringContent />
           </Tabs.Panel>
 
           <Tabs.Panel id="connections">
@@ -56,6 +58,10 @@ export function SystemDashboardPage() {
 
           <Tabs.Panel id="file-health">
             <FileHealthContent />
+          </Tabs.Panel>
+
+          <Tabs.Panel id="services">
+            <BackgroundServicesWidget />
           </Tabs.Panel>
         </Tabs.Panels>
       </Tabs>

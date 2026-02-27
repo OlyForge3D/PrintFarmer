@@ -1,4 +1,4 @@
 export { SystemLogsContent } from './SystemLogsContent';
-export { ObservabilityContent } from './ObservabilityContent';
+export { MonitoringContent } from './MonitoringContent';
 export { FileHealthContent } from './FileHealthContent';
 export { BackgroundServicesWidget } from './BackgroundServicesWidget';

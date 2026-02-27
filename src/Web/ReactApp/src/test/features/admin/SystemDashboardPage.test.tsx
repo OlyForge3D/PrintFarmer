@@ -8,14 +8,17 @@ import { MemoryRouter } from 'react-router';
 vi.mock('../../../features/admin/components/SystemLogsContent', () => ({
   SystemLogsContent: () => <div data-testid="system-logs-content">System Logs Content</div>
 }));
-vi.mock('../../../features/admin/components/ObservabilityContent', () => ({
-  ObservabilityContent: () => <div data-testid="observability-content">Observability Content</div>
+vi.mock('../../../features/admin/components/MonitoringContent', () => ({
+  MonitoringContent: () => <div data-testid="monitoring-content">Monitoring Content</div>
 }));
 vi.mock('../../../features/admin/components/FileHealthContent', () => ({
   FileHealthContent: () => <div data-testid="file-health-content">File Health Content</div>
 }));
 vi.mock('../../../features/admin/components/ConnectionHealthContent', () => ({
   ConnectionHealthContent: () => <div data-testid="connection-health-content">Connection Health Content</div>
+}));
+vi.mock('../../../features/admin/components/BackgroundServicesWidget', () => ({
+  BackgroundServicesWidget: () => <div data-testid="bg-services-content">Background Services Content</div>
 }));
 
 // Mock PageTemplate to simplify testing
@@ -48,12 +51,13 @@ describe('SystemDashboardPage', () => {
       expect(screen.getByTestId('page-template')).toHaveAttribute('data-title', 'System Dashboard');
     });
 
-    it('renders all four tabs', () => {
+    it('renders all five tabs', () => {
       renderWithRouter();
       expect(screen.getByRole('tab', { name: /system logs/i })).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: /observability/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /monitoring/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /connections/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /file health/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /background services/i })).toBeInTheDocument();
     });
   });
 
@@ -68,9 +72,9 @@ describe('SystemDashboardPage', () => {
       expect(screen.getByTestId('system-logs-content')).toBeInTheDocument();
     });
 
-    it('shows observability content when tab=observability', () => {
-      renderWithRouter('/admin/system?tab=observability');
-      expect(screen.getByTestId('observability-content')).toBeInTheDocument();
+    it('shows monitoring content when tab=monitoring', () => {
+      renderWithRouter('/admin/system?tab=monitoring');
+      expect(screen.getByTestId('monitoring-content')).toBeInTheDocument();
     });
 
     it('shows file health content when tab=file-health', () => {
@@ -93,7 +97,7 @@ describe('SystemDashboardPage', () => {
     it('tabs have proper roles', () => {
       renderWithRouter();
       const tabs = screen.getAllByRole('tab');
-      expect(tabs).toHaveLength(4);
+      expect(tabs).toHaveLength(5);
     });
 
     it('tab panels have proper roles', () => {

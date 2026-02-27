@@ -2,7 +2,7 @@
  * PrinterDashboard Component
  * 
  * Main dashboard page showing printer farm overview with stats,
- * alerts, jobs, and system health widgets.
+ * active jobs, recent prints, and actionable alerts.
  */
 
 import React from 'react';
@@ -17,14 +17,11 @@ import {
   CheckCircleIcon, 
   DashboardIcon 
 } from '@/common/components/icons/MdiIcons';
-import { DetailedSystemHealth } from '@/features/printers/components/SystemHealth';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { MaintenanceAlertsWidget, MaintenanceOverviewWidget } from '@/features/maintenance/components';
-import { BackgroundServicesWidget } from '@/features/admin/components';
 import { TasksWidget } from '@/features/tasks';
-import { AlertsWidget } from './AlertsWidget';
 import { ActiveJobsWidget } from './ActiveJobsWidget';
 import { RecentPrintsWidget } from './RecentPrintsWidget';
+import { CriticalAlertsBanner } from './CriticalAlertsBanner';
 
 interface StatsCardProps {
   title: string;
@@ -95,6 +92,9 @@ export const PrinterDashboard: React.FC = () => {
         )}
       </div>
 
+      {/* Critical Alerts — only shows when actionable items exist */}
+      <CriticalAlertsBanner />
+
       {/* Loading State */}
       {isLoading ? (
         <div role="status" aria-label="Printers loading">
@@ -126,28 +126,15 @@ export const PrinterDashboard: React.FC = () => {
       ) : (
         /* Main Dashboard Content */
         <div className="space-y-6">
-          {/* Row 1: Alerts and Pending Tasks */}
+          {/* Row 1: Tasks and Active Jobs */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <AlertsWidget />
             <TasksWidget />
-          </div>
-
-          {/* Row 2: Active Jobs and Recent Prints */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ActiveJobsWidget />
+          </div>
+
+          {/* Row 2: Recent Prints */}
+          <div>
             <RecentPrintsWidget />
-          </div>
-
-          {/* Row 3: Maintenance Widgets */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <MaintenanceAlertsWidget maxAlerts={3} />
-            <MaintenanceOverviewWidget />
-          </div>
-
-          {/* Row 4: System Health and Services */}
-          <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <BackgroundServicesWidget maxServices={5} />
-            <DetailedSystemHealth />
           </div>
         </div>
       )}

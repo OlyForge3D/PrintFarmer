@@ -43,7 +43,6 @@ import { ProfileImportWizardPage } from '@/features/tasks';
 import { FilesPage } from '@/features/files/pages/FilesPage';
 import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
-import { MonitoringPage } from '@/features/monitoring/pages/MonitoringPage';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
@@ -183,7 +182,7 @@ function AuthenticatedAppRoutes() {
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="data" element={<DataManagementPage />} />
           <Route path="system" element={<SystemDashboardPage />} />
-          <Route path="monitoring" element={<MonitoringPage />} />
+          <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
           <Route path="cameras" element={<Navigate to="/cameras?tab=manage" replace />} />
         </Route>
         <Route path="jobs/new" element={<RouteSuspense><LazyNewSliceJobPage /></RouteSuspense>} />
