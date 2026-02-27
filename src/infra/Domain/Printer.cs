@@ -236,4 +236,20 @@ public class Printer
     /// Null indicates no history has been seeded yet (triggers full initial seed).
     /// </summary>
     public DateTime? LastHistorySeedUtc { get; set; }
+
+    // AutoPrint Ready-Gate properties
+
+    /// <summary>
+    /// When enabled, the printer transitions to PendingReady after a job completes,
+    /// waiting for operator confirmation before dispatching the next queued job.
+    /// </summary>
+    public bool AutoPrintEnabled { get; set; }
+
+    /// <summary>
+    /// Current auto-print workflow state.
+    /// None = feature disabled or no pending action.
+    /// PendingReady = job completed, waiting for operator "bed clear" confirmation.
+    /// Ready = operator confirmed, next queued job will be dispatched.
+    /// </summary>
+    public AutoPrintState AutoPrintState { get; set; } = AutoPrintState.None;
 }

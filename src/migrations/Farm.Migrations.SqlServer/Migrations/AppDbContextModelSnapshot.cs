@@ -2416,6 +2416,12 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("ApiKey")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<bool>("AutoPrintEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("AutoPrintState")
+                        .HasColumnType("int");
+
                     b.Property<int>("Backend")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")

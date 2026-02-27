@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.AutoPrint;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -18,6 +19,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly ILogger<PrintJobCompletionService> _logger;
     private readonly INotificationService? _notificationService;
     private readonly IPrintCostCalculator? _costCalculator;
+    private readonly IAutoPrintService? _autoPrintService;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -64,13 +66,15 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         IHubContext<PrinterHub> hub,
         ILogger<PrintJobCompletionService> logger,
         INotificationService? notificationService = null,
-        IPrintCostCalculator? costCalculator = null)
+        IPrintCostCalculator? costCalculator = null,
+        IAutoPrintService? autoPrintService = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _notificationService = notificationService;
         _costCalculator = costCalculator;
+        _autoPrintService = autoPrintService;
     }
 
     /// <summary>
@@ -185,6 +189,19 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to send job completion notification");
+            }
+        }
+
+        // Trigger auto-print ready-gate if enabled
+        if (_autoPrintService != null)
+        {
+            try
+            {
+                await _autoPrintService.TransitionToPendingReadyAsync(printerId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to trigger auto-print transition for printer {PrinterId}", printerId);
             }
         }
 

@@ -65,6 +65,9 @@ public static class FeatureServicesStartup
         // Job Scheduling Service (Phase 4.1)
         services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();
 
+        // AutoPrint Ready-Gate (operator confirmation before dispatching next queued job)
+        services.AddScoped<Farm.Infrastructure.Services.AutoPrint.IAutoPrintService, Farm.Infrastructure.Services.AutoPrint.AutoPrintService>();
+
         // Prediction Service (Phase 4.2)
         services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobStatisticsRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobStatisticsRepository>();
         services.AddScoped<Farm.Infrastructure.Services.PredictionService>();
