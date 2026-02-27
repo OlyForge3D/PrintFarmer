@@ -13,6 +13,7 @@ using Farm.Infrastructure.Repositories.Filament;
 using Farm.Infrastructure.Services.Filament;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
+using Farm.Infrastructure.OpenFilamentDb;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Filament
@@ -612,6 +613,146 @@ namespace Farm.Infrastructure.Services.Filament
             }
 
             return new SpoolmanDbImportResult(created, updated, errorCount, errors.ToArray());
+        }
+
+        /// <summary>
+        /// Imports selected entries from the Open Filament Database into Spoolman.
+        /// Maps OFD data to Spoolman filament requests with vendor resolution and deduplication.
+        /// </summary>
+        public async Task<OfdImportResult> ImportFromOpenFilamentDbAsync(
+            IReadOnlyList<OfdFlattenedEntry> entries, CancellationToken ct)
+        {
+            if (entries is null or { Count: 0 })
+            {
+                return new OfdImportResult(0, 0, 0, []);
+            }
+
+            // Load existing filaments for dedup
+            IReadOnlyList<SpoolmanFilamentDto> existingFilaments = await _spoolmanService.ListFilamentsAsync(ct);
+            Dictionary<string, SpoolmanFilamentDto> byExternalId = existingFilaments
+                .Where(f => !string.IsNullOrWhiteSpace(f.ExternalId))
+                .ToDictionary(f => f.ExternalId!, f => f, StringComparer.OrdinalIgnoreCase);
+
+            static string MakeCompositeKey(string? name, string? material, string? vendor) =>
+                $"{name?.Trim()}|{material?.Trim()}|{vendor?.Trim()}".ToUpperInvariant();
+
+            Dictionary<string, SpoolmanFilamentDto> byComposite = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SpoolmanFilamentDto f in existingFilaments)
+            {
+                string key = MakeCompositeKey(f.Name, f.Material, f.Vendor);
+                byComposite.TryAdd(key, f);
+            }
+
+            // Load existing vendors
+            IReadOnlyList<SpoolmanVendorDto> existingVendors = await _spoolmanService.ListVendorsAsync(ct);
+            Dictionary<string, SpoolmanVendorDto> vendorByName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SpoolmanVendorDto v in existingVendors)
+            {
+                vendorByName.TryAdd(v.Name, v);
+            }
+
+            int created = 0;
+            int updated = 0;
+            int errorCount = 0;
+            List<string> errors = [];
+
+            foreach (OfdFlattenedEntry entry in entries)
+            {
+                try
+                {
+                    // Resolve or create vendor
+                    int? vendorId = null;
+                    if (!string.IsNullOrWhiteSpace(entry.BrandName))
+                    {
+                        if (vendorByName.TryGetValue(entry.BrandName, out SpoolmanVendorDto? existing))
+                        {
+                            vendorId = existing.Id;
+                        }
+                        else
+                        {
+                            SpoolmanVendorDto newVendor = await _spoolmanService.CreateVendorAsync(entry.BrandName, null, ct);
+                            vendorByName[entry.BrandName] = newVendor;
+                            vendorId = newVendor.Id;
+                        }
+                    }
+
+                    // Build display name: "FilamentName - ColorName (Weight)"
+                    string displayName = entry.FilamentName;
+                    if (!string.IsNullOrWhiteSpace(entry.ColorName))
+                    {
+                        displayName = $"{entry.FilamentName} - {entry.ColorName}";
+                    }
+
+                    if (entry.Weight > 0)
+                    {
+                        displayName += $" ({entry.Weight}g)";
+                    }
+
+                    // Resolve temperatures from min/max ranges
+                    int? extruderTemp = null;
+                    int? bedTemp = null;
+                    List<string> rangeNotes = [];
+
+                    if (entry.MinPrintTemp.HasValue && entry.MaxPrintTemp.HasValue)
+                    {
+                        extruderTemp = (int)(Math.Ceiling((entry.MinPrintTemp.Value + entry.MaxPrintTemp.Value) / 2.0 / 5.0) * 5);
+                        rangeNotes.Add($"Nozzle: {entry.MinPrintTemp}-{entry.MaxPrintTemp}°C");
+                    }
+
+                    if (entry.MinBedTemp.HasValue && entry.MaxBedTemp.HasValue)
+                    {
+                        bedTemp = (int)(Math.Ceiling((entry.MinBedTemp.Value + entry.MaxBedTemp.Value) / 2.0 / 5.0) * 5);
+                        rangeNotes.Add($"Bed: {entry.MinBedTemp}-{entry.MaxBedTemp}°C");
+                    }
+
+                    string? comment = rangeNotes.Count > 0
+                        ? $"OFD temp ranges: {string.Join("; ", rangeNotes)}"
+                        : null;
+
+                    string? colorHex = entry.ColorHex?.TrimStart('#');
+
+                    SpoolmanCreateFilamentRequest filamentRequest = new()
+                    {
+                        Name = displayName,
+                        VendorId = vendorId,
+                        Material = entry.Material,
+                        Density = entry.Density ?? 1.24d,
+                        Diameter = entry.Diameter,
+                        Weight = entry.Weight,
+                        SettingsExtruderTemp = extruderTemp,
+                        SettingsBedTemp = bedTemp,
+                        ColorHex = colorHex,
+                        ExternalId = entry.EntryId,
+                        Comment = comment
+                    };
+
+                    // Dedup: check by ExternalId first, then composite key
+                    if (byExternalId.TryGetValue(entry.EntryId, out SpoolmanFilamentDto? match))
+                    {
+                        await _spoolmanService.UpdateFilamentInSpoolmanAsync(match.Id, filamentRequest, ct);
+                        updated++;
+                    }
+                    else if (byComposite.TryGetValue(MakeCompositeKey(displayName, entry.Material, entry.BrandName), out SpoolmanFilamentDto? compositeMatch))
+                    {
+                        await _spoolmanService.UpdateFilamentInSpoolmanAsync(compositeMatch.Id, filamentRequest, ct);
+                        byExternalId[entry.EntryId] = compositeMatch;
+                        updated++;
+                    }
+                    else
+                    {
+                        SpoolmanFilamentDto newFilament = await _spoolmanService.CreateFilamentInSpoolmanAsync(filamentRequest, ct);
+                        byExternalId[entry.EntryId] = newFilament;
+                        created++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"'{entry.BrandName} {entry.FilamentName} {entry.ColorName}': {ex.Message}");
+                    errorCount++;
+                }
+            }
+
+            return new OfdImportResult(created, updated, errorCount, errors.ToArray());
         }
 
         #region Helper Methods

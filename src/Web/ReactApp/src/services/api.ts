@@ -80,6 +80,11 @@ import {
   SpoolmanDbMaterialEntry,
   SpoolmanDbImportRequest,
   SpoolmanDbImportResult,
+  OfdBrand,
+  OfdBrandDetail,
+  OfdFlattenedEntry,
+  OfdImportRequest,
+  OfdImportResult,
   ConnectionDiagnosticsResponse,
   PagedResponse,
 } from "@/types/api";
@@ -1185,6 +1190,43 @@ export class ApiClient {
   async syncExternalMaterials(): Promise<SpoolmanDbImportResult> {
     const response = await this.client.post<SpoolmanDbImportResult>(
       "/filament-types/spoolmandb/sync-materials"
+    );
+    return response.data;
+  }
+
+  // ─── Open Filament Database ──────────────────────────────────────────
+
+  async getOfdBrands(): Promise<OfdBrand[]> {
+    const response = await this.client.get<OfdBrand[]>(
+      "/filament-types/openfilamentdb/brands"
+    );
+    return response.data;
+  }
+
+  async getOfdBrandMaterials(brandSlug: string): Promise<OfdBrandDetail> {
+    const response = await this.client.get<OfdBrandDetail>(
+      `/filament-types/openfilamentdb/brands/${brandSlug}/materials`
+    );
+    return response.data;
+  }
+
+  async getOfdFilaments(
+    brandSlug: string,
+    materialSlug: string,
+    brandName: string,
+    materialName: string
+  ): Promise<OfdFlattenedEntry[]> {
+    const response = await this.client.get<OfdFlattenedEntry[]>(
+      `/filament-types/openfilamentdb/brands/${brandSlug}/materials/${materialSlug}/filaments`,
+      { params: { brandName, materialName } }
+    );
+    return response.data;
+  }
+
+  async importFromOfd(request: OfdImportRequest): Promise<OfdImportResult> {
+    const response = await this.client.post<OfdImportResult>(
+      "/filament-types/openfilamentdb/import",
+      request
     );
     return response.data;
   }

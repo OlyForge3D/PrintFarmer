@@ -44,6 +44,10 @@ import {
   SpoolmanDbFilamentEntry,
   SpoolmanDbMaterialEntry,
   SpoolmanDbImportRequest,
+  OfdBrand,
+  OfdBrandDetail,
+  OfdFlattenedEntry,
+  OfdImportRequest,
   SpoolmanBulkUpdateFilamentsRequest,
   SpoolmanBulkUpdateResult,
   SpoolmanVendor,
@@ -86,6 +90,9 @@ export const queryKeys = {
   filamentPresets: ['presets', 'filament'] as const,
   spoolmanDbFilaments: ['spoolmandb', 'filaments'] as const,
   spoolmanDbMaterials: ['spoolmandb', 'materials'] as const,
+  ofdBrands: ['ofd', 'brands'] as const,
+  ofdBrandMaterials: (slug: string) => ['ofd', 'brands', slug, 'materials'] as const,
+  ofdFilaments: (brandSlug: string, materialSlug: string) => ['ofd', 'filaments', brandSlug, materialSlug] as const,
   spoolmanVendors: ['spoolman', 'vendors'] as const,
   spoolmanMaterials: ['spoolman', 'materials'] as const,
   gcodeFiles: (page?: number, pageSize?: number) => ['gcode-files', page, pageSize] as const,
@@ -821,6 +828,55 @@ export function useImportFromSpoolmanDb() {
 
   return useMutation({
     mutationFn: (request: SpoolmanDbImportRequest) => apiClient.importFromSpoolmanDb(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["filament-types"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
+    },
+  });
+}
+
+// ─── Open Filament Database hooks ────────────────────────────────────────
+
+export function useOfdBrands(options?: QueryOptions<OfdBrand[]>) {
+  return useQuery({
+    queryKey: queryKeys.ofdBrands,
+    queryFn: () => apiClient.getOfdBrands(),
+    staleTime: 600_000,
+    ...options,
+  });
+}
+
+export function useOfdBrandMaterials(brandSlug: string, options?: QueryOptions<OfdBrandDetail>) {
+  return useQuery({
+    queryKey: queryKeys.ofdBrandMaterials(brandSlug),
+    queryFn: () => apiClient.getOfdBrandMaterials(brandSlug),
+    staleTime: 600_000,
+    enabled: !!brandSlug,
+    ...options,
+  });
+}
+
+export function useOfdFilaments(
+  brandSlug: string,
+  materialSlug: string,
+  brandName: string,
+  materialName: string,
+  options?: QueryOptions<OfdFlattenedEntry[]>
+) {
+  return useQuery({
+    queryKey: queryKeys.ofdFilaments(brandSlug, materialSlug),
+    queryFn: () => apiClient.getOfdFilaments(brandSlug, materialSlug, brandName, materialName),
+    staleTime: 600_000,
+    enabled: !!brandSlug && !!materialSlug,
+    ...options,
+  });
+}
+
+export function useImportFromOfd() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (request: OfdImportRequest) => apiClient.importFromOfd(request),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });

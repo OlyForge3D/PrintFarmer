@@ -43,6 +43,9 @@ namespace Farm.Infrastructure.Services.Filament
         /// <summary>Imports selected filaments from SpoolmanDB community database.</summary>
         Task<SpoolmanDbImportResult> ImportFromSpoolmanDbAsync(SpoolmanDbImportRequest request, IReadOnlyList<SpoolmanDbFilamentEntry> allFilaments, CancellationToken ct);
 
+        /// <summary>Imports selected entries from the Open Filament Database.</summary>
+        Task<Farm.Infrastructure.OpenFilamentDb.OfdImportResult> ImportFromOpenFilamentDbAsync(IReadOnlyList<Farm.Infrastructure.OpenFilamentDb.OfdFlattenedEntry> entries, CancellationToken ct);
+
         /// <summary>Syncs all external materials from Spoolman's SpoolmanDB endpoint as filament types (upsert).</summary>
         Task<SpoolmanDbImportResult> SyncExternalMaterialsAsync(IReadOnlyList<SpoolmanDbMaterialEntry> materials, CancellationToken ct);
     }

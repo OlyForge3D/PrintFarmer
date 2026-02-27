@@ -25,6 +25,7 @@ import { FilamentCard } from '@/features/filamentManagement/components/FilamentC
 import { FilamentTableView } from '@/features/filamentManagement/components/FilamentTableView';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { SpoolmanDbBrowserModal } from '@/features/filamentManagement/components/SpoolmanDbBrowserModal';
+import { OpenFilamentDbBrowserModal } from '@/features/filamentManagement/components/OpenFilamentDbBrowserModal';
 import { BulkEditFilamentsModal } from '@/features/filamentManagement/components/BulkEditFilamentsModal';
 import { EditFilamentModal } from '@/features/filamentManagement/components/EditFilamentModal';
 import { AddFilamentModal } from '@/features/filamentManagement/components/AddFilamentModal';
@@ -72,6 +73,7 @@ export function FilamentsTab() {
     return saved ? Number(saved) : 50;
   });
   const [isSpoolmanDbOpen, setIsSpoolmanDbOpen] = useState(false);
+  const [isOfdOpen, setIsOfdOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [editingFilament, setEditingFilament] = useState<SpoolmanFilament | null>(null);
@@ -430,6 +432,14 @@ export function FilamentsTab() {
             <DatabaseIcon className="h-4 w-4 mr-1" />
           </Button>
           <Button
+            variant="secondary"
+            size="sm"
+            title="Browse and import from Open Filament Database"
+            onClick={() => setIsOfdOpen(true)}
+          >
+            <DownloadIcon className="h-4 w-4 mr-1" />
+          </Button>
+          <Button
             variant="primary"
             size="sm"
             title="Add a new filament"
@@ -783,6 +793,11 @@ export function FilamentsTab() {
       <SpoolmanDbBrowserModal
         isOpen={isSpoolmanDbOpen}
         onClose={() => { setIsSpoolmanDbOpen(false); reload(); }}
+      />
+
+      <OpenFilamentDbBrowserModal
+        isOpen={isOfdOpen}
+        onClose={() => { setIsOfdOpen(false); reload(); }}
       />
 
       {/* Bulk Edit Modal */}

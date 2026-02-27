@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Filament;
 using Farm.Infrastructure.Services.Spoolman;
+using Farm.Infrastructure.Services.OpenFilamentDb;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
@@ -28,7 +29,7 @@ namespace Farm.Web.Api.Tests.Controllers
             List<FilamentTypeDto> expected = new List<FilamentTypeDto> { new FilamentTypeDto(System.Guid.NewGuid(), "PLA", new TempTargets(200, 60), false, false) };
             _ = mockService.Setup(s => s.GetFilamentTypesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
-            FilamentTypeController controller = new FilamentTypeController(mockService.Object, mockStartup.Object, mockLogger.Object, mockSpoolmanDb.Object);
+            FilamentTypeController controller = new FilamentTypeController(mockService.Object, mockStartup.Object, mockLogger.Object, mockSpoolmanDb.Object, new Mock<IOpenFilamentDbService>().Object);
 
             IActionResult result = await controller.GetFilamentTypesAsync(ct: CancellationToken.None);
 
@@ -53,7 +54,7 @@ namespace Farm.Web.Api.Tests.Controllers
             PagedResult<FilamentTypeDto> pagedResult = new PagedResult<FilamentTypeDto>(items, 1, 1, 50, 1);
             _ = mockService.Setup(s => s.GetPagedFilamentTypesAsync(1, 50, null, It.IsAny<CancellationToken>())).ReturnsAsync(pagedResult);
 
-            FilamentTypeController controller = new FilamentTypeController(mockService.Object, mockStartup.Object, mockLogger.Object, mockSpoolmanDb.Object);
+            FilamentTypeController controller = new FilamentTypeController(mockService.Object, mockStartup.Object, mockLogger.Object, mockSpoolmanDb.Object, new Mock<IOpenFilamentDbService>().Object);
 
             IActionResult result = await controller.GetFilamentTypesAsync(page: 1, ct: CancellationToken.None);
 

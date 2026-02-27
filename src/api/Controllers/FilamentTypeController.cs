@@ -3,7 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.OpenFilamentDb;
 using Farm.Infrastructure.Services.Filament;
+using Farm.Infrastructure.Services.OpenFilamentDb;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.Startup;
 using Microsoft.AspNetCore.Authorization;
@@ -23,12 +25,14 @@ public class FilamentTypeController(
     IFilamentTypeService filamentService,
     IStartupStatus startupStatus,
     ILogger<FilamentTypeController> logger,
-    ISpoolmanDbService spoolmanDbService) : ControllerBase
+    ISpoolmanDbService spoolmanDbService,
+    IOpenFilamentDbService openFilamentDbService) : ControllerBase
 {
     private readonly IFilamentTypeService _filamentService = filamentService ?? throw new ArgumentNullException(nameof(filamentService));
     private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
     private readonly ILogger<FilamentTypeController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ISpoolmanDbService _spoolmanDbService = spoolmanDbService ?? throw new ArgumentNullException(nameof(spoolmanDbService));
+    private readonly IOpenFilamentDbService _openFilamentDbService = openFilamentDbService ?? throw new ArgumentNullException(nameof(openFilamentDbService));
 
     /// <summary>
     /// Gets all available filament types.
@@ -436,4 +440,92 @@ public class FilamentTypeController(
 
     // Default temperature heuristics are implemented in FilamentTypeService; controller-local
     // copies were unused and removed to satisfy analyzer warnings.
+
+    // ─── Open Filament Database endpoints ────────────────────────────────────
+
+    /// <summary>
+    /// Lists all brands from the Open Filament Database (cached).
+    /// </summary>
+    [HttpGet("openfilamentdb/brands")]
+    [ProducesResponseType(typeof(IEnumerable<OfdBrand>), 200)]
+    public async Task<ActionResult<IEnumerable<OfdBrand>>> GetOfdBrandsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<OfdBrand> brands = await _openFilamentDbService.GetBrandsAsync(ct);
+            return Ok(brands);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error fetching OFD brands: {Message}", ex.Message);
+            return StatusCode(502, new { message = $"Failed to fetch brands from Open Filament Database: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Gets materials for a specific brand from the Open Filament Database.
+    /// </summary>
+    [HttpGet("openfilamentdb/brands/{brandSlug}/materials")]
+    [ProducesResponseType(typeof(OfdBrandDetailResponse), 200)]
+    public async Task<ActionResult<OfdBrandDetailResponse>> GetOfdBrandMaterialsAsync(string brandSlug, CancellationToken ct)
+    {
+        try
+        {
+            OfdBrandDetailResponse detail = await _openFilamentDbService.GetBrandDetailAsync(brandSlug, ct);
+            return Ok(detail);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error fetching OFD brand detail for {Brand}: {Message}", brandSlug, ex.Message);
+            return StatusCode(502, new { message = $"Failed to fetch brand details: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Gets flattened filament entries (variant × size) for a brand + material from the Open Filament Database.
+    /// </summary>
+    [HttpGet("openfilamentdb/brands/{brandSlug}/materials/{materialSlug}/filaments")]
+    [ProducesResponseType(typeof(IEnumerable<OfdFlattenedEntry>), 200)]
+    public async Task<ActionResult<IEnumerable<OfdFlattenedEntry>>> GetOfdFilamentsAsync(
+        string brandSlug, string materialSlug,
+        [FromQuery] string brandName, [FromQuery] string materialName,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<OfdFlattenedEntry> entries = await _openFilamentDbService.GetFlattenedEntriesAsync(
+                brandSlug, brandName, materialSlug, materialName, ct);
+            return Ok(entries);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error fetching OFD filaments for {Brand}/{Material}: {Message}", brandSlug, materialSlug, ex.Message);
+            return StatusCode(502, new { message = $"Failed to fetch filaments: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Imports selected filament entries from the Open Filament Database into Spoolman.
+    /// </summary>
+    [HttpPost("openfilamentdb/import")]
+    [ProducesResponseType(typeof(OfdImportResult), 200)]
+    [ProducesResponseType(400)]
+    public async Task<ActionResult<OfdImportResult>> ImportFromOfdAsync([FromBody] OfdImportRequest request, CancellationToken ct)
+    {
+        if (request?.Entries is null or { Count: 0 })
+        {
+            return BadRequest(new { message = "No entries provided" });
+        }
+
+        try
+        {
+            OfdImportResult result = await _filamentService.ImportFromOpenFilamentDbAsync(request.Entries, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error importing from OFD: {Message}", ex.Message);
+            return BadRequest(new { message = $"Failed to import from Open Filament Database: {ex.Message}" });
+        }
+    }
 }
