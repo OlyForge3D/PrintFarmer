@@ -1,4 +1,4 @@
-import { useState, useEffect, useTransition, useCallback } from 'react';
+import { useState, useEffect, useTransition, useCallback, useMemo } from 'react';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import {
   FilterIcon,
@@ -10,61 +10,39 @@ import {
   TableIcon,
   GearIcon,
   CloseIcon,
+  DownloadIcon,
   ArrowUpIcon,
-  ArrowDownIcon
+  ArrowDownIcon,
+  PlusIcon,
+  DeleteIcon,
 } from '@/common/components/icons/MdiIcons';
 import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
 import { normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
 import { Button, Checkbox, Select } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
-import { SpoolUsageBar } from '@/features/filamentManagement/components/SpoolUsageBar';
+import { SpoolCard } from '@/features/filamentManagement/components/SpoolCard';
+import { SpoolTableView } from '@/features/filamentManagement/components/SpoolTableView';
+import { EditSpoolModal } from '@/features/filamentManagement/components/EditSpoolModal';
+import { AddSpoolModal } from '@/features/filamentManagement/components/AddSpoolModal';
+import { BulkEditSpoolsModal } from '@/features/filamentManagement/components/BulkEditSpoolsModal';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
-import { SelectableRow } from '@/common/components/Table/SelectableRow';
+import { useDeleteSpool, useBulkDeleteSpools } from '@/common/hooks/useApi';
+import { formatSpoolWeight, getUsagePercentage, getRemainingPercentage } from '@/features/filamentManagement/utils/formatters';
+import type { SpoolmanSpoolDto, SpoolTableColumn } from '@/features/filamentManagement/types';
 import { apiClient } from '@/services/api';
+import { toast } from 'sonner';
 import '@/features/filamentManagement/components/spool-components.css';
 
-// Matches backend SpoolmanController (SpoolmanSpoolDto) serialized with camelCase
-interface SpoolmanSpoolDto {
-  id: number;
-  name: string;
-  material: string;
-  remainingWeightG?: number | null;
-  colorHex?: string | null;
-  inUse: boolean;
-  filamentName?: string | null;
-  vendor?: string | null;
-  registeredAt?: string | null;
-  firstUsedAt?: string | null;
-  lastUsedAt?: string | null;
-  initialWeightG?: number | null;
-  usedWeightG?: number | null;
-  spoolWeightG?: number | null;
-  remainingLengthMm?: number | null;
-  usedLengthMm?: number | null;
-  location?: string | null;
-  lotNumber?: string | null;
-  archived?: boolean | null;
-  usedPercent?: number | null;
-  remainingPercent?: number | null;
-}
-
 interface FilterState {
+  search: string;
   material: string;
   vendor: string;
   color: string;
   pageSize: string;
   location: string;
   showEmpty: boolean;
-}
-
-interface TableColumn {
-  id: string;
-  label: string;
-  visible: boolean;
-  sortable?: boolean;
-  render: (spool: SpoolmanSpoolDto) => React.ReactNode;
-  sortValue?: (spool: SpoolmanSpoolDto) => string | number;
 }
 
 /**
@@ -78,6 +56,7 @@ export function SpoolsTab() {
   const [spoolmanBaseUrl, setSpoolmanBaseUrl] = useState('');
   const [,startTransition] = useTransition();
   const [filters, setFilters] = useState<FilterState>({
+    search: '',
     material: '',
     vendor: '',
     color: '',
@@ -87,47 +66,47 @@ export function SpoolsTab() {
   });
   const [sortField, setSortField] = useState<string>('id');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
+    const saved = localStorage.getItem('spools-view-mode');
+    return saved === 'table' ? 'table' : 'cards';
+  });
+
+  // Persist view mode preference
+  useEffect(() => {
+    localStorage.setItem('spools-view-mode', viewMode);
+  }, [viewMode]);
   const [showColumnConfig, setShowColumnConfig] = useState(false);
   const [health, setHealth] = useState<{configured: boolean; success: boolean; message?: string} | null>(null);
 
-  const defaultColumns: TableColumn[] = [
+  // CRUD state
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [editingSpool, setEditingSpool] = useState<SpoolmanSpoolDto | null>(null);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [cloningSpool, setCloningSpool] = useState<SpoolmanSpoolDto | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'single'; spool: SpoolmanSpoolDto } | { type: 'bulk' } | null>(null);
+  const deleteSpoolMutation = useDeleteSpool();
+  const bulkDeleteMutation = useBulkDeleteSpools();
+
+  const defaultColumns: SpoolTableColumn[] = [
     { id: 'id', label: 'ID', visible: true, sortable: true, render: s => s.id, sortValue: s => s.id },
     { id: 'color', label: 'Color', visible: true, sortable: true, render: s => <ColorSwatch color={getRepresentativeHex(classifyColor(s.colorHex))} label={classifyColor(s.colorHex)} />, sortValue: s => classifyColor(s.colorHex).toLowerCase() },
     { id: 'vendor', label: 'Vendor', visible: true, sortable: true, render: s => (s.vendor || '—'), sortValue: s => (s.vendor || '').toLowerCase() },
     { id: 'material', label: 'Material', visible: true, sortable: true, render: s => (s.material || '—'), sortValue: s => (s.material || '').toLowerCase() },
     { id: 'name', label: 'Name', visible: true, sortable: true, render: s => (s.filamentName || s.name || '—'), sortValue: s => (s.filamentName || s.name || '').toLowerCase() },
-    { id: 'remaining', label: 'Remaining', visible: true, sortable: true, render: s => formatWeight(s.remainingWeightG), sortValue: s => (s.remainingWeightG ?? -Infinity) },
+    { id: 'remaining', label: 'Remaining', visible: true, sortable: true, render: s => formatSpoolWeight(s.remainingWeightG), sortValue: s => (s.remainingWeightG ?? -Infinity) },
     { id: 'usedPercent', label: 'Used %', visible: true, sortable: true, render: s => getUsagePercentage(s).toFixed(1), sortValue: s => getUsagePercentage(s) },
     { id: 'location', label: 'Location', visible: true, sortable: true, render: s => (s.location || ''), sortValue: s => (s.location || '').toLowerCase() },
     { id: 'archived', label: 'Archived', visible: true, sortable: true, render: s => (s.archived ? 'Yes' : ''), sortValue: s => (s.archived ? 1 : 0) },
-    { id: 'edit', label: 'Edit', visible: true, sortable: false, render: s => {
-      const base = normalizeSpoolmanBaseUrl(spoolmanBaseUrl);
-      const hasBase = !!base;
-      const editUrl = hasBase ? `${base}/spool/edit/${s.id}` : '/settings';
-      const title = hasBase ? `Edit spool ${s.id} in Spoolman` : 'Configure Spoolman URL first';
-      return (
-        <a
-          href={editUrl}
-          target={hasBase ? '_blank' : undefined}
-          rel={hasBase ? 'noopener noreferrer' : undefined}
-          className={`text-blue-400 underline inline-flex items-center gap-1 ${hasBase ? 'hover:text-blue-300' : 'opacity-60 hover:opacity-80'}`}
-          aria-label={title}
-          title={title}
-        >
-          <EditIcon className="h-3 w-3" />
-        </a>
-      );
-    } }
   ];
 
-  const [tableColumns, setTableColumns] = useState<TableColumn[]>(() => {
+  const [tableColumns, setTableColumns] = useState<SpoolTableColumn[]>(() => {
     try {
       const raw = localStorage.getItem('spool-table-columns');
       if (raw) {
         const parsed = JSON.parse(raw) as { id: string; visible: boolean }[];
         const used = new Set<string>();
-        const result: TableColumn[] = [];
+        const result: SpoolTableColumn[] = [];
         for (const p of parsed) {
           const def = defaultColumns.find(d => d.id === p.id);
             if (def) {
@@ -143,34 +122,6 @@ export function SpoolsTab() {
     } catch { /* ignore */ }
     return defaultColumns;
   });
-
-  // Update edit column render function when Spoolman base URL changes
-  useEffect(() => {
-    setTableColumns(cols => cols.map(c => {
-      if (c.id !== 'edit') return c;
-      return {
-        ...c,
-        render: (s: SpoolmanSpoolDto) => {
-          const base = normalizeSpoolmanBaseUrl(spoolmanBaseUrl);
-          const hasBase = !!base;
-          const editUrl = hasBase ? `${base}/spool/edit/${s.id}` : '/settings';
-          const title = hasBase ? `Edit spool ${s.id} in Spoolman` : 'Configure Spoolman URL first';
-          return (
-            <a
-              href={editUrl}
-              target={hasBase ? '_blank' : undefined}
-              rel={hasBase ? 'noopener noreferrer' : undefined}
-              className={`text-blue-400 underline inline-flex items-center gap-1 ${hasBase ? 'hover:text-blue-300' : 'opacity-60 hover:opacity-80'}`}
-              aria-label={title}
-              title={title}
-            >
-              <EditIcon className="h-3 w-3" />
-            </a>
-          );
-        }
-      };
-    }));
-  }, [spoolmanBaseUrl]);
 
   // One-time health probe
   useEffect(() => {
@@ -263,6 +214,9 @@ export function SpoolsTab() {
     });
   };
 
+  const hasActiveSpoolFilters = filters.search !== '' || filters.material !== '' || filters.vendor !== '' || filters.color !== '' || filters.location !== '' || filters.showEmpty;
+  const resetSpoolFilters = () => setFilters(prev => ({ ...prev, search: '', material: '', vendor: '', color: '', location: '', showEmpty: false }));
+
   const loadSpools = useCallback(async () => {
     startTransition(async () => {
       try {
@@ -305,7 +259,33 @@ export function SpoolsTab() {
     void loadSpools();
   }, [loadSpools]);
 
-  const getFilteredSpools = (): SpoolmanSpoolDto[] => spools.filter(spool => {
+  const reload = () => {
+    setLoading(true);
+    setSelectedIds(new Set());
+    loadSpools();
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const filteredSpools = useMemo((): SpoolmanSpoolDto[] => spools.filter(spool => {
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      const matchesSearch =
+        (spool.filamentName || spool.name || '').toLowerCase().includes(q) ||
+        (spool.vendor || '').toLowerCase().includes(q) ||
+        (spool.material || '').toLowerCase().includes(q) ||
+        (spool.location || '').toLowerCase().includes(q) ||
+        (spool.lotNumber || '').toLowerCase().includes(q) ||
+        String(spool.id).includes(q);
+      if (!matchesSearch) return false;
+    }
     if (filters.material && !spool.material?.toLowerCase().includes(filters.material.toLowerCase())) return false;
     if (filters.vendor && !(spool.vendor || '').toLowerCase().includes(filters.vendor.toLowerCase())) return false;
     if (filters.color && classifyColor(spool.colorHex) !== filters.color) return false;
@@ -316,11 +296,11 @@ export function SpoolsTab() {
       if (remaining == null && typeof spool.remainingPercent === 'number' && spool.remainingPercent <= 0) return false;
     }
     return true;
-  });
+  }), [spools, filters.search, filters.material, filters.vendor, filters.color, filters.location, filters.showEmpty]);
 
-  const getDisplayedSpools = (): SpoolmanSpoolDto[] => {
-    let filtered = getFilteredSpools();
-    filtered = [...filtered].sort((a, b) => {
+  const displayedSpools = useMemo((): SpoolmanSpoolDto[] => {
+    let filtered = [...filteredSpools];
+    filtered.sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1;
       const col = tableColumns.find(c => c.id === sortField);
       const val = (f: SpoolmanSpoolDto): string | number => {
@@ -346,7 +326,7 @@ export function SpoolsTab() {
     if (filters.pageSize === 'All') return filtered;
     const pageSize = parseInt(filters.pageSize);
     return filtered.slice(0, pageSize);
-  };
+  }, [filteredSpools, sortField, sortDir, tableColumns, filters.pageSize]);
 
   const getMaterialOptions = (): string[] => [...new Set(spools.map(s => s.material).filter((m): m is string => !!m))].sort();
   const getVendorOptions = (): string[] => [...new Set(spools.map(s => s.vendor).filter((v): v is string => !!v))].sort();
@@ -355,31 +335,10 @@ export function SpoolsTab() {
     .filter(f => f && f !== 'Unknown')
     .sort();
 
-  const formatWeight = (weight?: number | null): string => {
-    if (typeof weight === 'number' && isFinite(weight)) return `${Math.max(0, weight).toFixed(0)}g`;
-    return '—';
-  };
-
-  const getUsagePercentage = (spool: SpoolmanSpoolDto): number => {
-    if (typeof spool.usedPercent === 'number') return spool.usedPercent;
-    if (typeof spool.usedWeightG === 'number' && typeof spool.initialWeightG === 'number' && spool.initialWeightG > 0) {
-      return (spool.usedWeightG / spool.initialWeightG) * 100;
-    }
-    if (typeof spool.remainingWeightG === 'number' && typeof spool.initialWeightG === 'number' && spool.initialWeightG > 0) {
-      return ((spool.initialWeightG - spool.remainingWeightG) / spool.initialWeightG) * 100;
-    }
-    return 0;
-  };
-  const getRemainingPercentage = (spool: SpoolmanSpoolDto): number => {
-    if (typeof spool.remainingPercent === 'number') return spool.remainingPercent;
-    const used = getUsagePercentage(spool);
-    return used > 0 ? 100 - used : 0;
-  };
-
   const handleExportCsv = () => {
     const rows = [
       ['id','name','vendor','material','filamentName','colorHex','initialWeightG','remainingWeightG','usedWeightG','usedPercent','remainingPercent','location','lotNumber','archived'],
-      ...getDisplayedSpools().map(s => [
+      ...displayedSpools.map(s => [
         s.id,
         s.name,
         s.vendor || '',
@@ -409,16 +368,40 @@ export function SpoolsTab() {
     URL.revokeObjectURL(url);
   };
 
-  const weightTooltip = (spool: SpoolmanSpoolDto) => {
-    const parts: string[] = [];
-    if (spool.initialWeightG != null) parts.push(`Initial: ${spool.initialWeightG}g`);
-    if (spool.remainingWeightG != null) parts.push(`Remaining: ${spool.remainingWeightG}g`);
-    const used = spool.usedWeightG ?? (spool.initialWeightG && spool.remainingWeightG != null ? (spool.initialWeightG - spool.remainingWeightG) : undefined);
-    if (used != null) parts.push(`Used: ${used}g`);
-    parts.push(`Used %: ${getUsagePercentage(spool).toFixed(1)}%`);
-    parts.push(`Remaining %: ${getRemainingPercentage(spool).toFixed(1)}%`);
-    return parts.join(' | ');
+  const someSelected = selectedIds.size > 0;
+  const allSelected = displayedSpools.length > 0 && selectedIds.size === displayedSpools.length;
+  const toggleSelectAll = () => {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(displayedSpools.map(s => s.id)));
   };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirm) return;
+    if (deleteConfirm.type === 'single') {
+      try {
+        await deleteSpoolMutation.mutateAsync(deleteConfirm.spool.id);
+        toast.success(`Deleted spool #${deleteConfirm.spool.id}.`);
+        reload();
+      } catch {
+        toast.error('Failed to delete spool.');
+      }
+    } else {
+      try {
+        const result = await bulkDeleteMutation.mutateAsync([...selectedIds]);
+        if (result.errorCount > 0) {
+          toast.error(`Deleted ${result.updatedCount}, failed ${result.errorCount}.`);
+        } else {
+          toast.success(`Deleted ${result.updatedCount} spool${result.updatedCount !== 1 ? 's' : ''}.`);
+        }
+        reload();
+      } catch {
+        toast.error('Bulk delete failed.');
+      }
+    }
+    setDeleteConfirm(null);
+  };
+
+  const isDeleting = deleteSpoolMutation.isPending || bulkDeleteMutation.isPending;
 
   if (loading) {
     return (
@@ -456,8 +439,25 @@ export function SpoolsTab() {
         </div>
       )}
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold text-pf-text-primary">Spools</h2>
+        <h2 className="text-xl font-bold text-pf-text-primary">Spools ({filteredSpools.length})</h2>
         <div className="flex gap-2 items-center">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleExportCsv}
+            aria-label="Export spools to CSV"
+            title="Export spools to CSV"
+          >
+            <DownloadIcon className="h-4 w-4 mr-1" />
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            title="Add a new spool"
+            onClick={() => setIsAddOpen(true)}
+          >
+            <PlusIcon className="h-4 w-4 mr-1" />
+          </Button>
           <div className="flex rounded-sm overflow-hidden border border-pf-border">
             <Button
               variant={viewMode === 'cards' ? 'primary' : 'secondary'}
@@ -465,7 +465,6 @@ export function SpoolsTab() {
               aria-label="Card view"
               title="Card view"
               onClick={() => setViewMode('cards')}
-              className="flex items-center gap-1"
             >
               <GridIcon className="h-4 w-4" />
             </Button>
@@ -475,7 +474,6 @@ export function SpoolsTab() {
               aria-label="Table view"
               title="Table view"
               onClick={() => setViewMode('table')}
-              className="flex items-center gap-1"
             >
               <TableIcon className="h-4 w-4" />
             </Button>
@@ -558,7 +556,6 @@ export function SpoolsTab() {
             disabled={!spoolmanBaseUrl}
             aria-label="Refresh spools"
             title="Refresh spools"
-            className="flex items-center gap-2"
           >
             <RefreshIcon className="h-4 w-4" />
           </Button>
@@ -601,9 +598,33 @@ export function SpoolsTab() {
             <div className="flex items-center gap-2 mb-3">
               <FilterIcon className="h-4 w-4 text-pf-text-secondary" />
               <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
+              {hasActiveSpoolFilters && (
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  onClick={resetSpoolFilters}
+                  aria-label="Reset all filters"
+                  title="Reset all filters"
+                  iconLeft={<CloseIcon className="h-3 w-3" />}
+                >
+                  Reset
+                </Button>
+              )}
             </div>
             
             <div className="flex flex-wrap gap-4 items-end">
+              <div className="flex flex-col gap-1">
+                <label htmlFor="spool-search" className="text-xs text-pf-text-secondary">Search</label>
+                <input
+                  id="spool-search"
+                  type="search"
+                  value={filters.search}
+                  onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                  placeholder="Name, vendor, material..."
+                  className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                  aria-label="Search spools"
+                />
+              </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-pf-text-secondary">Material</label>
                 <Select
@@ -642,21 +663,6 @@ export function SpoolsTab() {
                   options={getColorFamilyOptions()}
                   placeholder="All Colors"
                 />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-pf-text-secondary">Page Size</label>
-                <Select
-                  aria-label="Select page size"
-                  value={filters.pageSize}
-                  onChange={(e) => setFilters(prev => ({ ...prev, pageSize: e.target.value }))}
-                  className="w-40"
-                >
-                  <option value="10">10 per page</option>
-                  <option value="50">50 per page</option>
-                  <option value="100">100 per page</option>
-                  <option value="All">Show All</option>
-                </Select>
               </div>
 
               <div className="flex flex-col gap-1">
@@ -707,7 +713,23 @@ export function SpoolsTab() {
               )}
 
               <div className="ml-auto flex flex-wrap gap-2 items-center text-sm">
-                <span className="text-pf-text-secondary">Showing {getDisplayedSpools().length} of {getFilteredSpools().length}</span>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="spool-page-size" className="text-xs text-pf-text-secondary">Show</label>
+                  <Select
+                    id="spool-page-size"
+                    aria-label="Page size"
+                    value={filters.pageSize}
+                    onChange={(e) => setFilters(prev => ({ ...prev, pageSize: e.target.value }))}
+                    className="w-20"
+                  >
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="All">All</option>
+                  </Select>
+                </div>
+                <span className="text-pf-text-secondary">Showing {displayedSpools.length} of {filteredSpools.length}</span>
                 
                 <label className="flex items-center gap-1 text-xs cursor-pointer">
                   <Checkbox
@@ -717,17 +739,6 @@ export function SpoolsTab() {
                   />
                   Show empty
                 </label>
-
-                {viewMode === 'cards' && (
-                  <>
-                  </>
-                )}
-                <Button
-                  size="sm"
-                  variant="success"
-                  onClick={handleExportCsv}
-                  className="text-xs px-2 py-1"
-                >Export CSV</Button>
               </div>
             </div>
           </div>
@@ -739,126 +750,75 @@ export function SpoolsTab() {
             </div>
           )}
 
-          {viewMode === 'cards' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {getDisplayedSpools().map((spool) => (
-              <div
-                key={spool.id}
-                className={`bg-pf-bg-1 border border-pf-border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors ${
-                  (spool.remainingWeightG ?? Infinity) <= 50 ? 'border-orange-500' : ''
-                } ${
-                  (spool.remainingWeightG ?? Infinity) <= 10 ? 'border-red-500' : ''
-                }`}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                  <ColorSwatch color={getRepresentativeHex(classifyColor(spool.colorHex))} label={classifyColor(spool.colorHex)} />
-                    <div className="text-sm font-medium text-pf-text-primary truncate">
-                      #{spool.id}
-                    </div>
-                  </div>
-                  {spool.archived && (
-                    <span className="ml-2 inline-block px-2 py-0.5 text-[10px] rounded-sm bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="space-y-0.5">
-                    <div className="text-sm font-medium text-pf-text-primary truncate">
-                      {spool.vendor || 'Unknown Vendor'}
-                    </div>
-                    <div className="text-xs text-pf-text-secondary truncate">
-                      {spool.filamentName || spool.name || 'Unnamed'} [{spool.material || 'Unknown Material'}]
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-pf-text-secondary">Weight</span>
-                      <span className={`font-medium ${
-                        (spool.remainingWeightG ?? Infinity) <= 50 ? 'text-orange-400' : ''
-                      } ${
-                        (spool.remainingWeightG ?? Infinity) <= 10 ? 'text-red-400' : ''
-                      }`}>
-                        {formatWeight(spool.remainingWeightG)}
-                      </span>
-                    </div>
-                    <SpoolUsageBar
-                      usedWeight={spool.usedWeightG ?? (spool.initialWeightG && spool.remainingWeightG ? (spool.initialWeightG - spool.remainingWeightG) : 0)}
-                      remainingWeight={spool.remainingWeightG ?? 0}
-                      label={`Spool ${spool.id} usage`}
-                    />
-                    <div
-                      className="text-xs text-pf-text-secondary flex justify-between items-center gap-2"
-                      title={weightTooltip(spool)}
-                      aria-label={weightTooltip(spool)}
-                    >
-                      <span>
-                        {getUsagePercentage(spool).toFixed(1)}% used / {getRemainingPercentage(spool).toFixed(1)}% left
-                        {spool.initialWeightG ? ` of ${spool.initialWeightG.toFixed(0)}g` : ''}
-                      </span>
-                      {spool.lastUsedAt && (
-                        <span className="whitespace-nowrap text-pf-text-secondary/80" title={`Last used: ${new Date(spool.lastUsedAt).toLocaleDateString()}`}>{`Last used: ${new Date(spool.lastUsedAt).toLocaleDateString()}`}</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {spool.location && (
-                    <div className="text-xs text-pf-text-secondary">Location: {spool.location}</div>
-                  )}
-
-                  {spool.lotNumber && (
-                    <div className="text-xs text-pf-text-secondary">Lot: {spool.lotNumber}</div>
-                  )}
-                </div>
+          {/* Bulk selection toolbar */}
+          {someSelected && (
+            <div className="bg-blue-900/30 border border-blue-700/50 rounded-xl px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-blue-200">
+                  {selectedIds.size} spool{selectedIds.size !== 1 ? 's' : ''} selected
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSelectedIds(new Set())}
+                  iconLeft={<CloseIcon className="h-3 w-3 mr-1" />}
+                >
+                  Clear
+                </Button>
               </div>
-            ))}
-          </div>
-          )}
-          {viewMode === 'table' && (
-            <div className="overflow-x-auto relative">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left bg-pf-bg-2">
-                    {tableColumns.filter(c => c.visible).map(c => {
-                      const isSorted = sortField === c.id;
-                      const ariaSort: 'ascending' | 'descending' | undefined = isSorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined;
-                      return (
-                        <th
-                          key={c.id}
-                          data-col-id={c.id}
-                          className={`px-3 py-2 font-medium ${c.sortable ? 'cursor-pointer select-none' : ''}`}
-                          onClick={() => {
-                            if (!c.sortable) return; 
-                            setSortField(prev => prev === c.id ? prev : c.id);
-                            setSortDir(prev => (isSorted ? (prev === 'asc' ? 'desc' : 'asc') : 'asc'));
-                          }}
-                          {...(ariaSort ? { 'aria-sort': ariaSort } : {})}
-                        >
-                          <span className="inline-flex items-center gap-1">
-                            {c.label}
-                            {c.sortable && isSorted && (
-                              sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />
-                            )}
-                          </span>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {getDisplayedSpools().map(spool => (
-                    <SelectableRow key={spool.id} className="border-t border-pf-border" isSelected={false}>
-                      {tableColumns.filter(c => c.visible).map(c => (
-                        <td key={c.id} className="px-3 py-2" data-col-id={c.id}>{c.render(spool)}</td>
-                      ))}
-                    </SelectableRow>
-                  ))}
-                </tbody>
-              </table>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setIsBulkEditOpen(true)}
+                  iconLeft={<EditIcon className="h-4 w-4 mr-1" />}
+                >
+                  Bulk Edit
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setDeleteConfirm({ type: 'bulk' })}
+                  iconLeft={<DeleteIcon className="h-4 w-4 mr-1" />}
+                >
+                  Delete
+                </Button>
+              </div>
             </div>
           )}
-          {getDisplayedSpools().length === 0 && getFilteredSpools().length > 0 && (
+
+          {viewMode === 'cards' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {displayedSpools.map((spool) => (
+                <SpoolCard
+                  key={spool.id}
+                  spool={spool}
+                  isSelected={selectedIds.has(spool.id)}
+                  onToggleSelect={() => toggleSelect(spool.id)}
+                  onEdit={() => setEditingSpool(spool)}
+                  onClone={() => setCloningSpool(spool)}
+                  onDelete={() => setDeleteConfirm({ type: 'single', spool })}
+                />
+              ))}
+            </div>
+          )}
+          {viewMode === 'table' && (
+            <SpoolTableView
+              spools={displayedSpools}
+              tableColumns={tableColumns}
+              selectedIds={selectedIds}
+              allSelected={allSelected}
+              sortField={sortField}
+              sortDir={sortDir}
+              onSort={(field, dir) => { setSortField(field); setSortDir(dir); }}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+              onEdit={(s) => setEditingSpool(s)}
+              onClone={(s) => setCloningSpool(s)}
+              onDelete={(s) => setDeleteConfirm({ type: 'single', spool: s })}
+            />
+          )}
+          {displayedSpools.length === 0 && filteredSpools.length > 0 && (
             <div className="text-center py-8 text-pf-text-secondary">
               No spools match the current filters.
             </div>
@@ -874,6 +834,59 @@ export function SpoolsTab() {
           </div>
         </div>
       )}
+
+      {/* Edit Spool Modal */}
+      <EditSpoolModal
+        key={editingSpool?.id ?? 'none'}
+        isOpen={editingSpool !== null}
+        onClose={() => setEditingSpool(null)}
+        spool={editingSpool}
+        onSuccess={reload}
+      />
+
+      {/* Add / Clone Spool Modal */}
+      <AddSpoolModal
+        isOpen={isAddOpen || cloningSpool !== null}
+        onClose={() => { setIsAddOpen(false); setCloningSpool(null); }}
+        sourceSpool={cloningSpool ?? undefined}
+        onSuccess={reload}
+      />
+
+      {/* Bulk Edit Spools Modal */}
+      <BulkEditSpoolsModal
+        isOpen={isBulkEditOpen}
+        onClose={() => setIsBulkEditOpen(false)}
+        selectedIds={[...selectedIds]}
+        onSuccess={reload}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={deleteConfirm !== null}
+        onClose={() => setDeleteConfirm(null)}
+        title={deleteConfirm?.type === 'bulk' ? 'Delete Spools?' : 'Delete Spool?'}
+        width="max-w-sm"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setDeleteConfirm(null)} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        }
+      >
+        {deleteConfirm?.type === 'single' ? (
+          <p className="text-pf-text-secondary">
+            Are you sure you want to delete spool <strong>#{deleteConfirm.spool.id}</strong> ({deleteConfirm.spool.filamentName || 'unnamed'})? This action cannot be undone.
+          </p>
+        ) : deleteConfirm?.type === 'bulk' ? (
+          <p className="text-pf-text-secondary">
+            Are you sure you want to delete <strong>{selectedIds.size}</strong> spool{selectedIds.size !== 1 ? 's' : ''}? This action cannot be undone.
+          </p>
+        ) : null}
+      </Modal>
     </div>
   );
 }

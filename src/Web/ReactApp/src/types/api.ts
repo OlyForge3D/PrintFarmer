@@ -202,6 +202,19 @@ export interface PrinterOperationalState {
 }
 
 /**
+ * Lightweight location summary for printer assignment.
+ * Matches backend LocationSummaryDto.
+ */
+export interface LocationSummary {
+  /** Location identifier */
+  id: string;
+  /** Location display name */
+  name: string;
+  /** Optional description */
+  description?: string;
+}
+
+/**
  * Combined base interface for full printer DTOs.
  * Extends all common base interfaces for a complete printer representation.
  * Use this as the base for DTOs that need most/all printer information.
@@ -213,6 +226,8 @@ export interface PrinterBase extends
   PrinterMetadata,
   PrinterCameraInfo,
   PrinterOperationalState {
+  /** Location assignment (farm location) */
+  location?: LocationSummary;
 }
 
 /**
@@ -2497,6 +2512,39 @@ export interface SpoolmanUpdateFilamentRequest {
   price?: number | null;
   articleNumber?: string | null;
   multiColorHexes?: string | null;
+}
+
+// ============ Spool CRUD Types ============
+
+/**
+ * Request to create or update (PATCH) a single spool in Spoolman.
+ * Only non-null/undefined fields are applied.
+ */
+export interface SpoolmanUpdateSpoolRequest {
+  filamentId?: number | null;
+  remainingWeight?: number | null;
+  initialWeight?: number | null;
+  spoolWeight?: number | null;
+  location?: string | null;
+  lotNumber?: string | null;
+  price?: number | null;
+  comment?: string | null;
+  archived?: boolean | null;
+}
+
+/** Alias for clarity: same shape as update but filamentId is required for create. */
+export type SpoolmanCreateSpoolRequest = SpoolmanUpdateSpoolRequest;
+
+/**
+ * Request to bulk-update multiple spools in Spoolman.
+ */
+export interface SpoolmanBulkUpdateSpoolsRequest {
+  spoolIds: number[];
+  location?: string | null;
+  lotNumber?: string | null;
+  price?: number | null;
+  comment?: string | null;
+  archived?: boolean | null;
 }
 
 // ============ Connection Diagnostics Types ============

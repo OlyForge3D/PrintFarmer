@@ -1,9 +1,10 @@
 import { useState, useMemo, useId } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button, Select, Input, Textarea, FormField, ColorPicker } from '@/common/components/ui';
+import { Button, Select, Input, Textarea, FormField, ColorPicker, NumberStepper } from '@/common/components/ui';
 import { useSpoolmanVendors, useCreateFilament, useSpoolmanMaterials } from '@/common/hooks/useApi';
 import type { SpoolmanFilament, SpoolmanUpdateFilamentRequest } from '@/types/api';
 import { toast } from 'sonner';
+import { apiClient } from '@/services/api';
 
 interface AddFilamentModalProps {
   isOpen: boolean;
@@ -39,7 +40,7 @@ function AddFilamentFormModal({ isOpen, onClose, sourceFilament, onSuccess }: Ad
   const createMutation = useCreateFilament();
 
   const isClone = sourceFilament != null;
-  const title = isClone ? `Clone: ${sourceFilament.name ?? 'Filament'}` : 'Add Filament';
+  const title = isClone ? 'Clone Filament' : 'Add Filament';
 
   // Resolve initial vendor ID from vendor name
   const resolvedVendorId = useMemo(() => {
@@ -62,6 +63,7 @@ function AddFilamentFormModal({ isOpen, onClose, sourceFilament, onSuccess }: Ad
   const [spoolWeight, setSpoolWeight] = useState(sourceFilament?.spoolWeight != null ? String(sourceFilament.spoolWeight) : '');
   const [articleNumber, setArticleNumber] = useState(sourceFilament?.articleNumber ?? '');
   const [comment, setComment] = useState(sourceFilament?.comment ?? '');
+  const [spoolCount, setSpoolCount] = useState(0);
 
   const effectiveVendorId = vendorTouched ? vendorId : resolvedVendorId;
 
@@ -90,8 +92,25 @@ function AddFilamentFormModal({ isOpen, onClose, sourceFilament, onSuccess }: Ad
     if (comment.trim()) request.comment = comment.trim();
 
     try {
-      await createMutation.mutateAsync(request);
-      toast.success(`Filament "${name.trim()}" created.`);
+      const filament = await createMutation.mutateAsync(request);
+      if (spoolCount > 0) {
+        const count = Math.min(spoolCount, 100);
+        let created = 0;
+        for (let i = 0; i < count; i++) {
+          try {
+            await apiClient.createSpool({
+              filamentId: filament.id,
+              initialWeight: filament.weight ?? undefined,
+              remainingWeight: filament.weight ?? undefined,
+              spoolWeight: filament.spoolWeight ?? undefined,
+            });
+            created++;
+          } catch { /* continue */ }
+        }
+        toast.success(`Filament "${name.trim()}" created with ${created} spool${created !== 1 ? 's' : ''}.`);
+      } else {
+        toast.success(`Filament "${name.trim()}" created.`);
+      }
       onSuccess();
       onClose();
     } catch {
@@ -107,18 +126,28 @@ function AddFilamentFormModal({ isOpen, onClose, sourceFilament, onSuccess }: Ad
       width="max-w-2xl"
       closeOnEscape
       footer={
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={onClose}>
+        <div className="flex items-center gap-2">
+          <NumberStepper
+            id={`${formId}-spool-count`}
+            value={spoolCount}
+            onChange={setSpoolCount}
+            min={0}
+            max={100}
+            aria-label="Number of spools to create with this filament"
+            className="mr-auto"
+          />
+          <Button variant="secondary" size="sm" className="h-8" onClick={onClose}>
             Cancel
           </Button>
           <Button
             variant="primary"
             size="sm"
+            className="h-8"
             type="submit"
             form={htmlFormId}
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? 'Creating...' : isClone ? 'Clone Filament' : 'Add Filament'}
+            {createMutation.isPending ? 'Creating...' : isClone ? 'Clone' : 'Add'}
           </Button>
         </div>
       }
@@ -287,6 +316,7 @@ function AddFilamentFormModal({ isOpen, onClose, sourceFilament, onSuccess }: Ad
             aria-label="Comment"
           />
         </FormField>
+
       </form>
     </Modal>
   );

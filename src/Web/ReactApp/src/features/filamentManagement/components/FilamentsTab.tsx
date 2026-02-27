@@ -14,13 +14,16 @@ import {
   CloseIcon,
   DeleteIcon,
   PlusIcon,
-  CopyIcon,
+  GearIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button, Select, FileUpload } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
-import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
-import { SelectableRow } from '@/common/components/Table/SelectableRow';
+import { classifyColor } from '@/common/utils/colorFamilies';
+import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
+import { FilamentCard } from '@/features/filamentManagement/components/FilamentCard';
+import { FilamentTableView } from '@/features/filamentManagement/components/FilamentTableView';
+import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { SpoolmanDbBrowserModal } from '@/features/filamentManagement/components/SpoolmanDbBrowserModal';
 import { BulkEditFilamentsModal } from '@/features/filamentManagement/components/BulkEditFilamentsModal';
 import { EditFilamentModal } from '@/features/filamentManagement/components/EditFilamentModal';
@@ -28,12 +31,15 @@ import { AddFilamentModal } from '@/features/filamentManagement/components/AddFi
 import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
 import { useExportSpoolmanFilamentsCsv, useImportSpoolmanFilamentsCsv, useDeleteFilament, useBulkDeleteFilaments } from '@/common/hooks/useApi';
+import { formatTemp, formatFilamentWeight, formatPrice, formatDiameter } from '@/features/filamentManagement/utils/formatters';
 import type { SpoolmanFilament } from '@/types/api';
+import type { FilamentTableColumn } from '@/features/filamentManagement/types';
 import { toast } from 'sonner';
 
 interface FilterState {
   material: string;
   vendor: string;
+  color: string;
   search: string;
 }
 
@@ -57,7 +63,7 @@ export function FilamentsTab() {
   useEffect(() => {
     localStorage.setItem('filaments-view-mode', viewMode);
   }, [viewMode]);
-  const [filters, setFilters] = useState<FilterState>({ material: '', vendor: '', search: '' });
+  const [filters, setFilters] = useState<FilterState>({ material: '', vendor: '', color: '', search: '' });
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
@@ -77,6 +83,106 @@ export function FilamentsTab() {
   const importCsvMutation = useImportSpoolmanFilamentsCsv();
   const deleteFilamentMutation = useDeleteFilament();
   const bulkDeleteMutation = useBulkDeleteFilaments();
+
+  // --- Column configuration ---
+  const [showColumnConfig, setShowColumnConfig] = useState(false);
+
+  const defaultColumns: FilamentTableColumn[] = useMemo(() => [
+    { id: 'color', label: 'Color', visible: true, sortable: false, render: f => <ColorSwatch color={f.colorHex || '#888888'} label={f.name || 'Unknown'} />, sortValue: () => '' },
+    { id: 'name', label: 'Name', visible: true, sortable: true, render: f => f.name || '—', sortValue: f => (f.name || '').toLowerCase() },
+    { id: 'vendor', label: 'Vendor', visible: true, sortable: true, render: f => f.vendor || '—', sortValue: f => (f.vendor || '').toLowerCase() },
+    { id: 'material', label: 'Material', visible: true, sortable: true, render: f => f.material || '—', sortValue: f => (f.material || '').toLowerCase() },
+    { id: 'diameter', label: 'Diameter', visible: true, sortable: true, render: f => formatDiameter(f.diameter), sortValue: f => f.diameter ?? -Infinity },
+    { id: 'weight', label: 'Weight', visible: true, sortable: true, render: f => formatFilamentWeight(f.weight), sortValue: f => f.weight ?? -Infinity },
+    { id: 'extruderTemp', label: 'Extruder Temp', visible: true, sortable: true, render: f => formatTemp(f.settingsExtruderTemp), sortValue: f => f.settingsExtruderTemp ?? -Infinity },
+    { id: 'bedTemp', label: 'Bed Temp', visible: true, sortable: true, render: f => formatTemp(f.settingsBedTemp), sortValue: f => f.settingsBedTemp ?? -Infinity },
+    { id: 'price', label: 'Price', visible: true, sortable: true, render: f => formatPrice(f.price), sortValue: f => f.price ?? -Infinity },
+  ], []);
+
+  const [tableColumns, setTableColumns] = useState<FilamentTableColumn[]>(() => {
+    try {
+      const raw = localStorage.getItem('filament-table-columns');
+      if (raw) {
+        const parsed = JSON.parse(raw) as { id: string; visible: boolean }[];
+        const used = new Set<string>();
+        const result: FilamentTableColumn[] = [];
+        for (const p of parsed) {
+          const def = defaultColumns.find(d => d.id === p.id);
+          if (def) {
+            result.push({ ...def, visible: p.visible });
+            used.add(def.id);
+          }
+        }
+        for (const def of defaultColumns) {
+          if (!used.has(def.id)) result.push(def);
+        }
+        if (result.length) return result;
+      }
+    } catch { /* ignore */ }
+    return defaultColumns;
+  });
+
+  // Persist column visibility/order
+  useEffect(() => {
+    try {
+      const minimal = tableColumns.map(c => ({ id: c.id, visible: c.visible }));
+      localStorage.setItem('filament-table-columns', JSON.stringify(minimal));
+    } catch { /* ignore */ }
+  }, [tableColumns]);
+
+  const moveColumn = (id: string, dir: -1 | 1) => {
+    setTableColumns(cols => {
+      const idx = cols.findIndex(c => c.id === id);
+      if (idx === -1) return cols;
+      const newIdx = idx + dir;
+      if (newIdx < 0 || newIdx >= cols.length) return cols;
+      const copy = [...cols];
+      const [item] = copy.splice(idx, 1);
+      copy.splice(newIdx, 0, item);
+      return copy;
+    });
+  };
+
+  const toggleColumnVisibility = (id: string) => {
+    setTableColumns(cols => {
+      const visibleCount = cols.filter(c => c.visible).length;
+      return cols.map(c => {
+        if (c.id !== id) return c;
+        if (c.visible && visibleCount === 1) return c;
+        return { ...c, visible: !c.visible };
+      });
+    });
+  };
+
+  // Drag & drop column reorder
+  const [dragColId, setDragColId] = useState<string | null>(null);
+  const onDragStart = (e: React.DragEvent<HTMLLIElement>, id: string) => {
+    setDragColId(id);
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', id); } catch { /* ignore */ }
+  };
+  const onDragOver = (e: React.DragEvent<HTMLLIElement>) => {
+    e.preventDefault();
+    try { if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; } } catch { /* ignore */ }
+  };
+  const onDrop = (e: React.DragEvent<HTMLLIElement>, targetId: string) => {
+    e.preventDefault();
+    const sourceId = dragColId || (() => { try { return e.dataTransfer.getData('text/plain'); } catch { return ''; } })();
+    if (!sourceId || sourceId === targetId) return;
+    setTableColumns(cols => {
+      const sourceIdx = cols.findIndex(c => c.id === sourceId);
+      const targetIdx = cols.findIndex(c => c.id === targetId);
+      if (sourceIdx === -1 || targetIdx === -1) return cols;
+      const copy = [...cols];
+      const [moved] = copy.splice(sourceIdx, 1);
+      copy.splice(targetIdx, 0, moved);
+      return copy;
+    });
+    setDragColId(null);
+  };
+
+  const hasActiveFilters = filters.material !== '' || filters.vendor !== '' || filters.color !== '' || filters.search !== '';
+  const resetFilters = () => setFilters({ material: '', vendor: '', color: '', search: '' });
 
   // Load filaments on mount
   const loadFilaments = useCallback(async () => {
@@ -124,6 +230,11 @@ export function FilamentsTab() {
     [filaments]
   );
 
+  const colorFamilyOptions = useMemo(() =>
+    [...new Set(filaments.map(f => classifyColor(f.colorHex)).filter(Boolean))].sort(),
+    [filaments]
+  );
+
   const filteredFilaments = useMemo(() => {
     let result = filaments;
     if (filters.material) {
@@ -131,6 +242,9 @@ export function FilamentsTab() {
     }
     if (filters.vendor) {
       result = result.filter(f => f.vendor?.toLowerCase() === filters.vendor.toLowerCase());
+    }
+    if (filters.color) {
+      result = result.filter(f => classifyColor(f.colorHex) === filters.color);
     }
     if (filters.search) {
       const q = filters.search.toLowerCase();
@@ -221,11 +335,6 @@ export function FilamentsTab() {
 
   const isDeleting = deleteFilamentMutation.isPending || bulkDeleteMutation.isPending;
 
-  const formatTemp = (temp?: number | null): string => temp != null ? `${temp}°C` : '—';
-  const formatWeight = (w?: number | null): string => w != null ? `${w}g` : '—';
-  const formatPrice = (p?: number | null): string => p != null ? `$${p.toFixed(2)}` : '—';
-  const formatDiameter = (d?: number | null): string => d != null ? `${d}mm` : '—';
-
   if (loading) {
     return (
       <div className="space-y-4">
@@ -300,9 +409,8 @@ export function FilamentsTab() {
                 toast.error('Failed to export filaments.');
               }
             }}
-            iconLeft={<DownloadIcon className="h-4 w-4 mr-1" />}
           >
-            Export CSV
+            <DownloadIcon className="h-4 w-4 mr-1" />
           </Button>
           <Button
             variant="secondary"
@@ -310,27 +418,24 @@ export function FilamentsTab() {
             title="Import filaments from CSV file"
             disabled={importCsvMutation.isPending}
             onClick={() => csvFileInputRef.current?.click()}
-            iconLeft={<UploadIcon className="h-4 w-4 mr-1" />}
           >
-            {importCsvMutation.isPending ? 'Importing...' : 'Import CSV'}
+            <UploadIcon className="h-4 w-4 mr-1" />
           </Button>
           <Button
             variant="secondary"
             size="sm"
             title="Browse and import from SpoolmanDB community database"
             onClick={() => setIsSpoolmanDbOpen(true)}
-            iconLeft={<DatabaseIcon className="h-4 w-4 mr-1" />}
           >
-            SpoolmanDB
+            <DatabaseIcon className="h-4 w-4 mr-1" />
           </Button>
           <Button
             variant="primary"
             size="sm"
             title="Add a new filament"
             onClick={() => setIsAddOpen(true)}
-            iconLeft={<PlusIcon className="h-4 w-4 mr-1" />}
           >
-            Add
+            <PlusIcon className="h-4 w-4 mr-1" />
           </Button>
           <div className="flex rounded-sm overflow-hidden border border-pf-border">
             <Button
@@ -352,6 +457,77 @@ export function FilamentsTab() {
               <TableIcon className="h-4 w-4" />
             </Button>
           </div>
+          <div className="relative">
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-label="Configure columns"
+              title="Configure columns"
+              aria-haspopup="dialog"
+              aria-expanded={showColumnConfig && viewMode === 'table'}
+              aria-controls="filament-column-config-panel"
+              onClick={() => setShowColumnConfig(!showColumnConfig)}
+              disabled={viewMode !== 'table'}
+            >
+              <GearIcon className="h-4 w-4" />
+            </Button>
+            {showColumnConfig && viewMode === 'table' && (
+              <div id="filament-column-config-panel" className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded-sm shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
+                <div className="flex justify-between items-center mb-1">
+                  <div className="text-xs font-medium text-pf-text-secondary">Visible Columns</div>
+                  <Button
+                    size="sm"
+                    variant="subtle"
+                    onClick={() => setShowColumnConfig(false)}
+                    aria-label="Close column configuration"
+                    iconLeft={<CloseIcon className="h-3 w-3" />}
+                  />
+                </div>
+                <ul className="space-y-1 max-h-64 overflow-auto" aria-label="Column list">
+                  {tableColumns.map((c, i) => (
+                    <li
+                      key={c.id}
+                      className={`flex items-center gap-2 group rounded-sm ${dragColId === c.id ? 'bg-blue-600/20' : 'hover:bg-pf-bg-2'}`}
+                      draggable
+                      onDragStart={(e) => onDragStart(e, c.id)}
+                      onDragOver={onDragOver}
+                      onDrop={(e) => onDrop(e, c.id)}
+                      data-col-id={c.id}
+                      data-dragging={dragColId === c.id ? 'true' : 'false'}
+                      role="listitem"
+                    >
+                      <Checkbox
+                        id={`filament-col-${c.id}`}
+                        checked={c.visible}
+                        onChange={() => toggleColumnVisibility(c.id)}
+                        aria-label={`Toggle column ${c.label}`}
+                      />
+                      <span className="text-xs flex-1 truncate">{c.label}</span>
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          onClick={() => moveColumn(c.id, -1)}
+                          disabled={i === 0}
+                          aria-label={`Move ${c.label} up`}
+                          iconLeft={<ArrowUpIcon className="h-3 w-3" />}
+                        />
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          onClick={() => moveColumn(c.id, 1)}
+                          disabled={i === tableColumns.length - 1}
+                          aria-label={`Move ${c.label} down`}
+                          iconLeft={<ArrowDownIcon className="h-3 w-3" />}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="text-[10px] text-pf-text-secondary pt-1 border-t border-pf-border">Reorder with arrows. At least one column must remain visible.</div>
+              </div>
+            )}
+          </div>
           <Button
             variant="primary"
             size="sm"
@@ -371,6 +547,18 @@ export function FilamentsTab() {
           <div className="flex items-center gap-2 mb-3">
             <FilterIcon className="h-4 w-4 text-pf-text-secondary" />
             <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
+            {hasActiveFilters && (
+              <Button
+                size="sm"
+                variant="subtle"
+                onClick={resetFilters}
+                aria-label="Reset all filters"
+                title="Reset all filters"
+                iconLeft={<CloseIcon className="h-3 w-3" />}
+              >
+                Reset
+              </Button>
+            )}
           </div>
           <div className="flex flex-wrap gap-4 items-end">
             <div className="flex flex-col gap-1">
@@ -381,7 +569,7 @@ export function FilamentsTab() {
                 value={filters.search}
                 onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
                 placeholder="Name, vendor, material..."
-                className="w-56 px-3 py-1.5 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                 aria-label="Search filaments"
               />
             </div>
@@ -412,6 +600,15 @@ export function FilamentsTab() {
                   <option key={v} value={v}>{v}</option>
                 ))}
               </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-pf-text-secondary">Color</label>
+              <ColorFamilySelect
+                value={filters.color}
+                onChange={val => setFilters(prev => ({ ...prev, color: val }))}
+                options={colorFamilyOptions}
+                placeholder="All Colors"
+              />
             </div>
             {viewMode === 'cards' && (
               <div className="flex flex-col gap-1">
@@ -509,182 +706,35 @@ export function FilamentsTab() {
       {viewMode === 'cards' && sortedFilaments.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {pagedFilaments.map(f => (
-            <div
+            <FilamentCard
               key={f.id}
-              className={`bg-pf-bg-1 border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors ${selectedIds.has(f.id) ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-pf-border'}`}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Checkbox
-                  checked={selectedIds.has(f.id)}
-                  onChange={() => toggleSelect(f.id)}
-                  aria-label={`Select ${f.name || 'filament'}`}
-                />
-                <div className="text-xs text-pf-text-secondary truncate flex-1">
-                  {f.vendor || 'Unknown Vendor'}
-                </div>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => setEditingFilament(f)}
-                  aria-label={`Edit ${f.name || 'filament'}`}
-                  title="Edit filament"
-                >
-                  <EditIcon className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => setCloningFilament(f)}
-                  aria-label={`Clone ${f.name || 'filament'}`}
-                  title="Clone filament"
-                >
-                  <CopyIcon className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => setDeleteConfirm({ type: 'single', filament: f })}
-                  aria-label={`Delete ${f.name || 'filament'}`}
-                  title="Delete filament"
-                >
-                  <DeleteIcon className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              <div className="flex items-center gap-2 mb-3">
-                <ColorSwatch color={f.colorHex || '#888888'} label={f.name || 'Unknown'} />
-                <div className="text-sm font-medium text-pf-text-primary truncate">
-                  {f.name || 'Unnamed'}
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                {f.material && (
-                  <span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-blue-600/20 text-blue-300 border border-blue-600/40 uppercase tracking-wide">
-                    {f.material}
-                  </span>
-                )}
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-pf-text-secondary mt-2">
-                  <span>Dia: {formatDiameter(f.diameter)}</span>
-                  <span>Wt: {formatWeight(f.weight)}</span>
-                </div>
-                {(f.settingsExtruderTemp != null || f.settingsBedTemp != null) && (
-                  <div className="flex gap-4 text-xs text-pf-text-secondary">
-                    {f.settingsExtruderTemp != null && <span>Extruder: {formatTemp(f.settingsExtruderTemp)}</span>}
-                    {f.settingsBedTemp != null && <span>Bed: {formatTemp(f.settingsBedTemp)}</span>}
-                  </div>
-                )}
-                {f.price != null && (
-                  <div className="text-xs font-medium text-pf-text-primary">{formatPrice(f.price)}</div>
-                )}
-              </div>
-            </div>
+              filament={f}
+              isSelected={selectedIds.has(f.id)}
+              onToggleSelect={() => toggleSelect(f.id)}
+              onEdit={() => setEditingFilament(f)}
+              onClone={() => setCloningFilament(f)}
+              onDelete={() => setDeleteConfirm({ type: 'single', filament: f })}
+            />
           ))}
         </div>
       )}
 
       {/* Table view */}
       {viewMode === 'table' && sortedFilaments.length > 0 && (
-        <div className="overflow-x-auto relative">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left bg-pf-bg-2">
-                <th className="px-3 py-2 w-10">
-                  <Checkbox
-                    checked={allSelected}
-                    onChange={toggleSelectAll}
-                    aria-label={allSelected ? 'Deselect all filaments' : 'Select all filaments'}
-                  />
-                </th>
-                {([
-                  { id: 'color' as const, label: 'Color', sortable: false },
-                  { id: 'name' as const, label: 'Name', sortable: true },
-                  { id: 'vendor' as const, label: 'Vendor', sortable: true },
-                  { id: 'material' as const, label: 'Material', sortable: true },
-                  { id: 'diameter' as const, label: 'Diameter', sortable: true },
-                  { id: 'weight' as const, label: 'Weight', sortable: true },
-                  { id: 'extruderTemp' as const, label: 'Extruder Temp', sortable: true },
-                  { id: 'bedTemp' as const, label: 'Bed Temp', sortable: true },
-                  { id: 'price' as const, label: 'Price', sortable: true },
-                ] as const).map(col => {
-                  const isSorted = sortField === col.id;
-                  const ariaSort: 'ascending' | 'descending' | undefined = isSorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined;
-                  return (
-                    <th
-                      key={col.id}
-                      className={`px-3 py-2 font-medium ${col.sortable ? 'cursor-pointer select-none' : ''}`}
-                      onClick={() => {
-                        if (!col.sortable) return;
-                        setSortField(col.id);
-                        setSortDir(prev => (isSorted ? (prev === 'asc' ? 'desc' : 'asc') : 'asc'));
-                      }}
-                      {...(ariaSort ? { 'aria-sort': ariaSort } : {})}
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        {col.label}
-                        {col.sortable && isSorted && (
-                          sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />
-                        )}
-                      </span>
-                    </th>
-                  );
-                })}
-                <th className="px-3 py-2 font-medium w-16">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pagedFilaments.map(f => (
-                <SelectableRow key={f.id} className="border-t border-pf-border" isSelected={selectedIds.has(f.id)}>
-                  <td className="px-3 py-2">
-                    <Checkbox
-                      checked={selectedIds.has(f.id)}
-                      onChange={() => toggleSelect(f.id)}
-                      aria-label={`Select ${f.name || 'filament'}`}
-                    />
-                  </td>
-                  <td className="px-3 py-2"><ColorSwatch color={f.colorHex || '#888888'} label={f.name || 'Unknown'} /></td>
-                  <td className="px-3 py-2">{f.name || '—'}</td>
-                  <td className="px-3 py-2">{f.vendor || '—'}</td>
-                  <td className="px-3 py-2">{f.material || '—'}</td>
-                  <td className="px-3 py-2">{formatDiameter(f.diameter)}</td>
-                  <td className="px-3 py-2">{formatWeight(f.weight)}</td>
-                  <td className="px-3 py-2">{formatTemp(f.settingsExtruderTemp)}</td>
-                  <td className="px-3 py-2">{formatTemp(f.settingsBedTemp)}</td>
-                  <td className="px-3 py-2">{formatPrice(f.price)}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1">
-                      <Button
-                        variant="subtle"
-                        size="sm"
-                        onClick={() => setEditingFilament(f)}
-                        aria-label={`Edit ${f.name || 'filament'}`}
-                        title="Edit filament"
-                      >
-                        <EditIcon className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="subtle"
-                        size="sm"
-                        onClick={() => setCloningFilament(f)}
-                        aria-label={`Clone ${f.name || 'filament'}`}
-                        title="Clone filament"
-                      >
-                        <CopyIcon className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="subtle"
-                        size="sm"
-                        onClick={() => setDeleteConfirm({ type: 'single', filament: f })}
-                        aria-label={`Delete ${f.name || 'filament'}`}
-                        title="Delete filament"
-                      >
-                        <DeleteIcon className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </td>
-                </SelectableRow>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <FilamentTableView
+          filaments={pagedFilaments}
+          selectedIds={selectedIds}
+          allSelected={allSelected}
+          sortField={sortField}
+          sortDir={sortDir}
+          tableColumns={tableColumns}
+          onToggleSelect={toggleSelect}
+          onToggleSelectAll={toggleSelectAll}
+          onSort={(field, dir) => { setSortField(field as SortField); setSortDir(dir); }}
+          onEdit={f => setEditingFilament(f)}
+          onClone={f => setCloningFilament(f)}
+          onDelete={f => setDeleteConfirm({ type: 'single', filament: f })}
+        />
       )}
 
       {/* Pagination controls */}

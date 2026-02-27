@@ -136,6 +136,9 @@ public static class SpoolmanJsonParser
         double? price = TryGetDoubleNullable(el, "price")
             ?? TryGetDoubleNullableFromObject(el, ["filament", "profile"], ["price", "cost", "spool_price"]);
 
+        // Comment
+        string? comment = TryGetString(el, "comment");
+
         // Dates: registered, first used, last used (tolerant to various names and formats)
         DateTime? registeredAt = TryGetDateTime(el, "registered");
         DateTime? firstUsedAt = TryGetDateTime(el, "first_used");
@@ -161,7 +164,8 @@ public static class SpoolmanJsonParser
             Location: location,
             LotNumber: lotNumber,
             Archived: archivedFlag,
-            Price: price);
+            Price: price,
+            Comment: comment);
     }
 
     /// <summary>

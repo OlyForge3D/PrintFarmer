@@ -50,6 +50,8 @@ import {
   SpoolmanMaterial,
   SpoolmanUpdateFilamentRequest,
   SpoolmanFilament,
+  SpoolmanUpdateSpoolRequest,
+  SpoolmanBulkUpdateSpoolsRequest,
   NfcDeviceDto,
   CreateNfcDeviceDto,
   UpdateNfcDeviceDto,
@@ -902,6 +904,38 @@ export function useBulkDeleteFilaments() {
 export function useExportSpoolmanFilamentsCsv() {
   return useMutation({
     mutationFn: () => apiClient.exportSpoolmanFilamentsCsv(),
+  });
+}
+
+// ---- Spool CRUD hooks ----
+
+export function useCreateSpool() {
+  return useMutation<unknown, ApiError, SpoolmanUpdateSpoolRequest>({
+    mutationFn: (request) => apiClient.createSpool(request),
+  });
+}
+
+export function useUpdateSpool() {
+  return useMutation<unknown, ApiError, { id: number; request: SpoolmanUpdateSpoolRequest }>({
+    mutationFn: ({ id, request }) => apiClient.updateSpool(id, request),
+  });
+}
+
+export function useDeleteSpool() {
+  return useMutation<void, ApiError, number>({
+    mutationFn: (id: number) => apiClient.deleteSpool(id),
+  });
+}
+
+export function useBulkUpdateSpools() {
+  return useMutation<SpoolmanBulkUpdateResult, ApiError, SpoolmanBulkUpdateSpoolsRequest>({
+    mutationFn: (request: SpoolmanBulkUpdateSpoolsRequest) => apiClient.bulkUpdateSpools(request),
+  });
+}
+
+export function useBulkDeleteSpools() {
+  return useMutation<SpoolmanBulkUpdateResult, ApiError, number[]>({
+    mutationFn: (spoolIds: number[]) => apiClient.bulkDeleteSpools(spoolIds),
   });
 }
 

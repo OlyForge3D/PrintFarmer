@@ -130,7 +130,7 @@ export function PrinterMaintenancePage() {
   return (
     <PageTemplate
       title={printer?.name ? `${printer.name} Maintenance` : 'Printer Maintenance'}
-      subtitle={printer ? `${printer.modelName || 'Unknown Model'} • ${printer.locationName || 'No Location'}` : undefined}
+      subtitle={printer ? `${printer.modelName || 'Unknown Model'} • ${printer.location?.name || 'No Location'}` : undefined}
       icon={WrenchIcon}
       actions={
         <div className="flex gap-2">

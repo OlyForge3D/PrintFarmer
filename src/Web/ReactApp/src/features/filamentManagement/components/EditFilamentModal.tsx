@@ -1,8 +1,9 @@
 import { useState, useMemo, useId } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button, Select, Input, Textarea, FormField, ColorPicker } from '@/common/components/ui';
+import { Button, Select, Input, Textarea, FormField, ColorPicker, NumberStepper } from '@/common/components/ui';
 import { useSpoolmanVendors, useUpdateFilament, useSpoolmanMaterials } from '@/common/hooks/useApi';
 import type { SpoolmanFilament, SpoolmanUpdateFilamentRequest } from '@/types/api';
+import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 
 interface EditFilamentModalProps {
@@ -59,6 +60,7 @@ function EditFilamentFormModal({ isOpen, onClose, filament, onSuccess }: EditFil
   const [spoolWeight, setSpoolWeight] = useState(filament?.spoolWeight != null ? String(filament.spoolWeight) : '');
   const [articleNumber, setArticleNumber] = useState(filament?.articleNumber ?? '');
   const [comment, setComment] = useState(filament?.comment ?? '');
+  const [addSpools, setAddSpools] = useState(0);
 
   // Use resolved vendor ID until user manually changes it
   const effectiveVendorId = vendorTouched ? vendorId : resolvedVendorId;
@@ -85,7 +87,24 @@ function EditFilamentFormModal({ isOpen, onClose, filament, onSuccess }: EditFil
 
     try {
       await updateMutation.mutateAsync({ id: filament.id, request });
-      toast.success(`Filament "${filament.name}" updated.`);
+      if (addSpools > 0) {
+        const count = Math.min(addSpools, 100);
+        let created = 0;
+        for (let i = 0; i < count; i++) {
+          try {
+            await apiClient.createSpool({
+              filamentId: filament.id,
+              initialWeight: filament.weight ?? undefined,
+              remainingWeight: filament.weight ?? undefined,
+              spoolWeight: filament.spoolWeight ?? undefined,
+            });
+            created++;
+          } catch { /* continue */ }
+        }
+        toast.success(`Filament "${filament.name}" updated with ${created} new spool${created !== 1 ? 's' : ''}.`);
+      } else {
+        toast.success(`Filament "${filament.name}" updated.`);
+      }
       onSuccess();
       onClose();
     } catch {
@@ -112,7 +131,7 @@ function EditFilamentFormModal({ isOpen, onClose, filament, onSuccess }: EditFil
             form={htmlFormId}
             disabled={updateMutation.isPending}
           >
-            {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+            {updateMutation.isPending ? 'Saving...' : addSpools > 0 ? `Save + Add ${addSpools} Spool${addSpools !== 1 ? 's' : ''}` : 'Save Changes'}
           </Button>
         </div>
       }
@@ -281,6 +300,22 @@ function EditFilamentFormModal({ isOpen, onClose, filament, onSuccess }: EditFil
               aria-label="Comment"
             />
           </FormField>
+
+          <div className="border-t border-pf-border pt-3">
+            <FormField label="Add Spools" htmlFor={`${formId}-add-spools`}>
+              <div className="flex items-center gap-2">
+                <NumberStepper
+                  id={`${formId}-add-spools`}
+                  value={addSpools}
+                  onChange={setAddSpools}
+                  min={0}
+                  max={100}
+                  aria-label="Number of new spools to create"
+                />
+                <span className="text-xs text-pf-text-secondary">new spool{addSpools !== 1 ? 's' : ''} of this filament</span>
+              </div>
+            </FormField>
+          </div>
         </form>
       )}
     </Modal>

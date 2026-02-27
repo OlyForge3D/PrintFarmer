@@ -1009,7 +1009,10 @@ public class DataSeedService : IDataSeedService
                 bool exists = await _context.MaintenancePlans
                     .AnyAsync(p => p.Name == dto.Name);
 
-                if (exists) continue;
+                if (exists)
+                {
+                    continue;
+                }
 
                 var plan = new MaintenancePlan
                 {
