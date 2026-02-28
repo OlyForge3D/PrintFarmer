@@ -62,7 +62,7 @@ function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) 
   );
 
   if (linkTo) {
-    return <Link to={linkTo}>{card}</Link>;
+    return <Link to={linkTo} aria-label={`${title}: ${value}`}>{card}</Link>;
   }
 
   return card;

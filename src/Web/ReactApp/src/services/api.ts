@@ -42,6 +42,7 @@ import {
   PrinterModelDto,
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
+  QueueHistoryPageDto,
   QueueOverviewDto,
   RegisterRequest,
   ResolveHostnameRequest,
@@ -3008,20 +3009,7 @@ export class ApiClient {
     statuses?: string[],
     dateStart?: string | null,
     dateEnd?: string | null
-  ): Promise<{ 
-    entries: unknown[]; 
-    totalCount: number; 
-    currentPage: number; 
-    pageSize: number;
-    stats: {
-      totalCompleted: number;
-      totalFailed: number;
-      totalCancelled: number;
-      successRate: number;
-      averageDurationMinutes: number;
-      totalPrintTimeMinutes: number;
-    };
-  }> {
+  ): Promise<QueueHistoryPageDto> {
     const params: Record<string, unknown> = { limit, offset, sortBy };
     
     // Add statuses as comma-separated string if provided

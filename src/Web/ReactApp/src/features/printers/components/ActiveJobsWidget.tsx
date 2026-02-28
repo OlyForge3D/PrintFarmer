@@ -5,7 +5,7 @@
  * Uses the common DashboardWidget for consistent styling.
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { DashboardWidget } from '@/common/components/DashboardWidget';
 import { PlayIcon, ClockIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
@@ -68,7 +68,7 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
                     variant="unstyled"
                     onClick={() => setPreviewImage({ src: thumbUrl, alt: jobName })}
                     className="shrink-0 w-10 h-10 rounded overflow-hidden border border-pf-border hover:border-pf-accent transition-colors cursor-pointer !p-0"
-                    aria-label={`Preview thumbnail for ${jobName}`}
+                    aria-label={jobName ? `Preview thumbnail for ${jobName}` : 'Preview thumbnail'}
                   >
                     <img
                       src={thumbUrl}
@@ -114,13 +114,15 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
       </DashboardWidget>
 
       {/* Image Preview Modal */}
-      <ImagePreviewModal
-        isOpen={previewImage !== null}
-        onClose={() => setPreviewImage(null)}
-        src={previewImage?.src ?? ''}
-        alt={previewImage?.alt}
-        title={previewImage?.alt}
-      />
+      {previewImage && (
+        <ImagePreviewModal
+          isOpen
+          onClose={() => setPreviewImage(null)}
+          src={previewImage.src}
+          alt={previewImage.alt}
+          title={previewImage.alt}
+        />
+      )}
     </>
   );
 }
