@@ -41,11 +41,17 @@ export function getPresetTargets(preset: string): TempTargets | null {
 /** Default minimum hotend temperature (°C) for extrusion when material is unknown. Matches PLA. */
 export const DEFAULT_EXTRUDE_MIN_TEMP = 210;
 
-/** Maximum extrusion distance (mm) to prevent jams from accidentally large step values. */
-export const MAX_EXTRUDE_DISTANCE_MM = 25;
+/** Selectable extrusion distances in mm. */
+export const EXTRUDE_DISTANCE_OPTIONS = [10, 25, 50, 100] as const;
 
-/** Extrusion feed rate in mm/min (5 mm/s). */
-export const EXTRUDE_FEEDRATE_MM_MIN = 300;
+/** Default extrusion distance in mm. */
+export const DEFAULT_EXTRUDE_DISTANCE_MM = 10;
+
+/** Selectable extrusion speeds in mm/s. */
+export const EXTRUDE_SPEED_OPTIONS = [1, 5, 10] as const;
+
+/** Default extrusion speed in mm/s. */
+export const DEFAULT_EXTRUDE_SPEED_MMS = 5;
 
 /**
  * Returns the minimum hotend temperature required before extruding for a given material.
