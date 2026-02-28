@@ -84,8 +84,10 @@ public static class SlicerModuleExtensions
             ConfigureProvider(options, dbConfig));
 
         // Register a factory that shares the same configuration as AddDbContext.
-        _ = services.AddDbContextFactory<SlicerDbContext>(options =>
-            ConfigureProvider(options, dbConfig));
+        // Use Scoped lifetime to match the scoped DbContextOptions registered by AddDbContext.
+        _ = services.AddDbContextFactory<SlicerDbContext>(
+            options => ConfigureProvider(options, dbConfig),
+            ServiceLifetime.Scoped);
     }
 
     /// <summary>

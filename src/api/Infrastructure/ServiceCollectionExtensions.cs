@@ -71,11 +71,14 @@ public static class ServiceCollectionExtensions
         });
 
         // Register a factory that shares the same configuration as AddDbContext.
-        _ = services.AddDbContextFactory<AppDbContext>((sp, options) =>
-        {
-            ConfigureAppDbProvider(options, dbConfig);
-            options.AddInterceptors(sp.GetRequiredService<TelemetrySaveChangesInterceptor>());
-        });
+        // Use Scoped lifetime to match the scoped DbContextOptions registered by AddDbContext.
+        _ = services.AddDbContextFactory<AppDbContext>(
+            (sp, options) =>
+            {
+                ConfigureAppDbProvider(options, dbConfig);
+                options.AddInterceptors(sp.GetRequiredService<TelemetrySaveChangesInterceptor>());
+            },
+            ServiceLifetime.Scoped);
 
         return services;
     }

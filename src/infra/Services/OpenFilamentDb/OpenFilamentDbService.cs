@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Services.OpenFilamentDb;
 /// </summary>
 public class OpenFilamentDbService : IOpenFilamentDbService
 {
-    private const string BaseUrl = "https://openfilamentcollective.github.io/open-filament-database/api/v1/";
+    private const string BaseUrl = "https://api.openfilamentdatabase.org/api/v1/";
     private const string BrandsCacheKey = "ofd_brands";
 
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(1);
