@@ -1087,6 +1087,10 @@ export interface FilamentTypeDto {
   isAbrasive: boolean;
   /** True if the filament requires an enclosure for optimal printing (e.g., ABS, ASA, Nylon). */
   needsEnclosure: boolean;
+  /** Default price per kilogram in USD for cost estimation. */
+  defaultPricePerKg?: number | null;
+  /** Default material density in g/cm³ for weight-based cost calculation. */
+  defaultDensity?: number | null;
 }
 
 export interface CreateFilamentTypeRequest {
@@ -1096,6 +1100,10 @@ export interface CreateFilamentTypeRequest {
   isAbrasive?: boolean;
   /** True if the filament requires an enclosure for optimal printing. */
   needsEnclosure?: boolean;
+  /** Default price per kilogram in USD for cost estimation. */
+  defaultPricePerKg?: number | null;
+  /** Default material density in g/cm³ for weight-based cost calculation. */
+  defaultDensity?: number | null;
 }
 
 export interface UpdateFilamentTypeRequest {
@@ -1105,6 +1113,10 @@ export interface UpdateFilamentTypeRequest {
   isAbrasive?: boolean;
   /** True if the filament requires an enclosure for optimal printing. */
   needsEnclosure?: boolean;
+  /** Default price per kilogram in USD for cost estimation. */
+  defaultPricePerKg?: number | null;
+  /** Default material density in g/cm³ for weight-based cost calculation. */
+  defaultDensity?: number | null;
 }
 
 export interface SpoolmanFilamentImportResult {

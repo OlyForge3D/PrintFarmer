@@ -75,6 +75,10 @@ public class FilamentTypeExportDto
     public bool IsAbrasive { get; set; }
 
     public bool NeedsEnclosure { get; set; }
+
+    public double? DefaultPricePerKg { get; set; }
+
+    public double? DefaultDensity { get; set; }
 }
 
 /// <summary>

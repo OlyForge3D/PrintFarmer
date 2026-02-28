@@ -27,6 +27,16 @@ public class FilamentType
     /// </summary>
     public bool NeedsEnclosure { get; set; }
 
+    /// <summary>
+    /// Default price per kilogram in USD, used for cost estimation when no spool-level price is available.
+    /// </summary>
+    public double? DefaultPricePerKg { get; set; }
+
+    /// <summary>
+    /// Default material density in g/cm³, used for weight-based cost calculation from gcode volume estimates.
+    /// </summary>
+    public double? DefaultDensity { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<PrinterModel> PrinterModels { get; } = new List<PrinterModel>();

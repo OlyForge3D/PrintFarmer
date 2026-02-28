@@ -136,6 +136,20 @@ function FilamentTypeCard({ filament, onEdit, onClone, onDelete, isDeleting }: F
           )}
         </div>
 
+        {/* Price & Density */}
+        <div className="flex flex-wrap gap-2 mt-2">
+          {filament.defaultPricePerKg != null && (
+            <Badge variant="default" size="sm">
+              ${filament.defaultPricePerKg}/kg
+            </Badge>
+          )}
+          {filament.defaultDensity != null && (
+            <Badge variant="default" size="sm">
+              {filament.defaultDensity} g/cm³
+            </Badge>
+          )}
+        </div>
+
         {/* Property badges */}
         <div className="flex flex-wrap gap-2 mt-2">
           {filament.isAbrasive && (
@@ -166,6 +180,8 @@ interface FilamentFormState {
   bedTemp: string;
   isAbrasive: boolean;
   needsEnclosure: boolean;
+  defaultPricePerKg: string;
+  defaultDensity: string;
 }
 
 const emptyForm: FilamentFormState = {
@@ -174,6 +190,8 @@ const emptyForm: FilamentFormState = {
   bedTemp: '',
   isAbrasive: false,
   needsEnclosure: false,
+  defaultPricePerKg: '',
+  defaultDensity: '',
 };
 
 /**
@@ -262,6 +280,24 @@ export function FilamentsCatalog() {
         </div>
       ),
     },
+    {
+      key: 'defaultPricePerKg',
+      header: 'Price ($/kg)',
+      sortable: true,
+      sort: (a, b) => (a.defaultPricePerKg ?? 0) - (b.defaultPricePerKg ?? 0),
+      render: (item) => item.defaultPricePerKg != null
+        ? `$${item.defaultPricePerKg}`
+        : '—',
+    },
+    {
+      key: 'defaultDensity',
+      header: 'Density (g/cm³)',
+      sortable: true,
+      sort: (a, b) => (a.defaultDensity ?? 0) - (b.defaultDensity ?? 0),
+      render: (item) => item.defaultDensity != null
+        ? `${item.defaultDensity}`
+        : '—',
+    },
   ], []);
 
   // Open add modal
@@ -279,6 +315,8 @@ export function FilamentsCatalog() {
       bedTemp: filament.defaultTemperatures?.bed?.toString() ?? '',
       isAbrasive: filament.isAbrasive,
       needsEnclosure: filament.needsEnclosure,
+      defaultPricePerKg: filament.defaultPricePerKg?.toString() ?? '',
+      defaultDensity: filament.defaultDensity?.toString() ?? '',
     });
     setFormErrors({});
     setEditingFilament(filament);
@@ -292,6 +330,8 @@ export function FilamentsCatalog() {
       bedTemp: filament.defaultTemperatures?.bed?.toString() ?? '',
       isAbrasive: filament.isAbrasive,
       needsEnclosure: filament.needsEnclosure,
+      defaultPricePerKg: filament.defaultPricePerKg?.toString() ?? '',
+      defaultDensity: filament.defaultDensity?.toString() ?? '',
     });
     setFormErrors({});
     setIsAddModalOpen(true);
@@ -332,6 +372,12 @@ export function FilamentsCatalog() {
     if (formState.bedTemp && (isNaN(Number(formState.bedTemp)) || Number(formState.bedTemp) < 0)) {
       errors.bedTemp = 'Bed temperature must be a positive number';
     }
+    if (formState.defaultPricePerKg && (isNaN(Number(formState.defaultPricePerKg)) || Number(formState.defaultPricePerKg) < 0)) {
+      errors.defaultPricePerKg = 'Price must be a non-negative number';
+    }
+    if (formState.defaultDensity && (isNaN(Number(formState.defaultDensity)) || Number(formState.defaultDensity) < 0)) {
+      errors.defaultDensity = 'Density must be a non-negative number';
+    }
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -354,6 +400,8 @@ export function FilamentsCatalog() {
       defaultTemperatures: buildTempTargets(),
       isAbrasive: formState.isAbrasive,
       needsEnclosure: formState.needsEnclosure,
+      defaultPricePerKg: formState.defaultPricePerKg !== '' ? Number(formState.defaultPricePerKg) : undefined,
+      defaultDensity: formState.defaultDensity !== '' ? Number(formState.defaultDensity) : undefined,
     };
 
     try {
@@ -373,6 +421,8 @@ export function FilamentsCatalog() {
       defaultTemperatures: buildTempTargets(),
       isAbrasive: formState.isAbrasive,
       needsEnclosure: formState.needsEnclosure,
+      defaultPricePerKg: formState.defaultPricePerKg !== '' ? Number(formState.defaultPricePerKg) : undefined,
+      defaultDensity: formState.defaultDensity !== '' ? Number(formState.defaultDensity) : undefined,
     };
 
     try {
@@ -696,6 +746,36 @@ function FilamentForm({
             value={formState.bedTemp}
             onChange={(e) => onFieldChange('bedTemp', e.target.value)}
             placeholder="e.g., 60"
+          />
+        </FormField>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <FormField
+          label="Default Price ($/kg)"
+          error={formErrors.defaultPricePerKg}
+        >
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={formState.defaultPricePerKg}
+            onChange={(e) => onFieldChange('defaultPricePerKg', e.target.value)}
+            placeholder="e.g., 16"
+          />
+        </FormField>
+
+        <FormField
+          label="Default Density (g/cm³)"
+          error={formErrors.defaultDensity}
+        >
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={formState.defaultDensity}
+            onChange={(e) => onFieldChange('defaultDensity', e.target.value)}
+            placeholder="e.g., 1.24"
           />
         </FormField>
       </div>

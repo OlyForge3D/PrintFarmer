@@ -229,7 +229,9 @@ public class DataImportService : IDataImportService
                         DefaultHotendTemp = dto.DefaultHotendTemp,
                         DefaultBedTemp = dto.DefaultBedTemp,
                         IsAbrasive = dto.IsAbrasive,
-                        NeedsEnclosure = dto.NeedsEnclosure
+                        NeedsEnclosure = dto.NeedsEnclosure,
+                        DefaultPricePerKg = dto.DefaultPricePerKg,
+                        DefaultDensity = dto.DefaultDensity
                     });
                     imported++;
                 }
@@ -240,6 +242,8 @@ public class DataImportService : IDataImportService
                     existing.DefaultBedTemp = dto.DefaultBedTemp;
                     existing.IsAbrasive = dto.IsAbrasive;
                     existing.NeedsEnclosure = dto.NeedsEnclosure;
+                    existing.DefaultPricePerKg = dto.DefaultPricePerKg;
+                    existing.DefaultDensity = dto.DefaultDensity;
                     imported++;
                 }
             }

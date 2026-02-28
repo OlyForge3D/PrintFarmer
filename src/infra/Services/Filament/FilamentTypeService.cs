@@ -105,6 +105,16 @@ namespace Farm.Infrastructure.Services.Filament
                 throw new ArgumentException("Name is required", nameof(req));
             }
 
+            if (req.DefaultPricePerKg is < 0)
+            {
+                throw new ArgumentException("Default price per kg cannot be negative", nameof(req));
+            }
+
+            if (req.DefaultDensity is < 0)
+            {
+                throw new ArgumentException("Default density cannot be negative", nameof(req));
+            }
+
             string trimmed = req.Name.Trim();
             FilamentType? existing = await _repo.GetByNameAsync(trimmed, ct);
             if (existing != null)
@@ -120,11 +130,13 @@ namespace Farm.Infrastructure.Services.Filament
                 DefaultBedTemp = req.DefaultTemperatures.Bed,
                 IsAbrasive = req.IsAbrasive,
                 NeedsEnclosure = req.NeedsEnclosure,
+                DefaultPricePerKg = req.DefaultPricePerKg ?? GetDefaultPricePerKg(trimmed),
+                DefaultDensity = req.DefaultDensity ?? GetDefaultDensity(trimmed),
                 CreatedAt = DateTime.UtcNow
             };
             await _repo.AddFilamentTypeAsync(filamentType, ct);
             await _repo.SaveChangesAsync(ct);
-            return new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp), filamentType.IsAbrasive, filamentType.NeedsEnclosure);
+            return new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp), filamentType.IsAbrasive, filamentType.NeedsEnclosure, filamentType.DefaultPricePerKg, filamentType.DefaultDensity);
         }
 
         /// <summary>
@@ -144,6 +156,16 @@ namespace Farm.Infrastructure.Services.Filament
             if (req is null)
             {
                 throw new ArgumentException("Request body is required", nameof(req));
+            }
+
+            if (req.DefaultPricePerKg is < 0)
+            {
+                throw new ArgumentException("Default price per kg cannot be negative", nameof(req));
+            }
+
+            if (req.DefaultDensity is < 0)
+            {
+                throw new ArgumentException("Default density cannot be negative", nameof(req));
             }
 
             FilamentTypeDto? dto = await _repo.GetByIdAsync(id, ct);
@@ -167,6 +189,8 @@ namespace Farm.Infrastructure.Services.Filament
             entity.DefaultBedTemp = req.DefaultTemperatures.Bed;
             entity.IsAbrasive = req.IsAbrasive;
             entity.NeedsEnclosure = req.NeedsEnclosure;
+            entity.DefaultPricePerKg = req.DefaultPricePerKg;
+            entity.DefaultDensity = req.DefaultDensity;
             await _repo.UpdateFilamentTypeAsync(entity, ct);
             await _repo.SaveChangesAsync(ct);
         }
@@ -220,6 +244,8 @@ namespace Farm.Infrastructure.Services.Filament
                         Name = name,
                         DefaultHotendTemp = tempTargets.Hotend,
                         DefaultBedTemp = tempTargets.Bed,
+                        DefaultPricePerKg = GetDefaultPricePerKg(name),
+                        DefaultDensity = GetDefaultDensity(name),
                         CreatedAt = DateTime.UtcNow
                     };
                     await _repo.AddFilamentTypeAsync(filamentType, ct);
@@ -294,6 +320,8 @@ namespace Farm.Infrastructure.Services.Filament
                     Name = materialName,
                     DefaultHotendTemp = GetDefaultHotendTemp(materialName),
                     DefaultBedTemp = GetDefaultBedTemp(materialName),
+                    DefaultPricePerKg = GetDefaultPricePerKg(materialName),
+                    DefaultDensity = GetDefaultDensity(materialName),
                     CreatedAt = DateTime.UtcNow
                 };
 
@@ -317,7 +345,7 @@ namespace Farm.Infrastructure.Services.Filament
             IReadOnlyList<FilamentTypeDto> filaments = await _repo.GetFilamentTypesAsync(ct);
 
             StringBuilder sb = new();
-            sb.AppendLine("Id,Name,HotendTemp,BedTemp,IsAbrasive,NeedsEnclosure");
+            sb.AppendLine("Id,Name,HotendTemp,BedTemp,IsAbrasive,NeedsEnclosure,DefaultPricePerKg,DefaultDensity");
 
             foreach (FilamentTypeDto f in filaments.OrderBy(f => f.Name))
             {
@@ -331,7 +359,11 @@ namespace Farm.Infrastructure.Services.Filament
                 sb.Append(',');
                 sb.Append(f.IsAbrasive ? "true" : "false");
                 sb.Append(',');
-                sb.AppendLine(f.NeedsEnclosure ? "true" : "false");
+                sb.Append(f.NeedsEnclosure ? "true" : "false");
+                sb.Append(',');
+                sb.Append(f.DefaultPricePerKg?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+                sb.Append(',');
+                sb.AppendLine(f.DefaultDensity?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
             }
 
             return Encoding.UTF8.GetBytes(sb.ToString());
@@ -399,6 +431,8 @@ namespace Farm.Infrastructure.Services.Filament
                     double? bed = ParseDoubleOrNull(GetCsvValue(values, headerMap, "BedTemp"));
                     bool isAbrasive = ParseBool(GetCsvValue(values, headerMap, "IsAbrasive"));
                     bool needsEnclosure = ParseBool(GetCsvValue(values, headerMap, "NeedsEnclosure"));
+                    double? pricePerKg = ParseDoubleOrNull(GetCsvValue(values, headerMap, "DefaultPricePerKg"));
+                    double? density = ParseDoubleOrNull(GetCsvValue(values, headerMap, "DefaultDensity"));
 
                     // Upsert: match by Id first, then by Name
                     FilamentTypeDto? match = null;
@@ -422,6 +456,8 @@ namespace Farm.Infrastructure.Services.Filament
                             entity.DefaultBedTemp = bed ?? entity.DefaultBedTemp;
                             entity.IsAbrasive = isAbrasive;
                             entity.NeedsEnclosure = needsEnclosure;
+                            entity.DefaultPricePerKg = pricePerKg ?? entity.DefaultPricePerKg;
+                            entity.DefaultDensity = density ?? entity.DefaultDensity;
                             await _repo.UpdateFilamentTypeAsync(entity, ct);
                             updated++;
                         }
@@ -437,12 +473,14 @@ namespace Farm.Infrastructure.Services.Filament
                             DefaultBedTemp = bed ?? GetDefaultBedTemp(name),
                             IsAbrasive = isAbrasive,
                             NeedsEnclosure = needsEnclosure,
+                            DefaultPricePerKg = pricePerKg ?? GetDefaultPricePerKg(name),
+                            DefaultDensity = density ?? GetDefaultDensity(name),
                             CreatedAt = DateTime.UtcNow
                         };
                         await _repo.AddFilamentTypeAsync(newFt, ct);
 
                         // Add to lookup for subsequent duplicate detection within same import
-                        FilamentTypeDto newDto = new(newFt.Id, newFt.Name, new TempTargets(newFt.DefaultHotendTemp, newFt.DefaultBedTemp), newFt.IsAbrasive, newFt.NeedsEnclosure);
+                        FilamentTypeDto newDto = new(newFt.Id, newFt.Name, new TempTargets(newFt.DefaultHotendTemp, newFt.DefaultBedTemp), newFt.IsAbrasive, newFt.NeedsEnclosure, newFt.DefaultPricePerKg, newFt.DefaultDensity);
                         byName[newFt.Name] = newDto;
                         created++;
                     }
@@ -794,14 +832,14 @@ namespace Farm.Infrastructure.Services.Filament
                 return 245;
             }
 
-            if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
-            {
-                return 260;
-            }
-
             if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
             {
                 return 235;
+            }
+
+            if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
+            {
+                return 260;
             }
 
             if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
@@ -859,14 +897,14 @@ namespace Farm.Infrastructure.Services.Filament
                 return 100;
             }
 
-            if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
-            {
-                return 110;
-            }
-
             if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
             {
                 return 80;
+            }
+
+            if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
+            {
+                return 110;
             }
 
             if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
@@ -885,6 +923,348 @@ namespace Farm.Infrastructure.Services.Filament
             }
 
             return material.Contains("CARBON", StringComparison.OrdinalIgnoreCase) ? 100 : 70;
+        }
+
+        /// <summary>
+        /// Gets default price per kilogram (USD) for a material type.
+        /// Market-averaged across mainstream vendors (Jayo, Sunlu, Eryone, Ambrosia, Polymaker).
+        /// </summary>
+        private static double? GetDefaultPricePerKg(string material)
+        {
+            // CF composites (most specific first — PA6/PA12 variants before generic PA)
+            if (material.Contains("PA6-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PA6CF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 50;
+            }
+
+            if (material.Contains("PA12-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PA12CF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 50;
+            }
+
+            if (material.Contains("PA-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PACF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 50;
+            }
+
+            if (material.Contains("PC-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PCCF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 40;
+            }
+
+            if (material.Contains("ABS-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("ABSCF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 28;
+            }
+
+            if (material.Contains("ASA-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("ASACF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 28;
+            }
+
+            if (material.Contains("PETG-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PETGCF", StringComparison.OrdinalIgnoreCase) ||
+                material.Contains("PET-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PETCF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 28;
+            }
+
+            if (material.Contains("PLA-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PLACF", StringComparison.OrdinalIgnoreCase) ||
+                (material.Contains("PLA", StringComparison.OrdinalIgnoreCase) && material.Contains("CARBON", StringComparison.OrdinalIgnoreCase)))
+            {
+                return 28;
+            }
+
+            // GF composites
+            if (material.Contains("PA6-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("PA6GF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 40;
+            }
+
+            if (material.Contains("PA-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("PAGF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 40;
+            }
+
+            if (material.Contains("PP-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("PPGF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 30;
+            }
+
+            if (material.Contains("ABS-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("ABSGF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 28;
+            }
+
+            if (material.Contains("ASA-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("ASAGF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 28;
+            }
+
+            // PLA variants
+            if (material.Contains("SILK", StringComparison.OrdinalIgnoreCase) && material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
+            {
+                return 18;
+            }
+
+            if (material.Contains("MATTE", StringComparison.OrdinalIgnoreCase) && material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
+            {
+                return 18;
+            }
+
+            if (material.Contains("WOOD", StringComparison.OrdinalIgnoreCase))
+            {
+                return 22;
+            }
+
+            if (material.Contains("PLA+", StringComparison.OrdinalIgnoreCase) || material.Contains("PLA PRO", StringComparison.OrdinalIgnoreCase))
+            {
+                return 18;
+            }
+
+            if (material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
+            {
+                return 16;
+            }
+
+            // Engineering materials (multi-char codes before short codes)
+            if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
+            {
+                return 24;
+            }
+
+            if (material.Contains("PETG", StringComparison.OrdinalIgnoreCase) || material.Contains("PET", StringComparison.OrdinalIgnoreCase))
+            {
+                return 18;
+            }
+
+            if (material.Contains("ASA", StringComparison.OrdinalIgnoreCase))
+            {
+                return 22;
+            }
+
+            if (material.Contains("ABS", StringComparison.OrdinalIgnoreCase))
+            {
+                return 16;
+            }
+
+            if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
+            {
+                return 24;
+            }
+
+            if (material.Contains("PVA", StringComparison.OrdinalIgnoreCase))
+            {
+                return 45;
+            }
+
+            if (material.Contains("HIPS", StringComparison.OrdinalIgnoreCase))
+            {
+                return 18;
+            }
+
+            // Short/ambiguous codes — check specific variants first, then word-boundary match
+            if (material.Contains("PA12", StringComparison.OrdinalIgnoreCase))
+            {
+                return 30;
+            }
+
+            if (material.Contains("PA6", StringComparison.OrdinalIgnoreCase))
+            {
+                return 30;
+            }
+
+            if (MatchesMaterialWord(material, "PC") || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
+            {
+                return 30;
+            }
+
+            if (material.Contains("NYLON", StringComparison.OrdinalIgnoreCase) || MatchesMaterialWord(material, "PA"))
+            {
+                return 30;
+            }
+
+            if (MatchesMaterialWord(material, "PP") || material.Contains("POLYPROPYLENE", StringComparison.OrdinalIgnoreCase))
+            {
+                return 26;
+            }
+
+            if (material.Contains("CARBON", StringComparison.OrdinalIgnoreCase))
+            {
+                return 28;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Gets default density (g/cm³) for a material type.
+        /// </summary>
+        private static double? GetDefaultDensity(string material)
+        {
+            // CF composites (most specific first — PA6/PA12 variants before generic PA)
+            if (material.Contains("PA6-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PA6CF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.15;
+            }
+
+            if (material.Contains("PA12-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PA12CF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.12;
+            }
+
+            if (material.Contains("PA-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PACF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.15;
+            }
+
+            if (material.Contains("PC-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PCCF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.22;
+            }
+
+            if (material.Contains("ABS-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("ABSCF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.10;
+            }
+
+            if (material.Contains("ASA-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("ASACF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.12;
+            }
+
+            if (material.Contains("PETG-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PETGCF", StringComparison.OrdinalIgnoreCase) ||
+                material.Contains("PET-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PETCF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.30;
+            }
+
+            if (material.Contains("PLA-CF", StringComparison.OrdinalIgnoreCase) || material.Contains("PLACF", StringComparison.OrdinalIgnoreCase) ||
+                (material.Contains("PLA", StringComparison.OrdinalIgnoreCase) && material.Contains("CARBON", StringComparison.OrdinalIgnoreCase)))
+            {
+                return 1.29;
+            }
+
+            // GF composites
+            if (material.Contains("PA6-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("PA6GF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.20;
+            }
+
+            if (material.Contains("PA-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("PAGF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.20;
+            }
+
+            if (material.Contains("PP-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("PPGF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.05;
+            }
+
+            if (material.Contains("ABS-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("ABSGF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.15;
+            }
+
+            if (material.Contains("ASA-GF", StringComparison.OrdinalIgnoreCase) || material.Contains("ASAGF", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.18;
+            }
+
+            // Base materials
+            if (material.Contains("WOOD", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.15;
+            }
+
+            if (material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.24;
+            }
+
+            if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.23;
+            }
+
+            if (material.Contains("PETG", StringComparison.OrdinalIgnoreCase) || material.Contains("PET", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.27;
+            }
+
+            if (material.Contains("ASA", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.07;
+            }
+
+            if (material.Contains("ABS", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.04;
+            }
+
+            if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.21;
+            }
+
+            if (material.Contains("PVA", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.23;
+            }
+
+            if (material.Contains("HIPS", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.04;
+            }
+
+            // Short/ambiguous codes — check specific variants first, then word-boundary match
+            if (material.Contains("PA12", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.02;
+            }
+
+            if (material.Contains("PA6", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.14;
+            }
+
+            if (MatchesMaterialWord(material, "PC") || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1.20;
+            }
+
+            if (material.Contains("NYLON", StringComparison.OrdinalIgnoreCase) || MatchesMaterialWord(material, "PA"))
+            {
+                return 1.14;
+            }
+
+            if (MatchesMaterialWord(material, "PP") || material.Contains("POLYPROPYLENE", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0.90;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Checks if a material name contains a short code (e.g. "PC", "PA", "PP") as a distinct word,
+        /// preventing false positives like "SPACE" matching "PA" or "COPPER" matching "PP".
+        /// </summary>
+        private static bool MatchesMaterialWord(string material, string code)
+        {
+            int idx = material.IndexOf(code, StringComparison.OrdinalIgnoreCase);
+            while (idx >= 0)
+            {
+                bool leftBoundary = idx == 0 || !char.IsLetter(material[idx - 1]);
+                bool rightBoundary = idx + code.Length >= material.Length || !char.IsLetter(material[idx + code.Length]);
+                if (leftBoundary && rightBoundary)
+                {
+                    return true;
+                }
+
+                idx = material.IndexOf(code, idx + 1, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
         }
 
         /// <summary>Escapes a CSV field value, wrapping in quotes if necessary.</summary>

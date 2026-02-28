@@ -156,7 +156,9 @@ public class DataExportService : IDataExportService
             DefaultHotendTemp = f.DefaultHotendTemp.HasValue ? (int)Math.Round(f.DefaultHotendTemp.Value) : 0,
             DefaultBedTemp = f.DefaultBedTemp.HasValue ? (int)Math.Round(f.DefaultBedTemp.Value) : 0,
             IsAbrasive = f.IsAbrasive,
-            NeedsEnclosure = f.NeedsEnclosure
+            NeedsEnclosure = f.NeedsEnclosure,
+            DefaultPricePerKg = f.DefaultPricePerKg,
+            DefaultDensity = f.DefaultDensity
         }).ToList();
     }
 

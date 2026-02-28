@@ -1,8 +1,8 @@
 # PrintFarmer Filament Type Seed Data
 # Schema: printfarmer/filament-types/v1
 #
-# This file defines supported filament types with default temperature settings
-# and material characteristics.
+# This file defines supported filament types with default temperature settings,
+# material characteristics, cost, and density data.
 #
 # Format:
 # - name: Filament type name (e.g., "PLA", "PETG", "ABS")
@@ -10,6 +10,8 @@
 #   defaultBedTemp: Default bed temperature in Celsius
 #   isAbrasive: Whether filament contains abrasive particles (requires hardened nozzle)
 #   needsEnclosure: Whether filament requires an enclosure for optimal printing
+#   defaultPricePerKg: Default price per kg in USD (market average, mainstream vendors)
+#   defaultDensity: Material density in g/cm³
 
 # Standard filaments
 - name: PLA
@@ -17,54 +19,72 @@
   defaultBedTemp: 60
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 16
+  defaultDensity: 1.24
 
 - name: PLA+
   defaultHotendTemp: 210
   defaultBedTemp: 60
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 18
+  defaultDensity: 1.24
 
 - name: PETG
   defaultHotendTemp: 240
   defaultBedTemp: 85
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 18
+  defaultDensity: 1.27
 
 - name: ABS
   defaultHotendTemp: 245
   defaultBedTemp: 100
   isAbrasive: false
   needsEnclosure: true
+  defaultPricePerKg: 16
+  defaultDensity: 1.04
 
 - name: ASA
   defaultHotendTemp: 250
   defaultBedTemp: 100
   isAbrasive: false
   needsEnclosure: true
+  defaultPricePerKg: 22
+  defaultDensity: 1.07
 
 - name: TPU
   defaultHotendTemp: 220
   defaultBedTemp: 60
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 24
+  defaultDensity: 1.21
 
 - name: TPU-95A
   defaultHotendTemp: 230
   defaultBedTemp: 60
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 24
+  defaultDensity: 1.21
 
 - name: TPU-85A
   defaultHotendTemp: 215
   defaultBedTemp: 50
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 24
+  defaultDensity: 1.21
 
 - name: FLEX
   defaultHotendTemp: 225
   defaultBedTemp: 60
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 24
+  defaultDensity: 1.21
 
 # Engineering filaments
 - name: PC
@@ -72,48 +92,64 @@
   defaultBedTemp: 110
   isAbrasive: false
   needsEnclosure: true
+  defaultPricePerKg: 30
+  defaultDensity: 1.20
 
 - name: PCTG
   defaultHotendTemp: 235
   defaultBedTemp: 80
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 24
+  defaultDensity: 1.23
 
 - name: PET
   defaultHotendTemp: 235
   defaultBedTemp: 80
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 18
+  defaultDensity: 1.27
 
 - name: PP
   defaultHotendTemp: 230
   defaultBedTemp: 85
   isAbrasive: false
   needsEnclosure: true
+  defaultPricePerKg: 26
+  defaultDensity: 0.90
 
 - name: PHAT
   defaultHotendTemp: 240
   defaultBedTemp: 90
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 22
+  defaultDensity: 1.24
 
 - name: Nylon
   defaultHotendTemp: 260
   defaultBedTemp: 70
   isAbrasive: false
   needsEnclosure: true
+  defaultPricePerKg: 30
+  defaultDensity: 1.14
 
 - name: PA6
   defaultHotendTemp: 260
   defaultBedTemp: 80
   isAbrasive: false
   needsEnclosure: true
+  defaultPricePerKg: 30
+  defaultDensity: 1.14
 
 - name: PA12
   defaultHotendTemp: 250
   defaultBedTemp: 75
   isAbrasive: false
   needsEnclosure: true
+  defaultPricePerKg: 30
+  defaultDensity: 1.02
 
 # Carbon fiber composites (abrasive - requires hardened nozzle)
 - name: PLA-CF
@@ -121,48 +157,64 @@
   defaultBedTemp: 60
   isAbrasive: true
   needsEnclosure: false
+  defaultPricePerKg: 28
+  defaultDensity: 1.29
 
 - name: PETG-CF
   defaultHotendTemp: 255
   defaultBedTemp: 85
   isAbrasive: true
   needsEnclosure: false
+  defaultPricePerKg: 28
+  defaultDensity: 1.30
 
 - name: PET-CF
   defaultHotendTemp: 255
   defaultBedTemp: 85
   isAbrasive: true
   needsEnclosure: false
+  defaultPricePerKg: 28
+  defaultDensity: 1.30
 
 - name: ABS-CF
   defaultHotendTemp: 260
   defaultBedTemp: 100
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 28
+  defaultDensity: 1.10
 
 - name: ASA-CF
   defaultHotendTemp: 260
   defaultBedTemp: 100
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 28
+  defaultDensity: 1.12
 
 - name: PA6-CF
   defaultHotendTemp: 280
   defaultBedTemp: 90
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 50
+  defaultDensity: 1.15
 
 - name: PA12-CF
   defaultHotendTemp: 270
   defaultBedTemp: 85
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 50
+  defaultDensity: 1.12
 
 - name: PC-CF
   defaultHotendTemp: 280
   defaultBedTemp: 110
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 40
+  defaultDensity: 1.22
 
 # Glass fiber composites (abrasive - requires hardened nozzle)
 - name: ABS-GF
@@ -170,24 +222,32 @@
   defaultBedTemp: 100
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 28
+  defaultDensity: 1.15
 
 - name: ASA-GF
   defaultHotendTemp: 255
   defaultBedTemp: 100
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 28
+  defaultDensity: 1.18
 
 - name: PA6-GF
   defaultHotendTemp: 275
   defaultBedTemp: 90
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 40
+  defaultDensity: 1.20
 
 - name: PP-GF
   defaultHotendTemp: 240
   defaultBedTemp: 85
   isAbrasive: true
   needsEnclosure: true
+  defaultPricePerKg: 30
+  defaultDensity: 1.05
 
 # Specialty filaments
 - name: Wood
@@ -195,21 +255,29 @@
   defaultBedTemp: 65
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 22
+  defaultDensity: 1.15
 
 - name: Glow-in-the-Dark
   defaultHotendTemp: 210
   defaultBedTemp: 60
   isAbrasive: true  # Contains phosphorescent particles
   needsEnclosure: false
+  defaultPricePerKg: 22
+  defaultDensity: 1.24
 
 - name: Silk PLA
   defaultHotendTemp: 210
   defaultBedTemp: 60
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 18
+  defaultDensity: 1.24
 
 - name: Matte PLA
   defaultHotendTemp: 205
   defaultBedTemp: 60
   isAbrasive: false
   needsEnclosure: false
+  defaultPricePerKg: 18
+  defaultDensity: 1.24

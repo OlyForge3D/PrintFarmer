@@ -276,7 +276,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<double?>("DefaultBedTemp")
                         .HasColumnType("double precision");
 
+                    b.Property<double?>("DefaultDensity")
+                        .HasColumnType("double precision");
+
                     b.Property<double?>("DefaultHotendTemp")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("DefaultPricePerKg")
                         .HasColumnType("double precision");
 
                     b.Property<bool>("IsAbrasive")

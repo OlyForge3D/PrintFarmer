@@ -89,7 +89,7 @@ export const DEFAULT_BASIC_FILAMENT_SETTINGS: BasicFilamentSettings = {
   material: 'PLA',
   color: '#3B82F6',
   density: 1.24,
-  cost: 20,
+  cost: 16,
   nozzleTemperature: 210,
   bedTemperature: 60,
 };
@@ -144,6 +144,7 @@ export const MATERIAL_PRESETS: Record<string, Partial<AdvancedFilamentSettings>>
   PLA: {
     material: 'PLA',
     density: 1.24,
+    cost: 16,
     nozzleTemperature: 210,
     bedTemperature: 60,
     firstLayerNozzleTemperature: 215,
@@ -155,6 +156,7 @@ export const MATERIAL_PRESETS: Record<string, Partial<AdvancedFilamentSettings>>
   PETG: {
     material: 'PETG',
     density: 1.27,
+    cost: 18,
     nozzleTemperature: 240,
     bedTemperature: 80,
     firstLayerNozzleTemperature: 245,
@@ -166,6 +168,7 @@ export const MATERIAL_PRESETS: Record<string, Partial<AdvancedFilamentSettings>>
   ABS: {
     material: 'ABS',
     density: 1.04,
+    cost: 16,
     nozzleTemperature: 250,
     bedTemperature: 100,
     firstLayerNozzleTemperature: 255,
@@ -177,6 +180,7 @@ export const MATERIAL_PRESETS: Record<string, Partial<AdvancedFilamentSettings>>
   ASA: {
     material: 'ASA',
     density: 1.07,
+    cost: 22,
     nozzleTemperature: 255,
     bedTemperature: 100,
     firstLayerNozzleTemperature: 260,
@@ -188,6 +192,7 @@ export const MATERIAL_PRESETS: Record<string, Partial<AdvancedFilamentSettings>>
   TPU: {
     material: 'TPU',
     density: 1.21,
+    cost: 24,
     nozzleTemperature: 225,
     bedTemperature: 50,
     firstLayerNozzleTemperature: 230,
@@ -200,6 +205,7 @@ export const MATERIAL_PRESETS: Record<string, Partial<AdvancedFilamentSettings>>
   'PA-CF': {
     material: 'PA-CF',
     density: 1.15,
+    cost: 50,
     nozzleTemperature: 280,
     bedTemperature: 90,
     firstLayerNozzleTemperature: 285,

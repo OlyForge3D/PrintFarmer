@@ -17,7 +17,7 @@ public class FilamentTypeRepository(AppDbContext db) : IFilamentTypeRepository
     public async Task<IReadOnlyList<FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct = default)
     {
         return await _db.FilamentTypes.AsNoTracking()
-            .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure))
+            .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure, f.DefaultPricePerKg, f.DefaultDensity))
             .ToListAsync(ct);
     }
 
@@ -39,7 +39,7 @@ public class FilamentTypeRepository(AppDbContext db) : IFilamentTypeRepository
         List<FilamentTypeDto> items = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure))
+            .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure, f.DefaultPricePerKg, f.DefaultDensity))
             .ToListAsync(ct);
 
         return new PagedResult<FilamentTypeDto>(items, totalCount, page, pageSize, totalPages);
@@ -61,7 +61,7 @@ public class FilamentTypeRepository(AppDbContext db) : IFilamentTypeRepository
     public async Task<FilamentTypeDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         FilamentType? f = await _db.FilamentTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        return f is null ? null : new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure);
+        return f is null ? null : new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure, f.DefaultPricePerKg, f.DefaultDensity);
     }
 
     public Task UpdateFilamentTypeAsync(FilamentType ft, CancellationToken ct = default)

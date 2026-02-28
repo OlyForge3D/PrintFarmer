@@ -100,7 +100,9 @@ public class DataSeedService : IDataSeedService
                         DefaultHotendTemp = dto.DefaultHotendTemp,
                         DefaultBedTemp = dto.DefaultBedTemp,
                         IsAbrasive = dto.IsAbrasive,
-                        NeedsEnclosure = dto.NeedsEnclosure
+                        NeedsEnclosure = dto.NeedsEnclosure,
+                        DefaultPricePerKg = dto.DefaultPricePerKg,
+                        DefaultDensity = dto.DefaultDensity
                     });
                 }
                 else
@@ -108,6 +110,8 @@ public class DataSeedService : IDataSeedService
                     // Update existing filament types with new properties if they weren't set
                     existing.IsAbrasive = dto.IsAbrasive;
                     existing.NeedsEnclosure = dto.NeedsEnclosure;
+                    existing.DefaultPricePerKg ??= dto.DefaultPricePerKg;
+                    existing.DefaultDensity ??= dto.DefaultDensity;
                 }
             }
 
