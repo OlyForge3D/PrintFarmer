@@ -119,3 +119,4 @@ src/api/data-protection-keys/
 deploy/nginx/certs/
 src/api/farm.db-journal
 .playwright-mcp/*
+.playwright-cli/*
