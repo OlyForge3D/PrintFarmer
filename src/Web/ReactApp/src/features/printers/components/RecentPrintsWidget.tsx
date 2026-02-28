@@ -5,12 +5,10 @@
  * Uses the queue analytics history endpoint for cross-printer results.
  */
 
-import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardWidget } from '@/common/components/DashboardWidget';
 import { TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
-import type { QueueHistoryEntryDto } from '@/types/api';
 
 export interface RecentPrintsWidgetProps {
   /** Maximum prints to display */
@@ -30,7 +28,7 @@ export function RecentPrintsWidget({ maxPrints = 5, className = '' }: RecentPrin
     staleTime: 30000,
   });
 
-  const entries: QueueHistoryEntryDto[] = (historyData?.entries ?? []) as QueueHistoryEntryDto[];
+  const entries = historyData?.entries ?? [];
   const hasPrints = entries.length > 0;
   const printCount = entries.length;
 

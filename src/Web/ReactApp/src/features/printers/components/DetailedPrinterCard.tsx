@@ -51,6 +51,11 @@ import {
   getPresetTargets,
   hotendPresetOptions,
   materialPresets,
+  getExtrudeMinTemp,
+  EXTRUDE_DISTANCE_OPTIONS,
+  DEFAULT_EXTRUDE_DISTANCE_MM,
+  EXTRUDE_SPEED_OPTIONS,
+  DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 
@@ -96,6 +101,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [moveY, setMoveY] = useState<number | string>('');
   const [moveZ, setMoveZ] = useState<number | string>('');
   const [step, setStep] = useState(1);
+  const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
+  const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
 
   const expandedProgressRef = useRef<HTMLDivElement>(null);
 
@@ -120,6 +127,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
 
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
+
+  const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
+  const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
 
   const homedAxesRaw = printer.homedAxes;
   const isHomedStateKnown = typeof homedAxesRaw === 'string';
@@ -374,6 +384,25 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
     }
   };
 
+  const handleExtrude = async (direction: 'extrude' | 'retract') => {
+    if (movementActionPending) return;
+
+    setMovementActionPending(true);
+    try {
+      const distance = direction === 'extrude' ? extrudeStep : -extrudeStep;
+      const feedrate = extrudeSpeed * 60; // mm/s to mm/min
+      const gcode = `M83\nG1 E${distance} F${feedrate}\nM82`;
+      const result = await apiClient.sendGcode(printer.id, gcode);
+      if (!result.success) {
+        console.error(`Failed to ${direction}:`, result.error);
+      }
+    } catch (error) {
+      console.error(`Error ${direction}ing:`, error);
+    } finally {
+      setMovementActionPending(false);
+    }
+  };
+
   const handleViewHistory = () => {
     setShowHistory(true);
   };
@@ -395,7 +424,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             )}
           </div>
 
-          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-white/[0.04] border border-white/10 text-pf-text-primary">
+          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-white/4 border border-white/10 text-pf-text-primary">
             <span className={`h-2 w-2 rounded-full ${statusDotClasses}`} aria-hidden />
             <span className="text-pf-text-secondary">
               {isOnline ? toCamelCase(state) : 'Offline'}
@@ -543,7 +572,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               onClick={() => handleApplyPreset('cooldown')}
               title="Cooldown"
               aria-label="Cooldown"
-              className="shrink-0 !px-2"
+              className="shrink-0 px-2!"
               iconCenter={<SnowflakeIcon className={`h-4 w-4 ${((printer.hotendTarget ?? 0) > 0 || (printer.bedTarget ?? 0) > 0) ? 'text-pf-accent' : 'text-pf-text-secondary'}`} />}
             >
             </Button>
@@ -557,7 +586,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                     handleApplyPreset(value);
                   }
                 }}
-                className="h-8 text-[10px] uppercase tracking-wide font-semibold !pr-6 !border-transparent !bg-transparent enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
+                className="h-8 text-[10px] uppercase tracking-wide font-semibold pr-6! border-transparent! bg-transparent! enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
               >
                 <option value="">PRESETS</option>
                 {materialPresets.map((preset) => (
@@ -711,6 +740,53 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                   Z-
                 </ControlPadButton>
               </div>
+
+              {/* Extrude Pad */}
+              <div className="flex flex-col gap-1 w-fit">
+                <ControlPadButton
+                  disabled={movementActionPending || !canExtrudeNow}
+                  onClick={() => handleExtrude('extrude')}
+                  title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                  aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
+                  padSize="small"
+                >
+                  E+
+                </ControlPadButton>
+                <div className="h-8 w-8" />
+                <ControlPadButton
+                  disabled={movementActionPending || !canExtrudeNow}
+                  onClick={() => handleExtrude('retract')}
+                  title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                  aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
+                  padSize="small"
+                >
+                  E-
+                </ControlPadButton>
+                <div className="flex flex-col gap-0.5 mt-1">
+                  <select
+                    value={extrudeStep}
+                    onChange={(e) => setExtrudeStep(Number(e.target.value))}
+                    disabled={!canExtrudeNow}
+                    className="h-6 text-[10px] bg-pf-input border border-white/10 text-pf-text-primary rounded px-1 w-full"
+                    aria-label="Extrude distance"
+                  >
+                    {EXTRUDE_DISTANCE_OPTIONS.map((d) => (
+                      <option key={d} value={d}>{d}mm</option>
+                    ))}
+                  </select>
+                  <select
+                    value={extrudeSpeed}
+                    onChange={(e) => setExtrudeSpeed(Number(e.target.value))}
+                    disabled={!canExtrudeNow}
+                    className="h-6 text-[10px] bg-pf-input border border-white/10 text-pf-text-primary rounded px-1 w-full"
+                    aria-label="Extrude speed"
+                  >
+                    {EXTRUDE_SPEED_OPTIONS.map((s) => (
+                      <option key={s} value={s}>{s}mm/s</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
             {/* Move distance slider */}
             <MoveDistanceSlider value={step} onChange={handleStepChange} disabled={!canSetStepNow} />
@@ -796,7 +872,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             disabled={movementActionPending || !canManualMoveNow}
             value={moveX}
             onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <MovementInput
             axis="Y"
@@ -805,7 +881,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             disabled={movementActionPending || !canManualMoveNow}
             value={moveY}
             onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <MovementInput
             axis="Z"
@@ -814,7 +890,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             disabled={movementActionPending || !canManualMoveNow}
             value={moveZ}
             onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <div className="pt-2">
             <ControlPadButton
@@ -845,7 +921,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               size="sm"
               disabled={spoolActionPending}
               onClick={() => setShowSpoolPicker(true)}
-              className="!p-0.5 !h-auto"
+              className="p-0.5! h-auto!"
               title="Change spool"
               aria-label="Change spool"
               iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
@@ -872,7 +948,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                     setSpoolActionPending(false);
                   }
                 }}
-                className="!p-0.5 !h-auto"
+                className="p-0.5! h-auto!"
                 title="Eject spool"
                 aria-label="Eject spool"
                 iconCenter={<EjectIcon className="h-3.5 w-3.5" />}

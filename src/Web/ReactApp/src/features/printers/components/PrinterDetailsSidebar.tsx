@@ -29,6 +29,11 @@ import {
   getPresetTargets,
   hotendPresetOptions,
   materialPresets,
+  getExtrudeMinTemp,
+  EXTRUDE_DISTANCE_OPTIONS,
+  DEFAULT_EXTRUDE_DISTANCE_MM,
+  EXTRUDE_SPEED_OPTIONS,
+  DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { renderUnknown } from '@/common/utils/renderUnknown';
@@ -185,6 +190,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
   const [step, setStep] = useState(10);
+  const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
+  const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
 
   // Track last known values for display fallback - use state not refs for render access
   const [lastKnownValues, setLastKnownValues] = useState({
@@ -280,6 +287,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
+
+  const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
+  const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
 
   // Use state values to track last known values for display (fallback when data is undefined)
   const lastKnownHotendTemp = lastKnownValues.hotendTemp;
@@ -439,6 +449,25 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
+  const handleExtrude = async (direction: 'extrude' | 'retract') => {
+    if (movementActionPending) return;
+
+    setMovementActionPending(true);
+    try {
+      const distance = direction === 'extrude' ? extrudeStep : -extrudeStep;
+      const feedrate = extrudeSpeed * 60; // mm/s to mm/min
+      const gcode = `M83\nG1 E${distance} F${feedrate}\nM82`;
+      const result = await apiClient.sendGcode(printer.id, gcode);
+      if (!result.success) {
+        console.error(`Failed to ${direction}:`, result.error);
+      }
+    } catch (error) {
+      console.error(`Error ${direction}ing:`, error);
+    } finally {
+      setMovementActionPending(false);
+    }
+  };
+
   const handleHotendTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || hotendTemp === '' || temperatureActionPending) return;
 
@@ -568,7 +597,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           variant="subtle"
           size="sm"
           onClick={handleClose}
-          className="!p-1 !h-auto shrink-0"
+          className="p-1! h-auto! shrink-0"
           title="Close sidebar"
           iconCenter={<CloseIcon className="h-6 w-6" />}
         ></Button>
@@ -588,7 +617,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               variant="ghost"
               size="sm"
               onClick={() => void printerStatisticsQuery.refetch()}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Refresh statistics"
               aria-label="Refresh statistics"
               iconCenter={<RefreshIcon className="h-4 w-4" />}
@@ -638,7 +667,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               variant="ghost"
               size="sm"
               onClick={() => void printerVersionQuery.refetch()}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Refresh version info"
               aria-label="Refresh version info"
               iconCenter={<RefreshIcon className="h-4 w-4" />}
@@ -668,7 +697,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               {printerVersionQuery.data.message ? (
                 <div className="col-span-2">
                   <dt className="text-xs text-pf-text-secondary">Message</dt>
-                  <dd className="text-pf-text-primary break-words">{printerVersionQuery.data.message}</dd>
+                  <dd className="text-pf-text-primary wrap-break-word">{printerVersionQuery.data.message}</dd>
                 </div>
               ) : null}
             </dl>
@@ -850,6 +879,53 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               </ControlPadButton>
             </div>
 
+            {/* Extrude Pad */}
+            <div className="flex flex-col gap-1 w-fit">
+              <ControlPadButton
+                disabled={movementActionPending || !canExtrudeNow}
+                onClick={() => handleExtrude('extrude')}
+                title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
+                padSize="small"
+              >
+                E+
+              </ControlPadButton>
+              <div className="h-8 w-8" />
+              <ControlPadButton
+                disabled={movementActionPending || !canExtrudeNow}
+                onClick={() => handleExtrude('retract')}
+                title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
+                padSize="small"
+              >
+                E-
+              </ControlPadButton>
+              <div className="flex flex-col gap-0.5 mt-1">
+                <select
+                  value={extrudeStep}
+                  onChange={(e) => setExtrudeStep(Number(e.target.value))}
+                  disabled={!canExtrudeNow}
+                  className="h-6 text-[10px] bg-pf-input border border-white/10 text-pf-text-primary rounded px-1 w-full"
+                  aria-label="Extrude distance"
+                >
+                  {EXTRUDE_DISTANCE_OPTIONS.map((d) => (
+                    <option key={d} value={d}>{d}mm</option>
+                  ))}
+                </select>
+                <select
+                  value={extrudeSpeed}
+                  onChange={(e) => setExtrudeSpeed(Number(e.target.value))}
+                  disabled={!canExtrudeNow}
+                  className="h-6 text-[10px] bg-pf-input border border-white/10 text-pf-text-primary rounded px-1 w-full"
+                  aria-label="Extrude speed"
+                >
+                  {EXTRUDE_SPEED_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{s}mm/s</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             </div>
             </div>
 
@@ -900,7 +976,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
-                className="!w-16 min-w-0"
+                className="w-16! min-w-0"
               />
               <MovementInput
                 axis="Y"
@@ -910,7 +986,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
-                className="!w-16 min-w-0"
+                className="w-16! min-w-0"
               />
               <MovementInput
                 axis="Z"
@@ -920,7 +996,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
-                className="!w-16 min-w-0"
+                className="w-16! min-w-0"
               />
               <ControlPadButton
                 disabled={movementActionPending || !canManualMoveNow || (moveX === '' && moveY === '' && moveZ === '')}
@@ -931,7 +1007,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 }}
                 title="Move to entered coordinates"
                 padSize="small"
-                className="!bg-green-600 hover:!bg-green-700 !text-white"
+                className="bg-green-600! hover:bg-green-700! text-white!"
               >
                 <span className="text-[10px] font-bold">GO</span>
               </ControlPadButton>
@@ -953,7 +1029,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               disabled={temperatureActionPending || !canCooldownNow}
               onClick={() => handleApplyPreset('cooldown')}
               title="Cooldown"
-              className="shrink-0 !px-2"
+              className="shrink-0 px-2!"
               iconCenter={<SnowflakeIcon className={`h-4 w-4 ${((displayPrinter?.hotendTarget ?? 0) > 0 || (displayPrinter?.bedTarget ?? 0) > 0) ? 'text-pf-accent' : 'text-pf-text-secondary'}`} />}
             ></Button>
             <div className="relative w-24">
@@ -966,7 +1042,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   }
                 }}
                 disabled={temperatureActionPending || !canSetTemperaturesNow}
-                className="h-8 text-[10px] uppercase tracking-wide font-semibold !pr-6 !border-transparent !bg-transparent enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
+                className="h-8 text-[10px] uppercase tracking-wide font-semibold pr-6! border-transparent! bg-transparent! enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
               >
                 <option value="">PRESETS</option>
                 {materialPresets.map((preset) => (
@@ -1057,7 +1133,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                       setSpoolActionPending(false);
                     }
                   }}
-                  className="!p-1 !h-auto"
+                  className="p-1! h-auto!"
                   title="Eject spool"
                   aria-label="Eject spool"
                   iconCenter={<EjectIcon className="h-4 w-4" />}
@@ -1069,7 +1145,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 size="sm"
                 disabled={spoolActionPending}
                 onClick={() => setShowSpoolPicker(true)}
-                className="!p-1 !h-auto"
+                className="p-1! h-auto!"
                 title="Change spool"
                 aria-label="Change spool"
                 iconCenter={<FilamentChangeIcon className="h-4 w-4" />}

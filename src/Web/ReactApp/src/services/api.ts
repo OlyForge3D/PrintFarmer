@@ -42,6 +42,7 @@ import {
   PrinterModelDto,
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
+  QueueHistoryPageDto,
   QueueOverviewDto,
   RegisterRequest,
   ResolveHostnameRequest,
@@ -712,6 +713,19 @@ export class ApiClient {
   async changeFilament(printerId: string): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/filament-change`
+    );
+    return response.data;
+  }
+
+  /**
+   * Sends an arbitrary G-code command to the printer.
+   * @param printerId The printer's GUID
+   * @param command The G-code command string
+   */
+  async sendGcode(printerId: string, command: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/gcode`,
+      { command }
     );
     return response.data;
   }
@@ -3008,20 +3022,7 @@ export class ApiClient {
     statuses?: string[],
     dateStart?: string | null,
     dateEnd?: string | null
-  ): Promise<{ 
-    entries: unknown[]; 
-    totalCount: number; 
-    currentPage: number; 
-    pageSize: number;
-    stats: {
-      totalCompleted: number;
-      totalFailed: number;
-      totalCancelled: number;
-      successRate: number;
-      averageDurationMinutes: number;
-      totalPrintTimeMinutes: number;
-    };
-  }> {
+  ): Promise<QueueHistoryPageDto> {
     const params: Record<string, unknown> = { limit, offset, sortBy };
     
     // Add statuses as comma-separated string if provided
