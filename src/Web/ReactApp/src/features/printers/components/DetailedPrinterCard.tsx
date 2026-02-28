@@ -51,6 +51,9 @@ import {
   getPresetTargets,
   hotendPresetOptions,
   materialPresets,
+  getExtrudeMinTemp,
+  MAX_EXTRUDE_DISTANCE_MM,
+  EXTRUDE_FEEDRATE_MM_MIN,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 
@@ -121,14 +124,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
 
-  const extrudeMinTemp = (() => {
-    const material = printer.spoolInfo?.material;
-    if (material) {
-      const preset = materialPresets.find(p => p.value.toLowerCase() === material.toLowerCase());
-      if (preset && preset.hotend > 0) return preset.hotend;
-    }
-    return 210;
-  })();
+  const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
   const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
 
   const homedAxesRaw = printer.homedAxes;
@@ -389,8 +385,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
     setMovementActionPending(true);
     try {
-      const distance = direction === 'extrude' ? step : -step;
-      const gcode = `M83\nG1 E${distance} F300`;
+      const clampedStep = Math.min(step, MAX_EXTRUDE_DISTANCE_MM);
+      const distance = direction === 'extrude' ? clampedStep : -clampedStep;
+      const gcode = `M83\nG1 E${distance} F${EXTRUDE_FEEDRATE_MM_MIN}\nM82`;
       const result = await apiClient.sendGcode(printer.id, gcode);
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
@@ -746,6 +743,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                   disabled={movementActionPending || !canExtrudeNow}
                   onClick={() => handleExtrude('extrude')}
                   title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                  aria-label={`Extrude filament ${Math.min(step, MAX_EXTRUDE_DISTANCE_MM)}mm`}
                   padSize="small"
                 >
                   E+
@@ -755,6 +753,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                   disabled={movementActionPending || !canExtrudeNow}
                   onClick={() => handleExtrude('retract')}
                   title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                  aria-label={`Retract filament ${Math.min(step, MAX_EXTRUDE_DISTANCE_MM)}mm`}
                   padSize="small"
                 >
                   E-

@@ -29,6 +29,9 @@ import {
   getPresetTargets,
   hotendPresetOptions,
   materialPresets,
+  getExtrudeMinTemp,
+  MAX_EXTRUDE_DISTANCE_MM,
+  EXTRUDE_FEEDRATE_MM_MIN,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { renderUnknown } from '@/common/utils/renderUnknown';
@@ -281,14 +284,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
 
-  const extrudeMinTemp = (() => {
-    const material = printer.spoolInfo?.material;
-    if (material) {
-      const preset = materialPresets.find(p => p.value.toLowerCase() === material.toLowerCase());
-      if (preset && preset.hotend > 0) return preset.hotend;
-    }
-    return 210;
-  })();
+  const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
   const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
 
   // Use state values to track last known values for display (fallback when data is undefined)
@@ -454,8 +450,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
     setMovementActionPending(true);
     try {
-      const distance = direction === 'extrude' ? step : -step;
-      const gcode = `M83\nG1 E${distance} F300`;
+      const clampedStep = Math.min(step, MAX_EXTRUDE_DISTANCE_MM);
+      const distance = direction === 'extrude' ? clampedStep : -clampedStep;
+      const gcode = `M83\nG1 E${distance} F${EXTRUDE_FEEDRATE_MM_MIN}\nM82`;
       const result = await apiClient.sendGcode(printer.id, gcode);
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
@@ -879,11 +876,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </div>
 
             {/* Extrude Pad */}
-            <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
+            <div className="flex flex-col gap-1 w-fit">
               <ControlPadButton
                 disabled={movementActionPending || !canExtrudeNow}
                 onClick={() => handleExtrude('extrude')}
                 title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                aria-label={`Extrude filament ${Math.min(step, MAX_EXTRUDE_DISTANCE_MM)}mm`}
                 padSize="small"
               >
                 E+
@@ -893,6 +891,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 disabled={movementActionPending || !canExtrudeNow}
                 onClick={() => handleExtrude('retract')}
                 title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                aria-label={`Retract filament ${Math.min(step, MAX_EXTRUDE_DISTANCE_MM)}mm`}
                 padSize="small"
               >
                 E-
