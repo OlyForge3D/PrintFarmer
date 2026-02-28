@@ -7,6 +7,8 @@ export interface CardProps {
   children: React.ReactNode;
   /** Additional className */
   className?: string;
+  /** Optional title rendered as a header */
+  title?: string;
   /** Whether to add hover effect */
   hoverable?: boolean;
   /** Click handler (makes card interactive) */
@@ -17,7 +19,7 @@ export const Card: React.FC<CardProps> & {
   Header: typeof CardHeader;
   Body: typeof CardBody;
   Footer: typeof CardFooter;
-} = ({ children, className, hoverable = false, onClick }) => {
+} = ({ children, className, title, hoverable = false, onClick }) => {
   const isInteractive = !!onClick || hoverable;
 
   return (
@@ -43,6 +45,11 @@ export const Card: React.FC<CardProps> & {
           : undefined
       }
     >
+      {title && (
+        <div className="px-4 pt-3 pb-1">
+          <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide">{title}</h3>
+        </div>
+      )}
       {children}
     </div>
   );
