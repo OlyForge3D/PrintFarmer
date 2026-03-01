@@ -66,6 +66,12 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         builder.Property(pj => pj.FilamentVendor).HasMaxLength(128);
         builder.Property(pj => pj.FilamentColor).HasMaxLength(32);
 
+        // Multi-copy support
+        builder.Property(pj => pj.Copies).HasDefaultValue(1);
+        builder.Property(pj => pj.CompletedCopies).HasDefaultValue(0);
+        builder.Ignore(pj => pj.RemainingCopies);
+        builder.Ignore(pj => pj.IsMultiCopy);
+
         // History seeding fields
         builder.Property(pj => pj.ExternalJobId).HasMaxLength(255);
         builder.Property(pj => pj.WasSeededFromHistory).HasDefaultValue(false);

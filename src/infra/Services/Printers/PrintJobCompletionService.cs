@@ -127,14 +127,26 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         foreach (PrintJob job in activeJobs)
         {
-            // Update job status
-            job.Status = PrintJobStatus.Completed;
-            job.ActualEndTime = completedAtUtc;
+            // Multi-copy support: increment CompletedCopies instead of immediately completing
+            job.CompletedCopies++;
 
-            // Calculate actual duration if start time is set
-            if (job.ActualStartTime.HasValue)
+            if (job.CompletedCopies >= job.Copies)
             {
-                job.ActualPrintTime = job.ActualEndTime - job.ActualStartTime;
+                // All copies done — mark job as completed
+                job.Status = PrintJobStatus.Completed;
+                job.ActualEndTime = completedAtUtc;
+
+                if (job.ActualStartTime.HasValue)
+                {
+                    job.ActualPrintTime = job.ActualEndTime - job.ActualStartTime;
+                }
+            }
+            else
+            {
+                // More copies remaining — return to queued for next copy
+                job.Status = PrintJobStatus.Queued;
+                job.ActualStartTime = null;
+                job.UpdatedAt = completedAtUtc;
             }
         }
 

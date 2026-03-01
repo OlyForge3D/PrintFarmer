@@ -104,6 +104,39 @@ public class PrintJob
     /// </summary>
     public bool WasSeededFromHistory { get; set; }
 
+    // Multi-copy support: track how many copies of this model to print
+
+    /// <summary>
+    /// Total number of copies to print for this job. Defaults to 1 for single-copy jobs.
+    /// When queued from a project, this equals the file's remaining prints.
+    /// Can be overridden from the job queue UI.
+    /// </summary>
+    public int Copies { get; set; } = 1;
+
+    /// <summary>
+    /// Number of copies that have been successfully printed so far.
+    /// Incremented when a print completes; not decremented on cancel/abort.
+    /// </summary>
+    public int CompletedCopies { get; set; }
+
+    /// <summary>
+    /// Number of copies still remaining to be printed.
+    /// </summary>
+    [NotMapped]
+    public int RemainingCopies => Math.Max(0, Copies - CompletedCopies);
+
+    /// <summary>
+    /// Whether this job requires printing multiple copies.
+    /// </summary>
+    [NotMapped]
+    public bool IsMultiCopy => Copies > 1;
+
+    /// <summary>
+    /// Link back to the specific project file this job was created from.
+    /// Used to auto-increment the project file's PrintedCount on copy completion.
+    /// </summary>
+    public Guid? ProjectFileId { get; set; }
+
     // Project tracking: link job to its source project and filament assignment
 
     /// <summary>

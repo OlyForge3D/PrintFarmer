@@ -538,6 +538,8 @@ public class PrintProjectsControllerTests
             CompletedFiles: 2,
             TotalPrints: 10,
             CompletedPrints: 4,
+            EstimatedTotalCost: null,
+            CompletedCost: null,
             CreatedAt: DateTime.UtcNow,
             CompletedAt: null);
     }

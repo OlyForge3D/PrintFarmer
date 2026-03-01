@@ -154,6 +154,14 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Abort the current print attempt but keep the job in the queue.
+    /// </summary>
+    Task AbortPrintAsync(
+        string jobId,
+        string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Cancel multiple jobs at once
     /// </summary>
     /// <param name="jobIds">List of job identifiers to cancel.</param>

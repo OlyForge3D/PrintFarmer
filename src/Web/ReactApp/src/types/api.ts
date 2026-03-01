@@ -1536,6 +1536,10 @@ export interface JobQueuePrintJob {
   startedAt?: Date;
   completedAt?: Date;
   failureReason?: string;
+  copies: number;
+  completedCopies: number;
+  remainingCopies: number;
+  projectFileId?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1945,6 +1949,14 @@ export interface QueuedPrintJobDto {
   filamentVendor?: string;
   /** Filament color hex from Spoolman */
   filamentColor?: string;
+  /** Number of copies to print */
+  copies: number;
+  /** Number of copies completed so far */
+  completedCopies: number;
+  /** Remaining copies (copies - completedCopies) */
+  remainingCopies: number;
+  /** Link to project file this job was created from */
+  projectFileId?: string;
 }
 
 export interface QueueGcodeFileMetaDto {
@@ -2241,6 +2253,8 @@ export interface PrintProjectListDto {
   completedFiles: number;
   totalPrints: number;
   completedPrints: number;
+  estimatedTotalCost?: number | null;
+  completedCost?: number | null;
   createdAt: string;
   completedAt?: string;
   progressPercent: number;
@@ -2264,6 +2278,8 @@ export interface PrintProjectDetailDto {
   totalPrints: number;
   completedPrints: number;
   progressPercent: number;
+  estimatedTotalCost?: number | null;
+  completedCost?: number | null;
 }
 
 /**
@@ -2293,6 +2309,8 @@ export interface PrintProjectFileDto {
   requiredNozzleDiameter?: number | null;
   extractedPrinterModelName?: string | null;
   remainingPrintTimeMinutes?: number | null;
+  estimatedCostPerCopy?: number | null;
+  estimatedFileCost?: number | null;
 }
 
 /**

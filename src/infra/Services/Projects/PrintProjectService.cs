@@ -53,6 +53,8 @@ public class PrintProjectService(
             p.Files.Count(f => f.PrintedCount >= f.PrintCount),
             p.Files.Sum(f => f.PrintCount),
             p.Files.Sum(f => f.PrintedCount),
+            EstimatedTotalCost: null,
+            CompletedCost: null,
             p.CreatedAt,
             p.CompletedAt)).ToList();
     }
@@ -464,51 +466,54 @@ public class PrintProjectService(
         {
             var remainingPrints = file.PrintCount - file.PrintedCount;
 
-            // Queue one job per remaining print for this file
-            for (var i = 0; i < remainingPrints; i++)
+            // Queue one job per file with Copies = remaining prints
+            var materialType = file.MaterialRequirement ?? file.GcodeFile?.RequiredMaterial;
+            string? colorHex = null;
+            string? filVendor = null;
+            string? filName = null;
+            if (file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var filament))
             {
-                var materialType = file.MaterialRequirement ?? file.GcodeFile?.RequiredMaterial;
-                string? colorHex = null;
-                if (file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var filament))
-                {
-                    colorHex = filament.ColorHex;
-                }
+                colorHex = filament.ColorHex;
+                filVendor = filament.Vendor;
+                filName = filament.Name;
+            }
 
-                var queueRequest = new QueuePrintJobDto
-                {
-                    GcodeFileId = file.GcodeFileId,
-                    AssignedPrinterId = request.AssignedPrinterId,
-                    Priority = (PrintJobPriority)request.Priority,
-                    RequiredMaterialType = materialType,
-                    RequiredNozzleDiameter = file.GcodeFile?.RequiredNozzleDiameter.HasValue == true
-                        ? (decimal)file.GcodeFile.RequiredNozzleDiameter.Value
-                        : null,
-                    RequiredPrinterModel = file.GcodeFile?.ExtractedPrinterModelName,
-                    ProjectId = projectId,
-                    ProjectName = project.Name,
-                    SpoolmanFilamentId = file.SpoolmanFilamentId,
-                    FilamentName = file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var fil) ? fil.Name : null,
-                    FilamentVendor = file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var filV) ? filV.Vendor : null,
-                    FilamentColor = colorHex,
-                };
+            var queueRequest = new QueuePrintJobDto
+            {
+                GcodeFileId = file.GcodeFileId,
+                AssignedPrinterId = request.AssignedPrinterId,
+                Priority = (PrintJobPriority)request.Priority,
+                RequiredMaterialType = materialType,
+                RequiredNozzleDiameter = file.GcodeFile?.RequiredNozzleDiameter.HasValue == true
+                    ? (decimal)file.GcodeFile.RequiredNozzleDiameter.Value
+                    : null,
+                RequiredPrinterModel = file.GcodeFile?.ExtractedPrinterModelName,
+                ProjectId = projectId,
+                ProjectName = project.Name,
+                SpoolmanFilamentId = file.SpoolmanFilamentId,
+                FilamentName = filName,
+                FilamentVendor = filVendor,
+                FilamentColor = colorHex,
+                Copies = remainingPrints,
+                ProjectFileId = file.Id,
+            };
 
-                var job = await queueService.AddJobToQueueAsync(queueRequest, ct);
-                if (job is not null)
-                {
-                    queuedFiles.Add(new QueuedProjectFileDto(
-                        file.Id,
-                        job.Id,
-                        file.GcodeFile?.FileName ?? "Unknown",
-                        materialType,
-                        colorHex,
-                        1,
-                        file.GcodeFile?.EstimatedPrintTimeMinutes,
-                        queueOrder++));
-                }
-                else
-                {
-                    logger.LogWarning("Could not queue file {FileGcodeFileId} (no compatible printer available)", file.GcodeFileId);
-                }
+            var job = await queueService.AddJobToQueueAsync(queueRequest, ct);
+            if (job is not null)
+            {
+                queuedFiles.Add(new QueuedProjectFileDto(
+                    file.Id,
+                    job.Id,
+                    file.GcodeFile?.FileName ?? "Unknown",
+                    materialType,
+                    colorHex,
+                    remainingPrints,
+                    file.GcodeFile?.EstimatedPrintTimeMinutes,
+                    queueOrder++));
+            }
+            else
+            {
+                logger.LogWarning("Could not queue file {FileGcodeFileId} (no compatible printer available)", file.GcodeFileId);
             }
         }
 
@@ -549,8 +554,17 @@ public class PrintProjectService(
 
         if (groupByMaterial && groupByColor)
         {
-            // Primary: material type, Secondary: color (filament color hex), Tertiary: sort order
+            // Primary: material type, Secondary: vendor, Tertiary: color, Quaternary: sort order
             ordered = files.OrderBy(f => f.MaterialRequirement ?? f.GcodeFile?.RequiredMaterial ?? "zzz")
+                .ThenBy(f =>
+                {
+                    if (f.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(f.SpoolmanFilamentId.Value, out var filament))
+                    {
+                        return filament.Vendor ?? "zzz";
+                    }
+
+                    return "zzz";
+                })
                 .ThenBy(f =>
                 {
                     if (f.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(f.SpoolmanFilamentId.Value, out var filament))
@@ -690,6 +704,7 @@ public class PrintProjectService(
             file.GcodeFile?.EstimatedFilamentWeightG,
             file.MaterialRequirement ?? file.GcodeFile?.RequiredMaterial,
             file.GcodeFile?.RequiredNozzleDiameter,
-            file.GcodeFile?.ExtractedPrinterModelName);
+            file.GcodeFile?.ExtractedPrinterModelName,
+            EstimatedCostPerCopy: null);
     }
 }

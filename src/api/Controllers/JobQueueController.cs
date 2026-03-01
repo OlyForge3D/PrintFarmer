@@ -212,6 +212,37 @@ public class JobQueueController(
     }
 
     /// <summary>
+    /// Abort the current print attempt but keep the job in the queue.
+    /// Sends cancel to the printer hardware and returns the job to Queued status.
+    /// Only works when the job is actively printing (Printing, Starting, or Paused status).
+    /// </summary>
+    /// <param name="id">The unique identifier of the job whose current print to abort.</param>
+    [HttpPost("{id:guid}/abort-print")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> AbortPrintAsync(Guid id)
+    {
+        try
+        {
+            string? userId = User.Identity?.Name ?? "anonymous";
+            await printJobManagementService.AbortPrintAsync(id.ToString(), userId, CancellationToken.None);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning("Cannot abort print for job {Id}: {Message}", id, ex.Message);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error aborting print for job {Id}", id);
+            return Problem("An error occurred while aborting the print", statusCode: 500);
+        }
+    }
+
+    /// <summary>
     /// Delete a job from the queue
     /// </summary>
     /// <param name="id">The unique identifier of the job to delete.</param>

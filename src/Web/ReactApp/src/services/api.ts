@@ -3101,6 +3101,14 @@ export class ApiClient {
   }
 
   /**
+   * Abort the current print attempt but keep the job in the queue.
+   * Only works when the job is actively printing (Printing, Starting, or Paused).
+   */
+  async abortPrint(jobId: string): Promise<void> {
+    await this.client.post(`/job-queue/${jobId}/abort-print`);
+  }
+
+  /**
    * Rerun a completed print queue job (add it back to queue)
    */
   async rerunPrintQueueJob(jobId: string): Promise<unknown> {

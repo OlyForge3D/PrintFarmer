@@ -16,6 +16,8 @@ public record PrintProjectListDto(
     int CompletedFiles,
     int TotalPrints,
     int CompletedPrints,
+    decimal? EstimatedTotalCost,
+    decimal? CompletedCost,
     DateTime CreatedAt,
     DateTime? CompletedAt)
 {
@@ -55,6 +57,18 @@ public record PrintProjectDetailDto(
     /// Progress percentage (0-100) based on completed prints.
     /// </summary>
     public int ProgressPercent => TotalPrints > 0 ? (int)Math.Round(100.0 * CompletedPrints / TotalPrints) : 0;
+
+    /// <summary>
+    /// Estimated total cost across all remaining file prints.
+    /// </summary>
+    public decimal? EstimatedTotalCost => Files.Any(f => f.EstimatedFileCost.HasValue)
+        ? Files.Sum(f => f.EstimatedFileCost ?? 0m)
+        : null;
+
+    /// <summary>
+    /// Actual cost from completed print jobs.
+    /// </summary>
+    public decimal? CompletedCost { get; init; }
 }
 
 /// <summary>
@@ -81,7 +95,10 @@ public record PrintProjectFileDto(
     double? EstimatedFilamentWeightG = null,
     string? RequiredMaterial = null,
     double? RequiredNozzleDiameter = null,
-    string? ExtractedPrinterModelName = null)
+    string? ExtractedPrinterModelName = null,
+
+    // Cost estimate per remaining copy
+    decimal? EstimatedCostPerCopy = null)
 {
     /// <summary>
     /// Whether all required prints have been completed.
@@ -98,6 +115,13 @@ public record PrintProjectFileDto(
     /// </summary>
     public double? RemainingPrintTimeMinutes => EstimatedPrintTimeMinutes.HasValue
         ? EstimatedPrintTimeMinutes.Value * RemainingPrints
+        : null;
+
+    /// <summary>
+    /// Estimated total cost for all remaining copies of this file.
+    /// </summary>
+    public decimal? EstimatedFileCost => EstimatedCostPerCopy.HasValue
+        ? EstimatedCostPerCopy.Value * RemainingPrints
         : null;
 }
 

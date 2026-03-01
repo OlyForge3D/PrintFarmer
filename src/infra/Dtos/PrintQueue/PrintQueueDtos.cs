@@ -133,6 +133,26 @@ public class QueuedPrintJobDto
     /// Actual cost of the print job (calculated on completion)
     /// </summary>
     public decimal? ActualCost { get; set; }
+
+    /// <summary>
+    /// Total number of copies to print for this job.
+    /// </summary>
+    public int Copies { get; set; } = 1;
+
+    /// <summary>
+    /// Number of copies successfully completed so far.
+    /// </summary>
+    public int CompletedCopies { get; set; }
+
+    /// <summary>
+    /// Remaining copies to print (Copies - CompletedCopies).
+    /// </summary>
+    public int RemainingCopies { get; set; }
+
+    /// <summary>
+    /// Link to the project file this job was created from (if any).
+    /// </summary>
+    public Guid? ProjectFileId { get; set; }
 }
 
 /// <summary>
@@ -410,6 +430,11 @@ public class UpdateJobDetailsRequest
     public string? FilamentVendor { get; set; }
 
     public string? FilamentColor { get; set; }
+
+    /// <summary>
+    /// Number of copies to print. Must be >= CompletedCopies.
+    /// </summary>
+    public int? Copies { get; set; }
 }
 
 /// <summary>

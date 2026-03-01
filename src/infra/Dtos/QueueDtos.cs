@@ -117,6 +117,16 @@ public class QueuePrintJobDto
     /// Denormalized filament color hex.
     /// </summary>
     public string? FilamentColor { get; set; }
+
+    /// <summary>
+    /// Number of copies to print for this job.
+    /// </summary>
+    public int Copies { get; set; } = 1;
+
+    /// <summary>
+    /// Link to the project file this job was created from.
+    /// </summary>
+    public Guid? ProjectFileId { get; set; }
 }
 
 /// <summary>
@@ -228,6 +238,14 @@ public class JobQueuePrintJobDto
     public decimal? EstimatedCost { get; set; }
 
     public decimal? ActualCost { get; set; }
+
+    public int Copies { get; set; } = 1;
+
+    public int CompletedCopies { get; set; }
+
+    public int RemainingCopies { get; set; }
+
+    public Guid? ProjectFileId { get; set; }
 
     public DateTime CreatedAt { get; set; }
 

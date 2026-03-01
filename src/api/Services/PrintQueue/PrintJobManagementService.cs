@@ -754,6 +754,50 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
+    /// Aborts the current print attempt but keeps the job in the queue.
+    /// Sends cancel to printer hardware, resets job status to Queued.
+    /// Copies remain unchanged — only the current print attempt is aborted.
+    /// </summary>
+    public async Task AbortPrintAsync(
+        string jobId,
+        string userId,
+        CancellationToken cancellationToken = default)
+    {
+        PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken);
+        if (job is null)
+        {
+            throw new InvalidOperationException($"Print job {jobId} not found");
+        }
+
+        if (job.Status is not (PrintJobStatus.Printing or PrintJobStatus.Paused or PrintJobStatus.Starting))
+        {
+            throw new InvalidOperationException(
+                $"Cannot abort a print that is not currently active (status: {job.Status})");
+        }
+
+        if (job.AssignedPrinterId.HasValue)
+        {
+            bool cancelSuccess = await _printersService.CancelPrintAsync(job.AssignedPrinterId.Value, cancellationToken);
+            if (!cancelSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to send cancel command to printer {job.AssignedPrinterId.Value}");
+            }
+
+            _logger.LogInformation(
+                "Abort print: sent cancel to printer {PrinterId} for job {JobId}",
+                job.AssignedPrinterId.Value, jobId);
+        }
+
+        job.Status = PrintJobStatus.Queued;
+        job.ActualStartTime = null;
+        job.UpdatedAt = DateTime.UtcNow;
+
+        await _repository.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Print aborted for job {JobId} by user {UserId}, job returned to queue", jobId, userId);
+    }
+
+    /// <summary>
     /// Cancel multiple jobs at once
     /// </summary>
     /// <param name="jobIds">The list of job identifiers to cancel.</param>
@@ -1544,6 +1588,10 @@ public class PrintJobManagementService(
             ProjectName = job.ProjectName,
             EstimatedCost = job.EstimatedCost,
             ActualCost = job.ActualCost,
+            Copies = job.Copies,
+            CompletedCopies = job.CompletedCopies,
+            RemainingCopies = job.RemainingCopies,
+            ProjectFileId = job.ProjectFileId,
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt,
@@ -1705,6 +1753,23 @@ public class PrintJobManagementService(
             {
                 // TODO: Implement tag support in Phase 3D
                 _logger.LogDebug("Tags update requested but not yet implemented for job {JobId}", jobId);
+            }
+
+            if (updates.Copies.HasValue)
+            {
+                if (updates.Copies.Value < 1)
+                {
+                    throw new ArgumentException("Copies must be at least 1", nameof(updates));
+                }
+
+                if (updates.Copies.Value < job.CompletedCopies)
+                {
+                    throw new ArgumentException(
+                        $"Copies ({updates.Copies.Value}) cannot be less than already completed copies ({job.CompletedCopies})",
+                        nameof(updates));
+                }
+
+                job.Copies = updates.Copies.Value;
             }
 
             job.UpdatedAt = DateTime.UtcNow;

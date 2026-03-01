@@ -192,6 +192,10 @@ namespace Farm.Infrastructure.Services.Queue
                 FailureReason = j.FailureReason,
                 EstimatedCost = j.EstimatedCost,
                 ActualCost = j.ActualCost,
+                Copies = j.Copies,
+                CompletedCopies = j.CompletedCopies,
+                RemainingCopies = j.RemainingCopies,
+                ProjectFileId = j.ProjectFileId,
                 CreatedAt = j.CreatedAt,
                 UpdatedAt = j.UpdatedAt,
                 GcodeFileName = j.GcodeFile?.FileName ?? string.Empty,
@@ -274,6 +278,8 @@ namespace Farm.Infrastructure.Services.Queue
                 FilamentName = request.FilamentName,
                 FilamentVendor = request.FilamentVendor,
                 FilamentColor = request.FilamentColor,
+                Copies = request.Copies,
+                ProjectFileId = request.ProjectFileId,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 QueuedAt = DateTime.UtcNow
@@ -318,6 +324,10 @@ namespace Farm.Infrastructure.Services.Queue
                 FilamentColor = job.FilamentColor,
                 EstimatedCost = job.EstimatedCost,
                 ActualCost = job.ActualCost,
+                Copies = job.Copies,
+                CompletedCopies = job.CompletedCopies,
+                RemainingCopies = job.RemainingCopies,
+                ProjectFileId = job.ProjectFileId,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };
@@ -364,6 +374,10 @@ namespace Farm.Infrastructure.Services.Queue
                     FilamentColor = job.FilamentColor,
                     EstimatedCost = job.EstimatedCost,
                     ActualCost = job.ActualCost,
+                    Copies = job.Copies,
+                    CompletedCopies = job.CompletedCopies,
+                    RemainingCopies = job.RemainingCopies,
+                    ProjectFileId = job.ProjectFileId,
                     CreatedAt = job.CreatedAt,
                     UpdatedAt = job.UpdatedAt
                 };
@@ -436,6 +450,10 @@ namespace Farm.Infrastructure.Services.Queue
                 EstimatedFilamentUsage = job.EstimatedFilamentUsage,
                 EstimatedCost = job.EstimatedCost,
                 ActualCost = job.ActualCost,
+                Copies = job.Copies,
+                CompletedCopies = job.CompletedCopies,
+                RemainingCopies = job.RemainingCopies,
+                ProjectFileId = job.ProjectFileId,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };
@@ -564,6 +582,10 @@ namespace Farm.Infrastructure.Services.Queue
                 FilamentColor = job.FilamentColor,
                 EstimatedCost = job.EstimatedCost,
                 ActualCost = job.ActualCost,
+                Copies = job.Copies,
+                CompletedCopies = job.CompletedCopies,
+                RemainingCopies = job.RemainingCopies,
+                ProjectFileId = job.ProjectFileId,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt
             };
