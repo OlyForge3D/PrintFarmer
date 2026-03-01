@@ -408,7 +408,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   };
 
   return (
-    <div className="relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full min-w-92">
+    <div className="relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full min-w-[26rem]">
       {/* Header */}
       <div className="mb-4">
         {/* Top row: Name + Status Pill (match collapsed card) */}
