@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { PanelRightOpen } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useSpoolman } from '@/contexts/SpoolmanHooks';
+import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
@@ -80,7 +80,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   // Fetch from shared usePrinters() cache (same as table view/sidebar) to ensure consistency
   const { data: allPrinters = [] } = usePrinters();
   const queryClient = useQueryClient();
-  const { enabled: spoolmanEnabled } = useSpoolman();
+  const { ready: spoolmanReady } = useSpoolmanConfigured();
   const apiPrinter = useMemo(
     () => allPrinters.find(p => p.id === initialPrinter.id) ?? initialPrinter,
     [allPrinters, initialPrinter]
@@ -924,7 +924,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       </div>
 
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
-      {(spoolmanEnabled || printer.spoolInfo || printer.currentSpoolId) && (
+      {(spoolmanReady || printer.spoolInfo || printer.currentSpoolId) && (
       <div className="mb-2">
         <div className="flex items-center justify-between mb-1">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>

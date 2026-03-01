@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
-import { useSpoolman } from '@/contexts/SpoolmanHooks';
+import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
 import { formatPrinterState } from '@/common/utils/printerStateDisplay';
@@ -126,7 +126,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const shouldFetch = !printerProp && !!printerId;
   const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
   const queryClient = useQueryClient();
-  const { enabled: spoolmanEnabled } = useSpoolman();
+  const { ready: spoolmanReady } = useSpoolmanConfigured();
 
   const [isClosing, setIsClosing] = useState(false);
   const closeTimeoutRef = useRef<number | null>(null);
@@ -1119,7 +1119,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
 
         {/* Spool Section - Show when Spoolman is configured (all backends) */}
-        {(spoolmanEnabled || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (
+        {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (
         <CollapsibleSection
           title="Spool"
           expanded={isSpoolExpanded}
