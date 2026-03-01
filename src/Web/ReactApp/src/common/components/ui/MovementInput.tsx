@@ -12,8 +12,6 @@ export interface MovementInputProps extends Omit<InputProps, 'type'> {
   step?: number;
   /** Current position to display as a groupbox-style label overlapping the top border */
   currentPosition?: number | null;
-  /** Render placeholder current-position label when `currentPosition` is unavailable */
-  showPlaceholderWhenUnavailable?: boolean;
 }
 
 /**
@@ -31,19 +29,15 @@ export function MovementInput({
   disabled = false,
   className,
   currentPosition,
-  showPlaceholderWhenUnavailable = false,
   ...props
 }: MovementInputProps) {
-  const showPositionLabel = currentPosition != null || showPlaceholderWhenUnavailable;
   const positionLabel = currentPosition != null ? `[ ${(currentPosition ?? 0).toFixed(1)} ]` : '[ --- ]';
 
   return (
-    <div className={`relative ${showPositionLabel ? 'pt-2' : ''} inline-block`}>
-      {showPositionLabel && (
-        <span className="absolute -top-0.5 right-2 px-1 bg-pf-bg-1 text-[10px] font-bold text-pf-text-secondary z-10">
-          {positionLabel}
-        </span>
-      )}
+    <div className="relative pt-2 inline-block">
+      <span className="absolute -top-0.5 right-2 px-1 bg-pf-bg-1 text-[10px] font-bold text-pf-text-secondary z-10">
+        {positionLabel}
+      </span>
       <span className="absolute left-2 bottom-1.5 text-slate-500 text-xs pointer-events-none z-10">
         {axis}
       </span>

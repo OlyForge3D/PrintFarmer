@@ -889,7 +889,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   min={0}
                   max={EXTRUDE_DISTANCE_OPTIONS.length - 1}
                   step={1}
-                  value={EXTRUDE_DISTANCE_OPTIONS.indexOf(extrudeStep) >= 0 ? EXTRUDE_DISTANCE_OPTIONS.indexOf(extrudeStep) : 0}
+                  value={(EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) >= 0 ? (EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) : 0}
                   onChange={(e) => setExtrudeStep(EXTRUDE_DISTANCE_OPTIONS[Number(e.target.value)])}
                   disabled={!canExtrudeNow}
                   className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
@@ -930,7 +930,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   min={0}
                   max={EXTRUDE_SPEED_OPTIONS.length - 1}
                   step={1}
-                  value={EXTRUDE_SPEED_OPTIONS.indexOf(extrudeSpeed) >= 0 ? EXTRUDE_SPEED_OPTIONS.indexOf(extrudeSpeed) : 0}
+                  value={(EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) >= 0 ? (EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) : 0}
                   onChange={(e) => setExtrudeSpeed(EXTRUDE_SPEED_OPTIONS[Number(e.target.value)])}
                   disabled={!canExtrudeNow}
                   className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
