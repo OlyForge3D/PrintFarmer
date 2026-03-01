@@ -924,7 +924,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       </div>
 
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
-      {spoolmanEnabled && (
+      {(spoolmanEnabled || printer.spoolInfo || printer.currentSpoolId) && (
       <div className="mb-2">
         <div className="flex items-center justify-between mb-1">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>

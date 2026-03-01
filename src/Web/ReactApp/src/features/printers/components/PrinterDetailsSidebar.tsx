@@ -1119,7 +1119,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
 
         {/* Spool Section - Show when Spoolman is configured (all backends) */}
-        {spoolmanEnabled && (
+        {(spoolmanEnabled || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (
         <CollapsibleSection
           title="Spool"
           expanded={isSpoolExpanded}
