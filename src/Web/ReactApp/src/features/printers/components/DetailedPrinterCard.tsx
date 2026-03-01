@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { PanelRightOpen } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSpoolman } from '@/contexts/SpoolmanHooks';
 import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
@@ -79,6 +80,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   // Fetch from shared usePrinters() cache (same as table view/sidebar) to ensure consistency
   const { data: allPrinters = [] } = usePrinters();
   const queryClient = useQueryClient();
+  const { enabled: spoolmanEnabled } = useSpoolman();
   const apiPrinter = useMemo(
     () => allPrinters.find(p => p.id === initialPrinter.id) ?? initialPrinter,
     [allPrinters, initialPrinter]
@@ -921,8 +923,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         </div>
       </div>
 
-      {/* Spool Info Section - Only show when Spoolman is configured */}
-      {printer.spoolInfo && (
+      {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
+      {spoolmanEnabled && (
       <div className="mb-2">
         <div className="flex items-center justify-between mb-1">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>
@@ -938,7 +940,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               aria-label="Change spool"
               iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
             ></Button>
-            {printer.spoolInfo?.hasActiveSpool && (
+            {(printer.spoolInfo?.hasActiveSpool || printer.currentSpoolId) && (
               <Button
                 type="button"
                 variant="ghost"
@@ -950,7 +952,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                     await apiClient.clearActiveSpool(printer.id);
                     queryClient.setQueryData<Printer[]>(['printers'], (old) =>
                       old?.map(p => p.id === printer.id
-                        ? { ...p, spoolInfo: { hasActiveSpool: false } }
+                        ? { ...p, spoolInfo: { hasActiveSpool: false }, currentSpoolId: undefined }
                         : p
                       )
                     );
@@ -968,7 +970,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             )}
           </div>
         </div>
-        <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
+        <LoadedFilamentCard spoolInfo={printer.spoolInfo ?? (printer.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: printer.currentSpoolId } : undefined)} />
       </div>
       )}
 
@@ -989,7 +991,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         isOpen={showSpoolPicker}
         onClose={() => setShowSpoolPicker(false)}
         printerId={printer.id}
-        activeSpoolId={printer.spoolInfo?.activeSpoolId}
+        activeSpoolId={printer.spoolInfo?.activeSpoolId ?? printer.currentSpoolId}
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
@@ -999,6 +1001,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               old?.map(p => p.id === printer.id
                 ? {
                     ...p,
+                    currentSpoolId: spool.id,
                     spoolInfo: {
                       hasActiveSpool: true,
                       activeSpoolId: spool.id,

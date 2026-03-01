@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
+import { useSpoolman } from '@/contexts/SpoolmanHooks';
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
 import { formatPrinterState } from '@/common/utils/printerStateDisplay';
@@ -125,6 +126,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const shouldFetch = !printerProp && !!printerId;
   const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
   const queryClient = useQueryClient();
+  const { enabled: spoolmanEnabled } = useSpoolman();
 
   const [isClosing, setIsClosing] = useState(false);
   const closeTimeoutRef = useRef<number | null>(null);
@@ -1116,15 +1118,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
 
 
-        {/* Spool Section - Only show when Spoolman is configured */}
-        {displayPrinter?.spoolInfo && (
+        {/* Spool Section - Show when Spoolman is configured (all backends) */}
+        {spoolmanEnabled && (
         <CollapsibleSection
           title="Spool"
           expanded={isSpoolExpanded}
           onToggle={setIsSpoolExpanded}
           headerActions={
             <div className="flex items-center gap-0.5">
-              {displayPrinter?.spoolInfo?.hasActiveSpool && (
+              {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (
                 <Button
                   type="button"
                   variant="ghost"
@@ -1168,7 +1170,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </div>
           }
         >
-          <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo} />
+          <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
         </CollapsibleSection>
         )}
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
@@ -1197,7 +1199,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         isOpen={showSpoolPicker}
         onClose={() => setShowSpoolPicker(false)}
         printerId={printer.id}
-        activeSpoolId={displayPrinter?.spoolInfo?.activeSpoolId}
+        activeSpoolId={displayPrinter?.spoolInfo?.activeSpoolId ?? displayPrinter?.currentSpoolId}
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
@@ -1208,6 +1210,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               old?.map(p => p.id === printer.id
                 ? {
                     ...p,
+                    currentSpoolId: spool.id,
                     spoolInfo: {
                       hasActiveSpool: true,
                       activeSpoolId: spool.id,
