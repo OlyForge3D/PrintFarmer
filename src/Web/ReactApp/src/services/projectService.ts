@@ -72,9 +72,10 @@ export const projectService = {
   async addFileToProject(projectId: string, request: AddFileToProjectRequest): Promise<PrintProjectFileDto> {
     const response = await apiClient.genericPost(
       `/projects/${projectId}/files`,
-      request as unknown as Record<string, unknown>
+      [request] as unknown as Record<string, unknown>
     );
-    return response as unknown as PrintProjectFileDto;
+    const files = response as unknown as PrintProjectFileDto[];
+    return files[0];
   },
 
   /**

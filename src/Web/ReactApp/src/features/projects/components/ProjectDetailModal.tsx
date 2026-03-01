@@ -276,6 +276,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                 variant="secondary"
                 size="sm"
                 iconLeft={<PlusIcon className="w-4 h-4" />}
+                onClick={onEdit}
               >
                 Add Files
               </Button>

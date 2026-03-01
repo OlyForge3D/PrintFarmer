@@ -1666,7 +1666,7 @@ export class ApiClient {
       xhr.open("POST", `/api/gcode-files/upload?${params.toString()}`);
 
       // Set auth header if available
-      const token = localStorage.getItem("auth_token");
+      const token = localStorage.getItem("auth-token");
       if (token) {
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       }
@@ -1730,7 +1730,7 @@ export class ApiClient {
       xhr.open("POST", `/api/3d-models/upload?${params.toString()}`);
 
       // Set auth header if available
-      const token = localStorage.getItem("auth_token");
+      const token = localStorage.getItem("auth-token");
       if (token) {
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       }
