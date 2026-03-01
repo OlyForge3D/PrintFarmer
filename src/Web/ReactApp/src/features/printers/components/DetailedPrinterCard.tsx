@@ -741,50 +741,65 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                 </ControlPadButton>
               </div>
 
-              {/* Extrude Pad */}
-              <div className="flex flex-col gap-1 w-fit">
-                <ControlPadButton
-                  disabled={movementActionPending || !canExtrudeNow}
-                  onClick={() => handleExtrude('extrude')}
-                  title={`Extrude filament (min ${extrudeMinTemp}°C)`}
-                  aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
-                  padSize="small"
-                >
-                  E+
-                </ControlPadButton>
-                <div className="h-8 w-8" />
-                <ControlPadButton
-                  disabled={movementActionPending || !canExtrudeNow}
-                  onClick={() => handleExtrude('retract')}
-                  title={`Retract filament (min ${extrudeMinTemp}°C)`}
-                  aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
-                  padSize="small"
-                >
-                  E-
-                </ControlPadButton>
-                <div className="flex flex-col gap-0.5 mt-1">
-                  <select
-                    value={extrudeStep}
-                    onChange={(e) => setExtrudeStep(Number(e.target.value))}
+              {/* Extrude Pad - vertical sliders flanking E+/E- buttons */}
+              <div className="flex gap-1.5 items-center">
+                {/* Length vertical slider */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[8px] text-pf-text-tertiary uppercase leading-none">len</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={EXTRUDE_DISTANCE_OPTIONS.length - 1}
+                    step={1}
+                    value={EXTRUDE_DISTANCE_OPTIONS.indexOf(extrudeStep) >= 0 ? EXTRUDE_DISTANCE_OPTIONS.indexOf(extrudeStep) : 0}
+                    onChange={(e) => setExtrudeStep(EXTRUDE_DISTANCE_OPTIONS[Number(e.target.value)])}
                     disabled={!canExtrudeNow}
-                    className="h-6 text-[10px] bg-pf-input border border-white/10 text-pf-text-primary rounded px-1 w-full"
+                    className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
                     aria-label="Extrude distance"
+                  />
+                  <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeStep}mm</span>
+                </div>
+
+                {/* E+ / E- buttons */}
+                <div className="flex flex-col gap-1 w-fit">
+                  <ControlPadButton
+                    disabled={movementActionPending || !canExtrudeNow}
+                    onClick={() => handleExtrude('extrude')}
+                    title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                    aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
+                    padSize="small"
                   >
-                    {EXTRUDE_DISTANCE_OPTIONS.map((d) => (
-                      <option key={d} value={d}>{d}mm</option>
-                    ))}
-                  </select>
-                  <select
-                    value={extrudeSpeed}
-                    onChange={(e) => setExtrudeSpeed(Number(e.target.value))}
+                    E+
+                  </ControlPadButton>
+                  <div className="h-8 w-8" />
+                  <ControlPadButton
+                    disabled={movementActionPending || !canExtrudeNow}
+                    onClick={() => handleExtrude('retract')}
+                    title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                    aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
+                    padSize="small"
+                  >
+                    E-
+                  </ControlPadButton>
+                </div>
+
+                {/* Speed vertical slider */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-[8px] text-pf-text-tertiary uppercase leading-none">spd</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={EXTRUDE_SPEED_OPTIONS.length - 1}
+                    step={1}
+                    value={EXTRUDE_SPEED_OPTIONS.indexOf(extrudeSpeed) >= 0 ? EXTRUDE_SPEED_OPTIONS.indexOf(extrudeSpeed) : 0}
+                    onChange={(e) => setExtrudeSpeed(EXTRUDE_SPEED_OPTIONS[Number(e.target.value)])}
                     disabled={!canExtrudeNow}
-                    className="h-6 text-[10px] bg-pf-input border border-white/10 text-pf-text-primary rounded px-1 w-full"
+                    className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
                     aria-label="Extrude speed"
-                  >
-                    {EXTRUDE_SPEED_OPTIONS.map((s) => (
-                      <option key={s} value={s}>{s}mm/s</option>
-                    ))}
-                  </select>
+                  />
+                  <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeSpeed}mm/s</span>
                 </div>
               </div>
             </div>
