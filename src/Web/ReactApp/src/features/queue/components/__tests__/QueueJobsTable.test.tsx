@@ -149,7 +149,7 @@ describe("QueueJobsTable Component", () => {
 
     render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
 
-    const cancelButtons = screen.getAllByText("Cancel");
+    const cancelButtons = screen.getAllByText("Cancel Job");
     fireEvent.click(cancelButtons[0]);
 
     expect(onCancel).toHaveBeenCalledWith("job-1");
