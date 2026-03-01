@@ -391,7 +391,7 @@ export function PrintersPage() {
                   ))}
                 </div>
               ) : viewMode === 'detailed' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,23rem)] gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(26rem,1fr))] gap-4">
                   {userPrinters.map((printer) => (
                     <DetailedPrinterCard
                       key={printer.id}
