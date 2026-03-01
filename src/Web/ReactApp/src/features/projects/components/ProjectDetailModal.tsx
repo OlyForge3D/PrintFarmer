@@ -247,6 +247,18 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
               style={{ width: `${project.progressPercent}%` }}
             />
           </div>
+          {(project.estimatedTotalCost != null && project.estimatedTotalCost > 0) && (
+            <div className="flex items-center justify-between mt-2 text-sm">
+              <span className="text-pf-text-tertiary">Estimated Cost</span>
+              <span className="text-pf-text-primary font-medium">${project.estimatedTotalCost.toFixed(2)}</span>
+            </div>
+          )}
+          {(project.completedCost != null && project.completedCost > 0) && (
+            <div className="flex items-center justify-between mt-1 text-sm">
+              <span className="text-pf-text-tertiary">Spent So Far</span>
+              <span className="text-pf-text-primary">${project.completedCost.toFixed(2)}</span>
+            </div>
+          )}
         </div>
 
         {/* Files List */}
@@ -441,6 +453,14 @@ const FileRow: React.FC<FileRowProps> = ({
       {file.remainingPrintTimeMinutes != null && file.remainingPrintTimeMinutes > 0 && (
         <div className="text-xs text-pf-text-tertiary">
           ~{formatDuration(file.remainingPrintTimeMinutes)}
+        </div>
+      )}
+      {file.estimatedCostPerCopy != null && file.estimatedCostPerCopy > 0 && (
+        <div className="text-xs text-pf-text-tertiary" title="Estimated cost per copy">
+          ${file.estimatedCostPerCopy.toFixed(2)}/ea
+          {file.estimatedFileCost != null && file.remainingPrints > 1 && (
+            <span className="ml-1">({`$${file.estimatedFileCost.toFixed(2)} total`})</span>
+          )}
         </div>
       )}
     </div>

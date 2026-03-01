@@ -262,6 +262,17 @@ export function PrintQueueDashboardPage() {
     }
   }, [invalidateQueue]);
 
+  const handleAbortPrint = useCallback(async (jobId: string) => {
+    try {
+      await apiClient.abortPrint(jobId);
+      invalidateQueue();
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to abort print";
+      setError(errorMessage);
+    }
+  }, [invalidateQueue]);
+
   const handleDispatchJob = useCallback(async (jobId: string) => {
     setDispatchingJobId(jobId);
     setDispatchUploadProgressByJobId((prev) => {
@@ -427,6 +438,7 @@ export function PrintQueueDashboardPage() {
                   onPause={handlePauseJob}
                   onResume={handleResumeJob}
                   onCancel={handleCancelJob}
+                  onAbortPrint={handleAbortPrint}
                   onPriority={handlePriorityChange}
                   onDispatch={handleDispatchJob}
                   onReorder={handleReorder}

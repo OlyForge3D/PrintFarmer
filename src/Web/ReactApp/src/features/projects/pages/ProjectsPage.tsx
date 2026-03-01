@@ -358,6 +358,11 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete })
                 {project.completedFiles} done
               </span>
             )}
+            {project.estimatedTotalCost != null && project.estimatedTotalCost > 0 && (
+              <span title="Estimated cost">
+                ~${project.estimatedTotalCost.toFixed(2)}
+              </span>
+            )}
           </div>
           
           {project.dueDate && (

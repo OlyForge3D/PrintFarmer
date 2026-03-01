@@ -46,6 +46,7 @@ export const ProjectsTableView: React.FC<ProjectsTableViewProps> = ({
             <th scope="col" className="px-4 py-3 text-left font-semibold text-pf-text-primary">Progress</th>
             <th scope="col" className="px-4 py-3 text-center font-semibold text-pf-text-primary">Files</th>
             <th scope="col" className="px-4 py-3 text-center font-semibold text-pf-text-primary">Prints</th>
+            <th scope="col" className="px-4 py-3 text-right font-semibold text-pf-text-primary">Est. Cost</th>
             <th scope="col" className="px-4 py-3 text-left font-semibold text-pf-text-primary">Due Date</th>
             <th scope="col" className="px-4 py-3 text-left font-semibold text-pf-text-primary">Created</th>
             <th scope="col" className="px-4 py-3 w-16"><span className="sr-only">Actions</span></th>
@@ -100,6 +101,13 @@ export const ProjectsTableView: React.FC<ProjectsTableViewProps> = ({
               <td className="px-4 py-3 text-center">
                 <span className="text-pf-text-primary">{project.completedPrints}</span>
                 <span className="text-pf-text-tertiary"> / {project.totalPrints}</span>
+              </td>
+
+              {/* Est. Cost */}
+              <td className="px-4 py-3 text-right text-pf-text-secondary whitespace-nowrap">
+                {project.estimatedTotalCost != null && project.estimatedTotalCost > 0
+                  ? `$${project.estimatedTotalCost.toFixed(2)}`
+                  : <span className="text-pf-text-tertiary">—</span>}
               </td>
 
               {/* Due Date */}

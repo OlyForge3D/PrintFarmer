@@ -39,6 +39,7 @@ export interface QueueJobsTableProps {
   onPause?: (jobId: string) => void;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
+  onAbortPrint?: (jobId: string) => void;
   onPriority?: (jobId: string, priority: number) => void;
   onEdit?: (jobId: string) => void;
   onDispatch?: (jobId: string) => void;
@@ -54,6 +55,7 @@ export function QueueJobsTable({
   onPause,
   onResume,
   onCancel,
+  onAbortPrint,
   onPriority,
   onEdit,
   onDispatch,
@@ -194,6 +196,7 @@ export function QueueJobsTable({
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Material</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Filament</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Est. Time</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Copies</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Source</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Status</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Priority</th>
@@ -301,6 +304,15 @@ export function QueueJobsTable({
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{filamentDisplay}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{estimatedTimeDisplay}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
+                  {(job.copies ?? 1) > 1 ? (
+                    <span className="text-pf-text-primary font-medium">
+                      {job.completedCopies ?? 0} / {job.copies}
+                    </span>
+                  ) : (
+                    <span className="text-pf-text-tertiary">1</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
                   {job.wasSeededFromHistory ? (
                     <span
                       role="img"
@@ -390,7 +402,20 @@ export function QueueJobsTable({
                         Resume
                       </Button>
                     )}
-                    {status !== "Completed" && (
+                    {(status === "Printing" || status === "Starting" || status === "Paused") && (
+                      <Button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAbortPrint?.(jobId);
+                        }}
+                        variant="subtle"
+                        size="sm"
+                        title="Abort current print attempt, keep job in queue"
+                      >
+                        Abort Print
+                      </Button>
+                    )}
+                    {status !== "Completed" && status !== "Cancelled" && (
                       <Button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -399,8 +424,9 @@ export function QueueJobsTable({
                         variant="danger"
                         size="sm"
                         disabled={cancelingJobId === jobId}
+                        title="Cancel job and remove from queue"
                       >
-                        Cancel
+                        Cancel Job
                       </Button>
                     )}
                   </div>
