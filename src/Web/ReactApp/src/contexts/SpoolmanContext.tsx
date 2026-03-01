@@ -1,17 +1,37 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { SpoolmanState, SpoolmanContextValue, SpoolmanContext } from './SpoolmanTypes';
+import { apiClient } from '@/services/api';
 
-const defaultState: SpoolmanState = {
-  enabled: false,
-  baseUrl: null,
-  version: null,
-  lastEndpoint: null,
-  lastErrorCategory: null,
-  lastErrorMessage: null
-};
+function loadInitialState(): SpoolmanState {
+  const savedUrl = localStorage.getItem('spoolman-base-url');
+  return {
+    enabled: !!savedUrl,
+    baseUrl: savedUrl,
+    version: null,
+    lastEndpoint: null,
+    lastErrorCategory: null,
+    lastErrorMessage: null,
+  };
+}
 
 export const SpoolmanProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<SpoolmanState>(defaultState);
+  const [state, setState] = useState<SpoolmanState>(loadInitialState);
+
+  // Fetch Spoolman settings from the API once auth is available
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.getSettings<{ baseUrl?: string }>('Spoolman')
+      .then(settings => {
+        if (cancelled) return;
+        const url = settings?.baseUrl?.trim() || null;
+        if (url) {
+          localStorage.setItem('spoolman-base-url', url);
+        }
+        setState(s => ({ ...s, enabled: !!url, baseUrl: url ?? s.baseUrl }));
+      })
+      .catch(() => { /* Not authenticated yet or settings unavailable — keep localStorage state */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const setEnabled = useCallback((v: boolean) => setState(s => ({ ...s, enabled: v })), []);
   const setBaseUrl = useCallback((url: string | null) => setState(s => ({ ...s, baseUrl: url })), []);
