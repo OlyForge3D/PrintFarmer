@@ -1,6 +1,8 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoPrint;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -20,6 +22,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly INotificationService? _notificationService;
     private readonly IPrintCostCalculator? _costCalculator;
     private readonly IAutoPrintService? _autoPrintService;
+    private readonly IBackendClientFactory? _backendFactory;
+    private readonly ISpoolmanService? _spoolmanService;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -67,7 +71,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         ILogger<PrintJobCompletionService> logger,
         INotificationService? notificationService = null,
         IPrintCostCalculator? costCalculator = null,
-        IAutoPrintService? autoPrintService = null)
+        IAutoPrintService? autoPrintService = null,
+        IBackendClientFactory? backendFactory = null,
+        ISpoolmanService? spoolmanService = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -75,6 +81,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _notificationService = notificationService;
         _costCalculator = costCalculator;
         _autoPrintService = autoPrintService;
+        _backendFactory = backendFactory;
+        _spoolmanService = spoolmanService;
     }
 
     /// <summary>
@@ -176,6 +184,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             }
         }
 
+        // Fetch actual filament usage from backend and record consumption in Spoolman
+        await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
@@ -265,6 +276,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         PrintJob primaryJob = activeJobs[0];
 
+        // Record partial filament consumption for failed/cancelled prints
+        await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
@@ -277,6 +291,70 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         await BroadcastJobQueueUpdateAsync(printerId, ct);
 
         return true;
+    }
+
+    /// <summary>
+    /// Fetches actual filament usage from the backend and records consumption in Spoolman.
+    /// Fire-and-forget — never fails the job completion if Spoolman is unavailable.
+    /// </summary>
+    private async Task FetchAndRecordFilamentUsageAsync(PrintJob job, Guid printerId, CancellationToken ct)
+    {
+        if (_backendFactory is null || _spoolmanService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Printer? printer = job.AssignedPrinter ?? await _db.Printers.FindAsync([printerId], ct);
+            if (printer is null)
+            {
+                return;
+            }
+
+            // Try to get actual filament usage from the backend
+            IBackendClient? client = _backendFactory.GetClient(printer.Backend);
+            double? usageGrams = null;
+
+            if (client is ISupportsFilamentUsageQuery usageQuery)
+            {
+                PrinterCredential? credential = !string.IsNullOrEmpty(printer.ApiKey)
+                    ? new PrinterCredential { ApiKey = printer.ApiKey }
+                    : null;
+
+                usageGrams = await usageQuery.GetLastJobFilamentUsageGramsAsync(
+                    printer.ServerUrl, credential, ct);
+            }
+
+            // Fallback to slicer estimate if no actual data
+            usageGrams ??= job.EstimatedFilamentUsage;
+
+            if (usageGrams is > 0)
+            {
+                job.ActualFilamentUsage = usageGrams;
+            }
+
+            // Record consumption in Spoolman if printer has an active spool
+            if (printer.CurrentSpoolId.HasValue && usageGrams is > 0)
+            {
+                bool consumed = await _spoolmanService.ConsumeFilamentAsync(
+                    printer.CurrentSpoolId.Value, usageGrams.Value, ct);
+
+                if (consumed)
+                {
+                    _logger.LogInformation(
+                        "[PrintJobCompletionService] Recorded {UsedGrams:F1}g filament consumption on spool {SpoolId} for job {JobId}",
+                        usageGrams.Value, printer.CurrentSpoolId.Value, job.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[PrintJobCompletionService] Failed to fetch/record filament usage for job {JobId} — continuing completion",
+                job.Id);
+        }
     }
 
     /// <summary>

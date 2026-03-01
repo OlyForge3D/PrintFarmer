@@ -487,6 +487,24 @@ public interface ISupportsSpoolman
 }
 
 /// <summary>
+/// Capability interface for backends that can report actual filament usage after a print completes.
+/// Backends implement this to provide real extrusion data from history or job APIs,
+/// enabling accurate Spoolman consumption tracking.
+/// </summary>
+public interface ISupportsFilamentUsageQuery
+{
+    /// <summary>
+    /// Retrieves the actual filament usage (in grams) for the most recently completed print job.
+    /// Returns null if usage data is unavailable (e.g., printer doesn't track extrusion).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="credential">Optional authentication credentials for the printer</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>Filament usage in grams, or null if unavailable</returns>
+    Task<double?> GetLastJobFilamentUsageGramsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backends that support raw G-code execution.
 /// Allows sending arbitrary G-code commands directly to the printer firmware.
 /// Useful for executing specialized commands not covered by standard capabilities.

@@ -34,7 +34,8 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     ISupportsStatus,
     ISupportsCompositeStatus,
     ISupportsControlRestart,
-    ISupportsGcodeExecution
+    ISupportsGcodeExecution,
+    ISupportsFilamentUsageQuery
 {
     private readonly HttpClient _http = http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
@@ -3259,6 +3260,57 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         return GetSpoolmanIntegrationsAsync(baseUrl.ToString(), ct);
+    }
+
+    /// <summary>
+    /// ISupportsFilamentUsageQuery implementation — uses Moonraker history API to get actual filament usage.
+    /// Converts mm extrusion to grams using slicer metadata (filament_weight_total / filament_total ratio).
+    /// </summary>
+#pragma warning disable CA1033
+    async Task<double?> ISupportsFilamentUsageQuery.GetLastJobFilamentUsageGramsAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
+#pragma warning restore CA1033
+    {
+        try
+        {
+            // Get most recent completed job from history
+            HistoryListResponse? history = await GetHistoryListAsync(baseUrl, limit: 1, order: "desc", ct: ct);
+            HistoryJob? lastJob = history?.Jobs?.FirstOrDefault();
+            if (lastJob is null || lastJob.FilamentUsed <= 0)
+            {
+                return null;
+            }
+
+            double actualMm = lastJob.FilamentUsed;
+
+            // Try to get metadata for mm→grams conversion
+            if (!string.IsNullOrEmpty(lastJob.Filename))
+            {
+                try
+                {
+                    GCodeMetadata? metadata = await GetFileMetadataAsync(baseUrl, lastJob.Filename, ct);
+                    if (metadata?.FilamentWeightTotal is > 0 && metadata?.FilamentTotal is > 0)
+                    {
+                        // Convert using slicer's mm/grams ratio
+                        double gramsPerMm = metadata.FilamentWeightTotal.Value / metadata.FilamentTotal.Value;
+                        return actualMm * gramsPerMm;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not fetch metadata for {Filename}, falling back to mm value", lastJob.Filename);
+                }
+            }
+
+            // Fallback: return mm value with a note — caller should handle conversion
+            // Standard PLA 1.75mm: ~1g per 335mm, but this varies by material
+            _logger.LogWarning("No slicer metadata available for mm→grams conversion, using default PLA density estimate");
+            return actualMm / 335.0; // Rough PLA estimate
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get filament usage from Moonraker history");
+            return null;
+        }
     }
 
     /// <summary>

@@ -129,4 +129,13 @@ public interface IPrintersRepository
     /// This is the encryption counterpart to PopulateCredential/DecryptIfNeeded.
     /// </summary>
     void EncryptSensitiveFieldsOnTrackedEntities();
+
+    /// <summary>
+    /// Finds a printer that currently has the specified Spoolman spool loaded.
+    /// Used to enforce spool exclusivity (one spool per printer).
+    /// </summary>
+    /// <param name="spoolId">The Spoolman spool ID to search for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The printer with this spool loaded, or null if no printer has it.</returns>
+    Task<Printer?> FindByCurrentSpoolIdAsync(int spoolId, CancellationToken ct);
 }

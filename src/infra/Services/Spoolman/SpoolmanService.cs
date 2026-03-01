@@ -1247,6 +1247,59 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
     private const string SpoolApiPath = "/api/v1/spool";
 
+    /// <inheritdoc/>
+    public async Task<bool> ConsumeFilamentAsync(int spoolId, double usedWeightGrams, CancellationToken ct)
+    {
+        if (usedWeightGrams <= 0)
+        {
+            return false;
+        }
+
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogWarning("ConsumeFilamentAsync: Spoolman is not configured, skipping consumption");
+            return false;
+        }
+
+        try
+        {
+            // Get current spool to read existing used_weight
+            SpoolmanSpoolDto? spool = await GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+            if (spool is null)
+            {
+                logger.LogWarning("ConsumeFilamentAsync: Spool {SpoolId} not found in Spoolman", spoolId);
+                return false;
+            }
+
+            double currentUsed = spool.UsedWeightG ?? 0;
+            double newUsedWeight = currentUsed + usedWeightGrams;
+
+            string url = $"{cfg.BaseUrl.TrimEnd('/')}{SpoolApiPath}/{spoolId}";
+            string jsonBody = System.Text.Json.JsonSerializer.Serialize(new { used_weight = newUsedWeight });
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Patch, url)
+            {
+                Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json")
+            };
+            HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+            response.EnsureSuccessStatusCode();
+
+            logger.LogInformation(
+                "ConsumeFilamentAsync: Recorded {UsedGrams:F1}g consumption on spool {SpoolId} (total: {TotalUsed:F1}g)",
+                usedWeightGrams, spoolId, newUsedWeight);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "ConsumeFilamentAsync: Failed to record consumption on spool {SpoolId}", spoolId);
+            return false;
+        }
+    }
+
     private static readonly JsonSerializerOptions ExternalJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,

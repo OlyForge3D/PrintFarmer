@@ -22,7 +22,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsPrinterInformation,
     ISupportsControlOperations,
     ISupportsMovement,
-    ISupportsTemperatureControl
+    ISupportsTemperatureControl,
+    ISupportsFilamentUsageQuery
 {
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly ILogger<PrusaLinkClient>? _logger;
@@ -947,6 +948,41 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
 
         return success;
+    }
+
+    /// <summary>
+    /// ISupportsFilamentUsageQuery implementation — uses PrusaLink job metadata for filament usage.
+    /// PrusaLink provides slicer-estimated filament usage from file metadata (not actual extrusion tracking).
+    /// </summary>
+#pragma warning disable CA1033
+    async Task<double?> ISupportsFilamentUsageQuery.GetLastJobFilamentUsageGramsAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
+#pragma warning restore CA1033
+    {
+        try
+        {
+            // PrusaLink's job endpoint includes file metadata with slicer estimates
+            Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
+            double? grams = job?.File?.Meta?.FilamentUsedG;
+            if (grams is > 0)
+            {
+                return grams.Value;
+            }
+
+            // Fallback: try converting from mm if grams unavailable
+            double? mm = job?.File?.Meta?.FilamentUsedMm;
+            if (mm is > 0)
+            {
+                // Standard PLA 1.75mm rough estimate
+                return mm.Value / 335.0;
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to get filament usage from PrusaLink job metadata");
+            return null;
+        }
     }
 }
 

@@ -158,4 +158,14 @@ public interface ISpoolmanService
     /// Returns material definitions with density, extruder temp, and bed temp.
     /// </summary>
     Task<IReadOnlyList<SpoolmanDbMaterialEntry>> GetExternalMaterialsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Records filament consumption on a Spoolman spool by incrementing its used_weight.
+    /// Calls PATCH /api/v1/spool/{spoolId} with the new total used_weight.
+    /// </summary>
+    /// <param name="spoolId">The Spoolman spool ID to update.</param>
+    /// <param name="usedWeightGrams">The amount of filament consumed in this print (grams).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True if the update succeeded, false otherwise.</returns>
+    Task<bool> ConsumeFilamentAsync(int spoolId, double usedWeightGrams, CancellationToken ct);
 }

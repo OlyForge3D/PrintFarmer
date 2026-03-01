@@ -2413,29 +2413,61 @@ public class PrintersService(
     public async Task<CommandResult> SetActiveSpoolAsync(Guid id, int? spoolId, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
-        if (p == null)
+        if (p is null)
         {
             return new CommandResult(false, $"Printer {id} not found");
         }
 
+        // Spool exclusivity: check if another printer already has this spool loaded
+        if (spoolId.HasValue)
+        {
+            Printer? conflicting = await _unitOfWork.Printers
+                .FindByCurrentSpoolIdAsync(spoolId.Value, ct)
+                .ConfigureAwait(false);
+
+            if (conflicting is not null && conflicting.Id != id)
+            {
+                _logger.LogWarning(
+                    "SetActiveSpoolAsync: Spool {SpoolId} is already assigned to printer {ConflictName} ({ConflictId})",
+                    spoolId, conflicting.Name, conflicting.Id);
+                return new CommandResult(
+                    false,
+                    $"Spool {spoolId} is already loaded on printer \"{conflicting.Name}\". Unload it there first.");
+            }
+        }
+
         try
         {
+            // Always store spool assignment in PrintFarmer DB (works for all backends)
+            p.CurrentSpoolId = spoolId;
+            await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            // If backend supports native Spoolman, also sync to the printer
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            if (client is not ISupportsSpoolman spoolmanClient)
+            if (client is ISupportsSpoolman spoolmanClient)
             {
-                _logger.LogWarning("SetActiveSpoolAsync: Backend {Backend} ({Name}) does not support Spoolman", backend, client.GetType().Name);
-                return new CommandResult(false, $"Backend '{backend}' does not support Spoolman integration");
-            }
+                try
+                {
+                    bool synced = await spoolmanClient.SetSpoolmanActiveSpoolAsync(p.ServerUrl, spoolId, ct)
+                        .ConfigureAwait(false);
 
-            bool result = await spoolmanClient.SetSpoolmanActiveSpoolAsync(p.ServerUrl, spoolId, ct).ConfigureAwait(false);
-
-            if (!result)
-            {
-                string action = spoolId.HasValue ? $"set active spool to {spoolId}" : "clear active spool";
-                _logger.LogWarning("SetActiveSpoolAsync: Spoolman rejected request to {Action} on printer {PName} ({Id})", action, p.Name, id);
-                return new CommandResult(false, $"Spoolman failed to {action}. The printer may not have Spoolman configured or the spool ID may be invalid.");
+                    if (!synced)
+                    {
+                        _logger.LogWarning(
+                            "SetActiveSpoolAsync: Backend sync failed for printer {PName} ({Id}), but DB assignment succeeded",
+                            p.Name, id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Non-fatal: DB assignment is the source of truth
+                    _logger.LogWarning(
+                        ex,
+                        "SetActiveSpoolAsync: Failed to sync spool to backend for printer {PName} ({Id})",
+                        p.Name, id);
+                }
             }
 
             return new CommandResult(true, spoolId.HasValue ? $"Active spool set to {spoolId}" : "Active spool cleared");

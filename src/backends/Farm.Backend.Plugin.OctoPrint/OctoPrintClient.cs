@@ -29,7 +29,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     ISupportsControlOperations,
     ISupportsGcodeExecution,
     ISupportsOctoPrintTemperature,
-    ISupportsMovement
+    ISupportsMovement,
+    ISupportsFilamentUsageQuery
 {
     private readonly HttpClient _httpClient = httpClient;
     private readonly ILogger<OctoPrintClient>? _logger = logger;
@@ -1962,5 +1963,35 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     {
         _logger?.LogWarning("MoveToAsync (absolute positioning) is not supported by OctoPrint");
         return Task.FromResult(false);
+    }
+
+    /// <summary>
+    /// ISupportsFilamentUsageQuery implementation — uses OctoPrint history to get filament usage.
+    /// OctoPrint tracks filament.tool0.length (in mm). Convert mm → grams using PLA density estimate.
+    /// </summary>
+#pragma warning disable CA1033
+    async Task<double?> ISupportsFilamentUsageQuery.GetLastJobFilamentUsageGramsAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
+#pragma warning restore CA1033
+    {
+        try
+        {
+            HistoryListResponse? history = await GetHistoryListAsync(baseUrl, limit: 1, credential: credential, ct: ct);
+            HistoryJob? lastJob = history?.Jobs?.FirstOrDefault();
+            if (lastJob is null || lastJob.FilamentUsed <= 0)
+            {
+                return null;
+            }
+
+            // FilamentUsed is in meters (converted from mm in parser), convert to mm then to grams
+            double actualMm = lastJob.FilamentUsed * 1000.0;
+
+            // Standard PLA 1.75mm rough estimate: ~1g per 335mm
+            return actualMm / 335.0;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to get filament usage from OctoPrint history");
+            return null;
+        }
     }
 }

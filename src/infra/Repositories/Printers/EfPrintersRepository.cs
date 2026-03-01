@@ -303,4 +303,12 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
         // They are typically 100+ characters long
         return value.Length > 100 && value.StartsWith("CfDJ", StringComparison.Ordinal);
     }
+
+    /// <inheritdoc/>
+    public async Task<Printer?> FindByCurrentSpoolIdAsync(int spoolId, CancellationToken ct)
+    {
+        return await _db.Printers
+            .FirstOrDefaultAsync(p => p.CurrentSpoolId == spoolId, ct)
+            .ConfigureAwait(false);
+    }
 }
