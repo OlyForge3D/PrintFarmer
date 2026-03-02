@@ -33,12 +33,12 @@ public interface ISpoolmanService
     void ClearConfig();
 
     /// <summary>
-    /// Gets a list of all filament spools from the configured Spoolman server.
+    /// Gets a paginated, filtered, and sorted list of filament spools from the configured Spoolman server.
     /// </summary>
-    /// <param name="ct">Cancellation token to cancel the operation</param>
-    /// <param name="limit">Optional maximum number of spools to return for faster partial loads</param>
-    /// <returns>A task containing a read-only list of all spools with their current status and information</returns>
-    Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct, int? limit = null);
+    /// <param name="queryParams">Query parameters for pagination, filtering, and sorting.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    /// <returns>A paginated result containing matching spools and total count.</returns>
+    Task<SpoolmanPagedResult<SpoolmanSpoolDto>> ListSpoolsAsync(SpoolmanSpoolQueryParams queryParams, CancellationToken ct);
 
     /// <summary>
     /// Gets a list of all filament types (product definitions) from the configured Spoolman server.

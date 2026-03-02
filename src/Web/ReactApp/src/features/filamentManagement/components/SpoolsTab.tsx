@@ -14,6 +14,8 @@ import {
   UploadIcon,
   ArrowUpIcon,
   ArrowDownIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
   PlusIcon,
   DeleteIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -40,29 +42,41 @@ interface FilterState {
   material: string;
   vendor: string;
   color: string;
-  pageSize: string;
+  pageSize: number;
   location: string;
   showEmpty: boolean;
 }
 
+/** Maps frontend sort field IDs to Spoolman API sort fields. */
+const SORT_FIELD_MAP: Record<string, string> = {
+  id: 'id',
+  name: 'filament.name',
+  vendor: 'filament.vendor.name',
+  material: 'filament.material',
+  remaining: 'remaining_weight',
+  location: 'location',
+};
+
 /**
  * SpoolsTab — Self-contained component displaying Spoolman spool inventory.
- * Supports card/table views, filtering, sorting, CSV export, and column config.
+ * Supports card/table views, server-side pagination/filtering/sorting, CSV export, and column config.
  */
 export function SpoolsTab() {
   const [spools, setSpools] = useState<SpoolmanSpoolDto[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [spoolmanError, setSpoolmanError] = useState<string | null>(null);
   const [spoolmanBaseUrl, setSpoolmanBaseUrl] = useState('');
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const importCsvMutation = useImportSpoolmanSpoolsCsv();
   const [,startTransition] = useTransition();
+  const [currentPage, setCurrentPage] = useState(0);
   const [filters, setFilters] = useState<FilterState>({
     search: '',
     material: '',
     vendor: '',
     color: '',
-    pageSize: '50',
+    pageSize: 50,
     location: '',
     showEmpty: false
   });
@@ -72,6 +86,11 @@ export function SpoolsTab() {
     const saved = localStorage.getItem('spools-view-mode');
     return saved === 'table' ? 'table' : 'cards';
   });
+
+  // Filter dropdown options — accumulated from loaded data
+  const [materialOptions, setMaterialOptions] = useState<string[]>([]);
+  const [vendorOptions, setVendorOptions] = useState<string[]>([]);
+  const [locationOptions, setLocationOptions] = useState<string[]>([]);
 
   // Persist view mode preference
   useEffect(() => {
@@ -217,28 +236,66 @@ export function SpoolsTab() {
   };
 
   const hasActiveSpoolFilters = filters.search !== '' || filters.material !== '' || filters.vendor !== '' || filters.color !== '' || filters.location !== '' || filters.showEmpty;
-  const resetSpoolFilters = () => setFilters(prev => ({ ...prev, search: '', material: '', vendor: '', color: '', location: '', showEmpty: false }));
+  const resetSpoolFilters = () => {
+    setFilters(prev => ({ ...prev, search: '', material: '', vendor: '', color: '', location: '', showEmpty: false }));
+    setCurrentPage(0);
+  };
 
   const loadSpools = useCallback(async () => {
     startTransition(async () => {
       try {
         setSpoolmanError(null);
-        const parsedPageSize = parseInt(filters.pageSize, 10);
-        const serverLimit = filters.pageSize === 'All' || !Number.isFinite(parsedPageSize)
-          ? undefined
-          : parsedPageSize;
-        const data = await apiClient.getSpools(serverLimit);
-        const list: SpoolmanSpoolDto[] = Array.isArray(data) ? (data as SpoolmanSpoolDto[]) : ((data as Record<string, unknown>).items as SpoolmanSpoolDto[] || []);
-        setSpools(list);
+
+        // Build server-side sort expression
+        const spoolmanSortField = SORT_FIELD_MAP[sortField];
+        const sort = spoolmanSortField ? `${spoolmanSortField}:${sortDir}` : undefined;
+
+        const result = await apiClient.getSpools({
+          limit: filters.pageSize,
+          offset: currentPage * filters.pageSize,
+          sort,
+          search: filters.search || undefined,
+          material: filters.material || undefined,
+          vendor: filters.vendor || undefined,
+          location: filters.location || undefined,
+          allowArchived: filters.showEmpty ? true : undefined,
+        });
+
+        setSpools(result.items);
+        setTotalCount(result.totalCount);
+
+        // Accumulate filter dropdown options from returned data
+        setMaterialOptions(prev => {
+          const combined = new Set(prev);
+          for (const s of result.items) {
+            if (s.material) combined.add(s.material);
+          }
+          return [...combined].sort();
+        });
+        setVendorOptions(prev => {
+          const combined = new Set(prev);
+          for (const s of result.items) {
+            if (s.vendor) combined.add(s.vendor);
+          }
+          return [...combined].sort();
+        });
+        setLocationOptions(prev => {
+          const combined = new Set(prev);
+          for (const s of result.items) {
+            if (s.location) combined.add(s.location);
+          }
+          return [...combined].sort();
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         setSpoolmanError(`Failed to load spools: ${message}`);
         setSpools([]);
+        setTotalCount(0);
       } finally {
         setLoading(false);
       }
     });
-  }, [filters.pageSize, startTransition]);
+  }, [startTransition, currentPage, filters.pageSize, filters.search, filters.material, filters.vendor, filters.location, filters.showEmpty, sortField, sortDir]);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -276,63 +333,22 @@ export function SpoolsTab() {
     });
   };
 
-  const filteredSpools = useMemo((): SpoolmanSpoolDto[] => spools.filter(spool => {
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-      const matchesSearch =
-        (spool.filamentName || spool.name || '').toLowerCase().includes(q) ||
-        (spool.vendor || '').toLowerCase().includes(q) ||
-        (spool.material || '').toLowerCase().includes(q) ||
-        (spool.location || '').toLowerCase().includes(q) ||
-        (spool.lotNumber || '').toLowerCase().includes(q) ||
-        String(spool.id).includes(q);
-      if (!matchesSearch) return false;
-    }
-    if (filters.material && !spool.material?.toLowerCase().includes(filters.material.toLowerCase())) return false;
-    if (filters.vendor && !(spool.vendor || '').toLowerCase().includes(filters.vendor.toLowerCase())) return false;
-    if (filters.color && classifyColor(spool.colorHex) !== filters.color) return false;
-    if (filters.location && !(spool.location || '').toLowerCase().includes(filters.location.toLowerCase())) return false;
-    if (!filters.showEmpty) {
-      const remaining = typeof spool.remainingWeightG === 'number' ? spool.remainingWeightG : (spool.initialWeightG != null && spool.usedWeightG != null ? (spool.initialWeightG - spool.usedWeightG) : null);
-      if (remaining != null && remaining <= 0) return false;
-      if (remaining == null && typeof spool.remainingPercent === 'number' && spool.remainingPercent <= 0) return false;
-    }
-    return true;
-  }), [spools, filters.search, filters.material, filters.vendor, filters.color, filters.location, filters.showEmpty]);
-
+  // Client-side filters that Spoolman doesn't support natively (color family, empty weight)
   const displayedSpools = useMemo((): SpoolmanSpoolDto[] => {
-    const filtered = [...filteredSpools];
-    filtered.sort((a, b) => {
-      const dir = sortDir === 'asc' ? 1 : -1;
-      const col = tableColumns.find(c => c.id === sortField);
-      const val = (f: SpoolmanSpoolDto): string | number => {
-        if (col?.sortValue) return col.sortValue(f);
-        switch (sortField) {
-          case 'vendor': return (f.vendor || '').toLowerCase();
-          case 'material': return (f.material || '').toLowerCase();
-          case 'remaining': return f.remainingWeightG ?? -Infinity;
-          case 'usedPercent': return getUsagePercentage(f);
-          case 'color': return classifyColor(f.colorHex).toLowerCase();
-          case 'location': return (f.location || '').toLowerCase();
-          case 'name': return (f.filamentName || f.name || '').toLowerCase();
-          case 'archived': return f.archived ? 1 : 0;
-          default: return f.id;
-        }
-      };
-      const av = val(a);
-      const bv = val(b);
-      if (av < bv) return -1 * dir;
-      if (av > bv) return 1 * dir;
-      return 0;
+    return spools.filter(spool => {
+      // Color filter is client-side only (Spoolman has no color family concept)
+      if (filters.color && classifyColor(spool.colorHex) !== filters.color) return false;
+      // showEmpty=false: hide spools with 0 remaining weight (client-side, Spoolman doesn't support this)
+      if (!filters.showEmpty) {
+        const remaining = typeof spool.remainingWeightG === 'number' ? spool.remainingWeightG : (spool.initialWeightG != null && spool.usedWeightG != null ? (spool.initialWeightG - spool.usedWeightG) : null);
+        if (remaining != null && remaining <= 0) return false;
+        if (remaining == null && typeof spool.remainingPercent === 'number' && spool.remainingPercent <= 0) return false;
+      }
+      return true;
     });
-    if (filters.pageSize === 'All') return filtered;
-    const pageSize = parseInt(filters.pageSize);
-    return filtered.slice(0, pageSize);
-  }, [filteredSpools, sortField, sortDir, tableColumns, filters.pageSize]);
+  }, [spools, filters.color, filters.showEmpty]);
 
-  const getMaterialOptions = (): string[] => [...new Set(spools.map(s => s.material).filter((m): m is string => !!m))].sort();
-  const getVendorOptions = (): string[] => [...new Set(spools.map(s => s.vendor).filter((v): v is string => !!v))].sort();
-  const getLocationOptions = (): string[] => [...new Set(spools.map(s => s.location).filter((l): l is string => !!l))].sort();
+  const totalPages = filters.pageSize > 0 ? Math.max(1, Math.ceil(totalCount / filters.pageSize)) : 1;
   const getColorFamilyOptions = (): string[] => [...new Set(spools.map(s => classifyColor(s.colorHex)))]
     .filter(f => f && f !== 'Unknown')
     .sort();
@@ -460,7 +476,7 @@ export function SpoolsTab() {
         </div>
       )}
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold text-pf-text-primary">Spools ({filteredSpools.length})</h2>
+        <h2 className="text-xl font-bold text-pf-text-primary">Spools ({totalCount})</h2>
         <div className="flex gap-2 items-center">
           <Button
             size="sm"
@@ -621,7 +637,7 @@ export function SpoolsTab() {
         </div>
       )}
 
-      {!spoolmanError && spools.length > 0 && (
+      {!spoolmanError && (spools.length > 0 || totalCount > 0) && (
         <>
           {/* Filters */}
           <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4" data-testid="spool-filters">
@@ -649,7 +665,10 @@ export function SpoolsTab() {
                   id="spool-search"
                   type="search"
                   value={filters.search}
-                  onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                  onChange={e => {
+                    setFilters(prev => ({ ...prev, search: e.target.value }));
+                    setCurrentPage(0);
+                  }}
                   placeholder="Name, vendor, material..."
                   className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                   aria-label="Search spools"
@@ -660,11 +679,14 @@ export function SpoolsTab() {
                 <Select
                   aria-label="Filter by material"
                   value={filters.material}
-                  onChange={(e) => setFilters(prev => ({ ...prev, material: e.target.value }))}
+                  onChange={(e) => {
+                    setFilters(prev => ({ ...prev, material: e.target.value }));
+                    setCurrentPage(0);
+                  }}
                   className="w-40"
                 >
                   <option value="">All Materials</option>
-                  {getMaterialOptions().map(material => (
+                  {materialOptions.map(material => (
                     <option key={material} value={material}>{material}</option>
                   ))}
                 </Select>
@@ -675,11 +697,14 @@ export function SpoolsTab() {
                 <Select
                   aria-label="Filter by vendor"
                   value={filters.vendor}
-                  onChange={(e) => setFilters(prev => ({ ...prev, vendor: e.target.value }))}
+                  onChange={(e) => {
+                    setFilters(prev => ({ ...prev, vendor: e.target.value }));
+                    setCurrentPage(0);
+                  }}
                   className="w-40"
                 >
                   <option value="">All Vendors</option>
-                  {getVendorOptions().map(vendor => (
+                  {vendorOptions.map(vendor => (
                     <option key={vendor} value={vendor}>{vendor}</option>
                   ))}
                 </Select>
@@ -700,11 +725,14 @@ export function SpoolsTab() {
                 <Select
                   aria-label="Filter by location"
                   value={filters.location}
-                  onChange={(e) => setFilters(prev => ({ ...prev, location: e.target.value }))}
+                  onChange={(e) => {
+                    setFilters(prev => ({ ...prev, location: e.target.value }));
+                    setCurrentPage(0);
+                  }}
                   className="w-40"
                 >
                   <option value="">All Locations</option>
-                  {getLocationOptions().map(loc => (
+                  {locationOptions.map(loc => (
                     <option key={loc} value={loc}>{loc}</option>
                   ))}
                 </Select>
@@ -718,24 +746,27 @@ export function SpoolsTab() {
                       id="sort-field"
                       aria-label="Sort field"
                       value={sortField}
-                      onChange={e => setSortField(e.target.value)}
+                      onChange={e => {
+                        setSortField(e.target.value);
+                        setCurrentPage(0);
+                      }}
                       className="w-40"
                     >
                       <option value="id">ID</option>
                       <option value="vendor">Vendor</option>
                       <option value="material">Material</option>
                       <option value="remaining">Remaining (g)</option>
-                      <option value="usedPercent">Used %</option>
-                      <option value="color">Color</option>
                       <option value="location">Location</option>
                       <option value="name">Name</option>
-                      <option value="archived">Archived</option>
                     </Select>
                     <Button
                       size="sm"
                       variant="subtle"
                       aria-label="Toggle sort direction"
-                      onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
+                      onClick={() => {
+                        setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+                        setCurrentPage(0);
+                      }}
                       iconLeft={sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />}
                     />
                   </div>
@@ -748,24 +779,56 @@ export function SpoolsTab() {
                   <Select
                     id="spool-page-size"
                     aria-label="Page size"
-                    value={filters.pageSize}
-                    onChange={(e) => setFilters(prev => ({ ...prev, pageSize: e.target.value }))}
+                    value={String(filters.pageSize)}
+                    onChange={(e) => {
+                      setFilters(prev => ({ ...prev, pageSize: parseInt(e.target.value) }));
+                      setCurrentPage(0);
+                    }}
                     className="w-20"
                   >
                     <option value="10">10</option>
                     <option value="25">25</option>
                     <option value="50">50</option>
                     <option value="100">100</option>
-                    <option value="All">All</option>
                   </Select>
                 </div>
-                <span className="text-pf-text-secondary">Showing {displayedSpools.length} of {filteredSpools.length}</span>
+                <span className="text-pf-text-secondary">
+                  {totalCount > 0
+                    ? `${currentPage * filters.pageSize + 1}–${Math.min((currentPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
+                    : '0 results'}
+                </span>
+
+                {/* Pagination controls */}
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="subtle"
+                    disabled={currentPage === 0}
+                    onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
+                    aria-label="Previous page"
+                    iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
+                  />
+                  <span className="text-xs text-pf-text-secondary px-1">
+                    Page {currentPage + 1} of {totalPages}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="subtle"
+                    disabled={currentPage >= totalPages - 1}
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages - 1, prev + 1))}
+                    aria-label="Next page"
+                    iconLeft={<ArrowRightIcon className="h-3 w-3" />}
+                  />
+                </div>
                 
                 <label className="flex items-center gap-1 text-xs cursor-pointer">
                   <Checkbox
                     aria-label="Show empty spools"
                     checked={filters.showEmpty}
-                    onChange={e => setFilters(prev => ({ ...prev, showEmpty: e.target.checked }))}
+                    onChange={e => {
+                      setFilters(prev => ({ ...prev, showEmpty: e.target.checked }));
+                      setCurrentPage(0);
+                    }}
                   />
                   Show empty
                 </label>
@@ -840,7 +903,7 @@ export function SpoolsTab() {
               allSelected={allSelected}
               sortField={sortField}
               sortDir={sortDir}
-              onSort={(field, dir) => { setSortField(field); setSortDir(dir); }}
+              onSort={(field, dir) => { setSortField(field); setSortDir(dir); setCurrentPage(0); }}
               onToggleSelect={toggleSelect}
               onToggleSelectAll={toggleSelectAll}
               onEdit={(s) => setEditingSpool(s)}
@@ -848,7 +911,7 @@ export function SpoolsTab() {
               onDelete={(s) => setDeleteConfirm({ type: 'single', spool: s })}
             />
           )}
-          {displayedSpools.length === 0 && filteredSpools.length > 0 && (
+          {displayedSpools.length === 0 && totalCount > 0 && (
             <div className="text-center py-8 text-pf-text-secondary">
               No spools match the current filters.
             </div>

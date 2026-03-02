@@ -161,31 +161,30 @@ namespace Farm.Web.Api.Tests.Controllers
             };
 
             _spoolmanServiceMock
-                .Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>(), It.IsAny<int?>()))
-                .ReturnsAsync(spools);
+                .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(spools, 2));
 
             // Act
-            ActionResult<IEnumerable<SpoolmanSpoolDto>> result = await _controller.GetSpoolsAsync(null, CancellationToken.None);
+            ActionResult<SpoolmanPagedResult<SpoolmanSpoolDto>> result = await _controller.GetSpoolsAsync(null, null, null, null, null, null, null, null, CancellationToken.None);
 
             // Assert
-            ActionResult<IEnumerable<SpoolmanSpoolDto>> okResult = Assert.IsType<ActionResult<IEnumerable<SpoolmanSpoolDto>>>(result);
+            _ = Assert.IsType<ActionResult<SpoolmanPagedResult<SpoolmanSpoolDto>>>(result);
         }
 
         [Fact]
         public async Task GetSpoolsAsync_CallsService()
         {
             // Arrange
-            var spools = new List<SpoolmanSpoolDto>();
             _spoolmanServiceMock
-                .Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>(), It.IsAny<int?>()))
-                .ReturnsAsync(spools);
+                .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0));
 
             // Act
-            await _controller.GetSpoolsAsync(null, CancellationToken.None);
+            await _controller.GetSpoolsAsync(null, null, null, null, null, null, null, null, CancellationToken.None);
 
             // Assert
             _spoolmanServiceMock.Verify(
-                s => s.ListSpoolsAsync(It.IsAny<CancellationToken>(), It.IsAny<int?>()),
+                s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()),
                 Times.Once);
         }
 

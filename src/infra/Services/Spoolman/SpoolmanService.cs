@@ -176,43 +176,122 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         settingsService.Save(settings);
     }
 
-    public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct, int? limit = null)
+    public async Task<SpoolmanPagedResult<SpoolmanSpoolDto>> ListSpoolsAsync(SpoolmanSpoolQueryParams queryParams, CancellationToken ct)
     {
-        int? effectiveLimit = limit.HasValue ? Math.Clamp(limit.Value, 1, 500) : null;
+        ArgumentNullException.ThrowIfNull(queryParams);
 
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
-            logger.LogDebug($"Spoolman not configured – returning empty spool list");
-            return [];
+            logger.LogDebug("Spoolman not configured – returning empty spool list");
+            return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
         }
 
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
-        string url = $"{baseUrl}/api/v1/spool";
-        if (effectiveLimit.HasValue)
-        {
-            url = $"{url}?page_size={effectiveLimit.Value}";
-        }
+        string url = BuildSpoolQueryUrl(baseUrl, queryParams);
 
         try
         {
-            PageFetchResult result = await FetchAllPagesAsync(url, ct, effectiveLimit);
-            if (result.AttemptedPages > 1)
+            using HttpRequestMessage req = new(HttpMethod.Get, url);
+            req.Headers.Accept.ParseAdd("application/json");
+            using HttpResponseMessage resp = await http.SendAsync(req, ct);
+
+            if (!resp.IsSuccessStatusCode)
             {
-                logger.LogInformation("Retrieved {Count} spools across {AttemptedPages} pages", result.Items.Count, result.AttemptedPages);
-            }
-            else
-            {
-                logger.LogDebug("Retrieved {Count} spools", result.Items.Count);
+                logger.LogWarning("Spoolman spool listing returned {StatusCode}", resp.StatusCode);
+                return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
             }
 
-            return result.Items;
+            // Read total count from Spoolman's X-Total-Count header
+            int totalCount = 0;
+            if (resp.Headers.TryGetValues("X-Total-Count", out IEnumerable<string>? values))
+            {
+                string? headerValue = values.FirstOrDefault();
+                if (!string.IsNullOrEmpty(headerValue))
+                {
+                    _ = int.TryParse(headerValue, CultureInfo.InvariantCulture, out totalCount);
+                }
+            }
+
+            using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
+            if (doc is null)
+            {
+                logger.LogWarning("Spoolman spool listing returned invalid JSON");
+                return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
+            }
+
+            List<SpoolmanSpoolDto> items = new();
+            foreach (JsonElement item in SpoolmanJsonParser.EnumerateItems(doc.RootElement))
+            {
+                ct.ThrowIfCancellationRequested();
+                items.Add(SpoolmanJsonParser.ParseSpool(item));
+            }
+
+            // If Spoolman didn't return an X-Total-Count header, fall back to item count
+            if (totalCount == 0 && items.Count > 0)
+            {
+                totalCount = items.Count;
+            }
+
+            logger.LogDebug("Retrieved {Count} spools (total {TotalCount})", items.Count, totalCount);
+            return new SpoolmanPagedResult<SpoolmanSpoolDto>(items, totalCount);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, $"Failed to fetch spools from Spoolman");
-            return [];
+            logger.LogWarning(ex, "Failed to fetch spools from Spoolman");
+            return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
         }
+    }
+
+    /// <summary>
+    /// Builds the Spoolman /api/v1/spool URL with query parameters for server-side pagination, filtering, and sorting.
+    /// </summary>
+    internal static string BuildSpoolQueryUrl(string baseUrl, SpoolmanSpoolQueryParams queryParams)
+    {
+        List<string> parts = new();
+
+        if (queryParams.Limit.HasValue)
+        {
+            parts.Add($"limit={queryParams.Limit.Value}");
+        }
+
+        if (queryParams.Offset.HasValue && queryParams.Offset.Value > 0)
+        {
+            parts.Add($"offset={queryParams.Offset.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Sort))
+        {
+            parts.Add($"sort={Uri.EscapeDataString(queryParams.Sort)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Search))
+        {
+            parts.Add($"filament.name={Uri.EscapeDataString(queryParams.Search)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Material))
+        {
+            parts.Add($"filament.material={Uri.EscapeDataString(queryParams.Material)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Vendor))
+        {
+            parts.Add($"filament.vendor.name={Uri.EscapeDataString(queryParams.Vendor)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryParams.Location))
+        {
+            parts.Add($"location={Uri.EscapeDataString(queryParams.Location)}");
+        }
+
+        if (queryParams.AllowArchived == true)
+        {
+            parts.Add("allow_archived=true");
+        }
+
+        string url = $"{baseUrl}/api/v1/spool";
+        return parts.Count > 0 ? $"{url}?{string.Join('&', parts)}" : url;
     }
 
     /// <inheritdoc/>
@@ -630,106 +709,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
     }
 
-    private sealed record PageFetchResult(List<SpoolmanSpoolDto> Items, bool Success, int AttemptedPages, HttpStatusCode? LastStatusCode);
-
     private sealed record MaterialPageFetchResult(List<SpoolmanMaterialDto> Items, bool Success, int AttemptedPages, HttpStatusCode? LastStatusCode);
-
-    private async Task<PageFetchResult> FetchAllPagesAsync(string initialUrl, CancellationToken ct, int? maxItems = null)
-    {
-        List<SpoolmanSpoolDto> collected = new();
-        string? nextUrl = initialUrl;
-        int page = 0;
-        HttpStatusCode? lastStatus = null;
-        bool anySuccess = false;
-        const int MAX_PAGES = 20; // safety cap
-
-        while (!string.IsNullOrWhiteSpace(nextUrl) && page < MAX_PAGES)
-        {
-            page++;
-            using HttpRequestMessage req = new(HttpMethod.Get, nextUrl);
-            req.Headers.Accept.ParseAdd("application/json");
-            using HttpResponseMessage resp = await http.SendAsync(req, ct);
-            lastStatus = resp.StatusCode;
-            if (!resp.IsSuccessStatusCode)
-            {
-                // Stop paging on first failure after at least one success; otherwise treat as total failure
-                break;
-            }
-
-            anySuccess = true;
-
-            string? mediaType = resp.Content.Headers.ContentType?.MediaType;
-            if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
-            {
-                logger.LogDebug("Spoolman page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
-                break;
-            }
-
-            using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
-            if (doc is null)
-            {
-                logger.LogDebug("Spoolman page {Page} invalid JSON; aborting", page);
-                break;
-            }
-
-            JsonElement root = doc.RootElement;
-            int before = collected.Count;
-            foreach (JsonElement item in SpoolmanJsonParser.EnumerateItems(root))
-            {
-                ct.ThrowIfCancellationRequested();
-                collected.Add(SpoolmanJsonParser.ParseSpool(item));
-            }
-
-            int added = collected.Count - before;
-            logger.LogDebug("Spoolman page {Page} added {Added} spools (total {CollectedCount})", page, added, collected.Count);
-
-            if (maxItems.HasValue && maxItems.Value > 0 && collected.Count >= maxItems.Value)
-            {
-                if (collected.Count > maxItems.Value)
-                {
-                    collected = collected.Take(maxItems.Value).ToList();
-                }
-
-                break;
-            }
-
-            // Pagination detection: common DRF style { "next": "url or null" }
-            string? next = null;
-            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("next", out JsonElement nextProp) && nextProp.ValueKind == JsonValueKind.String)
-            {
-                string? n = nextProp.GetString();
-                if (!string.IsNullOrWhiteSpace(n))
-                {
-                    next = n;
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(next))
-            {
-                break; // no further pages
-            }
-
-            // If relative, build absolute
-            if (!Uri.TryCreate(next, UriKind.Absolute, out Uri? nextAbs) && Uri.TryCreate(initialUrl, UriKind.Absolute, out Uri? baseAbs))
-            {
-                try
-                {
-                    string baseRoot = $"{baseAbs.Scheme}://{baseAbs.Authority}";
-                    nextUrl = baseRoot.TrimEnd('/') + (next.StartsWith('/') ? next : "/" + next);
-                }
-                catch
-                {
-                    nextUrl = next; // fallback raw
-                }
-            }
-            else
-            {
-                nextUrl = next;
-            }
-        }
-
-        return new PageFetchResult(collected, anySuccess, page, lastStatus);
-    }
 
     private async Task<MaterialPageFetchResult> FetchAllMaterialPagesAsync(string initialUrl, CancellationToken ct)
     {

@@ -30,39 +30,30 @@ public class SpoolmanServiceTests
 
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        IReadOnlyList<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(CancellationToken.None);
+        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
 
-        Assert.Empty(result);
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
     }
 
     [Fact]
-    public async Task ListSpoolsAsync_PaginatesAcrossNextUrls()
+    public async Task ListSpoolsAsync_ReturnsItemsWithTotalCount()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
-        // First page returns a 'next' field pointing to second page; second page returns final array
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
                 {
-                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spool") || req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
+                    if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spool"))
                     {
-                        if (req.RequestUri!.Query.Contains("page=2"))
+                        string json = JsonSerializer.Serialize(new[] { new { id = 1, name = "First" }, new { id = 2, name = "Second" } });
+                        HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
                         {
-                            string json2 = JsonSerializer.Serialize(new[] { new { id = 2, name = "Second" } });
-                            return new HttpResponseMessage(HttpStatusCode.OK)
-                            {
-                                Content = new StringContent(json2, Encoding.UTF8, "application/json")
-                            };
-                        }
-
-                        // Return object with results and next -> /api/v1/spools?page=2
-                        var page1 = new { results = new[] { new { id = 1, name = "First" } }, next = "/api/v1/spools?page=2" };
-                        string json1 = JsonSerializer.Serialize(page1);
-                        return new HttpResponseMessage(HttpStatusCode.OK)
-                        {
-                            Content = new StringContent(json1, Encoding.UTF8, "application/json")
+                            Content = new StringContent(json, Encoding.UTF8, "application/json")
                         };
+                        response.Headers.Add("X-Total-Count", "42");
+                        return response;
                     }
                     return new HttpResponseMessage(HttpStatusCode.NotFound);
                 });
@@ -70,11 +61,12 @@ public class SpoolmanServiceTests
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
+        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams { Limit = 50 }, CancellationToken.None);
 
-        Assert.Equal(2, items.Count);
-        Assert.Contains(items, i => i.Id == 1);
-        Assert.Contains(items, i => i.Id == 2);
+        Assert.Equal(2, result.Items.Count);
+        Assert.Equal(42, result.TotalCount);
+        Assert.Contains(result.Items, i => i.Id == 1);
+        Assert.Contains(result.Items, i => i.Id == 2);
     }
 
     [Fact]
@@ -152,10 +144,10 @@ public class SpoolmanServiceTests
 
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
+        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
 
-        _ = Assert.Single(items);
-        Assert.Equal(42, items[0].Id);
+        _ = Assert.Single(result.Items);
+        Assert.Equal(42, result.Items[0].Id);
     }
 
     [Fact]
@@ -187,43 +179,51 @@ public class SpoolmanServiceTests
     }
 
     [Fact]
-    public async Task ListSpoolsAsync_HandlesRelativeNextLinkResolution()
+    public async Task ListSpoolsAsync_PassesQueryParamsToSpoolman()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
-        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local/root" });
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
 
+        string? capturedUrl = null;
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
             {
-                // If the request URI contains page=2 return the second page
-                if (req.RequestUri!.AbsoluteUri.Contains("page=2"))
+                capturedUrl = req.RequestUri!.AbsoluteUri;
+                string json = JsonSerializer.Serialize(new[] { new { id = 101, name = "Filtered" } });
+                HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    string json2 = JsonSerializer.Serialize(new[] { new { id = 102, name = "RelSecond" } });
-                    return new HttpResponseMessage(HttpStatusCode.OK)
-                    {
-                        Content = new StringContent(json2, Encoding.UTF8, "application/json")
-                    };
-                }
-
-                if (req.RequestUri.AbsolutePath.Contains("/api/v1/spool"))
-                {
-                    // page 1 has next "/api/v1/spools?page=2" (relative)
-                    var page1 = new { results = new[] { new { id = 101, name = "RelFirst" } }, next = "/api/v1/spools?page=2" };
-                    return new HttpResponseMessage(HttpStatusCode.OK)
-                    {
-                        Content = new StringContent(JsonSerializer.Serialize(page1), Encoding.UTF8, "application/json")
-                    };
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                response.Headers.Add("X-Total-Count", "1");
+                return response;
             });
 
-        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local/root") };
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
-        Assert.Contains(items, i => i.Id == 101);
-        Assert.Contains(items, i => i.Id == 102);
+        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(
+            new SpoolmanSpoolQueryParams
+            {
+                Limit = 25,
+                Offset = 50,
+                Sort = "filament.name:asc",
+                Search = "PLA",
+                Material = "PLA",
+                Location = "Shelf A",
+                AllowArchived = true,
+            },
+            CancellationToken.None);
+
+        Assert.NotNull(capturedUrl);
+        Assert.Contains("limit=25", capturedUrl);
+        Assert.Contains("offset=50", capturedUrl);
+        Assert.Contains("sort=", capturedUrl);
+        Assert.Contains("filament.name=", capturedUrl);
+        Assert.Contains("filament.material=", capturedUrl);
+        Assert.Contains("location=", capturedUrl);
+        Assert.Contains("allow_archived=true", capturedUrl);
+        Assert.Single(result.Items);
+        Assert.Equal(1, result.TotalCount);
     }
 
     [Fact]
@@ -266,16 +266,19 @@ public class SpoolmanServiceTests
         {
             // Return empty successful payload
             string json = JsonSerializer.Serialize(new object[] { });
-            return new HttpResponseMessage(HttpStatusCode.OK)
+            HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             };
+            response.Headers.Add("X-Total-Count", "0");
+            return response;
         });
 
         HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
-        Assert.Empty(items);
+        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
     }
 }

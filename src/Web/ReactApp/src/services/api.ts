@@ -2527,13 +2527,45 @@ export class ApiClient {
   }
 
   /**
-   * Get spools from Spoolman
+   * Get paginated spools from Spoolman with server-side filtering and sorting.
    */
-  async getSpools(limit?: number): Promise<SpoolmanSpool[]> {
-    const params = limit && limit > 0 ? { limit } : undefined;
-    const response = await this.client.get('/spoolman/spools', { params });
+  async getSpools(params?: {
+    limit?: number;
+    offset?: number;
+    sort?: string;
+    search?: string;
+    material?: string;
+    vendor?: string;
+    location?: string;
+    allowArchived?: boolean;
+  }): Promise<{ items: SpoolmanSpool[]; totalCount: number }> {
+    const queryParams: Record<string, string | number | boolean> = {};
+    if (params?.limit && params.limit > 0) queryParams.limit = params.limit;
+    if (params?.offset && params.offset > 0) queryParams.offset = params.offset;
+    if (params?.sort) queryParams.sort = params.sort;
+    if (params?.search) queryParams.search = params.search;
+    if (params?.material) queryParams.material = params.material;
+    if (params?.vendor) queryParams.vendor = params.vendor;
+    if (params?.location) queryParams.location = params.location;
+    if (params?.allowArchived) queryParams.allowArchived = true;
+
+    const response = await this.client.get('/spoolman/spools', {
+      params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+    });
     const data = response.data;
-    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanSpool[] || [];
+
+    // Handle the new paginated response format { items, totalCount }
+    if (data && typeof data === 'object' && !Array.isArray(data) && 'items' in data) {
+      const result = data as { items: SpoolmanSpool[]; totalCount: number };
+      return {
+        items: Array.isArray(result.items) ? result.items : [],
+        totalCount: typeof result.totalCount === 'number' ? result.totalCount : 0,
+      };
+    }
+
+    // Fallback for plain array response (backward compatibility)
+    const items = Array.isArray(data) ? (data as SpoolmanSpool[]) : [];
+    return { items, totalCount: items.length };
   }
 
   /**

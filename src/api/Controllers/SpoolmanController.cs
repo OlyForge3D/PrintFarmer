@@ -96,25 +96,58 @@ public class SpoolmanController(
     }
 
     /// <summary>
-    /// Gets all spools from the connected Spoolman server.
+    /// Gets a paginated, filtered, and sorted list of spools from the connected Spoolman server.
     /// </summary>
-    /// <param name="limit">Optional maximum number of spools to fetch for faster partial loads.</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>List of all filament spools from Spoolman</returns>
-    /// <response code="200">Returns the list of spools from Spoolman</response>
+    /// <param name="limit">Maximum number of spools per page.</param>
+    /// <param name="offset">Offset into the full result set.</param>
+    /// <param name="sort">Sort expression, e.g. "filament.name:asc".</param>
+    /// <param name="search">Partial search term applied to filament name.</param>
+    /// <param name="material">Filter by filament material.</param>
+    /// <param name="vendor">Filter by vendor name.</param>
+    /// <param name="location">Filter by spool location.</param>
+    /// <param name="allowArchived">Whether to include archived spools.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Paginated result containing spools and total count.</returns>
+    /// <response code="200">Returns the paginated list of spools from Spoolman</response>
     /// <response code="503">If Spoolman is not configured or unavailable</response>
     [HttpGet("spools")]
-    [ProducesResponseType(typeof(IEnumerable<SpoolmanSpoolDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(SpoolmanPagedResult<SpoolmanSpoolDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetSpoolsAsync([FromQuery] int? limit, CancellationToken ct)
+    public async Task<ActionResult<SpoolmanPagedResult<SpoolmanSpoolDto>>> GetSpoolsAsync(
+        [FromQuery] int? limit,
+        [FromQuery] int? offset,
+        [FromQuery] string? sort,
+        [FromQuery] string? search,
+        [FromQuery] string? material,
+        [FromQuery] string? vendor,
+        [FromQuery] string? location,
+        [FromQuery] bool? allowArchived,
+        CancellationToken ct)
     {
         if (limit.HasValue && (limit.Value < 1 || limit.Value > 500))
         {
             return BadRequest(new { message = "limit must be between 1 and 500." });
         }
 
-        return Ok(await spoolman.ListSpoolsAsync(ct, limit));
+        if (offset.HasValue && offset.Value < 0)
+        {
+            return BadRequest(new { message = "offset must be non-negative." });
+        }
+
+        SpoolmanSpoolQueryParams queryParams = new()
+        {
+            Limit = limit,
+            Offset = offset,
+            Sort = sort,
+            Search = search,
+            Material = material,
+            Vendor = vendor,
+            Location = location,
+            AllowArchived = allowArchived,
+        };
+
+        return Ok(await spoolman.ListSpoolsAsync(queryParams, ct));
     }
 
     /// <summary>
