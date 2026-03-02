@@ -251,13 +251,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   }, [printer]);
 
   // Keep target temperature inputs in sync with the printer's actual targets via SignalR
+  const printerHotendTarget = printer?.hotendTarget ?? 0;
+  const printerBedTarget = printer?.bedTarget ?? 0;
   useEffect(() => {
-    if (!printer) return;
-    const hotend = printer.hotendTarget ?? 0;
-    setHotendTemp(hotend > 0 ? hotend : '');
-    const bed = printer.bedTarget ?? 0;
-    setBedTemp(bed > 0 ? bed : '');
-  }, [printer?.hotendTarget, printer?.bedTarget]);
+    setHotendTemp(printerHotendTarget > 0 ? printerHotendTarget : '');
+    setBedTemp(printerBedTarget > 0 ? printerBedTarget : '');
+  }, [printerHotendTarget, printerBedTarget]);
 
   // Guard early after all hooks are called
   if (!printerId) {
