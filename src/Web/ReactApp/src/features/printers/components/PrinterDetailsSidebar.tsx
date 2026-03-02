@@ -250,19 +250,13 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     });
   }, [printer]);
 
-  // Sync target temperature inputs from printer when user hasn't manually entered a value
+  // Keep target temperature inputs in sync with the printer's actual targets via SignalR
   useEffect(() => {
     if (!printer) return;
-    setHotendTemp(prev => {
-      const target = printer.hotendTarget ?? 0;
-      if (prev === '' && target > 0) return target;
-      return prev;
-    });
-    setBedTemp(prev => {
-      const target = printer.bedTarget ?? 0;
-      if (prev === '' && target > 0) return target;
-      return prev;
-    });
+    const hotend = printer.hotendTarget ?? 0;
+    setHotendTemp(hotend > 0 ? hotend : '');
+    const bed = printer.bedTarget ?? 0;
+    setBedTemp(bed > 0 ? bed : '');
   }, [printer?.hotendTarget, printer?.bedTarget]);
 
   // Guard early after all hooks are called
