@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router';
+import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { PackageIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -32,9 +32,12 @@ const TABS: Tab[] = [
  * Defaults to the Filaments tab. Active tab is persisted via URL search params.
  */
 export function FilamentManagementPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const { tabId } = useParams<{ tabId?: string }>();
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<TabId>(() => {
+    if (tabId === 'filaments' || tabId === 'spools') return tabId;
     const urlTab = searchParams.get('tab');
     if (urlTab === 'filaments' || urlTab === 'spools') return urlTab;
     const saved = localStorage.getItem('pf.spoolsPageActiveTab');
@@ -42,24 +45,23 @@ export function FilamentManagementPage() {
     return 'filaments';
   });
 
-  // Sync URL → state when search params change externally
+  // Sync URL → state when path param changes externally
   useEffect(() => {
-    const urlTab = searchParams.get('tab');
-    if (urlTab === 'filaments' || urlTab === 'spools') {
-      if (urlTab !== activeTab) {
+    if (tabId === 'filaments' || tabId === 'spools') {
+      if (tabId !== activeTab) {
         queueMicrotask(() => {
-          setActiveTab(urlTab);
-          localStorage.setItem('pf.spoolsPageActiveTab', urlTab);
+          setActiveTab(tabId);
+          localStorage.setItem('pf.spoolsPageActiveTab', tabId);
         });
       }
     }
-  }, [searchParams, activeTab]);
+  }, [tabId, activeTab]);
 
   const handleTabChange = useCallback((tab: TabId) => {
     setActiveTab(tab);
     localStorage.setItem('pf.spoolsPageActiveTab', tab);
-    setSearchParams({ tab }, { replace: true });
-  }, [setSearchParams]);
+    navigate(`/spools/${tab}`, { replace: true });
+  }, [navigate]);
 
   const currentTab = TABS.find(t => t.id === activeTab) ?? TABS[0];
 

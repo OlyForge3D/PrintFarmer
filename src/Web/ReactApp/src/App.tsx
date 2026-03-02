@@ -165,9 +165,12 @@ function AuthenticatedAppRoutes() {
         <Route path="printers" element={<PrintersPage />} />
         <Route path="printers/:printerId/maintenance" element={<PrinterMaintenancePage />} />
         <Route path="printQueue" element={<PrintQueueDashboardPage />} />
+        <Route path="printQueue/:tabId" element={<PrintQueueDashboardPage />} />
         <Route path="files/*" element={<FilesPage />} />
         <Route path="spools" element={<FilamentManagementPage />} />
+        <Route path="spools/:tabId" element={<FilamentManagementPage />} />
         <Route path="cameras" element={<CamerasPage />} />
+        <Route path="cameras/:tabId" element={<CamerasPage />} />
         <Route path="nfc-devices" element={<NfcDevicesPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="statistics" element={<StatisticsPage />} />
@@ -187,7 +190,7 @@ function AuthenticatedAppRoutes() {
           <Route path="data" element={<DataManagementPage />} />
           <Route path="system" element={<SystemDashboardPage />} />
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
-          <Route path="cameras" element={<Navigate to="/cameras?tab=manage" replace />} />
+          <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
         </Route>
         <Route path="jobs/new" element={<RouteSuspense><LazyNewSliceJobPage /></RouteSuspense>} />
         <Route

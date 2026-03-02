@@ -170,7 +170,7 @@ export function QueueJobsTable({
             </p>
           </div>
           <a
-            href="/files?tab=gcode"
+            href="/files/gcode"
             className="mt-4 px-4 py-2 bg-pf-accent hover:bg-pf-accent-dark text-white rounded-lg font-medium transition-colors"
           >
             Browse G-Code Files

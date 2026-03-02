@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useSearchParams } from "react-router";
+import { useSearchParams, useParams, useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PageTemplate } from "@/common/components/PageTemplate";
@@ -87,7 +87,9 @@ function AutoPrintGlobalToggle() {
 
 export function PrintQueueDashboardPage() {
   const queryClient = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const { tabId } = useParams<{ tabId?: string }>();
+  const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState<string | null>(null);
@@ -96,8 +98,9 @@ export function PrintQueueDashboardPage() {
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
   const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
   
-  // Persist active tab — URL search param takes priority, then localStorage
+  // Persist active tab — URL path takes priority, then search param, then localStorage
   const [activeTab, setActiveTabState] = useState(() => {
+    if (tabId && VALID_TABS.includes(tabId as typeof VALID_TABS[number])) return tabId;
     const fromUrl = searchParams.get('tab');
     if (fromUrl && VALID_TABS.includes(fromUrl as typeof VALID_TABS[number])) return fromUrl;
     const saved = localStorage.getItem(STORAGE_KEY_ACTIVE_TAB);
@@ -107,13 +110,8 @@ export function PrintQueueDashboardPage() {
   const setActiveTab = useCallback((tab: string) => {
     setActiveTabState(tab);
     localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, tab);
-    // Remove tab param from URL after applying it
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('tab');
-      return next;
-    }, { replace: true });
-  }, [setSearchParams]);
+    navigate(`/printQueue/${tab}`, { replace: true });
+  }, [navigate]);
   
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);

@@ -6,7 +6,7 @@ import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
 import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
 import { HarvestPage } from '@/features/gcode/pages/HarvestPage';
 import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { useSlicer } from '@/hooks/useSlicer';
 
 type TabId = 'models' | 'gcode' | 'harvest' | 'projects';
@@ -18,6 +18,15 @@ interface Tab {
   description: string;
   requiresSlicer?: boolean;
 }
+
+// Map URL path segments to tab IDs
+const PATH_TO_TAB: Record<string, TabId> = {
+  'models': 'models',
+  '3d-models': 'models',
+  'gcode': 'gcode',
+  'projects': 'projects',
+  'harvest': 'harvest',
+};
 
 const ALL_TABS: Tab[] = [
   {
@@ -47,8 +56,25 @@ const ALL_TABS: Tab[] = [
   }
 ];
 
+/** Extract tab ID from the current URL path or query params */
+function resolveTabFromLocation(pathname: string, search: string): TabId | null {
+  // 1. Check path: /files/projects → "projects"
+  const segment = pathname.replace(/^\/files\/?/, '').split('/')[0];
+  if (segment && PATH_TO_TAB[segment]) {
+    return PATH_TO_TAB[segment];
+  }
+  // 2. Fallback: ?tab=projects
+  const params = new URLSearchParams(search);
+  const urlTab = params.get('tab');
+  if (urlTab && PATH_TO_TAB[urlTab]) {
+    return PATH_TO_TAB[urlTab];
+  }
+  return null;
+}
+
 export function FilesPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { isSlicerAvailable } = useSlicer();
   
   // Filter tabs based on slicer availability
@@ -56,16 +82,10 @@ export function FilesPage() {
     return ALL_TABS.filter(tab => !tab.requiresSlicer || isSlicerAvailable);
   }, [isSlicerAvailable]);
   
-  // Initialize from localStorage, respecting URL params and slicer availability
+  // Initialize from URL path, then query param, then localStorage
   const [activeTab, setActiveTab] = useState<TabId>(() => {
-    // First check URL params (they take precedence)
-    const params = new URLSearchParams(window.location.search);
-    const urlTab = params.get('tab') as TabId | null;
-    if (urlTab && (urlTab === 'gcode' || urlTab === 'harvest' || urlTab === 'models' || urlTab === 'projects')) {
-      // Will be validated later against available tabs
-      return urlTab;
-    }
-    // Then check localStorage
+    const fromUrl = resolveTabFromLocation(window.location.pathname, window.location.search);
+    if (fromUrl) return fromUrl;
     const saved = localStorage.getItem('pf.filesPageActiveTab');
     if (saved === 'models' || saved === 'gcode' || saved === 'harvest' || saved === 'projects') {
       return saved;
@@ -79,14 +99,12 @@ export function FilesPage() {
     if (availableTabIds.includes(activeTab)) {
       return activeTab;
     }
-    // Fallback to first available tab (typically 'gcode')
     return availableTabIds[0] ?? 'gcode';
   }, [activeTab, TABS]);
   
   // Keep internal state synced with validated tab
   useEffect(() => {
     if (validActiveTab !== activeTab) {
-      // Schedule the state update to avoid synchronous setState in effect
       queueMicrotask(() => {
         setActiveTab(validActiveTab);
         localStorage.setItem('pf.filesPageActiveTab', validActiveTab);
@@ -94,24 +112,23 @@ export function FilesPage() {
     }
   }, [validActiveTab, activeTab]);
 
-  // Persist tab change to localStorage
+  // Navigate to the tab's URL path
   const handleTabChange = useCallback((tab: TabId) => {
     setActiveTab(tab);
     localStorage.setItem('pf.filesPageActiveTab', tab);
-  }, []);
+    navigate(`/files/${tab}`, { replace: true });
+  }, [navigate]);
 
-  // Sync active tab with URL params when location changes
+  // Sync active tab when URL changes (e.g., browser back/forward)
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const tab = params.get('tab') as TabId | null;
-    if (tab && TABS.some(t => t.id === tab)) {
-      // Schedule the state update to avoid synchronous setState in effect
+    const fromUrl = resolveTabFromLocation(location.pathname, location.search);
+    if (fromUrl && TABS.some(t => t.id === fromUrl)) {
       queueMicrotask(() => {
-        setActiveTab(tab);
-        localStorage.setItem('pf.filesPageActiveTab', tab);
+        setActiveTab(fromUrl);
+        localStorage.setItem('pf.filesPageActiveTab', fromUrl);
       });
     }
-  }, [location.search, TABS]);
+  }, [location.pathname, location.search, TABS]);
 
   // React 19: useEffectEvent to handle keyboard input without dependency issues
   const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {

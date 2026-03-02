@@ -4,7 +4,7 @@ import { Button } from '@/common/components/ui';
 import { CameraIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { CameraDto } from '@/types/api';
-import { useSearchParams } from 'react-router';
+import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
 
@@ -20,13 +20,17 @@ export function CamerasPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const { tabId } = useParams<{ tabId?: string }>();
+  const navigate = useNavigate();
   const canManageCameras = auth.hasRole('farm_admin');
   const activeTab = useMemo<'view' | 'manage'>(() => {
+    if (tabId === 'manage' && canManageCameras) return 'manage';
+    if (tabId === 'view') return 'view';
     const requestedTab = searchParams.get('tab');
     if (requestedTab === 'manage' && canManageCameras) return 'manage';
     return 'view';
-  }, [canManageCameras, searchParams]);
+  }, [canManageCameras, searchParams, tabId]);
 
   useEffect(() => {
     loadCameras();
@@ -48,13 +52,7 @@ export function CamerasPage() {
   };
 
   const setTab = (nextTab: 'view' | 'manage') => {
-    const nextParams = new URLSearchParams(searchParams);
-    if (nextTab === 'manage') {
-      nextParams.set('tab', 'manage');
-    } else {
-      nextParams.delete('tab');
-    }
-    setSearchParams(nextParams, { replace: true });
+    navigate(`/cameras/${nextTab}`, { replace: true });
   };
 
   return (
