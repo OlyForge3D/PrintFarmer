@@ -250,6 +250,21 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     });
   }, [printer]);
 
+  // Sync target temperature inputs from printer when user hasn't manually entered a value
+  useEffect(() => {
+    if (!printer) return;
+    setHotendTemp(prev => {
+      const target = printer.hotendTarget ?? 0;
+      if (prev === '' && target > 0) return target;
+      return prev;
+    });
+    setBedTemp(prev => {
+      const target = printer.bedTarget ?? 0;
+      if (prev === '' && target > 0) return target;
+      return prev;
+    });
+  }, [printer?.hotendTarget, printer?.bedTarget]);
+
   // Guard early after all hooks are called
   if (!printerId) {
     return null;
