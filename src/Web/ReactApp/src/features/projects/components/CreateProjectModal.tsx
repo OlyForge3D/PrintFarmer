@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
+import { FilePickerModal } from '@/common/components/modals/FilePickerModal';
 import { Button, Select, Textarea } from '@/common/components/ui';
 import { 
   PlusIcon, 
   DeleteIcon,
-  SearchIcon,
 } from '@/common/components/icons/MdiIcons';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { projectService } from '@/services/projectService';
@@ -42,14 +42,13 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [status, setStatus] = useState<PrintProjectStatus>('Open');
+  const [status, setStatus] = useState<PrintProjectStatus>(PrintProjectStatus.Open);
   const [priority, setPriority] = useState(0);
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [selectedFiles, setSelectedFiles] = useState<AddFileToProjectRequest[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
-  const [fileSearch, setFileSearch] = useState('');
   // Cache gcode file metadata so it persists after picker closes
   const [gcodeFileCache, setGcodeFileCache] = useState<Record<string, GcodeFile>>({});
   // Track which filament is assigned to each file (keyed by gcodeFileId)
@@ -111,21 +110,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     queryKey: ['project-templates'],
     queryFn: () => templateService.getTemplates(),
     staleTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  // Fetch available gcode files for picker
-  const { data: gcodeFiles = [] } = useQuery({
-    queryKey: ['gcode-files-for-project', fileSearch],
-    queryFn: async () => {
-      // Use the query endpoint that supports filtering
-      const result = await apiClient.getGcodeFilesQuery({ 
-        search: fileSearch, 
-        pageSize: 50 
-      });
-      return result.files || [];
-    },
-    enabled: showFilePicker,
-    staleTime: 30 * 1000,
   });
 
   // Fetch available filaments from Spoolman
@@ -220,14 +204,13 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const resetForm = () => {
     setName('');
     setDescription('');
-    setStatus('Open');
+    setStatus(PrintProjectStatus.Open);
     setPriority(0);
     setDueDate('');
     setNotes('');
     setSelectedTemplate('');
     setSelectedFiles([]);
     setShowFilePicker(false);
-    setFileSearch('');
     setGcodeFileCache({});
     setFilamentAssignments({});
   };
@@ -288,21 +271,23 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     createMutation.mutate(request);
   };
 
-  const addFile = (file: GcodeFile) => {
-    if (selectedFiles.some(f => f.gcodeFileId === file.id)) return;
-    
-    // Cache the full gcode file object so metadata persists after picker closes
-    setGcodeFileCache(prev => ({ ...prev, [file.id]: file }));
-    setSelectedFiles([
-      ...selectedFiles,
-      {
+  const addFiles = (files: GcodeFile[]) => {
+    const newEntries: AddFileToProjectRequest[] = [];
+    const cacheUpdates: Record<string, GcodeFile> = {};
+    for (const file of files) {
+      if (selectedFiles.some(f => f.gcodeFileId === file.id)) continue;
+      cacheUpdates[file.id] = file;
+      newEntries.push({
         gcodeFileId: file.id,
         materialRequirement: file.extractedMaterial || undefined,
         printCount: 1,
-      },
-    ]);
+      });
+    }
+    if (newEntries.length > 0) {
+      setGcodeFileCache(prev => ({ ...prev, ...cacheUpdates }));
+      setSelectedFiles(prev => [...prev, ...newEntries]);
+    }
     setShowFilePicker(false);
-    setFileSearch('');
   };
 
   const removeFile = (fileId: string) => {
@@ -353,7 +338,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             <Select
               value={selectedTemplate}
               onChange={(e) => handleTemplateChange(e.target.value)}
-              className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
+              className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"
             >
               <option value="">-- No template (blank project) --</option>
               {templates.map((template: PrintProjectTemplateListDto) => (
@@ -395,7 +380,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Brief description of the project..."
             rows={2}
-            className="w-full bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 !resize-none !min-h-0"
+            className="w-full bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2! resize-none! min-h-0!"
           />
         </div>
 
@@ -408,7 +393,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             <Select
               value={priority}
               onChange={(e) => setPriority(Number(e.target.value))}
-              className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
+              className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"
             >
               <option value={0}>Normal</option>
               <option value={1}>High</option>
@@ -426,7 +411,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               <Select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as PrintProjectStatus)}
-                className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
+                className="bg-pf-bg-2 border-pf-border rounded-lg! px-3! py-2!"
               >
                 <option value="Open">Open</option>
                 <option value="InProgress">In Progress</option>
@@ -438,10 +423,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           )}
 
           <div>
-            <label className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="project-due-date" className="block text-sm font-medium text-pf-text-primary mb-1">
               Due Date
             </label>
             <input
+              id="project-due-date"
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
@@ -460,54 +446,21 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => setShowFilePicker(!showFilePicker)}
+              onClick={() => setShowFilePicker(true)}
               iconLeft={<PlusIcon className="w-4 h-4" />}
             >
               Add Files
             </Button>
           </div>
 
-          {/* File Picker */}
-          {showFilePicker && (
-            <div className="mb-3 p-3 bg-pf-bg-2 border border-pf-border rounded-lg">
-              <div className="relative mb-2">
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-tertiary" />
-                <input
-                  type="text"
-                  value={fileSearch}
-                  onChange={(e) => setFileSearch(e.target.value)}
-                  placeholder="Search files..."
-                  className="w-full pl-9 pr-3 py-2 bg-pf-bg-1 border border-pf-border rounded-lg text-sm text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent"
-                />
-              </div>
-              <div className="max-h-40 overflow-y-auto space-y-1">
-                {gcodeFiles.length === 0 ? (
-                  <p className="text-sm text-pf-text-tertiary p-2">No files found</p>
-                ) : (
-                  gcodeFiles
-                    .filter(f => !selectedFiles.some(sf => sf.gcodeFileId === f.id))
-                    .map((file) => (
-                      <Button
-                        key={file.id}
-                        type="button"
-                        onClick={() => addFile(file)}
-                        variant="unstyled"
-                        className="w-full text-left px-3 py-2 rounded hover:bg-pf-bg-1 text-sm text-pf-text-primary enabled:cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="truncate">{file.name || file.fileName}</span>
-                          {file.extractedMaterial && (
-                            <span className="shrink-0 text-xs text-pf-text-tertiary">
-                              {file.extractedMaterial}
-                            </span>
-                          )}
-                        </span>
-                      </Button>
-                    ))
-                )}
-              </div>
-            </div>
-          )}
+          {/* File Picker Modal */}
+          <FilePickerModal
+            isOpen={showFilePicker}
+            onClose={() => setShowFilePicker(false)}
+            onSelect={addFiles}
+            excludeIds={selectedFiles.map(f => f.gcodeFileId)}
+            title="Add Files to Project"
+          />
 
           {/* Selected Files Table */}
           {selectedFiles.length > 0 ? (
@@ -525,8 +478,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 </thead>
                 <tbody className="divide-y divide-pf-border">
                   {selectedFiles.map((file) => {
-                    const gcodeFile = gcodeFiles.find(f => f.id === file.gcodeFileId) 
-                      || gcodeFileCache[file.gcodeFileId];
+                    const gcodeFile = gcodeFileCache[file.gcodeFileId];
                     const fileName = gcodeFile?.name || gcodeFile?.fileName || file.gcodeFileId;
                     const material = gcodeFile?.extractedMaterial || file.materialRequirement || '—';
                     const assignedFilamentId = filamentAssignments[file.gcodeFileId];
@@ -550,7 +502,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                                 <span className="text-[10px]">GC</span>
                               </div>
                             )}
-                            <p className="text-pf-text-primary truncate max-w-[260px]" title={fileName}>
+                            <p className="text-pf-text-primary truncate max-w-65" title={fileName}>
                               {fileName}
                             </p>
                           </div>
@@ -618,7 +570,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                             variant="subtle"
                             size="sm"
                             onClick={() => removeFile(file.gcodeFileId)}
-                            className="!p-1 text-pf-text-tertiary hover:text-pf-error"
+                            className="p-1! text-pf-text-tertiary hover:text-pf-error"
                             title={`Remove ${fileName}`}
                           >
                             <DeleteIcon className="w-4 h-4" />
@@ -708,8 +660,8 @@ const FilamentSelector: React.FC<FilamentSelectorProps> = ({ filaments, material
       <Select
         value={selectedFilamentId ?? ''}
         onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-        className="bg-pf-bg-2 border-pf-border rounded !px-2 !py-1 !text-xs !w-auto"
-        containerClassName="!w-auto"
+        className="bg-pf-bg-2 border-pf-border rounded px-2! py-1! text-xs! w-auto!"
+        containerClassName="w-auto!"
         title="Assign filament type"
       >
         <option value="">— None —</option>
