@@ -188,7 +188,7 @@ export function QueueJobsTable({
             <th className="w-10 px-2 py-3" aria-label="Reorder">
               <span className="sr-only">Drag to reorder</span>
             </th>
-            <th className="w-12 px-2 py-3" aria-label="Thumbnail">
+            <th className="w-14 min-w-14 px-2 py-3" aria-label="Thumbnail">
               <span className="sr-only">Thumbnail</span>
             </th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Time</th>
@@ -291,15 +291,15 @@ export function QueueJobsTable({
                 >
                   <GripVertical className="h-4 w-4" aria-hidden="true" />
                 </td>
-                <td className="w-12 px-2 py-3">
+                <td className="w-14 min-w-14 px-2 py-3">
                   {thumbnailUrl ? (
                     <img
                       src={thumbnailUrl}
                       alt=""
-                      className="w-10 h-10 rounded object-cover bg-pf-bg-2"
+                      className="w-10 h-10 min-w-10 rounded object-cover bg-pf-bg-2"
                     />
                   ) : (
-                    <div className="w-10 h-10 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary text-xs">
+                    <div className="w-10 h-10 min-w-10 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary text-xs">
                       —
                     </div>
                   )}
