@@ -2,10 +2,10 @@ import React from 'react';
 import { Badge } from '@/common/components/ui/Badge';
 import { Button } from '@/common/components/ui/Button';
 import { DeleteIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
-import type { PrintProjectListDto, PrintProjectStatus } from '@/types/api';
+import type { PrintProjectListDto } from '@/types/api';
 
-// Status badge color mapping (shared with ProjectsPage)
-const statusVariantMap: Record<PrintProjectStatus, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
+// Status badge color mapping — use string keys to avoid TDZ in production builds
+const statusVariantMap: Record<string, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
   Open: 'default',
   InProgress: 'primary',
   Completed: 'success',
@@ -13,7 +13,7 @@ const statusVariantMap: Record<PrintProjectStatus, 'default' | 'primary' | 'succ
   OnHold: 'warning',
 };
 
-const statusLabelMap: Record<PrintProjectStatus, string> = {
+const statusLabelMap: Record<string, string> = {
   Open: 'Open',
   InProgress: 'In Progress',
   Completed: 'Completed',

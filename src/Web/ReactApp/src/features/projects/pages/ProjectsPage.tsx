@@ -23,8 +23,8 @@ import type {
   PrintProjectDetailDto,
 } from '@/types/api';
 
-// Status badge color mapping
-const statusVariantMap: Record<PrintProjectStatus, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
+// Status badge color mapping — use string keys to avoid TDZ in production builds
+const statusVariantMap: Record<string, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
   Open: 'default',
   InProgress: 'primary',
   Completed: 'success',
@@ -33,7 +33,7 @@ const statusVariantMap: Record<PrintProjectStatus, 'default' | 'primary' | 'succ
 };
 
 // Status display labels
-const statusLabelMap: Record<PrintProjectStatus, string> = {
+const statusLabelMap: Record<string, string> = {
   Open: 'Open',
   InProgress: 'In Progress',
   Completed: 'Completed',

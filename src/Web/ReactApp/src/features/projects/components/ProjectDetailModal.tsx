@@ -14,8 +14,6 @@ import { apiClient } from '@/services/api';
 import type { 
   PrintProjectDetailDto,
   PrintProjectFileDto,
-  PrintProjectStatus,
-  PrintProjectFileStatus,
   SpoolmanFilament,
   QueueProjectRequest,
   QueueProjectResultDto,
@@ -30,8 +28,8 @@ interface ProjectDetailModalProps {
   onEdit: () => void;
 }
 
-// Status badge color mapping
-const statusVariantMap: Record<PrintProjectStatus, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
+// Status badge color mapping — use string keys to avoid TDZ in production builds
+const statusVariantMap: Record<string, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
   Open: 'default',
   InProgress: 'primary',
   Completed: 'success',
@@ -39,7 +37,7 @@ const statusVariantMap: Record<PrintProjectStatus, 'default' | 'primary' | 'succ
   OnHold: 'warning',
 };
 
-const statusLabelMap: Record<PrintProjectStatus, string> = {
+const statusLabelMap: Record<string, string> = {
   Open: 'Open',
   InProgress: 'In Progress',
   Completed: 'Completed',
@@ -47,7 +45,7 @@ const statusLabelMap: Record<PrintProjectStatus, string> = {
   OnHold: 'On Hold',
 };
 
-const fileStatusVariantMap: Record<PrintProjectFileStatus, 'default' | 'primary' | 'success' | 'warning'> = {
+const fileStatusVariantMap: Record<string, 'default' | 'primary' | 'success' | 'warning'> = {
   Pending: 'default',
   Printing: 'primary',
   Completed: 'success',
