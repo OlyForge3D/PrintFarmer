@@ -1957,6 +1957,12 @@ export interface QueuedPrintJobDto {
   remainingCopies: number;
   /** Link to project file this job was created from */
   projectFileId?: string;
+  /** Estimated cost of the print job */
+  estimatedCost?: number;
+  /** Actual cost of the print job */
+  actualCost?: number;
+  /** URL to the G-code file thumbnail image */
+  thumbnailUrl?: string;
 }
 
 export interface QueueGcodeFileMetaDto {

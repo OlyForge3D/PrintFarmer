@@ -153,6 +153,11 @@ public class QueuedPrintJobDto
     /// Link to the project file this job was created from (if any).
     /// </summary>
     public Guid? ProjectFileId { get; set; }
+
+    /// <summary>
+    /// URL to the G-code file thumbnail image (if available)
+    /// </summary>
+    public string? ThumbnailUrl { get; set; }
 }
 
 /// <summary>

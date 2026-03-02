@@ -98,9 +98,11 @@ export interface JobDetails {
   filamentName?: string;
   filamentVendor?: string;
   filamentColor?: string;
+  // Cost
+  estimatedCost?: number;
+  actualCost?: number;
+  // Thumbnail
+  thumbnailUrl?: string;
 }
 
-/**
- * Type for tab selection in job details modal
- */
-export type JobDetailsTabType = 'overview' | 'details';
+

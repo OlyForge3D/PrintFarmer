@@ -188,6 +188,9 @@ export function QueueJobsTable({
             <th className="w-10 px-2 py-3" aria-label="Reorder">
               <span className="sr-only">Drag to reorder</span>
             </th>
+            <th className="w-12 px-2 py-3" aria-label="Thumbnail">
+              <span className="sr-only">Thumbnail</span>
+            </th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Time</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">File</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Project</th>
@@ -196,6 +199,7 @@ export function QueueJobsTable({
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Material</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Filament</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Est. Time</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Cost</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Copies</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Source</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Status</th>
@@ -241,6 +245,8 @@ export function QueueJobsTable({
                 : "-";
 
             const timeDisplay = formatDateTime(job.actualStartTimeUtc ?? job.queuedAtUtc);
+            const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl;
+            const estimatedCost = job.estimatedCost;
             const dispatchProgress = dispatchUploadProgressByJobId?.[jobId];
             const dispatchProgressText = (() => {
               if (!dispatchProgress || dispatchProgress.isCompleted) {
@@ -285,6 +291,19 @@ export function QueueJobsTable({
                 >
                   <GripVertical className="h-4 w-4" aria-hidden="true" />
                 </td>
+                <td className="w-12 px-2 py-3">
+                  {thumbnailUrl ? (
+                    <img
+                      src={thumbnailUrl}
+                      alt=""
+                      className="w-10 h-10 rounded object-cover bg-pf-bg-2"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary text-xs">
+                      —
+                    </div>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{timeDisplay}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <div className="font-medium text-pf-text-primary">{fileName}</div>
@@ -303,6 +322,9 @@ export function QueueJobsTable({
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{material}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{filamentDisplay}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{estimatedTimeDisplay}</td>
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">
+                  {estimatedCost != null ? `$${estimatedCost.toFixed(2)}` : "-"}
+                </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   {(job.copies ?? 1) > 1 ? (
                     <span className="text-pf-text-primary font-medium">

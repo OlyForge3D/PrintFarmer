@@ -1592,6 +1592,7 @@ public class PrintJobManagementService(
             CompletedCopies = job.CompletedCopies,
             RemainingCopies = job.RemainingCopies,
             ProjectFileId = job.ProjectFileId,
+            ThumbnailUrl = job.GcodeFile != null ? _fileOperations.BuildGcodeThumbnailUrl(job.GcodeFile.Id) : null,
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt,
