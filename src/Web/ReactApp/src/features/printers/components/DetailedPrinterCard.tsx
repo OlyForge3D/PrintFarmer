@@ -544,7 +544,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       </div>
 
       {/* Progress bar for active prints */}
-      {isOnline && printer.progress !== undefined && printer.progress > 0 && (
+      {isOnline && (isPrinting || isPaused) && printer.progress !== undefined && printer.progress > 0 && (
         <div className="mb-4">
           <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
             <span className="truncate flex-1">{printer.jobName || 'Printing...'}</span>

@@ -304,7 +304,7 @@ export function CollapsedPrinterCard({
       {/* Progress bar for active prints */}
       {(() => {
         const progress = printer.progress ?? 0;
-        return isOnline && progress !== undefined && progress > 0 && (
+        return isOnline && (isPrinting || isPaused) && progress > 0 && (
           <div className="mt-3">
             <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
               <span className="truncate flex-1">{printer.jobName || 'Printing...'}</span>
