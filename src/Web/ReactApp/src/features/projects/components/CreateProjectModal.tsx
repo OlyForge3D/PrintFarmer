@@ -11,12 +11,12 @@ import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatc
 import { projectService } from '@/services/projectService';
 import { templateService } from '@/services/templateService';
 import { apiClient } from '@/services/api';
+import { PrintProjectStatus } from '@/types/api';
 import type { 
   CreatePrintProjectRequest, 
   AddFileToProjectRequest,
   GcodeFile,
   PrintProjectDetailDto,
-  PrintProjectStatus,
   PrintProjectTemplateListDto,
   SpoolmanFilament,
 } from '@/types/api';
