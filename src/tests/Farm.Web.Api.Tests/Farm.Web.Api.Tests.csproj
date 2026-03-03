@@ -33,7 +33,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <!-- Additional packages for slicer services testing -->
-    <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
+    <PackageReference Include="StackExchange.Redis" Version="2.11.8" />
     <!-- Note: Microsoft.Extensions.Options removed - available via API project reference -->
   </ItemGroup>
 
