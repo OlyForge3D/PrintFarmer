@@ -26,4 +26,5 @@ public record PrinterStatusUpdate(
     double? HotendTarget,
     double? BedTarget,
     string? HomedAxes,
-    PrinterSpoolInfoDto? SpoolInfo);
+    PrinterSpoolInfoDto? SpoolInfo,
+    MmuStatusDto? MmuStatus = null);

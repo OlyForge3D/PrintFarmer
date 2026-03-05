@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { Printer, PrinterStatusUpdate } from '@/types/api';
+import type { Printer, PrinterStatusUpdate, MmuStatus } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/common/hooks/useSignalR';
 
 /**
@@ -16,6 +16,8 @@ export interface PrinterDisplay extends Printer {
   isRealtimeStatus: boolean;
   /** Raw SignalR update if available, for debugging/inspection */
   signalRStatus: PrinterStatusUpdate | undefined;
+  /** MMU/ERCF status from real-time updates (only present when an MMU is detected) */
+  mmuStatus?: MmuStatus;
 }
 
 /**
@@ -57,6 +59,8 @@ export function usePrinterDisplay(printer: Printer): PrinterDisplay {
       bedTemp: signalRStatus?.bedTemp !== undefined ? signalRStatus.bedTemp : printer.bedTemp,
       hotendTarget: signalRStatus?.hotendTarget !== undefined ? signalRStatus.hotendTarget : printer.hotendTarget,
       bedTarget: signalRStatus?.bedTarget !== undefined ? signalRStatus.bedTarget : printer.bedTarget,
+      // MMU status (only available from SignalR)
+      mmuStatus: signalRStatus?.mmuStatus,
       // Expose for debugging/inspection
       isRealtimeStatus,
       signalRStatus,
@@ -100,6 +104,7 @@ export function usePrinterDisplays(printers: Printer[]): PrinterDisplay[] {
         hotendTarget: signalRStatus?.hotendTarget !== undefined ? signalRStatus.hotendTarget : printer.hotendTarget,
         bedTarget: signalRStatus?.bedTarget !== undefined ? signalRStatus.bedTarget : printer.bedTarget,
         spoolInfo: signalRStatus?.spoolInfo !== undefined ? signalRStatus.spoolInfo : printer.spoolInfo,
+        mmuStatus: signalRStatus?.mmuStatus,
         isRealtimeStatus,
         signalRStatus,
       } as PrinterDisplay;

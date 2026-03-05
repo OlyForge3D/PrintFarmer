@@ -30,6 +30,13 @@ namespace Farm.Slicer.Module.Tests
 
         public CustomWebApplicationFactory()
         {
+            // Force-load the Slicer API assembly so the integration shim's AppDomain scan
+            // finds SlicerApiModuleRegistrar and registers ISlicerFileStorage.
+            // Without this, .NET's lazy assembly loading means Farm.Slicer.Module.Api is
+            // not yet in AppDomain.GetAssemblies() when AddSlicerIntegration scans for plugins.
+            System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
+                typeof(Farm.Slicer.Module.Api.SlicerApiExtensions).TypeHandle);
+
             int dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
             _keepAliveConnection = new SqliteConnection($"Data Source=file:slicer_test_{dbId}?mode=memory&cache=shared");
             _keepAliveConnection.Open();

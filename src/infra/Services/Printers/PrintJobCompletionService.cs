@@ -404,7 +404,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     /// <inheritdoc />
     public async Task<int> SyncOrphanedPrintingJobsAsync(Func<Guid, string?> printerStateLookup, CancellationToken ct = default)
     {
-        _logger.LogInformation("[PrintJobCompletionService] Starting orphaned job synchronization...");
+        _logger.LogDebug("[PrintJobCompletionService] Running orphaned job reconciliation...");
 
         // Find all jobs in Starting or Printing status
         List<PrintJob> orphanedJobs = await _db.PrintJobs
@@ -415,7 +415,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         if (orphanedJobs.Count == 0)
         {
-            _logger.LogInformation("[PrintJobCompletionService] No orphaned jobs found.");
+            _logger.LogDebug("[PrintJobCompletionService] No orphaned jobs found.");
             return 0;
         }
 

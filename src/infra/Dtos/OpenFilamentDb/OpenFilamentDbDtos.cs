@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.OpenFilamentDb;
+﻿using System.Text.Json.Serialization;
+
+namespace Farm.Infrastructure.OpenFilamentDb;
 
 /// <summary>
 /// Response shape for the brands index endpoint.
@@ -143,6 +145,7 @@ public record OfdVariantSummary
 {
     public string Id { get; init; } = string.Empty;
 
+    [JsonPropertyName("name")]
     public string ColorName { get; init; } = string.Empty;
 
     public string? ColorHex { get; init; }
@@ -166,6 +169,7 @@ public record OfdVariantDetailResponse
 
     public string Slug { get; init; } = string.Empty;
 
+    [JsonPropertyName("name")]
     public string ColorName { get; init; } = string.Empty;
 
     public string? ColorHex { get; init; }

@@ -64,6 +64,7 @@ import {
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
+import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 
 // Animation styles
 // Use unique keyframe/class names to avoid collisions with other injected styles.
@@ -1124,7 +1125,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           />
         </CollapsibleSection>
 
-
+        {/* MMU Control Box - Show when MMU/ERCF is detected via real-time status */}
+        {displayPrinter?.mmuStatus && (
+          <MmuControlBox
+            printerId={printer.id}
+            mmuStatus={displayPrinter.mmuStatus}
+            isOnline={isOnline}
+          />
+        )}
 
         {/* Spool Section - Show when Spoolman is configured (all backends) */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (
