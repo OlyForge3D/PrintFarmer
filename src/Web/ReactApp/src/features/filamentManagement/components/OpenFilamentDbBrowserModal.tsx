@@ -144,7 +144,7 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
   const allCurrentSelected = filaments && filaments.length > 0 && filaments.every(f => selectedIds.has(f.entryId));
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title={stepTitle} size="xl">
+    <Modal isOpen={isOpen} onClose={handleClose} title={stepTitle} size="full">
       <div className="space-y-4">
         <p className="text-sm text-pf-text-secondary">
           {step === 'brands' && 'Browse the Open Filament Database and import community filament profiles into your catalog.'}
@@ -217,13 +217,14 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 p-2">
                 {brandDetail?.materials.map(mat => (
                   <Button
+                    type="button"
                     variant="unstyled"
                     key={mat.id}
                     onClick={() => handleSelectMaterial(mat)}
                     className="flex flex-col items-center justify-center p-4 rounded-lg border border-pf-border hover:bg-pf-surface-hover hover:border-pf-accent transition-colors"
                   >
-                    <span className="font-medium text-sm text-pf-text-primary">{mat.material}</span>
-                    <span className="text-xs text-pf-text-muted mt-1">{mat.filamentCount} filament{mat.filamentCount !== 1 ? 's' : ''}</span>
+                    <div className="font-medium text-sm text-pf-text-primary">{mat.material}</div>
+                    <div className="text-xs text-pf-text-muted mt-1">{mat.filamentCount} filament{mat.filamentCount !== 1 ? 's' : ''}</div>
                   </Button>
                 ))}
               </div>
@@ -357,7 +358,7 @@ function OfdFilamentRow({
           {entry.colorHex && (
             <span
               className="inline-block w-4 h-4 rounded border border-pf-border shrink-0"
-              style={{ backgroundColor: `#${entry.colorHex}` }}
+              style={{ backgroundColor: entry.colorHex }}
               aria-hidden="true"
             />
           )}

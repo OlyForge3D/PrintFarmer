@@ -26,4 +26,5 @@ public record PrinterStatusDto(
     double? BedTemp = null,
     double? HotendTarget = null,
     double? BedTarget = null,
-    PrinterSpoolInfoDto? SpoolInfo = null);
+    PrinterSpoolInfoDto? SpoolInfo = null,
+    MmuStatusDto? MmuStatus = null);

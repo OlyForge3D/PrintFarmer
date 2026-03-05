@@ -1996,6 +1996,119 @@ public class PrintersController(
         return MapCommandResult(result);
     }
 
+    // ── MMU (Multi-Material Unit) control endpoints ──
+
+    /// <summary>
+    /// Selects and loads a specific MMU tool (gate) with filament change.
+    /// Sends MMU_CHANGE_TOOL TOOL=N to the printer via Happy Hare.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="tool">The tool/gate index to select (0-based).</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <response code="200">MMU tool change command sent successfully.</response>
+    /// <response code="400">If the command failed.</response>
+    /// <response code="404">If the printer was not found.</response>
+    [HttpPost("{id:guid}/mmu/change-tool/{tool:int}")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> MmuChangeToolAsync(Guid id, int tool, CancellationToken ct)
+    {
+        if (tool < 0 || tool > 16)
+        {
+            return BadRequest(new CommandResult(false, "Tool index must be between 0 and 16."));
+        }
+
+        bool ok = await _printersService.SendGcodeAsync(id, $"MMU_CHANGE_TOOL TOOL={tool}", ct);
+        return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
+    /// <summary>
+    /// Ejects/unloads filament from the MMU.
+    /// Sends MMU_EJECT to the printer via Happy Hare.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    [HttpPost("{id:guid}/mmu/eject")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> MmuEjectAsync(Guid id, CancellationToken ct)
+    {
+        bool ok = await _printersService.SendGcodeAsync(id, "MMU_EJECT", ct);
+        return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
+    /// <summary>
+    /// Loads filament from the currently selected MMU gate into the extruder.
+    /// Sends MMU_LOAD to the printer via Happy Hare.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    [HttpPost("{id:guid}/mmu/load")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> MmuLoadAsync(Guid id, CancellationToken ct)
+    {
+        bool ok = await _printersService.SendGcodeAsync(id, "MMU_LOAD", ct);
+        return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
+    /// <summary>
+    /// Homes the MMU unit.
+    /// Sends MMU_HOME to the printer via Happy Hare.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    [HttpPost("{id:guid}/mmu/home")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> MmuHomeAsync(Guid id, CancellationToken ct)
+    {
+        bool ok = await _printersService.SendGcodeAsync(id, "MMU_HOME", ct);
+        return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
+    /// <summary>
+    /// Pre-selects an MMU tool without loading filament.
+    /// Sends MMU_SELECT_TOOL TOOL=N to the printer via Happy Hare.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="tool">The tool/gate index to pre-select (0-based).</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    [HttpPost("{id:guid}/mmu/select-tool/{tool:int}")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> MmuSelectToolAsync(Guid id, int tool, CancellationToken ct)
+    {
+        if (tool < 0 || tool > 16)
+        {
+            return BadRequest(new CommandResult(false, "Tool index must be between 0 and 16."));
+        }
+
+        bool ok = await _printersService.SendGcodeAsync(id, $"MMU_SELECT_TOOL TOOL={tool}", ct);
+        return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
+    /// <summary>
+    /// Recovers the MMU from an error state.
+    /// Sends MMU_RECOVER to the printer via Happy Hare.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    [HttpPost("{id:guid}/mmu/recover")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> MmuRecoverAsync(Guid id, CancellationToken ct)
+    {
+        bool ok = await _printersService.SendGcodeAsync(id, "MMU_RECOVER", ct);
+        return !ok ? NotFound() : new CommandResult(true, null);
+    }
+
     /// <summary>
     /// Sets or clears the active Spoolman spool for a printer.
     /// </summary>

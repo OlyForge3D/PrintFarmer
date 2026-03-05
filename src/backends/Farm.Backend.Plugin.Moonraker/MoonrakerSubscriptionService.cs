@@ -981,6 +981,20 @@ public sealed class MoonrakerSubscriptionService(
             await HandleHeaterBedUpdateAsync(printerId, state, hb, ct);
         }
 
+        // MMU (Happy Hare) status updates
+        if (statusObj.TryGetProperty("mmu", out JsonElement mmu))
+        {
+            HandleMmuUpdate(printerId, state, mmu);
+        }
+
+        // Qidibox filament box detection and updates
+        // Qidibox uses "box_stepper slotN" objects + "save_variables" for slot data
+        await HandleQidiboxUpdatesAsync(printerId, state, statusObj, serverUrl, ct);
+
+        // AFC (BoxTurtle/NightOwl/QuattroBox) filament changer detection and updates
+        // AFC uses "AFC" Moonraker object + "AFC_stepper <lane>" per-lane objects
+        HandleAfcUpdates(printerId, state, statusObj);
+
         // State/progress updates can come from multiple sources (display_status, print_stats, webhooks)
         if (statusObj.TryGetProperty("display_status", out _) ||
             statusObj.TryGetProperty("print_stats", out _) ||
@@ -1202,6 +1216,768 @@ public sealed class MoonrakerSubscriptionService(
     }
 
     /// <summary>
+    /// Handles MMU (Happy Hare) status updates from Moonraker.
+    /// Parses gate status, materials, colors, active tool/gate, and action state.
+    /// This is a synchronous handler since it only updates in-memory state.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="state">The persistent printer state to update.</param>
+    /// <param name="mmu">The mmu JSON element from the status update.</param>
+    private void HandleMmuUpdate(Guid printerId, PrinterState state, JsonElement mmu)
+    {
+        // Once we receive any mmu object, mark as detected
+        state.MmuDetected = true;
+        state.MmuType = MmuProtocol.HappyHare;
+        state.MmuDirty = true;
+
+        if (mmu.TryGetProperty("enabled", out JsonElement enabled) && enabled.ValueKind == JsonValueKind.True)
+        {
+            state.MmuEnabled = true;
+        }
+        else if (mmu.TryGetProperty("enabled", out JsonElement disabled) && disabled.ValueKind == JsonValueKind.False)
+        {
+            state.MmuEnabled = false;
+        }
+
+        if (mmu.TryGetProperty("is_homed", out JsonElement homed))
+        {
+            state.MmuIsHomed = homed.ValueKind == JsonValueKind.True;
+        }
+
+        if (mmu.TryGetProperty("tool", out JsonElement tool) && tool.ValueKind == JsonValueKind.Number)
+        {
+            state.MmuActiveTool = tool.GetInt32();
+        }
+
+        if (mmu.TryGetProperty("gate", out JsonElement gate) && gate.ValueKind == JsonValueKind.Number)
+        {
+            state.MmuActiveGate = gate.GetInt32();
+        }
+
+        if (mmu.TryGetProperty("filament", out JsonElement filament) && filament.ValueKind == JsonValueKind.String)
+        {
+            state.MmuFilamentState = filament.GetString();
+        }
+
+        if (mmu.TryGetProperty("action", out JsonElement action) && action.ValueKind == JsonValueKind.String)
+        {
+            state.MmuAction = action.GetString();
+        }
+
+        if (mmu.TryGetProperty("num_gates", out JsonElement numGates) && numGates.ValueKind == JsonValueKind.Number)
+        {
+            state.MmuNumGates = numGates.GetInt32();
+        }
+
+        if (mmu.TryGetProperty("has_bypass", out JsonElement hasBypass))
+        {
+            state.MmuHasBypass = hasBypass.ValueKind == JsonValueKind.True;
+        }
+
+        if (mmu.TryGetProperty("endless_spool", out JsonElement endlessSpool) && endlessSpool.ValueKind == JsonValueKind.Number)
+        {
+            state.MmuEndlessSpool = endlessSpool.GetInt32() > 0;
+        }
+
+        if (mmu.TryGetProperty("clog_detection", out JsonElement clogDetection) && clogDetection.ValueKind == JsonValueKind.Number)
+        {
+            state.MmuClogDetection = clogDetection.GetInt32() > 0;
+        }
+
+        // Per-gate arrays
+        if (mmu.TryGetProperty("gate_status", out JsonElement gateStatus) && gateStatus.ValueKind == JsonValueKind.Array)
+        {
+            state.MmuGateStatus = ParseIntArray(gateStatus);
+        }
+
+        if (mmu.TryGetProperty("gate_material", out JsonElement gateMaterial) && gateMaterial.ValueKind == JsonValueKind.Array)
+        {
+            state.MmuGateMaterial = ParseStringArray(gateMaterial);
+        }
+
+        if (mmu.TryGetProperty("gate_color", out JsonElement gateColor) && gateColor.ValueKind == JsonValueKind.Array)
+        {
+            state.MmuGateColor = ParseStringArray(gateColor);
+        }
+
+        if (mmu.TryGetProperty("gate_filament_name", out JsonElement gateFilamentName) && gateFilamentName.ValueKind == JsonValueKind.Array)
+        {
+            state.MmuGateFilamentName = ParseStringArray(gateFilamentName);
+        }
+
+        if (mmu.TryGetProperty("gate_spool_id", out JsonElement gateSpoolId) && gateSpoolId.ValueKind == JsonValueKind.Array)
+        {
+            state.MmuGateSpoolId = ParseIntArray(gateSpoolId);
+        }
+
+        _logger.LogDebug(
+            "MMU update for printer {PrinterId}: Tool={Tool}, Gate={Gate}, Action={Action}, NumGates={NumGates}",
+            printerId,
+            state.MmuActiveTool,
+            state.MmuActiveGate,
+            state.MmuAction,
+            state.MmuNumGates);
+    }
+
+    private static int[] ParseIntArray(JsonElement arr)
+    {
+        int[] result = new int[arr.GetArrayLength()];
+        for (int i = 0; i < result.Length; i++)
+        {
+            result[i] = arr[i].ValueKind == JsonValueKind.Number ? arr[i].GetInt32() : 0;
+        }
+
+        return result;
+    }
+
+    private static string[] ParseStringArray(JsonElement arr)
+    {
+        string[] result = new string[arr.GetArrayLength()];
+        for (int i = 0; i < result.Length; i++)
+        {
+            result[i] = arr[i].ValueKind == JsonValueKind.String ? arr[i].GetString() ?? string.Empty : string.Empty;
+        }
+
+        return result;
+    }
+
+    // ── Qidibox filament box handling ──
+
+    /// <summary>
+    /// Detects and handles Qidibox filament box updates from Moonraker.
+    /// Qidibox uses "box_stepper slotN" objects for filament presence and
+    /// "save_variables" for filament type/color assignments.
+    /// The filament/color name dictionaries are fetched once from officiall_filas_list.cfg.
+    /// </summary>
+    private async Task HandleQidiboxUpdatesAsync(
+        Guid printerId,
+        PrinterState state,
+        JsonElement statusObj,
+        string serverUrl,
+        CancellationToken ct)
+    {
+        // Skip detection scan if Qidibox is already detected
+        bool hasBoxStepper = false;
+        bool hasBoxCount = false;
+        bool hasSaveVariables = false;
+        JsonElement variables = default;
+
+        if (!state.QidiboxDetected)
+        {
+            // Detect Qidibox by presence of "box_stepper slot0" in the status
+            foreach (JsonProperty prop in statusObj.EnumerateObject())
+            {
+                if (prop.Name.StartsWith("box_stepper slot", StringComparison.Ordinal))
+                {
+                    hasBoxStepper = true;
+                    break;
+                }
+            }
+        }
+
+        // Check save_variables (needed for both detection and ongoing updates)
+        hasSaveVariables = statusObj.TryGetProperty("save_variables", out JsonElement saveVarsElem);
+        if (hasSaveVariables &&
+            saveVarsElem.TryGetProperty("variables", out variables) &&
+            variables.TryGetProperty("box_count", out _))
+        {
+            hasBoxCount = true;
+        }
+
+        if (!hasBoxStepper && !hasBoxCount && !state.QidiboxDetected)
+        {
+            return;
+        }
+
+        // Mark Qidibox as detected (and set MMU type)
+        if (!state.QidiboxDetected && (hasBoxStepper || hasBoxCount))
+        {
+            state.QidiboxDetected = true;
+            state.MmuDetected = true;
+            state.MmuEnabled = true;
+            state.MmuType = MmuProtocol.Qidibox;
+            state.MmuDirty = true;
+            _logger.LogInformation(
+                "Qidibox filament box detected for printer {PrinterId}",
+                printerId);
+        }
+
+        // Fetch the filament/color dictionary once
+        if (state.QidiboxDetected && !state.QidiboxDictFetched)
+        {
+            await FetchQidiboxDictionaryAsync(state, serverUrl, ct);
+        }
+
+        // Parse box_count from save_variables
+        if (hasBoxCount && variables.ValueKind == JsonValueKind.Object)
+        {
+            if (variables.TryGetProperty("box_count", out JsonElement boxCountElem) &&
+                boxCountElem.ValueKind == JsonValueKind.Number)
+            {
+                int boxCount = boxCountElem.GetInt32();
+                if (boxCount > 0)
+                {
+                    state.QidiboxBoxCount = boxCount;
+                    state.MmuNumGates = boxCount * 4;
+                }
+            }
+
+            // Parse active slot from last_load_slot (e.g., "slot0" → 0, "slot-1" → -1)
+            if (variables.TryGetProperty("last_load_slot", out JsonElement lastSlotElem) &&
+                lastSlotElem.ValueKind == JsonValueKind.String)
+            {
+                string? lastSlot = lastSlotElem.GetString();
+                if (lastSlot is not null && lastSlot.StartsWith("slot", StringComparison.Ordinal))
+                {
+                    if (int.TryParse(lastSlot.AsSpan(4), out int slotIndex))
+                    {
+                        state.MmuActiveTool = slotIndex;
+                        state.MmuActiveGate = slotIndex >= 0 ? slotIndex : -1;
+                    }
+                }
+            }
+
+            // Build per-slot arrays from save_variables
+            int numSlots = state.MmuNumGates > 0 ? state.MmuNumGates : 4;
+            EnsureSlotArrays(state, numSlots);
+
+            for (int i = 0; i < numSlots; i++)
+            {
+                // Filament type
+                if (variables.TryGetProperty($"filament_slot{i}", out JsonElement filTypeElem) &&
+                    filTypeElem.ValueKind == JsonValueKind.Number)
+                {
+                    int filType = filTypeElem.GetInt32();
+                    if (state.QidiboxFilamentDict.TryGetValue(filType, out string? filName))
+                    {
+                        state.MmuGateMaterial![i] = filName;
+                        state.MmuGateFilamentName![i] = filName;
+                    }
+                    else
+                    {
+                        state.MmuGateMaterial![i] = $"Type {filType}";
+                        state.MmuGateFilamentName![i] = $"Type {filType}";
+                    }
+                }
+
+                // Color
+                if (variables.TryGetProperty($"color_slot{i}", out JsonElement colorElem) &&
+                    colorElem.ValueKind == JsonValueKind.Number)
+                {
+                    int colorIdx = colorElem.GetInt32();
+                    if (state.QidiboxColorDict.TryGetValue(colorIdx, out string? colorHex))
+                    {
+                        state.MmuGateColor![i] = colorHex;
+                    }
+                    else
+                    {
+                        state.MmuGateColor![i] = "#808080";
+                    }
+                }
+            }
+        }
+
+        // Parse individual box_stepper slotN runout_button values
+        foreach (JsonProperty prop in statusObj.EnumerateObject())
+        {
+            if (!prop.Name.StartsWith("box_stepper slot", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // Extract slot index from "box_stepper slotN"
+            if (!int.TryParse(prop.Name.AsSpan("box_stepper slot".Length), out int slotIdx))
+            {
+                continue;
+            }
+
+            int numSlots = state.MmuNumGates > 0 ? state.MmuNumGates : 4;
+            if (slotIdx < 0 || slotIdx >= numSlots)
+            {
+                continue;
+            }
+
+            EnsureSlotArrays(state, numSlots);
+
+            // runout_button: 0 = filament present, 1 = no filament, null = slot inactive
+            if (prop.Value.TryGetProperty("runout_button", out JsonElement runoutElem))
+            {
+                if (runoutElem.ValueKind == JsonValueKind.Number)
+                {
+                    int runout = runoutElem.GetInt32();
+                    state.MmuGateStatus![slotIdx] = runout == 0 ? 1 : 0; // 1=Available, 0=Empty
+                }
+                else if (runoutElem.ValueKind == JsonValueKind.Null)
+                {
+                    state.MmuGateStatus![slotIdx] = -1; // Disabled (slot doesn't physically exist)
+                }
+            }
+        }
+
+        if (state.QidiboxDetected)
+        {
+            // Set filament state based on active tool — only mark dirty when values change
+            string newFilamentState = state.MmuActiveTool >= 0 ? "Loaded" : "Unloaded";
+            if (state.MmuFilamentState != newFilamentState || state.MmuAction != "Idle")
+            {
+                state.MmuFilamentState = newFilamentState;
+                state.MmuAction = "Idle";
+                state.MmuDirty = true;
+            }
+
+            _logger.LogDebug(
+                "Qidibox update for printer {PrinterId}: BoxCount={BoxCount}, ActiveTool={Tool}, Slots={Slots}",
+                printerId,
+                state.QidiboxBoxCount,
+                state.MmuActiveTool,
+                state.MmuNumGates);
+        }
+    }
+
+    /// <summary>
+    /// Ensures the slot arrays on PrinterState are initialized to the given size.
+    /// Preserves existing data when resizing via Array.Copy.
+    /// </summary>
+    private static void EnsureSlotArrays(PrinterState state, int numSlots)
+    {
+        if (state.MmuGateStatus == null || state.MmuGateStatus.Length != numSlots)
+        {
+            int[] newArr = new int[numSlots];
+            Array.Fill(newArr, 2); // Default: Unknown
+            if (state.MmuGateStatus is not null)
+            {
+                Array.Copy(state.MmuGateStatus, newArr, Math.Min(state.MmuGateStatus.Length, numSlots));
+            }
+
+            state.MmuGateStatus = newArr;
+        }
+
+        if (state.MmuGateMaterial == null || state.MmuGateMaterial.Length != numSlots)
+        {
+            string[] newArr = new string[numSlots];
+            if (state.MmuGateMaterial is not null)
+            {
+                Array.Copy(state.MmuGateMaterial, newArr, Math.Min(state.MmuGateMaterial.Length, numSlots));
+            }
+
+            state.MmuGateMaterial = newArr;
+        }
+
+        if (state.MmuGateColor == null || state.MmuGateColor.Length != numSlots)
+        {
+            string[] newArr = new string[numSlots];
+            if (state.MmuGateColor is not null)
+            {
+                Array.Copy(state.MmuGateColor, newArr, Math.Min(state.MmuGateColor.Length, numSlots));
+            }
+
+            state.MmuGateColor = newArr;
+        }
+
+        if (state.MmuGateFilamentName == null || state.MmuGateFilamentName.Length != numSlots)
+        {
+            string[] newArr = new string[numSlots];
+            if (state.MmuGateFilamentName is not null)
+            {
+                Array.Copy(state.MmuGateFilamentName, newArr, Math.Min(state.MmuGateFilamentName.Length, numSlots));
+            }
+
+            state.MmuGateFilamentName = newArr;
+        }
+
+        if (state.MmuGateSpoolId == null || state.MmuGateSpoolId.Length != numSlots)
+        {
+            int[] newArr = new int[numSlots];
+            Array.Fill(newArr, -1);
+            if (state.MmuGateSpoolId is not null)
+            {
+                Array.Copy(state.MmuGateSpoolId, newArr, Math.Min(state.MmuGateSpoolId.Length, numSlots));
+            }
+
+            state.MmuGateSpoolId = newArr;
+        }
+    }
+
+    // ── AFC (BoxTurtle / NightOwl / QuattroBox) handling ──
+
+    /// <summary>
+    /// Detects and handles AFC Klipper add-on updates from Moonraker.
+    /// AFC (Armored Turtle Filament Changer) uses the "AFC" Moonraker object with lanes
+    /// and per-lane "AFC_stepper &lt;name&gt;" objects for individual lane status.
+    /// Supports BoxTurtle, NightOwl, and QuattroBox unit types.
+    /// </summary>
+    private void HandleAfcUpdates(
+        Guid printerId,
+        PrinterState state,
+        JsonElement statusObj)
+    {
+        // Detect AFC by presence of "AFC" key in status
+        bool hasAfcObject = statusObj.TryGetProperty("AFC", out JsonElement afcElem);
+
+        // Also detect via AFC_stepper objects (per-lane status)
+        // Skip scanning if we already know this printer has no AFC
+        bool hasAfcSteppers = false;
+        if (!state.AfcDetected)
+        {
+            foreach (JsonProperty prop in statusObj.EnumerateObject())
+            {
+                if (prop.Name.StartsWith("AFC_stepper ", StringComparison.Ordinal))
+                {
+                    hasAfcSteppers = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasAfcObject && !hasAfcSteppers && !state.AfcDetected)
+        {
+            return;
+        }
+
+        // Mark AFC as detected (and set MMU type)
+        if (!state.AfcDetected && (hasAfcObject || hasAfcSteppers))
+        {
+            state.AfcDetected = true;
+            state.MmuDetected = true;
+            state.MmuEnabled = true;
+            state.MmuType = MmuProtocol.Afc;
+            state.MmuDirty = true;
+            _logger.LogInformation(
+                "AFC filament changer detected for printer {PrinterId}",
+                printerId);
+        }
+
+        // Parse top-level AFC object if present
+        if (hasAfcObject && afcElem.ValueKind == JsonValueKind.Object)
+        {
+            // current_state: Idle, Loading, Unloading, Error, Ejecting, Moving, Restoring, Initialized
+            if (afcElem.TryGetProperty("current_state", out JsonElement currentStateElem) &&
+                currentStateElem.ValueKind == JsonValueKind.String)
+            {
+                state.AfcCurrentState = currentStateElem.GetString();
+                state.MmuAction = state.AfcCurrentState;
+            }
+
+            // current_load: name of currently loaded lane, or null/empty
+            if (afcElem.TryGetProperty("current_load", out JsonElement currentLoadElem))
+            {
+                if (currentLoadElem.ValueKind == JsonValueKind.String)
+                {
+                    string? loadedLane = currentLoadElem.GetString();
+                    state.AfcCurrentLoad = string.IsNullOrEmpty(loadedLane) ? null : loadedLane;
+                }
+                else if (currentLoadElem.ValueKind == JsonValueKind.Null)
+                {
+                    state.AfcCurrentLoad = null;
+                }
+            }
+
+            // error_state: boolean
+            if (afcElem.TryGetProperty("error_state", out JsonElement errorStateElem))
+            {
+                state.AfcErrorState = errorStateElem.ValueKind == JsonValueKind.True;
+            }
+
+            // bypass_state: boolean
+            if (afcElem.TryGetProperty("bypass_state", out JsonElement bypassStateElem))
+            {
+                state.AfcBypassState = bypassStateElem.ValueKind == JsonValueKind.True;
+                state.MmuHasBypass = true; // AFC supports bypass
+            }
+
+            // lanes: array of lane name strings — establishes lane ordering
+            if (afcElem.TryGetProperty("lanes", out JsonElement lanesElem) &&
+                lanesElem.ValueKind == JsonValueKind.Array)
+            {
+                List<string> laneNames = [];
+                foreach (JsonElement lane in lanesElem.EnumerateArray())
+                {
+                    if (lane.ValueKind == JsonValueKind.String)
+                    {
+                        string? name = lane.GetString();
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            laneNames.Add(name);
+                        }
+                    }
+                }
+
+                if (laneNames.Count > 0)
+                {
+                    state.AfcLaneNames = laneNames;
+                    state.MmuNumGates = laneNames.Count;
+                    EnsureSlotArrays(state, laneNames.Count);
+                }
+            }
+        }
+
+        // Parse individual AFC_stepper lane objects for per-lane status
+        foreach (JsonProperty prop in statusObj.EnumerateObject())
+        {
+            if (!prop.Name.StartsWith("AFC_stepper ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // Extract lane name from "AFC_stepper <name>"
+            string laneName = prop.Name["AFC_stepper ".Length..];
+            if (string.IsNullOrEmpty(laneName))
+            {
+                continue;
+            }
+
+            // Find the lane index — add to list if not yet known
+            int laneIndex = state.AfcLaneNames.IndexOf(laneName);
+            if (laneIndex < 0)
+            {
+                // Lane not in the lanes list yet — append it
+                state.AfcLaneNames.Add(laneName);
+                laneIndex = state.AfcLaneNames.Count - 1;
+                state.MmuNumGates = state.AfcLaneNames.Count;
+            }
+
+            int numLanes = state.AfcLaneNames.Count;
+            EnsureSlotArrays(state, numLanes);
+
+            JsonElement laneObj = prop.Value;
+            if (laneObj.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            // material: filament type (e.g., "PLA", "PETG")
+            if (laneObj.TryGetProperty("material", out JsonElement materialElem) &&
+                materialElem.ValueKind == JsonValueKind.String)
+            {
+                string? material = materialElem.GetString();
+                state.MmuGateMaterial![laneIndex] = material ?? string.Empty;
+                state.MmuGateFilamentName![laneIndex] = material ?? string.Empty;
+            }
+
+            // color: filament color hex string
+            if (laneObj.TryGetProperty("color", out JsonElement colorElem) &&
+                colorElem.ValueKind == JsonValueKind.String)
+            {
+                string? color = colorElem.GetString();
+                state.MmuGateColor![laneIndex] = color ?? string.Empty;
+            }
+
+            // spool_id: Spoolman spool ID
+            if (laneObj.TryGetProperty("spool_id", out JsonElement spoolIdElem))
+            {
+                if (spoolIdElem.ValueKind == JsonValueKind.Number)
+                {
+                    state.MmuGateSpoolId![laneIndex] = spoolIdElem.GetInt32();
+                }
+                else if (spoolIdElem.ValueKind == JsonValueKind.String &&
+                         int.TryParse(spoolIdElem.GetString(), out int spoolId))
+                {
+                    state.MmuGateSpoolId![laneIndex] = spoolId;
+                }
+            }
+
+            // Determine gate status from load state flags:
+            // load_state — filament loaded to extruder
+            // prep_state — filament prepped/present at hub
+            // loaded_to_hub — filament loaded to hub
+            bool filamentPresent =
+                (laneObj.TryGetProperty("load_state", out JsonElement loadStateElem) &&
+                 loadStateElem.ValueKind == JsonValueKind.True) ||
+                (laneObj.TryGetProperty("prep_state", out JsonElement prepStateElem) &&
+                 prepStateElem.ValueKind == JsonValueKind.True) ||
+                (laneObj.TryGetProperty("loaded_to_hub", out JsonElement hubLoadElem) &&
+                 hubLoadElem.ValueKind == JsonValueKind.True);
+
+            // Gate status: 1=Available, 0=Empty
+            state.MmuGateStatus![laneIndex] = filamentPresent ? 1 : 0;
+        }
+
+        // Update active tool/gate based on currently loaded lane
+        if (state.AfcDetected)
+        {
+            if (!string.IsNullOrEmpty(state.AfcCurrentLoad))
+            {
+                int loadedIndex = state.AfcLaneNames.IndexOf(state.AfcCurrentLoad);
+                if (loadedIndex >= 0)
+                {
+                    state.MmuActiveTool = loadedIndex;
+                    state.MmuActiveGate = loadedIndex;
+                }
+
+                state.MmuFilamentState = "Loaded";
+            }
+            else
+            {
+                state.MmuActiveTool = -1;
+                state.MmuActiveGate = 0;
+                state.MmuFilamentState = "Unloaded";
+            }
+
+            // Map AFC states to action label
+            state.MmuAction = state.AfcCurrentState ?? "Idle";
+
+            // Is-homed: AFC doesn't have a homing concept; if Initialized or Idle, treat as homed
+            state.MmuIsHomed = state.AfcCurrentState is "Idle" or "Initialized" or "Loading" or "Unloading";
+            state.MmuDirty = true;
+
+            _logger.LogDebug(
+                "AFC update for printer {PrinterId}: State={State}, CurrentLoad={Load}, Lanes={Lanes}, Error={Error}",
+                printerId,
+                state.AfcCurrentState,
+                state.AfcCurrentLoad,
+                state.MmuNumGates,
+                state.AfcErrorState);
+        }
+    }
+
+    /// <summary>
+    /// Fetches and parses the Qidibox filament/color dictionary from the printer's
+    /// officiall_filas_list.cfg configuration file via Moonraker HTTP API.
+    /// </summary>
+    private async Task FetchQidiboxDictionaryAsync(PrinterState state, string serverUrl, CancellationToken ct)
+    {
+        // Backoff: skip if we've failed recently and retry window hasn't elapsed
+        if (state.QidiboxDictFetchAttempts > 0 && DateTime.UtcNow < state.QidiboxDictRetryAfter)
+        {
+            return;
+        }
+
+        const int maxAttempts = 5;
+        if (state.QidiboxDictFetchAttempts >= maxAttempts)
+        {
+            // Give up permanently after max retries
+            state.QidiboxDictFetched = true;
+            return;
+        }
+
+        try
+        {
+            string normalized = serverUrl.TrimEnd('/');
+            string dictUrl = $"{normalized}/server/files/config/officiall_filas_list.cfg";
+
+            using HttpClient httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            string content = await httpClient.GetStringAsync(dictUrl, ct);
+
+            // Parse [colordict] section: index = #hexcolor
+            ParseIniSection(content, "colordict", state.QidiboxColorDict);
+
+            // Parse [filaN] sections: sections like [fila1], [fila41] with "filament = PETG"
+            ParseFilamentSections(content, state.QidiboxFilamentDict);
+
+            state.QidiboxDictFetched = true;
+            state.QidiboxDictFetchAttempts = 0;
+            _logger.LogInformation(
+                "Fetched Qidibox dictionary: {ColorCount} colors, {FilamentCount} filaments",
+                state.QidiboxColorDict.Count,
+                state.QidiboxFilamentDict.Count);
+        }
+        catch (Exception ex)
+        {
+            state.QidiboxDictFetchAttempts++;
+            int delaySec = (int)Math.Pow(2, state.QidiboxDictFetchAttempts) * 5; // 10s, 20s, 40s, 80s, 160s
+            state.QidiboxDictRetryAfter = DateTime.UtcNow.AddSeconds(delaySec);
+
+            _logger.LogWarning(
+                ex,
+                "Failed to fetch Qidibox filament dictionary from {ServerUrl} (attempt {Attempt}/{Max}). Retrying in {Delay}s.",
+                serverUrl,
+                state.QidiboxDictFetchAttempts,
+                maxAttempts,
+                delaySec);
+        }
+    }
+
+    /// <summary>
+    /// Parses an INI-style [section] into a dictionary of int → string values.
+    /// Used for [colordict] in officiall_filas_list.cfg.
+    /// </summary>
+    private static void ParseIniSection(string content, string sectionName, Dictionary<int, string> result)
+    {
+        result.Clear();
+        string sectionHeader = $"[{sectionName}]";
+        bool inSection = false;
+
+        foreach (string rawLine in content.Split('\n'))
+        {
+            string line = rawLine.Trim();
+            if (line.StartsWith('['))
+            {
+                inSection = string.Equals(line, sectionHeader, StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(line) || line[0] is '#' or ';')
+            {
+                continue;
+            }
+
+            if (inSection)
+            {
+                int eqPos = line.IndexOf('=');
+                if (eqPos > 0)
+                {
+                    string key = line[..eqPos].Trim();
+                    string value = line[(eqPos + 1)..].Trim();
+                    if (int.TryParse(key, out int index) && !string.IsNullOrEmpty(value))
+                    {
+                        result[index] = value;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parses [filaN] sections from officiall_filas_list.cfg to build a filament type dictionary.
+    /// Each [filaN] section contains "filament = MaterialName".
+    /// </summary>
+    private static void ParseFilamentSections(string content, Dictionary<int, string> result)
+    {
+        result.Clear();
+        int currentFilaIndex = -1;
+
+        foreach (string rawLine in content.Split('\n'))
+        {
+            string line = rawLine.Trim();
+            if (line.StartsWith('['))
+            {
+                currentFilaIndex = -1;
+                if (line.StartsWith("[fila", StringComparison.OrdinalIgnoreCase) && line.EndsWith(']'))
+                {
+                    string numStr = line[5..^1]; // Extract number between "[fila" and "]"
+                    if (int.TryParse(numStr, out int idx))
+                    {
+                        currentFilaIndex = idx;
+                    }
+                }
+
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(line) || line[0] is '#' or ';')
+            {
+                continue;
+            }
+
+            if (currentFilaIndex >= 0)
+            {
+                int eqPos = line.IndexOf('=');
+                if (eqPos > 0)
+                {
+                    string key = line[..eqPos].Trim();
+                    string value = line[(eqPos + 1)..].Trim();
+                    if (string.Equals(key, "filament", StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrEmpty(value))
+                    {
+                        result[currentFilaIndex] = value;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Handles print state, progress, and job name updates from multiple sources.
     /// Prioritizes print_stats over webhooks state, updates persistent state, and emits a state update event.
     /// </summary>
@@ -1322,6 +2098,9 @@ public sealed class MoonrakerSubscriptionService(
             // Default to false if not yet tracked (prevents false positives)
             bool isOnline = _klippyReadyState.TryGetValue(printerId, out bool ready) && ready;
 
+            // Build MMU status if detected
+            MmuStatusDto? mmuStatus = state.BuildMmuStatus();
+
             // Send consolidated update for offline status and overall state sync
             PrinterStatusUpdate update = new PrinterStatusUpdate(
                 printerId,
@@ -1339,7 +2118,8 @@ public sealed class MoonrakerSubscriptionService(
                 HotendTarget: state.HotendTarget,
                 BedTarget: state.BedTarget,
                 HomedAxes: state.HomedAxes,
-                SpoolInfo: spoolInfo);
+                SpoolInfo: spoolInfo,
+                MmuStatus: mmuStatus);
 
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
@@ -1360,7 +2140,8 @@ public sealed class MoonrakerSubscriptionService(
                 BedTemp: state.BedTemp,
                 HotendTarget: state.HotendTarget,
                 BedTarget: state.BedTarget,
-                SpoolInfo: spoolInfo);
+                SpoolInfo: spoolInfo,
+                MmuStatus: mmuStatus);
             _statusCacheWriter.UpdateStatus(cacheUpdate);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);

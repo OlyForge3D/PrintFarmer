@@ -428,6 +428,68 @@ export interface PrinterStatus extends
 export interface PrinterStatusUpdate extends PrinterStatus {
   /** Axes that have been homed (e.g., "xyz") */
   homedAxes?: string;
+  /** MMU/ERCF status if detected */
+  mmuStatus?: MmuStatus;
+}
+
+// ── MMU (Multi-Material Unit) types ──
+
+/** Gate/slot status values from Happy Hare */
+export enum MmuGateStatus {
+  /** Gate disabled */
+  Disabled = -1,
+  /** No filament detected */
+  Empty = 0,
+  /** Filament available */
+  Available = 1,
+  /** Status unknown */
+  Unknown = 2,
+}
+
+/** Single gate/slot on the MMU */
+export interface MmuGate {
+  /** Gate index (0-based) */
+  index: number;
+  /** Gate status: -1=disabled, 0=empty, 1=available, 2=unknown */
+  status: MmuGateStatus;
+  /** Material type (e.g., "PLA", "PETG", "ASA") */
+  material?: string;
+  /** CSS color string for the filament */
+  color?: string;
+  /** Filament brand/name */
+  filamentName?: string;
+  /** Spoolman spool ID (-1 = none) */
+  spoolId: number;
+  /** Lane/slot name (e.g., "lane1" for AFC), absent for HappyHare */
+  name?: string;
+}
+
+/** Overall MMU status for a printer */
+export interface MmuStatus {
+  /** Whether the MMU is enabled */
+  enabled: boolean;
+  /** Whether the MMU has been homed */
+  isHomed: boolean;
+  /** Currently selected tool index (-1=none, -2=unknown) */
+  activeTool: number;
+  /** Currently selected gate index */
+  activeGate: number;
+  /** Filament load state: "Loaded", "Unloaded", "Unknown" */
+  filamentState?: string;
+  /** Current action: "Idle", "Loading", "Unloading", "Forming Tip", etc. */
+  action?: string;
+  /** Total number of gates/slots */
+  numGates: number;
+  /** Whether the MMU has a bypass */
+  hasBypass: boolean;
+  /** Whether endless spool mode is active */
+  endlessSpool: boolean;
+  /** Whether clog detection is active */
+  clogDetection: boolean;
+  /** Per-gate slot information */
+  gates: MmuGate[];
+  /** MMU protocol type: "HappyHare", "Qidibox", or "AFC" */
+  mmuType?: string;
 }
 
 // File information with thumbnail

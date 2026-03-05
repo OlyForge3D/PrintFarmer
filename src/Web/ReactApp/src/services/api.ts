@@ -717,6 +717,56 @@ export class ApiClient {
     return response.data;
   }
 
+  // ── MMU (Multi-Material Unit) commands ──
+
+  /** Change to a specific MMU tool/gate (loads filament). */
+  async mmuChangeTool(printerId: string, tool: number): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/mmu/change-tool/${tool}`
+    );
+    return response.data;
+  }
+
+  /** Eject/unload filament from the MMU. */
+  async mmuEject(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/mmu/eject`
+    );
+    return response.data;
+  }
+
+  /** Load filament from the currently selected gate into the extruder. */
+  async mmuLoad(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/mmu/load`
+    );
+    return response.data;
+  }
+
+  /** Home the MMU unit. */
+  async mmuHome(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/mmu/home`
+    );
+    return response.data;
+  }
+
+  /** Pre-select an MMU tool without loading filament. */
+  async mmuSelectTool(printerId: string, tool: number): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/mmu/select-tool/${tool}`
+    );
+    return response.data;
+  }
+
+  /** Recover the MMU from an error state. */
+  async mmuRecover(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/mmu/recover`
+    );
+    return response.data;
+  }
+
   /**
    * Sends an arbitrary G-code command to the printer.
    * @param printerId The printer's GUID
