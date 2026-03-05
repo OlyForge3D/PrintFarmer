@@ -246,6 +246,7 @@ public class UnifiedSettingsController(
     /// </summary>
     /// <param name="keyName">The key name of the settings section.</param>
     /// <returns>The settings object for the specified section.</returns>
+    [AllowAnonymous]
     [HttpGet("{keyName}")]
     public ActionResult<object> GetSettingsByKeyName(string keyName)
     {
@@ -272,6 +273,7 @@ public class UnifiedSettingsController(
     /// </summary>
     /// <param name="keyName">The key name - should be "NetworkDiscovery".</param>
     /// <returns>NoContent on success.</returns>
+    [AllowAnonymous]
     [HttpPost("{keyName}/heartbeat")]
     public ActionResult SendHeartbeat(string keyName)
     {

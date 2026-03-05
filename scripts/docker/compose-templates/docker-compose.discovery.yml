@@ -62,7 +62,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    restart: unless-stopped
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m

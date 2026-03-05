@@ -23,6 +23,8 @@ import { TasksWidget } from '@/features/tasks';
 import { ActiveJobsWidget } from './ActiveJobsWidget';
 import { RecentPrintsWidget } from './RecentPrintsWidget';
 import { CriticalAlertsBanner } from './CriticalAlertsBanner';
+import { BackgroundServicesWidget } from '@/features/admin/components/BackgroundServicesWidget';
+import { MaintenanceAlertsWidget } from '@/features/maintenance/components/MaintenanceAlertsWidget';
 
 interface StatsCardProps {
   title: string;
@@ -146,6 +148,12 @@ export const PrinterDashboard: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ActiveJobsWidget />
             <RecentPrintsWidget />
+          </div>
+
+          {/* Row 3: Maintenance Alerts + Background Services */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <BackgroundServicesWidget maxServices={8} />
+            <MaintenanceAlertsWidget />
           </div>
         </div>
       )}
