@@ -4,7 +4,7 @@ import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { EyeIcon, EyeOffIcon, LoginIcon } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { Button, Input } from '@/common/components/ui';
+import { Button, Checkbox, Input } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 
 interface LoginModalProps {
@@ -16,6 +16,7 @@ interface LoginModalProps {
 export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { login, error } = useAuth();
@@ -26,7 +27,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
 
     setIsLoading(true);
     try {
-      const success = await login({ username, password });
+      const success = await login({ username, password, rememberMe });
       if (success) {
         onClose();
         setUsername('');
@@ -101,6 +102,12 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
         </div>
 
         <div className="flex items-center justify-between text-sm">
+          <Checkbox
+            label="Remember me"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+            disabled={isLoading}
+          />
           <Link
             to="/forgot-password"
             className="text-pf-accent hover:text-pf-accent-hover font-medium"

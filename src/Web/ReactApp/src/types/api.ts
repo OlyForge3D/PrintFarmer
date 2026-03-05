@@ -1653,6 +1653,7 @@ export interface LoginRequest {
   username?: string;
   usernameOrEmail?: string;
   password: string;
+  rememberMe?: boolean;
 }
 
 export interface RegisterRequest {
