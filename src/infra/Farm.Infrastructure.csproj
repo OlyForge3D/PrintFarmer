@@ -19,7 +19,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.3" />
   <PackageReference Include="Refit.HttpClientFactory" Version="10.0.1" />
-    <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
+    <PackageReference Include="StackExchange.Redis" Version="2.11.8" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.16.0" />
     <PackageReference Include="Lucene.Net" Version="4.8.0-beta00017" />
     <PackageReference Include="Lucene.Net.QueryParser" Version="4.8.0-beta00017" />
