@@ -4,12 +4,19 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Web.Api.Services.Startup;
 
 /// <summary>
-/// Background service that syncs orphaned print jobs on API startup.
-/// Jobs can get stuck in "Printing" status if the API restarts while a print completes.
-/// This service waits for the printer status cache to populate, then syncs any orphaned jobs.
+/// Background service that periodically syncs orphaned print jobs.
+/// Jobs can get stuck in "Printing" status if:
+/// - The API restarts while a print completes
+/// - A print is cancelled directly on the printer and the WebSocket/polling misses the transition
+/// - A transient database error prevents the real-time state handler from persisting the change
+///
+/// Runs once at startup (after a 15-second warm-up) and then every 60 seconds.
 /// </summary>
 public class OrphanedJobSyncStartupService : BackgroundService
 {
+    private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ReconciliationInterval = TimeSpan.FromSeconds(60);
+
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<OrphanedJobSyncStartupService> _logger;
 
@@ -24,22 +31,32 @@ public class OrphanedJobSyncStartupService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Wait for printer status cache to be populated by polling services
-        // Give the polling services ~15 seconds to do their first poll
         _logger.LogInformation("[OrphanedJobSync] Waiting for printer status cache to populate...");
-        await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+        await Task.Delay(InitialDelay, stoppingToken);
 
-        if (stoppingToken.IsCancellationRequested)
+        // Run initial startup sync, then loop periodically
+        while (!stoppingToken.IsCancellationRequested)
         {
-            return;
-        }
+            await RunSyncAsync(stoppingToken);
 
+            try
+            {
+                await Task.Delay(ReconciliationInterval, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task RunSyncAsync(CancellationToken ct)
+    {
         try
         {
             using var scope = _serviceProvider.CreateScope();
             var completionService = scope.ServiceProvider.GetRequiredService<IPrintJobCompletionService>();
             var statusCache = scope.ServiceProvider.GetRequiredService<IPrinterStatusCacheReader>();
-
-            _logger.LogInformation("[OrphanedJobSync] Running startup sync of orphaned jobs...");
 
             string? LookupPrinterState(Guid printerId)
             {
@@ -49,20 +66,20 @@ public class OrphanedJobSyncStartupService : BackgroundService
 
             int syncedCount = await completionService.SyncOrphanedPrintingJobsAsync(
                 LookupPrinterState,
-                stoppingToken);
+                ct);
 
             if (syncedCount > 0)
             {
-                _logger.LogInformation("[OrphanedJobSync] Startup sync completed: {SyncedCount} orphaned job(s) synchronized", syncedCount);
+                _logger.LogInformation("[OrphanedJobSync] Reconciliation synced {SyncedCount} orphaned job(s)", syncedCount);
             }
-            else
-            {
-                _logger.LogInformation("[OrphanedJobSync] Startup sync completed: no orphaned jobs found");
-            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Shutting down — expected
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[OrphanedJobSync] Error during startup sync of orphaned jobs");
+            _logger.LogError(ex, "[OrphanedJobSync] Error during orphaned job sync");
         }
     }
 }

@@ -157,7 +157,7 @@ public class OpenFilamentDbService : IOpenFilamentDbService
                         BrandName = brandName,
                         FilamentName = filDetail.Name,
                         Material = materialName,
-                        ColorName = FormatColorName(varDetail.ColorName),
+                        ColorName = varDetail.ColorName,
                         ColorHex = varDetail.ColorHex,
                         Density = filDetail.Density,
                         Diameter = size.Diameter,
@@ -179,9 +179,4 @@ public class OpenFilamentDbService : IOpenFilamentDbService
         _logger.LogDebug("Flattened {Count} entries for {Brand}/{Material} from OFD", result.Count, brandSlug, materialSlug);
         return result;
     }
-
-    /// <summary>Converts snake_case color names to Title Case (e.g., "azure_blue" → "Azure Blue").</summary>
-    private static string FormatColorName(string name) =>
-        string.Join(' ', name.Split('_').Select(w =>
-            w.Length > 0 ? char.ToUpperInvariant(w[0]) + w[1..] : w));
 }

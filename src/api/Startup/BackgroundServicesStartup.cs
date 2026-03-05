@@ -27,8 +27,8 @@ public static class BackgroundServicesStartup
         services.Configure<Farm.Infrastructure.Settings.MaintenanceAlertSettings>(configuration.GetSection(Farm.Infrastructure.Settings.MaintenanceAlertSettings.SectionName));
         services.AddHostedService<Farm.Infrastructure.Services.Maintenance.MaintenanceAlertHostedService>();
 
-        // Orphaned Job Sync - Runs once on startup to sync jobs stuck in "Printing" status
-        // This handles cases where the API restarts while a print completes
+        // Orphaned Job Sync - Runs periodically (every 60s) to sync jobs stuck in "Printing" status
+        // Catches missed state transitions from direct printer cancellations or WebSocket drops
         services.AddHostedService<Farm.Web.Api.Services.Startup.OrphanedJobSyncStartupService>();
 
         // History Seeding - Periodically seeds job history from connected printers
