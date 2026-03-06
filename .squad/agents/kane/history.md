@@ -64,3 +64,15 @@
 - **EF Core SaveChanges overrides** populate the `NameLowered` shadow property on Manufacturer from `Name.ToLowerInvariant()`
 - Unit tests that create `AppDbContext` directly (not via `CustomWebApplicationFactory`) need to call `TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled()` for FK enforcement
 - **FolderNode** entity has no named `DbSet` — access via `_db.Set<FolderNode>()`; uses `Path` and `FolderType` properties (not Name/Category)
+
+### Phase 2: Auto-Dispatch Tests (2025-07-XX)
+- **35 Phase 2 tests** added across 3 files (all passing, 0 failures):
+  - `AutoDispatchBackgroundServiceTests.cs` — 12 tests: idle→dispatch, disabled, manual mode, no jobs, no compatible, score below threshold, suggest mode, suggest logs, printer offline/disabled/active-job, dispatch exception
+  - `DispatchSettingsControllerTests.cs` — 12 tests: GET defaults, enum string serialization, PUT valid/suggest/negative-idle/score>100/negative-score/max-concurrent-zero, roundtrip, updatedAt changes, singleton constraint
+  - `AutoDispatchConcurrencyTests.cs` — 11 tests: two-printers-same-job race, multi-printer-multi-job uniqueness, max-concurrent, trigger notify/read/cancel/clear/multi-notify, DispatchSettings defaults/seeded, DTO events
+- **Race condition tests** require mock `DispatchJobAsync` to update the DB (set `AssignedPrinterId` and `Status = Starting`) — otherwise the semaphore serializes cycles but the second cycle still finds the job as Queued
+- **Manufacturer has no `CreatedAt`/`UpdatedAt`** properties; **PrinterModel has no `CreatedAt`/`UpdatedAt`** — do not set timestamps when seeding
+- **FluentAssertions v8** removed `BeLessOrEqualTo()` — use `BeInRange(0, N)` instead
+- **Controller tests** require `IAsyncLifetime` + `CreateAuthenticatedClientAsync` pattern for `[Authorize]` endpoints
+- **JSON deserialization in tests** needs `JsonSerializerOptions` with `JsonStringEnumConverter` and `PropertyNameCaseInsensitive = true`
+- Full suite: 1952 tests passing (1504 API + 448 slicer), 0 regressions
