@@ -43,6 +43,14 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     ];
 
     /// <summary>
+    /// Minimum time a job must be in Starting/Printing status before it can be
+    /// considered orphaned. Prevents false positives when a job has just been
+    /// dispatched but the printer hasn't started printing yet (file upload,
+    /// heating, etc.).
+    /// </summary>
+    private static readonly TimeSpan OrphanedJobMinAge = TimeSpan.FromMinutes(5);
+
+    /// <summary>
     /// Printer states that indicate a print has failed.
     /// Covers Moonraker, PrusaLink, OctoPrint, and SDCP backends.
     /// </summary>
@@ -433,6 +441,21 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 _logger.LogWarning(
                     "[PrintJobCompletionService] Job {JobId} has no assigned printer, skipping",
                     job.Id);
+                continue;
+            }
+
+            // Skip jobs that have only recently entered Starting/Printing status.
+            // The printer may still be idle because the file is uploading or the
+            // print hasn't physically started yet.
+            DateTime jobActiveTime = job.ActualStartTime ?? job.UpdatedAt;
+            TimeSpan elapsed = DateTime.UtcNow - jobActiveTime;
+            if (elapsed < OrphanedJobMinAge)
+            {
+                _logger.LogDebug(
+                    "[PrintJobCompletionService] Job {JobId} is only {Elapsed} old (min {Min}), skipping orphan check",
+                    job.Id,
+                    elapsed,
+                    OrphanedJobMinAge);
                 continue;
             }
 

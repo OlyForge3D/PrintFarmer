@@ -1,14 +1,14 @@
 # PrintFarmer Printer Discovery Service
 # Microservice for automatic printer network discovery
-# Runs on host network to access local network for mDNS and broadcast discovery
+# Scans configured subnets for 3D printers via TCP probes
 #
 # Architecture:
-#   - Runs in HOST network mode (can access local network)
-#   - Connects back to API in bridge network via host.docker.internal
+#   - Runs on bridge network alongside other PrintFarmer services
+#   - Connects to API via Docker DNS (http://api:5245)
 #   - Two operational modes: Push (periodic) + Pull (manual HTTP endpoint)
 #
 # Environment Variables:
-#   Discovery__ApiBaseUrl       - API base URL (http://host.docker.internal:5245)
+#   Discovery__ApiBaseUrl       - API base URL (http://api:5245)
 #   EnablePeriodicDiscovery     - Auto-scan periodically (true/false)
 #   ScanIntervalSeconds         - Interval between scans (default: 300)
 #   Subnets                     - Comma-separated CIDR subnets to scan
@@ -30,7 +30,6 @@ services:
     image: printfarmer-printer-discovery
     container_name: printfarmer-printer-discovery
     restart: unless-stopped
-    # Use bridge network for microservices deployments (host network reserved for specific scenarios)
     networks:
       - printfarmer-network
     environment:
@@ -42,7 +41,7 @@ services:
       - DB_CONNECTION_RETRY_DELAY=${DB_CONNECTION_RETRY_DELAY:-2}
       - EnablePeriodicDiscovery=${ENABLE_PERIODIC_DISCOVERY:-true}
       - ScanIntervalSeconds=${SCAN_INTERVAL_SECONDS:-300}
-      - Subnets=${DISCOVERY_SUBNETS:-192.168.0.0/16,10.0.0.0/8}
+      - Subnets=${DISCOVERY_SUBNETS:-10.0.0.0/24}
       - ProbeTimeoutMs=${PROBE_TIMEOUT_MS:-1000}
       - MaxConcurrentProbes=${MAX_CONCURRENT_PROBES:-50}
       - Logging__LogLevel__Default=Information

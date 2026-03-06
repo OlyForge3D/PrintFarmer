@@ -56,6 +56,7 @@ function AddPrinterModalContent({
   // Test connection state
   const [isTesting, setIsTesting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
@@ -100,8 +101,8 @@ function AddPrinterModalContent({
     }
 
     // Check authentication requirements per backend
-    if (formData.backend === PrinterBackend.PrusaLink && !formData.apiKey?.trim()) {
-      errors.apiKey = ['API Key is required for PrusaLink (Settings → Network → Credentials)'];
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
+      errors.password = ['Password is required for PrusaLink (Settings → Network → Credentials)'];
     }
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
@@ -155,8 +156,8 @@ function AddPrinterModalContent({
     }
     
     // Validate authentication per backend
-    if (formData.backend === PrinterBackend.PrusaLink && !formData.apiKey?.trim()) {
-      errors.apiKey = ['API Key is required for PrusaLink printers'];
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
+      errors.password = ['Password is required for PrusaLink printers'];
     }
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
@@ -329,21 +330,21 @@ function AddPrinterModalContent({
               />
             </FormField>
 
-            {/* PrusaLink Authentication (API Key) */}
+            {/* PrusaLink Authentication (password with fixed "maker" username) */}
             {formData.backend === PrinterBackend.PrusaLink && (
               <FormField
-                label="API Key"
+                label="Password"
                 required
-                error={validationErrors.apiKey?.[0]}
+                error={validationErrors.password?.[0]}
                 helper="Get this from printer: Settings → Network → Credentials"
               >
                 <div className="relative">
                   <Input
                     type={showPassword ? 'text' : 'password'}
-                    value={formData.apiKey || ''}
-                    onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                    placeholder="Enter API key from printer"
-                    aria-label="API Key for PrusaLink"
+                    value={formData.password || ''}
+                    onChange={(e) => handleInputChange('password', e.target.value)}
+                    placeholder="Enter password from printer"
+                    aria-label="Password for PrusaLink"
                     className="pr-10"
                   />
                   <Button
@@ -351,7 +352,7 @@ function AddPrinterModalContent({
                     variant="subtle"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
-                    aria-label={showPassword ? 'Hide API key' : 'Show API key'}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                     iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
                   />
                 </div>
@@ -365,13 +366,24 @@ function AddPrinterModalContent({
                 required
                 error={validationErrors.apiKey?.[0]}
               >
-                <Input
-                  type="text"
-                  value={formData.apiKey || ''}
-                  onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                  placeholder="Enter OctoPrint API key"
-                  aria-label="API Key"
-                />
+                <div className="relative">
+                  <Input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={formData.apiKey || ''}
+                    onChange={(e) => handleInputChange('apiKey', e.target.value)}
+                    placeholder="Enter OctoPrint API key"
+                    aria-label="API Key"
+                    className="pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
+                    aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+                    iconCenter={showApiKey ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                  />
+                </div>
               </FormField>
             )}
 

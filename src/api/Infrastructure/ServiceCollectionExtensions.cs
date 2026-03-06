@@ -611,6 +611,10 @@ public static class ServiceCollectionExtensions
             // System log cleanup (common service, not plugin-specific)
             _ = services.AddHostedService<Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService>();
 
+            // Discovery heartbeat monitor - tracks external discovery microservice status
+            _ = services.AddSingleton<Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService>();
+            _ = services.AddHostedService(sp => sp.GetRequiredService<Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService>());
+
             // Slicer hosted services (WorkerHealthMonitor, JobDispatching,
             // JobTimeoutScanner, StaleWorkerCleanup) are now registered by
             // AddSlicerModule() in Farm.Slicer.Module.

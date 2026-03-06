@@ -24,7 +24,6 @@ import { ColorFamilySelect } from '@/features/filamentManagement/components/Colo
 import { FilamentCard } from '@/features/filamentManagement/components/FilamentCard';
 import { FilamentTableView } from '@/features/filamentManagement/components/FilamentTableView';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
-import { SpoolmanDbBrowserModal } from '@/features/filamentManagement/components/SpoolmanDbBrowserModal';
 import { OpenFilamentDbBrowserModal } from '@/features/filamentManagement/components/OpenFilamentDbBrowserModal';
 import { BulkEditFilamentsModal } from '@/features/filamentManagement/components/BulkEditFilamentsModal';
 import { EditFilamentModal } from '@/features/filamentManagement/components/EditFilamentModal';
@@ -72,7 +71,7 @@ export function FilamentsTab() {
     const saved = localStorage.getItem('filaments-page-size');
     return saved ? Number(saved) : 50;
   });
-  const [isSpoolmanDbOpen, setIsSpoolmanDbOpen] = useState(false);
+
   const [isOfdOpen, setIsOfdOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
@@ -426,18 +425,10 @@ export function FilamentsTab() {
           <Button
             variant="secondary"
             size="sm"
-            title="Browse and import from SpoolmanDB community database"
-            onClick={() => setIsSpoolmanDbOpen(true)}
-          >
-            <DatabaseIcon className="h-4 w-4 mr-1" />
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
             title="Browse and import from Open Filament Database"
             onClick={() => setIsOfdOpen(true)}
           >
-            <DownloadIcon className="h-4 w-4 mr-1" />
+            <DatabaseIcon className="h-4 w-4 mr-1" />
           </Button>
           <Button
             variant="primary"
@@ -788,12 +779,6 @@ export function FilamentsTab() {
           </div>
         </div>
       )}
-
-      {/* SpoolmanDB Browser Modal */}
-      <SpoolmanDbBrowserModal
-        isOpen={isSpoolmanDbOpen}
-        onClose={() => { setIsSpoolmanDbOpen(false); reload(); }}
-      />
 
       <OpenFilamentDbBrowserModal
         isOpen={isOfdOpen}

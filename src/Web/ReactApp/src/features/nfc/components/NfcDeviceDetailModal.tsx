@@ -70,7 +70,7 @@ export function NfcDeviceDetailModal({ device, isOpen, onClose }: NfcDeviceDetai
         <div>
           <h3 className="text-lg font-medium text-pf-text-primary mb-3">Scan History</h3>
           {historyLoading ? (
-            <Spinner size="md" />
+            <Spinner />
           ) : history.length === 0 ? (
             <p className="text-pf-text-secondary text-sm">No scan events recorded yet.</p>
           ) : (

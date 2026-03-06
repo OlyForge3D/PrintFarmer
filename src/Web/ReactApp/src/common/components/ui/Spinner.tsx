@@ -1,9 +1,18 @@
 import type { ComponentPropsWithoutRef } from 'react';
 
-export type SpinnerProps = Omit<ComponentPropsWithoutRef<'svg'>, 'children'>;
+const sizeClasses = {
+  sm: 'w-4 h-4',
+  md: 'w-6 h-6',
+  lg: 'w-8 h-8',
+} as const;
 
-export function Spinner({ className, ...props }: SpinnerProps) {
-  const mergedClassName = ['animate-spin', className].filter(Boolean).join(' ');
+export type SpinnerProps = Omit<ComponentPropsWithoutRef<'svg'>, 'children'> & {
+  /** Preset size. Defaults to 'md'. Can be overridden via className. */
+  size?: keyof typeof sizeClasses;
+};
+
+export function Spinner({ className, size = 'md', ...props }: SpinnerProps) {
+  const mergedClassName = ['animate-spin text-pf-accent', sizeClasses[size], className].filter(Boolean).join(' ');
 
   return (
     <svg

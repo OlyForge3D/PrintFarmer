@@ -14,10 +14,17 @@ namespace PrinterDiscovery.Services;
 public interface INetworkDiscoveryService
 {
     /// <summary>
-    /// Perform a single discovery scan (manual/pull mode)
+    /// Perform a single discovery scan (manual/pull mode) using locally configured subnets.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task<IReadOnlyList<DiscoveredPrinterDto>> ScanOnceAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Perform a single discovery scan using the specified subnets from API settings.
+    /// </summary>
+    /// <param name="subnets">CIDR subnets to scan.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    Task<IReadOnlyList<DiscoveredPrinterDto>> ScanOnceAsync(IList<string> subnets, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Register discovered printers with the central API
@@ -61,18 +68,23 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
     /// Manual discovery scan (pull mode)
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to cancel the scan.</param>
-    public async Task<IReadOnlyList<DiscoveredPrinterDto>> ScanOnceAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<DiscoveredPrinterDto>> ScanOnceAsync(CancellationToken cancellationToken = default)
+    {
+        // Fallback: use locally configured subnets from env vars
+        string subnetsConfig = _config["Discovery:Subnets"] ?? "10.0.0.0/24";
+        string[] subnets = subnetsConfig.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        return ScanOnceAsync(subnets, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<DiscoveredPrinterDto>> ScanOnceAsync(IList<string> subnets, CancellationToken cancellationToken = default)
     {
         try
         {
-            _logger.LogInformation("Starting manual printer discovery scan...");
+            _logger.LogInformation("Starting printer discovery scan...");
 
-            // Get configured network ranges or auto-detect
-            string subnetsConfig = _config["Discovery:Subnets"] ?? "192.168.0.0/16,10.0.0.0/8";
-            string[] subnets = subnetsConfig.Split(',', StringSplitOptions.RemoveEmptyEntries);
             List<string> ipAddresses = GenerateIpAddresses(subnets.ToList());
 
-            _logger.LogInformation("Scanning {IpCount} IP addresses across {SubnetCount} subnets", ipAddresses.Count, subnets.Length);
+            _logger.LogInformation("Scanning {IpCount} IP addresses across {SubnetCount} subnets", ipAddresses.Count, subnets.Count);
 
             // Use the core discovery service to probe all IPs
             int maxConcurrent = _config.GetValue("Discovery:MaxConcurrentProbes", 50);

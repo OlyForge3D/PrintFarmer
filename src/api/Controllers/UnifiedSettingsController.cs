@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Workers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -13,9 +14,11 @@ namespace Farm.Web.Api.Controllers;
 [Authorize]
 public class UnifiedSettingsController(
     ISettingsService modularSettingsService,
+    DiscoveryHeartbeatMonitorService discoveryMonitor,
     ILogger<UnifiedSettingsController> logger) : ControllerBase
 {
     private readonly ISettingsService _modularSettingsService = modularSettingsService;
+    private readonly DiscoveryHeartbeatMonitorService _discoveryMonitor = discoveryMonitor;
     private readonly ILogger<UnifiedSettingsController> _logger = logger;
 
     // Lazy-initialize this since it depends on _modularSettingsService
@@ -297,6 +300,9 @@ public class UnifiedSettingsController(
 
             // Save the updated settings
             _modularSettingsService.Save(currentSettings);
+
+            // Notify the background service monitor so it appears in the dashboard widget
+            _discoveryMonitor.OnHeartbeatReceived();
 
             _logger.LogDebug("Heartbeat received and recorded for NetworkDiscoverySettings at {Timestamp}", currentSettings.LastHeartbeat);
 

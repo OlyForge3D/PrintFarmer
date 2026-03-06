@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Button, Input, Checkbox, Badge, Spinner } from '@/common/components/ui';
+import { Button, Input, Checkbox, Badge, Spinner, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { SearchIcon, DownloadIcon, ChevronLeftIcon } from '@/common/components/icons/MdiIcons';
 import { useOfdBrands, useOfdBrandMaterials, useOfdFilaments, useImportFromOfd } from '@/common/hooks/useApi';
@@ -21,6 +21,13 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedEntries, setSelectedEntries] = useState<Map<string, OfdFlattenedEntry>>(new Map());
 
+  // Filament step filters
+  const [nameFilter, setNameFilter] = useState('');
+  const [colorFilter, setColorFilter] = useState('');
+  const [weightFilter, setWeightFilter] = useState('');
+  const [diameterFilter, setDiameterFilter] = useState('');
+  const [traitFilter, setTraitFilter] = useState('');
+
   const { data: brands, isLoading: brandsLoading } = useOfdBrands({ enabled: isOpen });
   const { data: brandDetail, isLoading: materialsLoading } = useOfdBrandMaterials(
     selectedBrand?.slug ?? '',
@@ -35,6 +42,41 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
   );
 
   const importMutation = useImportFromOfd();
+
+  // Unique filter values derived from loaded filaments
+  const uniqueColors = useMemo(() => {
+    if (!filaments) return [];
+    const set = new Set(filaments.map(f => f.colorName).filter(Boolean));
+    return Array.from(set).sort();
+  }, [filaments]);
+
+  const uniqueWeights = useMemo(() => {
+    if (!filaments) return [];
+    const set = new Set(filaments.map(f => f.weight).filter((w): w is number => w != null));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [filaments]);
+
+  const uniqueDiameters = useMemo(() => {
+    if (!filaments) return [];
+    const set = new Set(filaments.map(f => f.diameter).filter((d): d is number => d != null));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [filaments]);
+
+  // Filtered filaments for step 3
+  const filteredFilaments = useMemo(() => {
+    if (!filaments) return [];
+    const q = nameFilter.toLowerCase();
+    return filaments.filter(f => {
+      if (q && !f.filamentName?.toLowerCase().includes(q)) return false;
+      if (colorFilter && f.colorName !== colorFilter) return false;
+      if (weightFilter && String(f.weight) !== weightFilter) return false;
+      if (diameterFilter && String(f.diameter) !== diameterFilter) return false;
+      if (traitFilter === 'Matte' && !f.matte) return false;
+      if (traitFilter === 'Translucent' && !f.translucent) return false;
+      if (traitFilter === 'Glow' && !f.glow) return false;
+      return true;
+    });
+  }, [filaments, nameFilter, colorFilter, weightFilter, diameterFilter, traitFilter]);
 
   const filteredBrands = useMemo(() => {
     if (!brands) return [];
@@ -57,6 +99,11 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
   const handleBack = useCallback(() => {
     if (step === 'filaments') {
       setSelectedMaterial(null);
+      setNameFilter('');
+      setColorFilter('');
+      setWeightFilter('');
+      setDiameterFilter('');
+      setTraitFilter('');
       setStep('materials');
     } else if (step === 'materials') {
       setSelectedBrand(null);
@@ -87,25 +134,29 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
   }, []);
 
   const toggleSelectAll = useCallback(() => {
-    if (!filaments) return;
-    if (selectedIds.size === filaments.length && filaments.length > 0) {
-      filaments.forEach(f => {
-        selectedIds.delete(f.entryId);
-        selectedEntries.delete(f.entryId);
+    if (!filteredFilaments.length) return;
+    const allFilteredSelected = filteredFilaments.every(f => selectedIds.has(f.entryId));
+    if (allFilteredSelected) {
+      // Deselect only the currently filtered filaments
+      const nextIds = new Set(selectedIds);
+      const nextEntries = new Map(selectedEntries);
+      filteredFilaments.forEach(f => {
+        nextIds.delete(f.entryId);
+        nextEntries.delete(f.entryId);
       });
-      setSelectedIds(new Set(selectedIds));
-      setSelectedEntries(new Map(selectedEntries));
+      setSelectedIds(nextIds);
+      setSelectedEntries(nextEntries);
     } else {
       const nextIds = new Set(selectedIds);
       const nextEntries = new Map(selectedEntries);
-      filaments.forEach(f => {
+      filteredFilaments.forEach(f => {
         nextIds.add(f.entryId);
         nextEntries.set(f.entryId, f);
       });
       setSelectedIds(nextIds);
       setSelectedEntries(nextEntries);
     }
-  }, [filaments, selectedIds, selectedEntries]);
+  }, [filteredFilaments, selectedIds, selectedEntries]);
 
   const handleImport = useCallback(async () => {
     if (selectedEntries.size === 0) return;
@@ -132,6 +183,11 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
     setSelectedMaterial(null);
     setSelectedIds(new Set());
     setSelectedEntries(new Map());
+    setNameFilter('');
+    setColorFilter('');
+    setWeightFilter('');
+    setDiameterFilter('');
+    setTraitFilter('');
     onClose();
   }, [onClose]);
 
@@ -141,7 +197,7 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
     ? `${selectedBrand?.name} — Select Material`
     : `${selectedBrand?.name} — ${selectedMaterial?.material}`;
 
-  const allCurrentSelected = filaments && filaments.length > 0 && filaments.every(f => selectedIds.has(f.entryId));
+  const allCurrentSelected = filteredFilaments.length > 0 && filteredFilaments.every(f => selectedIds.has(f.entryId));
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={stepTitle} size="full">
@@ -240,8 +296,83 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
             </div>
           ) : (
             <>
+              {/* Filters */}
+              <div className="flex flex-wrap gap-3">
+                <div>
+                  <label htmlFor="ofd-name-filter" className="sr-only">Filter by name</label>
+                  <Input
+                    id="ofd-name-filter"
+                    value={nameFilter}
+                    onChange={(e) => setNameFilter(e.target.value)}
+                    placeholder="Search by name…"
+                    className="px-3 py-2 rounded-lg text-sm w-44"
+                    aria-label="Filter by name"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="ofd-color-filter" className="sr-only">Filter by color</label>
+                  <Select
+                    id="ofd-color-filter"
+                    value={colorFilter}
+                    onChange={(e) => setColorFilter(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-sm"
+                    aria-label="Filter by color"
+                  >
+                    <option value="">All Colors</option>
+                    {uniqueColors.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label htmlFor="ofd-weight-filter" className="sr-only">Filter by weight</label>
+                  <Select
+                    id="ofd-weight-filter"
+                    value={weightFilter}
+                    onChange={(e) => setWeightFilter(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-sm"
+                    aria-label="Filter by weight"
+                  >
+                    <option value="">All Weights</option>
+                    {uniqueWeights.map(w => (
+                      <option key={w} value={String(w)}>{w}g</option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label htmlFor="ofd-diameter-filter" className="sr-only">Filter by diameter</label>
+                  <Select
+                    id="ofd-diameter-filter"
+                    value={diameterFilter}
+                    onChange={(e) => setDiameterFilter(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-sm"
+                    aria-label="Filter by diameter"
+                  >
+                    <option value="">All Diameters</option>
+                    {uniqueDiameters.map(d => (
+                      <option key={d} value={String(d)}>{d}mm</option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label htmlFor="ofd-trait-filter" className="sr-only">Filter by trait</label>
+                  <Select
+                    id="ofd-trait-filter"
+                    value={traitFilter}
+                    onChange={(e) => setTraitFilter(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-sm"
+                    aria-label="Filter by trait"
+                  >
+                    <option value="">All Traits</option>
+                    <option value="Matte">Matte</option>
+                    <option value="Translucent">Translucent</option>
+                    <option value="Glow">Glow</option>
+                  </Select>
+                </div>
+              </div>
+
               <div className="text-sm text-pf-text-secondary">
-                {filaments?.length ?? 0} variant{(filaments?.length ?? 0) !== 1 ? 's' : ''}
+                {filteredFilaments.length} of {filaments?.length ?? 0} variant{(filaments?.length ?? 0) !== 1 ? 's' : ''}
                 {selectedIds.size > 0 && ` · ${selectedIds.size} selected across all materials`}
               </div>
               <div className="max-h-96 overflow-y-auto border border-pf-border rounded-lg">
@@ -266,14 +397,16 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
                     </tr>
                   </thead>
                   <tbody>
-                    {!filaments || filaments.length === 0 ? (
+                    {filteredFilaments.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="px-3 py-8 text-center text-pf-text-muted">
-                          No filaments available for this material.
+                          {filaments && filaments.length > 0
+                            ? 'No filaments match the current filters.'
+                            : 'No filaments available for this material.'}
                         </td>
                       </tr>
                     ) : (
-                      filaments.map(f => (
+                      filteredFilaments.map(f => (
                         <OfdFilamentRow
                           key={f.entryId}
                           entry={f}

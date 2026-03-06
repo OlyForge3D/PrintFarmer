@@ -469,7 +469,7 @@ function FilePickerContent({
         {/* Loading / Load More */}
         {isFetching && (
           <div className="flex justify-center py-4">
-            <Spinner className="w-6 h-6" />
+            <Spinner />
           </div>
         )}
         {!isFetching && hasMore && visibleFiles.length > 0 && (

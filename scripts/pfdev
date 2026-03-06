@@ -110,7 +110,7 @@ deploy_service() {
     
     echo "🚀 Deploying $service... [$(date '+%H:%M:%S')]"
     cd "$REPO_ROOT"
-    docker compose up -d "$service"
+    docker compose up -d --remove-orphans "$service"
     
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))

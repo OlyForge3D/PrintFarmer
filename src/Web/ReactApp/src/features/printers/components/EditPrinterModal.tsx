@@ -49,6 +49,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   // Test connection state
   const [isTesting, setIsTesting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   
   // Fetch default capabilities for the selected model
   const { data: defaultCapabilities, isLoading: isLoadingCapabilities } = useModelDefaultCapabilities(formData?.modelId);
@@ -69,10 +70,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         backend: typeof printerDetails.backend === 'string'
           ? (printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString) ?? PrinterBackend.Unknown)
           : printerDetails.backend,
-        // PrusaLink uses API key for authentication (same as OctoPrint)
         apiKey: printerDetails.apiKey,
-        // Legacy: keep username/password if present for backward compatibility
         username: printerDetails.username,
+        // PrusaLink stores credential as password (username is fixed to "maker")
         password: printerDetails.password,
         cameraStreamUrl: printerDetails.cameraStreamUrl,
         cameraSnapshotUrl: printerDetails.cameraSnapshotUrl,
@@ -135,12 +135,14 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     setValidationErrors({});
     setError('');
     setShowPassword(false);
+    setShowApiKey(false);
   }, [onClose]);
 
-  // Reset password visibility when modal opens or printer changes
+  // Reset password/API key visibility when modal opens or printer changes
   useEffect(() => {
     if (isOpen) {
       setShowPassword(false);
+      setShowApiKey(false);
     }
   }, [isOpen, printerId]);
 
@@ -456,8 +458,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     }
 
     // Check authentication requirements per backend
-    if (formData.backend === PrinterBackend.PrusaLink && !formData.apiKey?.trim()) {
-      errors.apiKey = ['API Key is required for PrusaLink (Settings → Network → Credentials)'];
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
+      errors.password = ['Password is required for PrusaLink (Settings → Network → Credentials)'];
     }
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
@@ -615,17 +617,17 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             )}
-            {/* PrusaLink uses API Key authentication */}
+            {/* PrusaLink uses password authentication (username is fixed to "maker") */}
             {formData.backend === PrinterBackend.PrusaLink && (
               <div className="col-span-2">
-                <FormField label="API Key" error={validationErrors.apiKey?.[0]}>
+                <FormField label="Password" error={validationErrors.password?.[0]}>
                   <div className="relative">
                     <Input
                       type={showPassword ? 'text' : 'password'}
-                      value={formData.apiKey || ''}
-                      onChange={e => handleInputChange('apiKey', e.target.value)}
+                      value={formData.password || ''}
+                      onChange={e => handleInputChange('password', e.target.value)}
                       placeholder="From printer Settings → Network → Credentials"
-                      title="PrusaLink API key from printer settings"
+                      title="PrusaLink password from printer settings"
                       className="pr-10"
                     />
                     <Button
@@ -633,7 +635,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       variant="subtle"
                       onClick={() => setShowPassword(!showPassword)}
                       className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
-                      aria-label={showPassword ? 'Hide API key' : 'Show API key'}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                       iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
                     />
                   </div>
@@ -644,13 +646,24 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             {formData.backend === PrinterBackend.OctoPrint && (
               <div className="col-span-2">
                 <FormField label="API Key (OctoPrint)" error={validationErrors.apiKey?.[0]}>
-                  <Input
-                    type="text"
-                    value={formData.apiKey || ''}
-                    onChange={e => handleInputChange('apiKey', e.target.value)}
-                    placeholder="Enter OctoPrint API Key"
-                    title="OctoPrint API Key"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showApiKey ? 'text' : 'password'}
+                      value={formData.apiKey || ''}
+                      onChange={e => handleInputChange('apiKey', e.target.value)}
+                      placeholder="Enter OctoPrint API Key"
+                      title="OctoPrint API Key"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
+                      aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+                      iconCenter={showApiKey ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                    />
+                  </div>
                 </FormField>
               </div>
             )}

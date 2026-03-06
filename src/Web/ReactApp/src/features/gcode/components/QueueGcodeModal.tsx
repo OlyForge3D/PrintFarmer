@@ -272,7 +272,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
               >
                 {successState.isStarting ? (
                   <span className="flex items-center gap-2">
-                    <Spinner className="h-4 w-4" />
+                    <Spinner size="sm" />
                     Starting...
                   </span>
                 ) : (
@@ -359,7 +359,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
             >
               {startNowLoading ? (
                 <span className="flex items-center gap-2">
-                  <Spinner className="h-4 w-4" />
+                  <Spinner size="sm" />
                   Starting...
                 </span>
               ) : (
@@ -391,7 +391,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
             >
               {loadingAllPrinters ? (
                 <span className="flex items-center gap-2">
-                  <Spinner className="h-4 w-4" />
+                  <Spinner size="sm" />
                   Loading printers…
                 </span>
               ) : (
@@ -532,7 +532,7 @@ export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
       >
         <div className="flex items-center justify-center py-8">
           <div className="text-center">
-            <Spinner className="w-8 h-8 text-pf-accent mx-auto mb-2" />
+            <Spinner size="lg" className="mx-auto mb-2" />
             <p className="text-pf-text-secondary">Loading compatible printers...</p>
           </div>
         </div>

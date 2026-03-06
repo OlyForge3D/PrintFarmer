@@ -66,8 +66,8 @@ public class PeriodicDiscoveryBackgroundService : BackgroundService, IDisposable
                 TimeSpan scanInterval = TimeSpan.FromMinutes(settings.BackgroundScanIntervalMinutes);
                 _logger.LogInformation("Running periodic discovery scan (interval: {Interval} minutes)", settings.BackgroundScanIntervalMinutes);
 
-                // Run a discovery scan
-                await RunDiscoveryScanAsync(stoppingToken);
+                // Run a discovery scan using subnets from API settings
+                await RunDiscoveryScanAsync(settings.DiscoverySubnets, stoppingToken);
 
                 // Wait for the configured interval
                 _logger.LogDebug("Next scan in {Interval} minutes", settings.BackgroundScanIntervalMinutes);
@@ -134,14 +134,14 @@ public class PeriodicDiscoveryBackgroundService : BackgroundService, IDisposable
         }
     }
 
-    private async Task RunDiscoveryScanAsync(CancellationToken stoppingToken)
+    private async Task RunDiscoveryScanAsync(IList<string> subnets, CancellationToken stoppingToken)
     {
         try
         {
             using IServiceScope scope = _serviceScopeFactory.CreateScope();
             INetworkDiscoveryService discoveryService = scope.ServiceProvider.GetRequiredService<INetworkDiscoveryService>();
 
-            IReadOnlyList<DiscoveredPrinterDto> printers = await discoveryService.ScanOnceAsync(stoppingToken);
+            IReadOnlyList<DiscoveredPrinterDto> printers = await discoveryService.ScanOnceAsync(subnets, stoppingToken);
             _logger.LogInformation("Periodic discovery scan found {Count} printers", printers.Count);
 
             if (printers.Count > 0)

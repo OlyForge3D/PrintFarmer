@@ -12,7 +12,7 @@ import type { MonitoringStatusDto } from '@/types/api';
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 min (cookie TTL is 15 min)
 
 export function MonitoringPage() {
-  const sessionRefreshRef = useRef<ReturnType<typeof setInterval>>();
+  const sessionRefreshRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const [sessionKey, setSessionKey] = useState(0);
 
   const { data: status, isLoading: statusLoading, error: statusError } = useQuery({

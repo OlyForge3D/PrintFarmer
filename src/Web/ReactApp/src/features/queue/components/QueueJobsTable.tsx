@@ -392,7 +392,7 @@ export function QueueJobsTable({
                       >
                         {dispatchingJobId === jobId ? (
                           <span className="flex items-center gap-1">
-                            <Spinner className="h-4 w-4" />
+                            <Spinner size="sm" />
                             {dispatchProgressText}
                           </span>
                         ) : (

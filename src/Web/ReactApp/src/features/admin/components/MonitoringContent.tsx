@@ -21,7 +21,7 @@ const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const ADVANCED_PREFS_KEY = 'monitoring-advanced-visible';
 
 export function MonitoringContent() {
-  const sessionRefreshRef = useRef<ReturnType<typeof setInterval>>();
+  const sessionRefreshRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const [sessionKey, setSessionKey] = useState(0);
   const [showAdvanced, setShowAdvanced] = useState(() => {
     try { return localStorage.getItem(ADVANCED_PREFS_KEY) === 'true'; } catch { return false; }
