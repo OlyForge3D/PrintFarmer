@@ -6,12 +6,15 @@ How to decide who handles what.
 
 | Work Type | Route To | Examples |
 |-----------|----------|----------|
-| {domain 1} | {Name} | {example tasks} |
-| {domain 2} | {Name} | {example tasks} |
-| {domain 3} | {Name} | {example tasks} |
-| Code review | {Name} | Review PRs, check quality, suggest improvements |
-| Testing | {Name} | Write tests, find edge cases, verify fixes |
-| Scope & priorities | {Name} | What to build next, trade-offs, decisions |
+| Architecture, design, scope | Dallas | System design, technical decisions, cross-domain concerns |
+| React, TypeScript, UI, frontend | Ripley | Components, pages, styling, frontend state, SignalR client |
+| C#, .NET, API, database, backend | Lambert | Controllers, EF Core, migrations, backend plugins, SignalR hubs |
+| Code review | Dallas | Review PRs, check quality, approve/reject changes |
+| Testing, QA, coverage | Kane | Write tests, find edge cases, run test suites, coverage analysis |
+| Documentation, API docs, user guides, README | Ash | API reference, user docs, changelogs, migration guides, config docs |
+| Research, competitive analysis, features | Brett | Market research, competitor analysis, feature recommendations, trends |
+| DevOps, Docker, deployment, CI/CD, infra | Parker | Dockerfiles, compose, deploy scripts, GitHub Actions, install automation |
+| Scope & priorities | Dallas | What to build next, trade-offs, decisions |
 | Async issue work (bugs, tests, small features) | @copilot 🤖 | Well-defined tasks matching capability profile |
 | Session logging | Scribe | Automatic — never needs routing |
 
