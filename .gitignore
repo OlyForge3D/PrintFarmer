@@ -120,3 +120,6 @@ deploy/nginx/certs/
 src/api/farm.db-journal
 .playwright-mcp/*
 .playwright-cli/*
+# Squad: ignore generated logs
+.squad/orchestration-log/
+.squad/log/
