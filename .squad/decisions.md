@@ -212,8 +212,78 @@ Full design document: `.squad/decisions/inbox/dallas-location-hierarchy-design.m
 
 ---
 
+### 9. User Directive: UI Tests for New Features
+
+**Author:** Jeff Papiez  
+**Date:** 2026-03-06T20:26:37Z  
+**Status:** TEAM STANDARD — All subsequent UI work must include tests
+
+**Directive:** "We need to add UI tests when adding new UI features. Every new UI component or feature must have corresponding Vitest + React Testing Library tests."
+
+**Impact:** Kane completed 78 comprehensive tests for all 6 location hierarchy components in Sprint 2. This is now team policy — zero new UI without test coverage.
+
+---
+
+### 10. Location Hierarchy User Decisions
+
+**Author:** Jeff Papiez  
+**Date:** 2026-03-06T19:50:20Z  
+**Status:** APPROVED — Integrated into Phase 1 scope
+
+**User-Provided Answers:**
+1. **Printer-to-location assignment:** ANY level is allowed (not restricted to leaf nodes only)
+2. **Location-based dashboards:** YES — clicking a location should show all printers in that subtree with status summary
+3. **Type hierarchy enforcement:** DEFERRED — not implementing rules like "Room must be inside Building" for now
+
+**Outcome:** Ripley's implementation follows these decisions. Phase 2 will add dashboard + dispatch scoring integration.
+
+---
+
+### 11. Auto-Dispatch Phase 2: Event-Driven Background Service
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-03-07  
+**Status:** ✅ IMPLEMENTED — Pending schema review
+
+**Core Architecture:**
+- **Channel<Guid>-based trigger** — fire-and-forget idle notifications, no polling
+- **Per-printer CancellationTokenSource** — cancel pending dispatch if printer goes offline
+- **SemaphoreSlim(1,1)** — serialize dispatch decisions to prevent double-assignment
+- **DispatchSettings singleton entity** — type-safe configuration (AutoDispatchEnabled, AutoDispatchMode, IdleThresholdSeconds, etc.)
+- **Suggest + Auto modes** — notifications only (Suggest) vs full automation (Auto)
+
+**SignalR Events:** jobautodispatched, dispatchsuggestion, dispatchfailed
+
+**Test Coverage:** 35 Phase 2 tests (concurrent, settings, background service) all passing.
+
+**Risks:**
+- Idle threshold < 10s could dispatch before operator clears build bed. Default 30s.
+- Scoring overhead on large farms with many queued jobs. Mitigated by Take(20) limit.
+- No EF migrations yet — schema changes pending review.
+
+---
+
+### 12. Location Hierarchy UI Test Coverage
+
+**Author:** Kane (Tester)  
+**Date:** 2026-03-08  
+**Status:** ✅ IMPLEMENTED — 78 tests all passing
+
+**Coverage:** LocationTreePicker (19), LocationBreadcrumb (11), LocationManagement (21), LocationSelector (8), PrinterLocationDragDrop (12), LocationManagementAdminPage (3)
+
+**Key Learnings:**
+- Mock child components when testing parents (isolation)
+- Use getByRole over getByText for disabled-state checks (Button wraps text)
+- Dynamic await import() for typed mock access
+- ConfirmationModal renders inline (no portal)
+
+**Fulfills Jeff's directive:** Every new UI feature now has comprehensive test coverage.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+- **UI Policy:** Every new component/feature must have Vitest + RTL tests (per Jeff 2026-03-06)
