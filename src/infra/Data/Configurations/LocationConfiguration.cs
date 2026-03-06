@@ -6,7 +6,7 @@ namespace Farm.Infrastructure.Data.Configurations;
 
 /// <summary>
 /// Entity Framework configuration for the Location entity.
-/// Extracted from AppDbContext.OnModelCreating for better maintainability.
+/// Supports self-referential hierarchy (tree structure).
 /// </summary>
 public class LocationConfiguration : IEntityTypeConfiguration<Location>
 {
@@ -22,14 +22,28 @@ public class LocationConfiguration : IEntityTypeConfiguration<Location>
         builder.Property(l => l.ModifiedAt).IsRequired();
         builder.Property(l => l.IsActive).HasDefaultValue(true);
 
+        // Tree structure properties
+        builder.Property(l => l.Path).IsRequired().HasMaxLength(2048).HasDefaultValue("/");
+        builder.Property(l => l.Depth).HasDefaultValue(0);
+        builder.Property(l => l.SortOrder).HasDefaultValue(0);
+        builder.Property(l => l.TotalPrinterCount).HasDefaultValue(0);
+
+        // Self-referential FK: Parent → Children
+        builder.HasOne(l => l.Parent)
+            .WithMany(l => l.Children)
+            .HasForeignKey(l => l.ParentId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // One location can have many printers
         builder.HasMany(l => l.Printers)
             .WithOne(p => p.Location)
             .HasForeignKey(p => p.LocationId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        // Indexes
-        builder.HasIndex(l => l.Name).IsUnique();
+        // Indexes — composite unique on (ParentId, Name) allows duplicate names under different parents
+        builder.HasIndex(l => new { l.ParentId, l.Name }).IsUnique();
+        builder.HasIndex(l => l.ParentId);
+        builder.HasIndex(l => l.Path);
         builder.HasIndex(l => l.IsActive);
         builder.HasIndex(l => l.CreatedAt);
     }

@@ -11,7 +11,8 @@ namespace Farm.Infrastructure.Repositories.Locations;
 
 /// <summary>
 /// Entity Framework Core implementation of ILocationRepository.
-/// Provides data access operations for printer locations using EF Core.
+/// Provides data access operations for printer locations using EF Core,
+/// including tree/hierarchy queries.
 /// </summary>
 public class EfLocationRepository : ILocationRepository
 {
@@ -23,44 +24,54 @@ public class EfLocationRepository : ILocationRepository
         _dbContext = dbContext;
     }
 
-    /// <summary>
-    /// Gets all active locations.
-    /// </summary>
-    /// <param name="ct">Cancellation token.</param>
     public async Task<List<Location>> GetAllAsync(CancellationToken ct)
     {
         return await _dbContext.Locations
             .Where(l => l.IsActive)
-            .OrderBy(l => l.Name)
+            .OrderBy(l => l.Path)
+            .ThenBy(l => l.SortOrder)
+            .ThenBy(l => l.Name)
             .ToListAsync(ct);
     }
 
-    /// <summary>
-    /// Gets all locations including inactive ones.
-    /// </summary>
-    /// <param name="ct">Cancellation token.</param>
     public async Task<List<Location>> GetAllWithInactiveAsync(CancellationToken ct)
     {
         return await _dbContext.Locations
-            .OrderBy(l => l.Name)
+            .OrderBy(l => l.Path)
+            .ThenBy(l => l.SortOrder)
+            .ThenBy(l => l.Name)
             .ToListAsync(ct);
     }
 
-    /// <summary>
-    /// Finds a location by ID.
-    /// </summary>
-    /// <param name="id">The location ID.</param>
-    /// <param name="ct">Cancellation token.</param>
     public async Task<Location?> FindByIdAsync(Guid id, CancellationToken ct)
     {
         return await _dbContext.Locations.FindAsync(new object[] { id }, cancellationToken: ct);
     }
 
-    /// <summary>
-    /// Finds a location by name (case-insensitive, trimmed).
-    /// </summary>
-    /// <param name="name">The location name to search for.</param>
-    /// <param name="ct">Cancellation token.</param>
+    public async Task<Location?> FindByIdWithChildrenAsync(Guid id, CancellationToken ct)
+    {
+        return await _dbContext.Locations
+            .Include(l => l.Children.Where(c => c.IsActive))
+            .FirstOrDefaultAsync(l => l.Id == id, ct);
+    }
+
+    public async Task<Location?> FindByNameAndParentAsync(string name, Guid? parentId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        string trimmed = name.Trim();
+
+        List<Location> candidates = await _dbContext.Locations
+            .Where(l => l.ParentId == parentId && l.IsActive)
+            .ToListAsync(ct);
+
+        return candidates.FirstOrDefault(l =>
+            string.Equals(l.Name?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+    }
+
     public async Task<Location?> FindByNameAsync(string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -70,8 +81,6 @@ public class EfLocationRepository : ILocationRepository
 
         string trimmed = name.Trim();
 
-        // EF Core cannot translate the StringComparison overload, so materialize
-        // the candidates and perform a culture-invariant ordinal comparison on the client.
         List<Location> candidates = await _dbContext.Locations
             .Where(l => l.Name != null)
             .ToListAsync(ct);
@@ -79,11 +88,23 @@ public class EfLocationRepository : ILocationRepository
         return candidates.FirstOrDefault(l => string.Equals(l.Name?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// Checks if a location with the given name exists (case-insensitive, trimmed).
-    /// </summary>
-    /// <param name="name">The location name to check.</param>
-    /// <param name="ct">Cancellation token.</param>
+    public async Task<bool> ExistsByNameAndParentAsync(string name, Guid? parentId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        string trimmed = name.Trim();
+
+        List<string> names = await _dbContext.Locations
+            .Where(l => l.ParentId == parentId && l.IsActive && l.Name != null)
+            .Select(l => l.Name)
+            .ToListAsync(ct);
+
+        return names.Any(n => string.Equals(n?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+    }
+
     public async Task<bool> ExistsByNameAsync(string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -93,8 +114,6 @@ public class EfLocationRepository : ILocationRepository
 
         string trimmed = name.Trim();
 
-        // Materialize only the name column to minimize transport, then perform
-        // a case-insensitive comparison on the client side.
         List<string> names = await _dbContext.Locations
             .Where(l => l.Name != null)
             .Select(l => l.Name)
@@ -103,11 +122,83 @@ public class EfLocationRepository : ILocationRepository
         return names.Any(n => string.Equals(n?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// Adds a new location to the repository.
-    /// </summary>
-    /// <param name="location">The location to add.</param>
-    /// <param name="ct">Cancellation token.</param>
+    public async Task<List<Location>> GetAllWithChildrenAsync(CancellationToken ct)
+    {
+        return await _dbContext.Locations
+            .Where(l => l.IsActive)
+            .Include(l => l.Children.Where(c => c.IsActive))
+            .OrderBy(l => l.SortOrder)
+            .ThenBy(l => l.Name)
+            .ToListAsync(ct);
+    }
+
+    public async Task<List<Location>> GetChildrenAsync(Guid parentId, CancellationToken ct)
+    {
+        return await _dbContext.Locations
+            .Where(l => l.ParentId == parentId && l.IsActive)
+            .OrderBy(l => l.SortOrder)
+            .ThenBy(l => l.Name)
+            .ToListAsync(ct);
+    }
+
+    public async Task<List<Location>> GetAncestorsAsync(Guid id, CancellationToken ct)
+    {
+        var ancestors = new List<Location>();
+        Location? current = await FindByIdAsync(id, ct);
+
+        while (current?.ParentId is not null)
+        {
+            Location? parent = await FindByIdAsync(current.ParentId.Value, ct);
+            if (parent is null)
+            {
+                break;
+            }
+
+            ancestors.Insert(0, parent);
+            current = parent;
+        }
+
+        return ancestors;
+    }
+
+    public async Task<List<Location>> GetDescendantsAsync(Guid id, CancellationToken ct)
+    {
+        var descendants = new List<Location>();
+        var queue = new Queue<Guid>();
+        queue.Enqueue(id);
+
+        while (queue.Count > 0)
+        {
+            Guid currentId = queue.Dequeue();
+            List<Location> children = await GetChildrenAsync(currentId, ct);
+
+            foreach (Location child in children)
+            {
+                descendants.Add(child);
+                queue.Enqueue(child.Id);
+            }
+        }
+
+        return descendants;
+    }
+
+    public async Task<bool> IsDescendantOfAsync(Guid locationId, Guid potentialAncestorId, CancellationToken ct)
+    {
+        Location? current = await FindByIdAsync(locationId, ct);
+
+        while (current?.ParentId is not null)
+        {
+            if (current.ParentId == potentialAncestorId)
+            {
+                return true;
+            }
+
+            current = await FindByIdAsync(current.ParentId.Value, ct);
+        }
+
+        return false;
+    }
+
     public async Task AddAsync(Location location, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(location);
@@ -118,11 +209,6 @@ public class EfLocationRepository : ILocationRepository
         await _dbContext.Locations.AddAsync(location, ct);
     }
 
-    /// <summary>
-    /// Updates an existing location.
-    /// </summary>
-    /// <param name="location">The location to update.</param>
-    /// <param name="ct">Cancellation token.</param>
     public async Task UpdateAsync(Location location, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(location);
@@ -132,11 +218,6 @@ public class EfLocationRepository : ILocationRepository
         await Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Removes a location from the repository (hard delete).
-    /// </summary>
-    /// <param name="location">The location to remove.</param>
-    /// <param name="ct">Cancellation token.</param>
     public async Task RemoveAsync(Location location, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(location);
@@ -145,11 +226,6 @@ public class EfLocationRepository : ILocationRepository
         await Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Gets all printers assigned to a location.
-    /// </summary>
-    /// <param name="locationId">The location ID.</param>
-    /// <param name="ct">Cancellation token.</param>
     public async Task<List<Printer>> GetPrintersInLocationAsync(Guid locationId, CancellationToken ct)
     {
         return await _dbContext.Printers
@@ -158,11 +234,6 @@ public class EfLocationRepository : ILocationRepository
             .ToListAsync(ct);
     }
 
-    /// <summary>
-    /// Gets the count of printers assigned to a location.
-    /// </summary>
-    /// <param name="locationId">The location ID.</param>
-    /// <param name="ct">Cancellation token.</param>
     public async Task<int> GetPrinterCountAsync(Guid locationId, CancellationToken ct)
     {
         return await _dbContext.Printers
@@ -170,10 +241,6 @@ public class EfLocationRepository : ILocationRepository
             .CountAsync(ct);
     }
 
-    /// <summary>
-    /// Persists changes to the database.
-    /// </summary>
-    /// <param name="ct">Cancellation token.</param>
     public async Task SaveChangesAsync(CancellationToken ct)
     {
         await _dbContext.SaveChangesAsync(ct);

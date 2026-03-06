@@ -2163,6 +2163,21 @@ export class ApiClient {
     return response.data;
   }
 
+  async getLocationTree(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/locations/tree');
+    return response.data;
+  }
+
+  async getLocationAncestors(id: string): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get(`/locations/${id}/ancestors`);
+    return response.data;
+  }
+
+  async getLocationDescendants(id: string): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get(`/locations/${id}/descendants`);
+    return response.data;
+  }
+
   async createLocation(request: Record<string, unknown>): Promise<Record<string, unknown>> {
     const response = await this.client.post('/locations', request);
     return response.data;
@@ -2170,6 +2185,11 @@ export class ApiClient {
 
   async updateLocation(id: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
     const response = await this.client.put(`/locations/${id}`, request);
+    return response.data;
+  }
+
+  async moveLocation(id: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.post(`/locations/${id}/move`, request);
     return response.data;
   }
 
