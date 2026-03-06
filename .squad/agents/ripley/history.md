@@ -9,6 +9,28 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Sprint 1 Summary (2026-03-07)
+
+**Completed:**
+1. **Location Hierarchy Full-Stack** (1298s) — Tree service + React components
+   - LocationTreeService: GetTree, GetAncestors, GetDescendants, Move (with circular ref detection + path propagation)
+   - 4 API endpoints: GET /api/locations/tree, GET /api/locations/{id}/ancestors, GET /api/locations/{id}/descendants, POST /api/locations/{id}/move
+   - React components: LocationTreePicker (multi-level dropdown), LocationBreadcrumb (path display), LocationManagement (CRUD + tree view)
+   - Tree constraints: circular ref detection, own-descendant prevention, path auto-update, depth validation, unique name within parent, cascade delete
+   - 21 location hierarchy tests all passing
+
+2. **API Service Architecture Refactoring Phase 1** (foundation for future)
+   - Created apiClient.ts with shared axios instance + auth/correlation ID interceptors
+   - Documented service architecture in src/services/README.md + REFACTOR_PLAN.md
+   - Existing services (locationService, cameraService, etc.) already follow the pattern
+
+**Key Decisions Integrated:**
+- **Printer assignment at ANY level** — not restricted to leaf nodes (per user feedback)
+- **Location dashboards planned** — click location → show subtree printers with aggregated status
+- **Type hierarchy enforcement deferred** — no rules like "Room must be inside Building" for now
+
+**Next Phase:** Extract top 3 services (printerService, queueService, catalogService) from monolithic api.ts
+
 ### 2026-01-12 - API Service Architecture Refactoring (P1 Finding)
 
 **Context**: Dallas (Lead/Architect) identified `api.ts` as the #1 architecture issue in the codebase - a 3,458-line god class with 313 methods violating SRP.
@@ -30,7 +52,7 @@
 **Service Pattern Established**:
 ```typescript
 // Delegate pattern (used by locationService, cameraService)
-export const serviceNa me = {
+export const serviceName = {
   async getItems(): Promise<Item[]> {
     return apiClient.getItems(); // Delegates to api.ts
   }

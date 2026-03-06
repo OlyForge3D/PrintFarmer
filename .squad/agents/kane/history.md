@@ -8,6 +8,45 @@
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+
+### Sprint 1 Test Strategy & Validation (2026-03-07)
+
+**Completed:**
+1. **Pre-Implementation Test Suites** (1109s)
+   - 22 Dispatch tests: DispatchScorerTests (scoring logic), JobDispatchServiceTests (dispatch flow), API endpoint coverage
+   - 21 Location tests: LocationTreeServiceTests (tree operations), LocationHierarchyApiTests (API contracts), React component stubs
+   - 43 total tests, all passing against current codebase (1572 API tests, 150 React tests)
+
+2. **Key Learnings Discovered:**
+   - **Manufacturer entity** has a shadow property `NameLowered` with UNIQUE index — cannot insert multiple manufacturers with the same name in tests
+   - **Printer entity** has a UNIQUE constraint on `ServerUrl` — test printers must use distinct URLs (e.g., `http://192.168.1.{n}`)
+   - **Location entity** has a UNIQUE constraint on `(ParentId, Name)` — duplicate child names under the same parent are rejected at the DB level
+   - **FolderNode** entity has no named `DbSet` — access via `_db.Set<FolderNode>()`; uses `Path` and `FolderType` properties (not Name/Category)
+   - **EF Core SaveChanges overrides** populate the `NameLowered` shadow property on Manufacturer from `Name.ToLowerInvariant()`
+   - **FK enforcement in unit tests** requires `TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled()` when creating `AppDbContext` directly
+
+3. **Test Infrastructure Insights:**
+   - `CustomWebApplicationFactory` handles proper DI + seeded test data
+   - Playwright UI validation suite spins up real API + React servers with fresh SQLite DB
+   - NetworkDiscovery__EnableDiscovery=false prevents hitting real network during tests
+   - DB_PROVIDER=sqlite + ConnectionStrings__Default controls test database location
+   - `/health` endpoint returns 503 (Unhealthy) when catalog health check fails — tests must accept both 200 and 503
+
+4. **Printer Creation Requirements:**
+   - Must seed `Manufacturer` and `PrinterModel` entities first, then reference their IDs
+   - Distinct ServerURL values required (unique constraint)
+   - `CreatedAt` / `UpdatedAt` must be explicitly set or defaults applied (not ignored)
+
+5. **API Response Handling:**
+   - Catalog API (`/api/catalog/manufacturers`) has a pre-existing DI bug: `CatalogCache` tries to resolve scoped `IDbContextFactory<AppDbContext>` from root provider
+   - On first run with empty DB, React app shows "Initializing system..." loading screen before interactive elements appear — tests cannot rely on buttons/links being immediately visible
+   - React dev server (vite) proxies `/api/*` and `/hubs/*` to localhost:5245, so browser tests can hit `localhost:3000/api/*`
+
+**Status**: All 43 tests created, validated, and passing. Suite ready for integration testing against new implementations.
+
+**Next Phase:** Execute full suite against Lambert's dispatch implementation + Ripley's location hierarchy to validate end-to-end behavior.
+
+### Previous: UI validation test suite (2025-12-XX)
 - **UI validation test suite** lives at `tests/ui-validation/` — standalone Playwright project that spins up real API + React servers with fresh SQLite DB
 - The catalog API (`/api/catalog/manufacturers`) has a pre-existing DI bug: `CatalogCache` tries to resolve scoped `IDbContextFactory<AppDbContext>` from root provider, causing 500 errors
 - The `/health` endpoint returns 503 (Unhealthy) when catalog health check fails — tests must accept 200 or 503
