@@ -246,6 +246,17 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
     }
   }, [canSendCommand, printerId, executeCommand, isQidibox, isAfc, displayGate, activeGate, mmuStatus.gates]);
 
+  const handleEject = useCallback(() => {
+    if (!canSendCommand) return;
+    const ejectGate = displayGate ?? activeGate;
+    if (isQidibox) {
+      if (ejectGate === null) return;
+      void executeCommand('Eject', () => apiClient.sendGcode(printerId, `EJECT_T${ejectGate}`));
+    } else {
+      void executeCommand('Eject', () => apiClient.mmuEject(printerId));
+    }
+  }, [canSendCommand, printerId, executeCommand, isQidibox, displayGate, activeGate]);
+
   const handleHome = useCallback(() => {
     if (!canSendCommand) return;
     void executeCommand('Home', () => apiClient.mmuHome(printerId));
@@ -413,6 +424,22 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
 
         {/* Action buttons */}
         <div className="flex gap-2">
+          {!isAfc && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleEject}
+              disabled={!canSendCommand || (isQidibox && (displayGate ?? activeGate) === null)}
+              title={isQidibox
+                ? `Eject filament from slot ${displayGate ?? activeGate ?? '?'}`
+                : 'Eject filament out of the MMU'}
+              className="flex-1"
+            >
+              <EjectIcon className="w-4 h-4 mr-1" ariaLabel="" />
+              Eject
+            </Button>
+          )}
           <Button
             type="button"
             variant="secondary"
@@ -423,10 +450,9 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
               ? `Unload filament from slot ${displayGate ?? activeGate ?? '?'}`
               : isAfc
                 ? `Unload filament from lane ${(displayGate ?? activeGate) !== null ? (displayGate ?? activeGate)! + 1 : '?'}`
-                : 'Eject/unload filament from MMU'}
+                : 'Unload filament from MMU'}
             className="flex-1"
           >
-            <EjectIcon className="w-4 h-4 mr-1" ariaLabel="" />
             Unload
           </Button>
           <Button
