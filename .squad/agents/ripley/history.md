@@ -114,3 +114,47 @@ export const serviceName = {
 **Key Pattern**: Re-export files at old locations prevent breaking changes while establishing the correct feature folder as canonical. New code should import from `@/features/locations/components/`.
 
 **Testing**: ✅ Build passes (7.46s), ✅ 138 location tests pass across 11 files, ✅ Lint passes (0 errors)
+
+### 2026-03-09 - Dependency Vulnerability Patching
+
+**Context**: 3 Dependabot alerts (1 moderate, 2 high) on npm transitive dependencies.
+
+**Vulnerabilities Fixed**:
+1. **dompurify 3.3.1** (moderate, XSS) — transitive via jspdf@4.2.0. Override to `>=3.3.2`.
+2. **minimatch 10.2.2** (2x high, ReDoS) — transitive via eslint@10.0.1 and typescript-eslint@8.56.0. Override to `>=10.2.3`.
+
+**Approach**: npm `overrides` in package.json. The existing minimatch override was pinned to the vulnerable version (`10.2.2`); updated it and added dompurify override.
+
+**Key Learning**: npm overrides using `>=` range syntax are better than exact pins for security patches — they allow future minor/patch updates without manual intervention.
+
+**Validation**: ✅ `npm audit` reports 0 vulnerabilities, ✅ Lint passes (0 errors), ✅ 1151/1196 tests pass (45 failures are pre-existing, confirmed via git stash test)
+
+### 2026-03-09 - npm Dependency Vulnerability Fix Pattern
+
+**Context**: 3 Dependabot security alerts discovered in transitive npm dependencies (dompurify XSS, minimatch ReDoS x2).
+
+**Vulnerabilities Fixed**:
+1. **dompurify 3.3.1** (moderate, XSS) — transitive via jspdf@4.2.0
+2. **minimatch 10.2.2** (2x high, ReDoS) — transitive via eslint@10.0.1 and typescript-eslint@8.56.0
+
+**Solution**: npm `overrides` in `src/Web/ReactApp/package.json`:
+```json
+"overrides": {
+  "dompurify": ">=3.3.2",
+  "minimatch": ">=10.2.3"
+}
+```
+
+**Key Pattern Established**: npm overrides with `>=` range syntax (instead of exact pins) allow future semver-compatible patches to auto-update without manual intervention. This is superior to exact version pins which can themselves become vulnerability sources.
+
+**Rationale**:
+- Exact pins (like prior `minimatch: 10.2.2`) lock vulnerabilities in place
+- `>=` ranges guarantee minimum safe version while allowing minor/patch updates
+- Overrides are the correct npm mechanism for forcing transitive dependency versions when direct parents (jspdf, eslint, typescript-eslint) haven't released safe versions yet
+
+**Outcome**:
+- `npm audit` reports 0 vulnerabilities (was 10: 1 moderate, 9 high)
+- No functional changes — lint passes, tests pass unchanged
+- Monitor for upstream package releases; overrides can be removed when parent packages pull in safe versions natively
+
+**Validation**: ✅ npm audit 0 vulnerabilities, ✅ Lint passes (0 errors), ✅ 1151/1196 tests pass (45 pre-existing failures)

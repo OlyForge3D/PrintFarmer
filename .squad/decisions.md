@@ -309,6 +309,31 @@ Full design document: `.squad/decisions/inbox/dallas-location-hierarchy-design.m
 
 ---
 
+### 15. npm Dependency Vulnerability Mitigation
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-09  
+**Status:** ✅ IMPLEMENTED
+
+**Summary:** Fixed 3 Dependabot security alerts (dompurify XSS, minimatch ReDoS x2) using npm `overrides` strategy.
+
+**Approach:** npm `overrides` with `>=` range syntax (e.g., `"minimatch": ">=10.2.3"`) instead of exact pins.
+
+**Rationale:**
+- Exact version pins lock vulnerabilities in place and can themselves become vulnerability sources
+- `>=` ranges allow semver-compatible patches to auto-update without manual intervention
+- Overrides are the correct npm mechanism for forcing transitive dependency versions
+
+**Outcome:** 
+- `npm audit` now reports 0 vulnerabilities (was 10: 1 moderate, 9 high)
+- Overrides applied: dompurify >=3.3.2, minimatch >=10.2.3
+- No functional changes; lint and tests passing
+- Monitor upstream (jspdf, eslint, typescript-eslint) for native safe versions; overrides can be removed when parents update
+
+**File:** `src/Web/ReactApp/package.json`
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
