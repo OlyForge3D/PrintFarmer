@@ -9,6 +9,28 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Sprint 3 Playwright UI Validation Tests (2026-03-10)
+
+**Completed: 14 new Playwright tests across 2 files + 1 navigation update**
+
+**Test Coverage by Feature:**
+1. **09-locations.spec.ts** (7 tests) — Location dashboard route accessibility, admin route accessibility, #root content rendering for dashboard and admin pages, locations list API (`GET /api/locations`), location tree API (`GET /api/locations/tree`), page title/loading state verification
+2. **10-dispatch.spec.ts** (7 tests) — Dispatch settings API GET (validates all 5 settings properties), queue-status API, dispatch history API, settings page route accessibility, settings page #root content rendering, dispatch settings PUT validation (rejects below-minimum values)
+3. **05-navigation.spec.ts update** — Added `/locations` and `/locations/dashboard` to the key routes accessibility check array
+
+**Key Patterns Used:**
+- **Resilient status checks** — `expect(status).toBeLessThan(500)` allows 401/redirect for auth-gated routes without failing
+- **API property validation** — when response is 200, validate expected property names (`autoDispatchEnabled`, `autoDispatchMode`, etc.) to catch serialization mismatches
+- **`#root *` content check** — proves React app renders meaningful content regardless of auth state
+- **`page.waitForLoadState('networkidle')`** — standard pattern from existing tests for waiting until all network activity settles
+- **Separate `request` vs `page` tests** — API endpoint tests use Playwright's `request` context directly (no browser), UI tests use `page` for full rendering
+
+**Routes Discovered:**
+- `/locations/dashboard` — LocationDashboardPage (no auth gate)
+- `/locations` — LocationManagementAdminPage (requires `farm_admin` role via ProtectedRoute)
+- No `/dispatch` route exists yet — DispatchSettingsPanel is a component not mounted in any route; tested via API endpoints and `/settings` page
+- Dispatch settings API uses `/dispatch-settings` path (not `/api/dispatch/settings`)
+
 ### Sprint 3 Pre-Implementation Tests (2026-03-09)
 
 **Completed: 17 new tests across 3 files — ALL COMPILING (0 errors, 0 warnings)**
