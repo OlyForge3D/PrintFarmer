@@ -8,6 +8,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Locations;
@@ -23,19 +24,23 @@ public class LocationService : ILocationService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LocationService> _logger;
     private readonly IMapper _mapper;
+    private readonly IPrinterStatusCacheReader _statusCache;
 
     public LocationService(
         IUnitOfWork unitOfWork,
         ILogger<LocationService> logger,
-        IMapper mapper)
+        IMapper mapper,
+        IPrinterStatusCacheReader statusCache)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(mapper);
+        ArgumentNullException.ThrowIfNull(statusCache);
 
         _unitOfWork = unitOfWork;
         _logger = logger;
         _mapper = mapper;
+        _statusCache = statusCache;
     }
 
     public async Task<List<Location>> GetAllAsync(CancellationToken ct)
@@ -643,6 +648,73 @@ public class LocationService : ILocationService
             child.Depth = location.Depth + 1;
             await _unitOfWork.Locations.UpdateAsync(child, ct);
             await RebuildPathAsync(child, ct);
+        }
+    }
+
+    public async Task<List<LocationSubtreePrinterDto>> GetSubtreePrintersAsync(Guid locationId, CancellationToken ct)
+    {
+        if (locationId == Guid.Empty)
+        {
+            throw new ArgumentException("Location ID cannot be empty", nameof(locationId));
+        }
+
+        try
+        {
+            Location? location = await _unitOfWork.Locations.FindByIdAsync(locationId, ct);
+            if (location is null)
+            {
+                return [];
+            }
+
+            // Collect all location IDs in the subtree: the root + all descendants
+            List<Location> descendants = await _unitOfWork.Locations.GetDescendantsAsync(locationId, ct);
+            var allLocations = new Dictionary<Guid, string>(descendants.Count + 1)
+            {
+                [location.Id] = location.Name,
+            };
+
+            foreach (Location descendant in descendants)
+            {
+                allLocations[descendant.Id] = descendant.Name;
+            }
+
+            // Single query: all printers whose LocationId is in the subtree
+            List<Guid> locationIds = [.. allLocations.Keys];
+            List<Printer> printers = [];
+
+            foreach (Guid locId in locationIds)
+            {
+                List<Printer> locationPrinters = await _unitOfWork.Locations.GetPrintersInLocationAsync(locId, ct);
+                printers.AddRange(locationPrinters);
+            }
+
+            // Enrich with real-time status from cache
+            IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
+            var result = new List<LocationSubtreePrinterDto>(printers.Count);
+
+            foreach (Printer printer in printers)
+            {
+                cachedStatuses.TryGetValue(printer.Id, out PrinterStatusDto? status);
+                bool isOnline = status?.IsOnline ?? false;
+                string state = status?.State ?? "Offline";
+                string? jobName = status?.JobName;
+
+                result.Add(new LocationSubtreePrinterDto(
+                    PrinterId: printer.Id,
+                    PrinterName: printer.Name,
+                    LocationId: printer.LocationId!.Value,
+                    LocationName: allLocations[printer.LocationId!.Value],
+                    IsOnline: isOnline,
+                    Status: state,
+                    CurrentJobName: jobName));
+            }
+
+            return result.OrderBy(p => p.LocationName).ThenBy(p => p.PrinterName).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting subtree printers for location {Id}", locationId);
+            throw;
         }
     }
 }

@@ -12,6 +12,7 @@ import {
   CreateHotendModelDto,
   CreateNozzleModelDto,
   CreatePrinterDto,
+  CreatePrinterGroupRequest,
   CreateToolheadModelDto,
   DiscoveredPrinterDto,
   ExtruderModelDefinition,
@@ -39,6 +40,8 @@ import {
   PrinterDetails,
   PrinterFast,
   PrinterFileDto,
+  PrinterGroup,
+  PrinterGroupDetail,
   PrinterModelDto,
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
@@ -62,6 +65,7 @@ import {
   UpdateModelRequest,
   UpdateNozzleModelDto,
   UpdatePrinterDto,
+  UpdatePrinterGroupRequest,
   UpdateToolheadModelDefDto,
   UserDto,
   DiscoveredGcodeFileDto,
@@ -871,6 +875,53 @@ export class ApiClient {
       `/printers/${printerId}/files`
     );
     return response.data;
+  }
+
+  // ============ Printer Groups API methods ============
+
+  async getPrinterGroups(): Promise<PrinterGroup[]> {
+    const response = await this.client.get<PrinterGroup[]>(
+      "/printer-groups"
+    );
+    return response.data;
+  }
+
+  async getPrinterGroup(id: string): Promise<PrinterGroupDetail> {
+    const response = await this.client.get<PrinterGroupDetail>(
+      `/printer-groups/${id}`
+    );
+    return response.data;
+  }
+
+  async createPrinterGroup(dto: CreatePrinterGroupRequest): Promise<PrinterGroup> {
+    const response = await this.client.post<PrinterGroup>(
+      "/printer-groups",
+      dto
+    );
+    return response.data;
+  }
+
+  async updatePrinterGroup(
+    id: string,
+    dto: UpdatePrinterGroupRequest
+  ): Promise<PrinterGroup> {
+    const response = await this.client.put<PrinterGroup>(
+      `/printer-groups/${id}`,
+      dto
+    );
+    return response.data;
+  }
+
+  async deletePrinterGroup(id: string): Promise<void> {
+    await this.client.delete(`/printer-groups/${id}`);
+  }
+
+  async assignPrinterToGroup(groupId: string, printerId: string): Promise<void> {
+    await this.client.post(`/printer-groups/${groupId}/printers/${printerId}`);
+  }
+
+  async removePrinterFromGroup(groupId: string, printerId: string): Promise<void> {
+    await this.client.delete(`/printer-groups/${groupId}/printers/${printerId}`);
   }
 
   // ============ Catalog API methods ============
@@ -2202,6 +2253,11 @@ export class ApiClient {
     await this.client.delete(`/locations/${id}`);
   }
 
+  async getLocationSubtreePrinters(locationId: string): Promise<import("@/types/api").LocationSubtreePrinter[]> {
+    const response = await this.client.get<import("@/types/api").LocationSubtreePrinter[]>(`/locations/${locationId}/printers/subtree`);
+    return response.data;
+  }
+
   // ============ Printer Location API methods ============
   async getAllPrinterLocations(): Promise<Record<string, unknown>[]> {
     const response = await this.client.get('/printers');
@@ -3481,3 +3537,10 @@ export class ApiClient {
 
 // Export singleton instance
 export const apiClient = new ApiClient();
+
+// ── Domain service re-exports ───────────────────────────────────────────
+// Phase 2: focused service modules. Import directly for new code,
+// or continue importing from api.ts (barrel) for backward compat.
+export { printerService } from './printerService';
+export { jobQueueService } from './jobQueueService';
+export { catalogService } from './catalogService';

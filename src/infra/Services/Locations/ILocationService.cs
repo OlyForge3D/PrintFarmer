@@ -66,4 +66,10 @@ public interface ILocationService
     /// Updates Path for all descendants.
     /// </summary>
     Task<LocationDto?> MoveAsync(Guid id, Guid? newParentId, CancellationToken ct);
+
+    /// <summary>
+    /// Gets all printers in a location's subtree (the location itself and all descendants).
+    /// Includes real-time status from the printer status cache.
+    /// </summary>
+    Task<List<LocationSubtreePrinterDto>> GetSubtreePrintersAsync(Guid locationId, CancellationToken ct);
 }

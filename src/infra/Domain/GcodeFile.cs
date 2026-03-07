@@ -58,6 +58,10 @@ public class GcodeFile : StoredFile
 
     public double? PrintSpeed { get; set; }
 
+    public Guid? PrinterGroupId { get; set; } // Optional: restricts dispatch to printers in this group
+
+    public PrinterGroup? PrinterGroup { get; set; }
+
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
 }

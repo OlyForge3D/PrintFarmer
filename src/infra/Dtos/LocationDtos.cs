@@ -129,3 +129,16 @@ public class MoveLocationDto
 {
     public Guid? NewParentId { get; set; }
 }
+
+/// <summary>
+/// Lightweight printer summary for location subtree views.
+/// Includes real-time status from the printer status cache.
+/// </summary>
+public record LocationSubtreePrinterDto(
+    Guid PrinterId,
+    string PrinterName,
+    Guid LocationId,
+    string LocationName,
+    bool IsOnline,
+    string Status,
+    string? CurrentJobName);

@@ -11,6 +11,18 @@ import type {
 export type { Location, LocationTreeNode, LocationBreadcrumbItem, CreateLocationRequest, UpdateLocationRequest, MoveLocationRequest };
 
 /**
+ * Find a location node in a tree by ID
+ */
+export function findNode(nodes: LocationTreeNode[], id: string): LocationTreeNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const found = findNode(node.children, id);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
  * Location service - delegated to apiClient singleton
  * apiClient handles authentication, correlation IDs, and error handling automatically
  */

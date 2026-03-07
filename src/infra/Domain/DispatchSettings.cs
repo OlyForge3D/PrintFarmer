@@ -57,4 +57,10 @@ public class DispatchSettings
     /// UTC timestamp of the last settings update.
     /// </summary>
     public DateTime UpdatedAt { get; set; } = new(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>When this settings record was created.</summary>
+    public DateTimeOffset CreatedDate { get; set; } = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    /// <summary>When this settings record was last updated.</summary>
+    public DateTimeOffset UpdatedDate { get; set; } = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
 }

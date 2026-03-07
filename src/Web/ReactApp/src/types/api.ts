@@ -276,6 +276,22 @@ export interface UpdateLocationRequest {
   sortOrder?: number;
 }
 
+/**
+ * Location subtree printer DTO matching backend LocationSubtreePrinterDto.
+ * Used for location dashboard printer list with status information.
+ */
+export interface LocationSubtreePrinter {
+  printerId: string;
+  printerName: string;
+  locationId: string;
+  locationName: string;
+  backendType: string;
+  isOnline: boolean;
+  currentState?: string | null;
+  currentJobName?: string | null;
+  progressPercent?: number | null;
+}
+
 /** Request DTO for moving a location. Matches backend MoveLocationDto. */
 export interface MoveLocationRequest {
   newParentId?: string | null;
@@ -2941,4 +2957,57 @@ export interface AutoPrintStatus {
   autoPrintEnabled: boolean;
   state: AutoPrintState;
   queuedJobCount: number;
+}
+
+// ── Printer Groups ──────────────────────────────────────────────
+
+/**
+ * Basic printer group DTO with printer count
+ */
+export interface PrinterGroup {
+  id: string;
+  name: string;
+  description?: string;
+  createdDate: string;
+  updatedDate: string;
+  printerCount: number;
+}
+
+/**
+ * Detailed printer group DTO with assigned printers
+ */
+export interface PrinterGroupDetail {
+  id: string;
+  name: string;
+  description?: string;
+  createdDate: string;
+  updatedDate: string;
+  printers: PrinterGroupPrinter[];
+}
+
+/**
+ * Printer DTO within a printer group
+ */
+export interface PrinterGroupPrinter {
+  id: string;
+  name: string;
+  backend: PrinterBackend;
+  isAvailable: boolean;
+  inMaintenance: boolean;
+}
+
+/**
+ * Request DTO for creating a printer group
+ */
+export interface CreatePrinterGroupRequest {
+  name: string;
+  description?: string;
+}
+
+/**
+ * Request DTO for updating a printer group
+ */
+export interface UpdatePrinterGroupRequest {
+  name: string;
+  description?: string;
 }

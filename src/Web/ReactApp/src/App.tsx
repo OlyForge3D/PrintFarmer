@@ -24,6 +24,7 @@ import { apiClient } from '@/services/api';
 import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
 import { FilamentManagementPage } from '@/features/filamentManagement/pages/FilamentManagementPage';
 import { PrintersPage } from '@/features/printers/pages/PrintersPage';
+import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
 import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
@@ -165,6 +166,7 @@ function AuthenticatedAppRoutes() {
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
         <Route path="printers/:printerId/maintenance" element={<PrinterMaintenancePage />} />
+        <Route path="printer-groups" element={<ProtectedRoute requiredRole="farm_admin"><PrinterGroupsPage /></ProtectedRoute>} />
         <Route path="printQueue" element={<PrintQueueDashboardPage />} />
         <Route path="printQueue/:tabId" element={<PrintQueueDashboardPage />} />
         <Route path="files/*" element={<FilesPage />} />

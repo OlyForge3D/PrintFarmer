@@ -1,13 +1,24 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { locationService, type LocationTreeNode } from '@/services/locationService';
-import type { Printer } from '@/types/api';
+import { locationService, findNode } from '@/services/locationService';
+import type { LocationTreeNode, LocationSubtreePrinter } from '@/types/api';
 import { printerSignalRService } from '@/services/printer-signalr';
+
+export { findNode };
+export type { LocationTreeNode };
+
+export function collectLocationIds(node: LocationTreeNode): string[] {
+  const ids = [node.id];
+  for (const child of node.children) {
+    ids.push(...collectLocationIds(child));
+  }
+  return ids;
+}
 
 export const locationDashboardKeys = {
   tree: ['locations', 'tree'] as const,
-  printers: (locationId: string) => ['locations', locationId, 'printers'] as const,
+  subtreePrinters: (locationId: string) => ['locations', locationId, 'subtree-printers'] as const,
   stats: (locationId: string) => ['locations', locationId, 'stats'] as const,
 } as const;
 
@@ -20,10 +31,14 @@ export interface LocationStats {
   activeJobs: number;
 }
 
-export function computeStats(printers: Printer[]): LocationStats {
+export function computeStats(printers: LocationSubtreePrinter[]): LocationStats {
   const online = printers.filter(p => p.isOnline);
-  const printing = online.filter(p => p.state === 'Printing');
-  const idle = online.filter(p => p.state === 'Idle' || p.state === 'Ready' || p.state === 'Operational');
+  const printing = online.filter(p => p.currentState === 'Printing');
+  const idle = online.filter(p => 
+    p.currentState === 'Idle' || 
+    p.currentState === 'Ready' || 
+    p.currentState === 'Operational'
+  );
 
   return {
     totalPrinters: printers.length,
@@ -35,23 +50,6 @@ export function computeStats(printers: Printer[]): LocationStats {
   };
 }
 
-export function collectLocationIds(node: LocationTreeNode): string[] {
-  const ids = [node.id];
-  for (const child of node.children) {
-    ids.push(...collectLocationIds(child));
-  }
-  return ids;
-}
-
-export function findNode(nodes: LocationTreeNode[], id: string): LocationTreeNode | undefined {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    const found = findNode(node.children, id);
-    if (found) return found;
-  }
-  return undefined;
-}
-
 export function useLocationTree() {
   return useQuery({
     queryKey: locationDashboardKeys.tree,
@@ -61,23 +59,24 @@ export function useLocationTree() {
 }
 
 export function useLocationPrinters(locationId: string | null) {
-  const { data: allPrinters = [], isLoading, error } = useQuery({
-    queryKey: ['printers'],
-    queryFn: () => apiClient.getPrinters() as Promise<Printer[]>,
-    staleTime: 30_000,
+  return useQuery({
+    queryKey: locationId ? locationDashboardKeys.subtreePrinters(locationId) : ['locations', 'all-printers'],
+    queryFn: async () => {
+      if (!locationId) {
+        // When no location selected, get all printers by fetching subtree for root locations
+        const tree = await locationService.getLocationTree();
+        const allPrinters: LocationSubtreePrinter[] = [];
+        for (const root of tree) {
+          const printers = await apiClient.getLocationSubtreePrinters(root.id);
+          allPrinters.push(...printers);
+        }
+        return allPrinters;
+      }
+      return apiClient.getLocationSubtreePrinters(locationId);
+    },
+    staleTime: 10_000, // Real-time-ish data
+    enabled: true,
   });
-
-  const { data: tree = [] } = useLocationTree();
-
-  const filteredPrinters = useMemo(() => {
-    if (!locationId) return allPrinters;
-    const node = findNode(tree, locationId);
-    if (!node) return [];
-    const descendantIds = new Set(collectLocationIds(node));
-    return allPrinters.filter(p => p.location && descendantIds.has(p.location.id));
-  }, [allPrinters, tree, locationId]);
-
-  return { data: filteredPrinters, isLoading, error };
 }
 
 export function useLocationStats(locationId: string | null) {
@@ -91,7 +90,13 @@ export function useSignalRPrinterUpdates() {
 
   const handleUpdate = useCallback(
     () => {
-      queryClient.invalidateQueries({ queryKey: ['printers'] });
+      // Invalidate all subtree-printers queries when printer status updates
+      queryClient.invalidateQueries({ 
+        predicate: (query) => 
+          Array.isArray(query.queryKey) && 
+          query.queryKey[0] === 'locations' &&
+          (query.queryKey.includes('subtree-printers') || query.queryKey.includes('all-printers'))
+      });
     },
     [queryClient],
   );

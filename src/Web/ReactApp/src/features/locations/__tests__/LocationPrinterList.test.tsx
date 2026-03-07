@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Printer } from '@/types/api';
+import type { LocationSubtreePrinter } from '@/types/api';
 
 vi.mock('@/common/components/ui', () => ({
   Card: Object.assign(
@@ -30,8 +30,8 @@ vi.mock('@/common/components/ui', () => ({
   Select: ({ value, onChange, children, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & { containerClassName?: string }) => (
     <select value={value} onChange={onChange} {...rest}>{children}</select>
   ),
-  Badge: ({ children, variant, size }: { children: React.ReactNode; variant?: string; size?: string }) => (
-    <span data-testid="badge" data-variant={variant} data-size={size}>{children}</span>
+  Badge: ({ children, variant, size, className }: { children: React.ReactNode; variant?: string; size?: string; className?: string }) => (
+    <span data-testid="badge" data-variant={variant} data-size={size} className={className}>{children}</span>
   ),
 }));
 
@@ -41,26 +41,24 @@ vi.mock('@/common/components/icons/MdiIcons', () => ({
 
 import { LocationPrinterList } from '../components/LocationPrinterList';
 
-const makePrinter = (overrides: Partial<Printer> = {}): Printer =>
-  ({
-    id: 'p1',
-    name: 'Test Printer',
-    backend: 'Moonraker',
-    isOnline: true,
-    state: 'Idle',
-    backendUrl: 'http://test:7125',
-    isReachable: true,
-    hotendTemp: 200,
-    bedTemp: 60,
-    progress: 0,
-    ...overrides,
-  }) as Printer;
+const makePrinter = (overrides: Partial<LocationSubtreePrinter> = {}): LocationSubtreePrinter => ({
+  printerId: 'p1',
+  printerName: 'Test Printer',
+  locationId: 'loc1',
+  locationName: 'Test Location',
+  backendType: 'Moonraker',
+  isOnline: true,
+  currentState: 'Idle',
+  currentJobName: null,
+  progressPercent: null,
+  ...overrides,
+});
 
 describe('LocationPrinterList', () => {
-  const printers: Printer[] = [
-    makePrinter({ id: 'p1', name: 'Prusa MK4', isOnline: true, state: 'Printing', progress: 75 }),
-    makePrinter({ id: 'p2', name: 'Voron 2.4', isOnline: true, state: 'Idle' }),
-    makePrinter({ id: 'p3', name: 'Ender 3', isOnline: false, state: 'Disconnected' }),
+  const printers: LocationSubtreePrinter[] = [
+    makePrinter({ printerId: 'p1', printerName: 'Prusa MK4', isOnline: true, currentState: 'Printing', progressPercent: 75 }),
+    makePrinter({ printerId: 'p2', printerName: 'Voron 2.4', isOnline: true, currentState: 'Idle' }),
+    makePrinter({ printerId: 'p3', printerName: 'Ender 3', isOnline: false, currentState: 'Disconnected' }),
   ];
 
   beforeEach(() => {
@@ -81,7 +79,7 @@ describe('LocationPrinterList', () => {
 
   it('filters by search text', () => {
     render(<LocationPrinterList printers={printers} />);
-    const searchInput = screen.getByPlaceholderText('Search printers...');
+    const searchInput = screen.getByPlaceholderText('Search printers or locations...');
     fireEvent.change(searchInput, { target: { value: 'voron' } });
     expect(screen.getByText('Voron 2.4')).toBeInTheDocument();
     expect(screen.queryByText('Prusa MK4')).not.toBeInTheDocument();
@@ -103,7 +101,7 @@ describe('LocationPrinterList', () => {
 
   it('shows filter-no-match message when filters exclude all', () => {
     render(<LocationPrinterList printers={printers} />);
-    const searchInput = screen.getByPlaceholderText('Search printers...');
+    const searchInput = screen.getByPlaceholderText('Search printers or locations...');
     fireEvent.change(searchInput, { target: { value: 'nonexistent' } });
     expect(screen.getByText('No printers match the current filters.')).toBeInTheDocument();
   });
@@ -122,12 +120,10 @@ describe('LocationPrinterList', () => {
     expect(cards.length).toBe(3);
   });
 
-  it('shows temperature info for online printers', () => {
+  it('shows current state for online printers', () => {
     render(<LocationPrinterList printers={printers} />);
-    const hotendTemps = screen.getAllByText(/200°C/);
-    expect(hotendTemps.length).toBeGreaterThanOrEqual(1);
-    const bedTemps = screen.getAllByText(/60°C/);
-    expect(bedTemps.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/Printing/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/Idle/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows status badges', () => {

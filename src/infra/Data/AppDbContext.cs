@@ -17,6 +17,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<Printer> Printers => Set<Printer>();
 
+    public DbSet<PrinterGroup> PrinterGroups => Set<PrinterGroup>();
+
     public DbSet<Location> Locations => Set<Location>();
 
     public DbSet<Spool> Spools => Set<Spool>();

@@ -43,6 +43,11 @@ public class GcodeFileConfiguration : IEntityTypeConfiguration<GcodeFile>
             .HasForeignKey(g => g.PrinterModelId)
             .OnDelete(DeleteBehavior.NoAction);
 
+        builder.HasOne(g => g.PrinterGroup)
+            .WithMany()
+            .HasForeignKey(g => g.PrinterGroupId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         // Skip-navigation: GcodeFile.Tags - join table managed by EF Core
         builder.HasMany(g => g.Tags)
             .WithMany();
@@ -56,5 +61,6 @@ public class GcodeFileConfiguration : IEntityTypeConfiguration<GcodeFile>
         builder.HasIndex(g => g.SourcePrinterId);
         builder.HasIndex(g => g.HealthStatus);
         builder.HasIndex(g => g.LastHealthCheckDate);
+        builder.HasIndex(g => g.PrinterGroupId);
     }
 }

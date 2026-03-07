@@ -1,0 +1,173 @@
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.PrinterGroups;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace Farm.Infrastructure.Services.PrinterGroups;
+
+/// <summary>
+/// Service layer for printer group operations with business rule enforcement.
+/// </summary>
+public class PrinterGroupService(
+    IPrinterGroupRepository repository,
+    AppDbContext db,
+    ILogger<PrinterGroupService> logger) : IPrinterGroupService
+{
+    public async Task<IReadOnlyList<PrinterGroupDto>> ListAllAsync(CancellationToken ct)
+    {
+        IReadOnlyList<PrinterGroup> groups = await repository.ListAllAsync(ct);
+        return groups.Select(MapToDto).ToList();
+    }
+
+    public async Task<PrinterGroupDetailDto?> GetByIdAsync(Guid id, CancellationToken ct)
+    {
+        PrinterGroup? group = await repository.GetByIdAsync(id, ct);
+        return group is null ? null : MapToDetailDto(group);
+    }
+
+    public async Task<PrinterGroupDto> CreateAsync(CreatePrinterGroupDto dto, CancellationToken ct)
+    {
+        string trimmedName = dto.Name.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            throw new InvalidOperationException("Group name is required.");
+        }
+
+        PrinterGroup? existing = await repository.GetByNameAsync(trimmedName, ct);
+        if (existing is not null)
+        {
+            throw new InvalidOperationException($"A printer group named '{trimmedName}' already exists.");
+        }
+
+        var group = new PrinterGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = trimmedName,
+            Description = dto.Description?.Trim(),
+            CreatedDate = DateTimeOffset.UtcNow,
+            UpdatedDate = DateTimeOffset.UtcNow,
+        };
+
+        await repository.AddAsync(group, ct);
+        await repository.SaveChangesAsync(ct);
+
+        logger.LogInformation("Created printer group '{Name}' ({Id})", group.Name, group.Id);
+        return MapToDto(group);
+    }
+
+    public async Task<PrinterGroupDto> UpdateAsync(Guid id, UpdatePrinterGroupDto dto, CancellationToken ct)
+    {
+        PrinterGroup? group = await repository.GetByIdAsync(id, ct);
+        if (group is null)
+        {
+            throw new KeyNotFoundException($"Printer group {id} not found.");
+        }
+
+        string trimmedName = dto.Name.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            throw new InvalidOperationException("Group name is required.");
+        }
+
+        // Check uniqueness only if the name changed
+        if (!string.Equals(group.Name, trimmedName, StringComparison.OrdinalIgnoreCase))
+        {
+            PrinterGroup? conflict = await repository.GetByNameAsync(trimmedName, ct);
+            if (conflict is not null)
+            {
+                throw new InvalidOperationException($"A printer group named '{trimmedName}' already exists.");
+            }
+        }
+
+        group.Name = trimmedName;
+        group.Description = dto.Description?.Trim();
+        group.UpdatedDate = DateTimeOffset.UtcNow;
+
+        await repository.SaveChangesAsync(ct);
+
+        logger.LogInformation("Updated printer group '{Name}' ({Id})", group.Name, group.Id);
+        return MapToDto(group);
+    }
+
+    public async Task DeleteAsync(Guid id, CancellationToken ct)
+    {
+        PrinterGroup? group = await repository.GetByIdAsync(id, ct);
+        if (group is null)
+        {
+            throw new KeyNotFoundException($"Printer group {id} not found.");
+        }
+
+        repository.Remove(group);
+        await repository.SaveChangesAsync(ct);
+
+        logger.LogInformation("Deleted printer group '{Name}' ({Id})", group.Name, group.Id);
+    }
+
+    public async Task AddPrinterAsync(Guid groupId, Guid printerId, CancellationToken ct)
+    {
+        PrinterGroup? group = await repository.GetByIdAsync(groupId, ct);
+        if (group is null)
+        {
+            throw new KeyNotFoundException($"Printer group {groupId} not found.");
+        }
+
+        Printer? printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == printerId, ct);
+        if (printer is null)
+        {
+            throw new KeyNotFoundException($"Printer {printerId} not found.");
+        }
+
+        printer.PrinterGroupId = groupId;
+        await repository.SaveChangesAsync(ct);
+
+        logger.LogInformation("Added printer '{PrinterName}' to group '{GroupName}'", printer.Name, group.Name);
+    }
+
+    public async Task RemovePrinterAsync(Guid groupId, Guid printerId, CancellationToken ct)
+    {
+        PrinterGroup? group = await repository.GetByIdAsync(groupId, ct);
+        if (group is null)
+        {
+            throw new KeyNotFoundException($"Printer group {groupId} not found.");
+        }
+
+        Printer? printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == printerId && p.PrinterGroupId == groupId, ct);
+        if (printer is null)
+        {
+            throw new KeyNotFoundException($"Printer {printerId} not found in group {groupId}.");
+        }
+
+        printer.PrinterGroupId = null;
+        await repository.SaveChangesAsync(ct);
+
+        logger.LogInformation("Removed printer '{PrinterName}' from group '{GroupName}'", printer.Name, group.Name);
+    }
+
+    private static PrinterGroupDto MapToDto(PrinterGroup group) => new()
+    {
+        Id = group.Id,
+        Name = group.Name,
+        Description = group.Description,
+        CreatedDate = group.CreatedDate,
+        UpdatedDate = group.UpdatedDate,
+        PrinterCount = group.Printers.Count,
+    };
+
+    private static PrinterGroupDetailDto MapToDetailDto(PrinterGroup group) => new()
+    {
+        Id = group.Id,
+        Name = group.Name,
+        Description = group.Description,
+        CreatedDate = group.CreatedDate,
+        UpdatedDate = group.UpdatedDate,
+        Printers = group.Printers.Select(p => new PrinterGroupPrinterDto
+        {
+            Id = p.Id,
+            Name = p.Name,
+            Backend = p.Backend,
+            IsAvailable = p.IsAvailable,
+            InMaintenance = p.InMaintenance,
+        }).ToList(),
+    };
+}

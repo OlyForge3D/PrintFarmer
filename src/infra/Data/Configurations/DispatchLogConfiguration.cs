@@ -14,8 +14,19 @@ public class DispatchLogConfiguration : IEntityTypeConfiguration<DispatchLog>
             .HasConversion<string>()
             .HasMaxLength(20);
 
+        _ = builder.Property(d => d.DispatchMode)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
+        _ = builder.Property(d => d.Status)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
         _ = builder.Property(d => d.Reason).HasMaxLength(500);
         _ = builder.Property(d => d.ScoreBreakdown).HasMaxLength(4000);
+        _ = builder.Property(d => d.ScoringDetails).HasMaxLength(8000);
+        _ = builder.Property(d => d.ErrorMessage).HasMaxLength(2000);
+        _ = builder.Property(d => d.DispatchedByUserId).HasMaxLength(450);
 
         _ = builder.HasOne(d => d.PrintJob)
             .WithMany()
@@ -30,5 +41,6 @@ public class DispatchLogConfiguration : IEntityTypeConfiguration<DispatchLog>
         _ = builder.HasIndex(d => d.PrintJobId);
         _ = builder.HasIndex(d => d.PrinterId);
         _ = builder.HasIndex(d => d.CreatedAtUtc);
+        _ = builder.HasIndex(d => d.DispatchedAt);
     }
 }

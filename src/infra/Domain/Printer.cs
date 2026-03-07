@@ -166,6 +166,10 @@ public class Printer
 
     public Location? Location { get; set; }
 
+    public Guid? PrinterGroupId { get; set; } // Optional group of identical printers for dispatch targeting
+
+    public PrinterGroup? PrinterGroup { get; set; }
+
     public DateTime? DateAcquired { get; set; }
 
     // Hardware Specifications (previously in PrinterCapabilities)

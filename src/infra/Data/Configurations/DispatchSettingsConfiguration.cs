@@ -29,6 +29,8 @@ public class DispatchSettingsConfiguration : IEntityTypeConfiguration<DispatchSe
             MaxConcurrentDispatches = 3,
             LoadBalancingStrategy = Services.Queue.Dispatch.LoadBalancingStrategy.BestFit,
             UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            CreatedDate = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            UpdatedDate = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero),
         });
     }
 }

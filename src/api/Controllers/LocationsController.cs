@@ -338,4 +338,31 @@ public class LocationsController(
             return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
         }
     }
+
+    /// <summary>
+    /// Gets all printers in a location's subtree (the location itself and all descendant locations).
+    /// Returns lightweight printer summaries with real-time status.
+    /// </summary>
+    [AllowAnonymous]
+    [HttpGet("{id}/printers/subtree")]
+    [ProducesResponseType(typeof(List<LocationSubtreePrinterDto>), 200)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<List<LocationSubtreePrinterDto>>> GetSubtreePrintersAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            if (!_startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
+
+            List<LocationSubtreePrinterDto> printers = await _locationService.GetSubtreePrintersAsync(id, ct);
+            return Ok(printers);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[LocationsController] Exception in GetSubtreePrintersAsync for ID {LocationId}: {Message}", id.ToString(), ex.Message);
+            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
+    }
 }

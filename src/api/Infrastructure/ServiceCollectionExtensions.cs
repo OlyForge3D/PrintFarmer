@@ -176,6 +176,9 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IBatchDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.BatchDispatchService>();
 
+        // Printer group service
+        _ = services.AddScoped<Farm.Infrastructure.Services.PrinterGroups.IPrinterGroupService, Farm.Infrastructure.Services.PrinterGroups.PrinterGroupService>();
+
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
         _ = services.AddSingleton(autoDispatchTrigger);
@@ -302,6 +305,9 @@ public static class ServiceCollectionExtensions
 
         // Webhook repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Webhooks.IWebhookRepository, Farm.Infrastructure.Repositories.Webhooks.EfWebhookRepository>();
+
+        // Printer group repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.PrinterGroups.IPrinterGroupRepository, Farm.Infrastructure.Repositories.PrinterGroups.EfPrinterGroupRepository>();
     }
 
     #endregion

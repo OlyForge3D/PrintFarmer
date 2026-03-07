@@ -4,7 +4,7 @@ import {
   collectLocationIds,
   findNode,
 } from '../hooks/useLocationDashboard';
-import type { LocationTreeNode } from '@/services/locationService';
+import type { LocationTreeNode, LocationSubtreePrinter } from '@/types/api';
 
 const makeNode = (overrides: Partial<LocationTreeNode> = {}): LocationTreeNode => ({
   id: 'n1',
@@ -34,11 +34,11 @@ describe('computeStats', () => {
 
   it('computes correct counts for mixed statuses', () => {
     const printers = [
-      { isOnline: true, state: 'Printing' },
-      { isOnline: true, state: 'Idle' },
-      { isOnline: true, state: 'Ready' },
-      { isOnline: false, state: 'Disconnected' },
-    ] as Parameters<typeof computeStats>[0];
+      { isOnline: true, currentState: 'Printing' },
+      { isOnline: true, currentState: 'Idle' },
+      { isOnline: true, currentState: 'Ready' },
+      { isOnline: false, currentState: 'Disconnected' },
+    ] as LocationSubtreePrinter[];
 
     const stats = computeStats(printers);
     expect(stats.totalPrinters).toBe(4);
@@ -50,7 +50,7 @@ describe('computeStats', () => {
   });
 
   it('counts Operational state as idle', () => {
-    const printers = [{ isOnline: true, state: 'Operational' }] as Parameters<typeof computeStats>[0];
+    const printers = [{ isOnline: true, currentState: 'Operational' }] as LocationSubtreePrinter[];
     const stats = computeStats(printers);
     expect(stats.idle).toBe(1);
   });
