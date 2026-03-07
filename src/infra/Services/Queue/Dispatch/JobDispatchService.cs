@@ -1,0 +1,111 @@
+﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Services.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace Farm.Infrastructure.Services.Queue.Dispatch;
+
+/// <summary>
+/// Orchestrates dispatch operations: scoring candidates and assigning jobs to printers.
+/// Delegates scoring to <see cref="IDispatchScorer"/> and job execution to
+/// <see cref="IPrintJobManagementService"/>.
+/// </summary>
+public class JobDispatchService(
+    IDispatchScorer scorer,
+    IPrintJobManagementService printJobManagement,
+    AppDbContext db,
+    ILogger<JobDispatchService> logger) : IJobDispatchService
+{
+    public async Task<List<DispatchCandidateDto>> FindCandidatesAsync(Guid jobId, CancellationToken ct = default)
+    {
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(jobId, ct);
+
+        // Log candidates for audit trail
+        foreach (DispatchScore score in scores.Where(s => !s.Eliminated))
+        {
+            db.DispatchLogs.Add(new DispatchLog
+            {
+                Id = Guid.NewGuid(),
+                PrintJobId = jobId,
+                PrinterId = score.PrinterId,
+                Action = DispatchAction.Suggested,
+                Score = score.TotalScore,
+                ScoreBreakdown = JsonSerializer.Serialize(score.ScoreBreakdown),
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        return scores.Select(s => new DispatchCandidateDto
+        {
+            PrinterId = s.PrinterId,
+            PrinterName = s.PrinterName,
+            Score = s.TotalScore,
+            ScoreBreakdown = s.ScoreBreakdown.ToDictionary(
+                kvp => kvp.Key,
+                kvp => new FactorScoreDto
+                {
+                    FactorName = kvp.Value.FactorName,
+                    Score = kvp.Value.Score,
+                    Weight = kvp.Value.Weight,
+                    WeightedScore = kvp.Value.WeightedScore,
+                }),
+            Eliminated = s.Eliminated,
+            EliminationReasons = s.EliminationReasons,
+        }).ToList();
+    }
+
+    public async Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, CancellationToken ct = default)
+    {
+        PrintJob? job = await db.PrintJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct)
+            ?? throw new InvalidOperationException($"Print job {jobId} not found");
+
+        Printer? printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == printerId, ct)
+            ?? throw new InvalidOperationException($"Printer {printerId} not found");
+
+        // Score the printer for audit and to populate DispatchScore on the job
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(jobId, ct);
+        DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printerId);
+
+        if (printerScore is { Eliminated: true })
+        {
+            string reasons = string.Join("; ", printerScore.EliminationReasons);
+            throw new InvalidOperationException($"Printer '{printer.Name}' is eliminated: {reasons}");
+        }
+
+        // Assign the job to the printer
+        job.AssignedPrinterId = printerId;
+        job.DispatchedAt = DateTime.UtcNow;
+        job.DispatchScore = printerScore?.TotalScore;
+        job.DispatchMode = (int)DispatchMode.Suggested;
+
+        await db.SaveChangesAsync(ct);
+
+        // Log the dispatch
+        db.DispatchLogs.Add(new DispatchLog
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = jobId,
+            PrinterId = printerId,
+            Action = DispatchAction.Dispatched,
+            Score = printerScore?.TotalScore,
+            ScoreBreakdown = printerScore is not null
+                ? JsonSerializer.Serialize(printerScore.ScoreBreakdown)
+                : null,
+            Reason = $"Dispatched by {userId}",
+            CreatedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync(ct);
+
+        // Trigger print start via existing service
+        logger.LogInformation(
+            "Dispatching job {JobId} to printer {PrinterName} (score: {Score})",
+            jobId, printer.Name, printerScore?.TotalScore ?? 0);
+
+        return await printJobManagement.DispatchJobAsync(jobId.ToString(), userId, ct);
+    }
+}
