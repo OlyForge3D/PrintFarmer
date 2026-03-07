@@ -8,7 +8,6 @@ import type {
   MoveLocationRequest,
 } from '@/types/api';
 
-// Re-export types from canonical location for backward compatibility
 export type { Location, LocationTreeNode, LocationBreadcrumbItem, CreateLocationRequest, UpdateLocationRequest, MoveLocationRequest };
 
 /**
