@@ -334,6 +334,20 @@ Full design document: `.squad/decisions/inbox/dallas-location-hierarchy-design.m
 
 ---
 
+### 16. EF Core Migration Directive
+
+**Author:** Jeff Papiez  
+**Date:** 2026-03-07T16:38:08Z  
+**Status:** TEAM STANDARD — Mandatory for schema changes
+
+**Directive:** "When modifying database schema that requires a new migration, make sure the migrations are generated and committed with the corresponding changes that introduced the requirement to add migrations."
+
+**Scope:** All database schema modifications.
+
+**Rationale:** Prevents schema changes from shipping without matching EF Core migrations, which would break production deployments. Migrations and code changes must land together.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
@@ -342,3 +356,4 @@ Full design document: `.squad/decisions/inbox/dallas-location-hierarchy-design.m
 - **UI Policy:** Every new component/feature must have Vitest + RTL tests (per Jeff 2026-03-06)
 - **Lint Policy:** All code must pass `npm run lint` and `dotnet format` before commit (per Jeff 2026-03-07)
 - **Branching:** Always use feature branches, never commit directly to main (per Jeff 2026-03-07)
+- **Migrations Policy:** Schema changes and migrations must be committed together (per Jeff 2026-03-07)
