@@ -2153,43 +2153,43 @@ export class ApiClient {
   }
 
   // ============ Location API methods ============
-  async getAllLocations(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/locations');
+  async getAllLocations(): Promise<import("@/types/api").Location[]> {
+    const response = await this.client.get<import("@/types/api").Location[]>('/locations');
     return response.data;
   }
 
-  async getLocationById(id: string): Promise<Record<string, unknown>> {
-    const response = await this.client.get(`/locations/${id}`);
+  async getLocationById(id: string): Promise<import("@/types/api").Location> {
+    const response = await this.client.get<import("@/types/api").Location>(`/locations/${id}`);
     return response.data;
   }
 
-  async getLocationTree(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/locations/tree');
+  async getLocationTree(): Promise<import("@/types/api").LocationTreeNode[]> {
+    const response = await this.client.get<import("@/types/api").LocationTreeNode[]>('/locations/tree');
     return response.data;
   }
 
-  async getLocationAncestors(id: string): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get(`/locations/${id}/ancestors`);
+  async getLocationAncestors(id: string): Promise<import("@/types/api").LocationBreadcrumbItem[]> {
+    const response = await this.client.get<import("@/types/api").LocationBreadcrumbItem[]>(`/locations/${id}/ancestors`);
     return response.data;
   }
 
-  async getLocationDescendants(id: string): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get(`/locations/${id}/descendants`);
+  async getLocationDescendants(id: string): Promise<import("@/types/api").Location[]> {
+    const response = await this.client.get<import("@/types/api").Location[]>(`/locations/${id}/descendants`);
     return response.data;
   }
 
-  async createLocation(request: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.client.post('/locations', request);
+  async createLocation(request: import("@/types/api").CreateLocationRequest): Promise<import("@/types/api").Location> {
+    const response = await this.client.post<import("@/types/api").Location>('/locations', request);
     return response.data;
   }
 
-  async updateLocation(id: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.client.put(`/locations/${id}`, request);
+  async updateLocation(id: string, request: import("@/types/api").UpdateLocationRequest): Promise<import("@/types/api").Location> {
+    const response = await this.client.put<import("@/types/api").Location>(`/locations/${id}`, request);
     return response.data;
   }
 
-  async moveLocation(id: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.client.post(`/locations/${id}/move`, request);
+  async moveLocation(id: string, request: import("@/types/api").MoveLocationRequest): Promise<import("@/types/api").Location> {
+    const response = await this.client.post<import("@/types/api").Location>(`/locations/${id}/move`, request);
     return response.data;
   }
 

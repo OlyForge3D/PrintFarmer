@@ -18,7 +18,7 @@ vi.mock('@/services/locationService', () => ({
   },
 }));
 
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+ 
 const { locationService } = await import('@/services/locationService') as typeof import('@/services/locationService');
 
 describe('LocationBreadcrumb', () => {

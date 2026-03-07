@@ -1,5 +1,5 @@
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { LocationManagement } from '@/features/catalog/components/LocationManagement';
+import { LocationManagement } from '@/features/locations/components/LocationManagement';
 import { LayersIcon } from '@/common/components/icons/MdiIcons';
 
 export function LocationManagementAdminPage() {

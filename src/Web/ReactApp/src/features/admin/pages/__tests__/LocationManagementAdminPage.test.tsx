@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
 
-vi.mock('@/features/catalog/components/LocationManagement', () => ({
+vi.mock('@/features/locations/components/LocationManagement', () => ({
   LocationManagement: () => <div data-testid="location-management">LocationManagement Content</div>,
 }));
 

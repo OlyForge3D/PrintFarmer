@@ -215,6 +215,71 @@ export interface LocationSummary {
 }
 
 /**
+ * Full location DTO matching backend LocationDto.
+ * Contains all location properties including hierarchy info.
+ */
+export interface Location {
+  id: string;
+  name: string;
+  description?: string;
+  parentId?: string | null;
+  path?: string;
+  depth: number;
+  sortOrder: number;
+  printerCount: number;
+  totalPrinterCount: number;
+  createdAt: string;
+  modifiedAt: string;
+  isActive: boolean;
+}
+
+/**
+ * Nested tree structure matching backend LocationTreeDto.
+ * Used for hierarchical location display.
+ */
+export interface LocationTreeNode {
+  id: string;
+  name: string;
+  description?: string;
+  parentId?: string | null;
+  path?: string;
+  depth: number;
+  sortOrder: number;
+  printerCount: number;
+  totalPrinterCount: number;
+  children: LocationTreeNode[];
+}
+
+/**
+ * Breadcrumb item matching backend LocationBreadcrumbDto.
+ */
+export interface LocationBreadcrumbItem {
+  id: string;
+  name: string;
+}
+
+/** Request DTO for creating a location. Matches backend CreateLocationDto. */
+export interface CreateLocationRequest {
+  name: string;
+  description?: string;
+  parentId?: string | null;
+  sortOrder?: number;
+}
+
+/** Request DTO for updating a location. Matches backend UpdateLocationDto. */
+export interface UpdateLocationRequest {
+  name?: string;
+  description?: string;
+  parentId?: string | null;
+  sortOrder?: number;
+}
+
+/** Request DTO for moving a location. Matches backend MoveLocationDto. */
+export interface MoveLocationRequest {
+  newParentId?: string | null;
+}
+
+/**
  * Combined base interface for full printer DTOs.
  * Extends all common base interfaces for a complete printer representation.
  * Use this as the base for DTOs that need most/all printer information.

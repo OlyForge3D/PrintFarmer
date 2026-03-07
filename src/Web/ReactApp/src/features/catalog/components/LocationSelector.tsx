@@ -1,35 +1,4 @@
-import React from 'react';
-import { LocationTreePicker } from '@/common/components/LocationTreePicker';
-
-export interface LocationSelectorProps {
-  value?: string;
-  onChange: (locationId: string | null) => void;
-  label?: string;
-  required?: boolean;
-  disabled?: boolean;
-}
-
-/**
- * LocationSelector wraps LocationTreePicker for backward compatibility.
- * All new code should use LocationTreePicker directly.
- */
-export const LocationSelector: React.FC<LocationSelectorProps> = ({
-  value,
-  onChange,
-  label = 'Location',
-  required = false,
-  disabled = false,
-}) => {
-  return (
-    <LocationTreePicker
-      value={value ?? null}
-      onChange={onChange}
-      label={label}
-      required={required}
-      disabled={disabled}
-      placeholder={required ? 'Select a location' : 'No location (unassigned)'}
-    />
-  );
-};
-
-export default LocationSelector;
+// Re-export from canonical location
+export { LocationSelector } from '@/features/locations/components/LocationSelector';
+export type { LocationSelectorProps } from '@/features/locations/components/LocationSelector';
+export { LocationSelector as default } from '@/features/locations/components/LocationSelector';

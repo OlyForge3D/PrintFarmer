@@ -11,7 +11,7 @@ import {
   useSignalRPrinterUpdates,
   findNode,
 } from '@/features/locations/hooks/useLocationDashboard';
-import type { LocationTreeNode } from '@/services/locationService';
+import type { LocationTreeNode } from '@/types/api';
 import clsx from 'clsx';
 
 interface TreeNodeProps {

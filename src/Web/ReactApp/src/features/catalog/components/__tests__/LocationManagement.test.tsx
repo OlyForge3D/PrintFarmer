@@ -103,7 +103,7 @@ vi.mock('@/features/printers/components/PrinterLocationDragDrop', () => ({
   PrinterLocationDragDrop: () => <div data-testid="printer-drag-drop" />,
 }));
 
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+ 
 const { locationService } = await import('@/services/locationService') as typeof import('@/services/locationService');
 
 describe('LocationManagement', () => {
