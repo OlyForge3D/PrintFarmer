@@ -134,3 +134,16 @@ DB_PROVIDER=sqlserver dotnet ef migrations add AddLocationDispatchEntities \
 - **Naming collision resolved:** renamed new `QueueStatusDto` → `DispatchQueueStatusDto` to avoid collision with existing `Farm.Infrastructure.QueueStatusDto`
 - **No EF migrations created yet** — `LoadBalancingStrategy` column pending migration generation
 - **Build:** 0 errors, 0 warnings; **Tests:** 1952/1952 pass (1504 API + 448 slicer)
+
+### BatchDispatchService Bug Fixes (2026-03-09)
+
+**Fixed two code-review bugs in `src/infra/Services/Queue/Dispatch/BatchDispatchService.cs`:**
+
+1. **N+1 Query in DispatchLeastBusyAsync (HIGH):** Queue depth DB query was inside the foreach loop over jobs — dispatching N jobs triggered N separate DB round-trips. Moved the query before the loop; in-batch assignments via `batchAssignments` dictionary still correctly adjust effective queue depth per printer as jobs are dispatched within the batch.
+
+2. **Divide-by-Zero in Average Score (MEDIUM):** `GetQueueStatusAsync` called `.Average()` on dispatch logs filtered to `.Where(l => l.Score.HasValue)` without guarding against an empty sequence. If all dispatched logs have null scores, this throws `InvalidOperationException`. Fixed with `.DefaultIfEmpty(0).Average()` which safely returns 0 when no scored logs exist.
+
+**Learnings:**
+- **N+1 pattern in batch loops:** Any DB query inside a loop over items being processed should be a red flag. Hoist queries before the loop and track in-memory state for within-batch changes.
+- **`.Average()` on empty sequences:** Always use `.DefaultIfEmpty(fallback).Average()` or check `.Any()` before calling `.Average()` on LINQ sequences that could be empty after filtering.
+- **Build:** 0 errors, 0 new warnings

@@ -158,3 +158,17 @@ export const serviceName = {
 - Monitor for upstream package releases; overrides can be removed when parent packages pull in safe versions natively
 
 **Validation**: ✅ npm audit 0 vulnerabilities, ✅ Lint passes (0 errors), ✅ 1151/1196 tests pass (45 pre-existing failures)
+
+### 2026-03-10 - Missing loadBalancingStrategy Field Fix
+
+**Context**: Code review found that the C# `DispatchSettingsDto` has a `LoadBalancingStrategy` field (enum: BestFit, RoundRobin, LeastBusy) but the TypeScript `DispatchSettings` interface was missing it, causing silent data loss on API round-trips.
+
+**Changes Made**:
+1. Added `loadBalancingStrategy: string` to the `DispatchSettings` interface in `DispatchSettingsPanel.tsx`
+2. Added `LOAD_BALANCING_STRATEGIES` options array with descriptive labels
+3. Added Select form field with helper text, disabled when auto-dispatch is off
+4. Default value set to `'BestFit'` matching the C# enum default (value 0)
+
+**Key Pattern Confirmed**: Backend enums serialize as STRINGS via `JsonStringEnumConverter`, so TypeScript uses `string` type with string literal option values (`'BestFit'`, `'RoundRobin'`, `'LeastBusy'`) — never numeric.
+
+**Validation**: ✅ Lint passes (0 errors), ✅ Build passes (8.01s), ✅ 12 existing dispatch settings tests pass

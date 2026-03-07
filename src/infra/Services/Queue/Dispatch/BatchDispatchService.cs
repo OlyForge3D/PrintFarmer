@@ -249,6 +249,15 @@ public class BatchDispatchService(
         // Track in-flight assignments during this batch to adjust queue depths
         Dictionary<Guid, int> batchAssignments = [];
 
+        // Query queue depths once before the loop to avoid N+1 DB queries
+        Dictionary<Guid, int> queueDepths = await db.PrintJobs
+            .Where(j => j.AssignedPrinterId != null
+                && j.Status != PrintJobStatus.Completed
+                && j.Status != PrintJobStatus.Failed
+                && j.Status != PrintJobStatus.Cancelled)
+            .GroupBy(j => j.AssignedPrinterId!.Value)
+            .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
+
         foreach (PrintJob job in jobs)
         {
             if (result.DispatchedCount >= settings.MaxConcurrentDispatches)
@@ -281,15 +290,6 @@ public class BatchDispatchService(
                 result.SkippedCount++;
                 continue;
             }
-
-            // Get current queue depths from DB + batch assignments
-            Dictionary<Guid, int> queueDepths = await db.PrintJobs
-                .Where(j => j.AssignedPrinterId != null
-                    && j.Status != PrintJobStatus.Completed
-                    && j.Status != PrintJobStatus.Failed
-                    && j.Status != PrintJobStatus.Cancelled)
-                .GroupBy(j => j.AssignedPrinterId!.Value)
-                .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
 
             // Pick the eligible printer with lowest effective queue depth
             DispatchScore? chosen = eligible
@@ -462,9 +462,11 @@ public class BatchDispatchService(
         DispatchStatsDto stats = new()
         {
             DispatchesLast24Hours = dispatched.Count,
-            AverageScoreLast24Hours = dispatched.Count > 0
-                ? Math.Round(dispatched.Where(l => l.Score.HasValue).Average(l => l.Score!.Value), 2)
-                : 0,
+            AverageScoreLast24Hours = Math.Round(
+                dispatched.Where(l => l.Score.HasValue)
+                    .Select(l => l.Score!.Value)
+                    .DefaultIfEmpty(0)
+                    .Average(), 2),
             AutoDispatchesLast24Hours = recentLogs.Count(l =>
                 l.Action == DispatchAction.Dispatched
                 && l.Reason is not null

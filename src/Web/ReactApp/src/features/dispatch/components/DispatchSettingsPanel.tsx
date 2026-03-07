@@ -10,6 +10,7 @@ export interface DispatchSettings {
   idleThresholdSeconds: number;
   minimumScoreThreshold: number;
   maxConcurrentDispatches: number;
+  loadBalancingStrategy: string;
 }
 
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
@@ -18,6 +19,12 @@ const DISPATCH_MODES = [
   { value: 'Manual', label: 'Manual — Operator controls all dispatch' },
   { value: 'Suggest', label: 'Suggest — Notifications with recommendations' },
   { value: 'Auto', label: 'Auto — Fully automated dispatch' },
+];
+
+const LOAD_BALANCING_STRATEGIES = [
+  { value: 'BestFit', label: 'Best Fit — Assign to highest-scoring printer' },
+  { value: 'RoundRobin', label: 'Round Robin — Distribute evenly across printers' },
+  { value: 'LeastBusy', label: 'Least Busy — Prefer printers with shortest queue' },
 ];
 
 export const DispatchSettingsPanel: React.FC = () => {
@@ -41,6 +48,7 @@ export const DispatchSettingsPanel: React.FC = () => {
     idleThresholdSeconds: formOverrides.idleThresholdSeconds ?? settings?.idleThresholdSeconds ?? 30,
     minimumScoreThreshold: formOverrides.minimumScoreThreshold ?? settings?.minimumScoreThreshold ?? 0.5,
     maxConcurrentDispatches: formOverrides.maxConcurrentDispatches ?? settings?.maxConcurrentDispatches ?? 3,
+    loadBalancingStrategy: formOverrides.loadBalancingStrategy ?? settings?.loadBalancingStrategy ?? 'BestFit',
   };
 
   const saveMutation = useMutation({
@@ -127,6 +135,25 @@ export const DispatchSettingsPanel: React.FC = () => {
             {DISPATCH_MODES.map(mode => (
               <option key={mode.value} value={mode.value}>
                 {mode.label}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+
+        <FormField
+          label="Load Balancing Strategy"
+          htmlFor="loadBalancingStrategy"
+          helper="How jobs are distributed across eligible printers during auto-dispatch."
+        >
+          <Select
+            id="loadBalancingStrategy"
+            value={form.loadBalancingStrategy}
+            onChange={e => handleChange('loadBalancingStrategy', e.target.value)}
+            disabled={!form.autoDispatchEnabled}
+          >
+            {LOAD_BALANCING_STRATEGIES.map(strategy => (
+              <option key={strategy.value} value={strategy.value}>
+                {strategy.label}
               </option>
             ))}
           </Select>
