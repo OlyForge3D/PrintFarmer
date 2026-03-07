@@ -3,6 +3,25 @@ import { cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import '@testing-library/jest-dom';
 
+// Node.js 25+ ships a native localStorage that requires --localstorage-file.
+// Without a valid path the native object exists but its methods are missing,
+// which shadows jsdom's working implementation.  Install a spec-compliant
+// in-memory Storage so tests always have functional localStorage/sessionStorage.
+function createStorage(): Storage {
+  let store: Record<string, string> = {};
+  return {
+    getItem(key: string) { return key in store ? store[key] : null; },
+    setItem(key: string, value: string) { store[key] = String(value); },
+    removeItem(key: string) { delete store[key]; },
+    clear() { store = {}; },
+    key(index: number) { return Object.keys(store)[index] ?? null; },
+    get length() { return Object.keys(store).length; },
+  };
+}
+
+Object.defineProperty(globalThis, 'localStorage', { value: createStorage(), writable: true, configurable: true });
+Object.defineProperty(globalThis, 'sessionStorage', { value: createStorage(), writable: true, configurable: true });
+
 // Add ResizeObserver polyfill for three.js and react-three-fiber in tests
 // Vitest v4 requires class for constructors
 global.ResizeObserver = class MockResizeObserver {
@@ -152,4 +171,6 @@ vi.mock('@/services/harvest-signalr', () => ({
 // runs a cleanup after each test case (e.g. clearing jsdom)
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  sessionStorage.clear();
 });
