@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Select } from '@/common/components/ui/Select';
-import { Location, locationService } from '@/services/locationService';
+import React from 'react';
+import { LocationTreePicker } from '@/common/components/LocationTreePicker';
 
 export interface LocationSelectorProps {
   value?: string;
@@ -10,6 +9,10 @@ export interface LocationSelectorProps {
   disabled?: boolean;
 }
 
+/**
+ * LocationSelector wraps LocationTreePicker for backward compatibility.
+ * All new code should use LocationTreePicker directly.
+ */
 export const LocationSelector: React.FC<LocationSelectorProps> = ({
   value,
   onChange,
@@ -17,50 +20,15 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
   required = false,
   disabled = false,
 }) => {
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadLocations();
-  }, []);
-
-  const loadLocations = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await locationService.getAllLocations();
-      setLocations(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load locations');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
-    <div>
-      <label htmlFor="location" className="block text-sm font-medium text-pf-text-primary">
-        {label}
-        {required && <span style={{ color: 'var(--pf-error)' }} className="ml-1">*</span>}
-      </label>
-      <Select
-        id="location"
-        value={value || ''}
-        onChange={(e) => onChange(e.target.value || null)}
-        disabled={disabled || loading}
-      >
-        <option value="">
-          {required ? 'Select a location' : 'No location (unassigned)'}
-        </option>
-        {locations.map((location) => (
-          <option key={location.id} value={location.id}>
-            {location.name} ({location.printerCount} printers)
-          </option>
-        ))}
-      </Select>
-      {error && <p className="mt-1 text-sm" style={{ color: 'var(--pf-error)' }}>{error}</p>}
-    </div>
+    <LocationTreePicker
+      value={value ?? null}
+      onChange={onChange}
+      label={label}
+      required={required}
+      disabled={disabled}
+      placeholder={required ? 'Select a location' : 'No location (unassigned)'}
+    />
   );
 };
 

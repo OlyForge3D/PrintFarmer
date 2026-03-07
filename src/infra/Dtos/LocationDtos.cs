@@ -7,7 +7,7 @@ namespace Farm.Infrastructure;
 
 /// <summary>
 /// Location DTO for reading and listing printer locations.
-/// Contains all location properties including associated printer count.
+/// Contains all location properties including hierarchy and associated printer count.
 /// </summary>
 public class LocationDto
 {
@@ -18,6 +18,18 @@ public class LocationDto
     public string? Description { get; set; }
 
     public int PrinterCount { get; set; }
+
+    public Guid? ParentId { get; set; }
+
+    public string Path { get; set; } = "/";
+
+    public int Depth { get; set; }
+
+    public int SortOrder { get; set; }
+
+    public int TotalPrinterCount { get; set; }
+
+    public List<LocationDto>? Children { get; set; }
 
     public DateTime CreatedAt { get; set; }
 
@@ -38,11 +50,15 @@ public class CreateLocationDto
 
     [StringLength(1024, ErrorMessage = "Location description cannot exceed 1024 characters.")]
     public string? Description { get; set; }
+
+    public Guid? ParentId { get; set; }
+
+    public int? SortOrder { get; set; }
 }
 
 /// <summary>
 /// DTO for updating an existing printer location.
-/// Allows updating location name, description, and address.
+/// Allows updating location name, description, and hierarchy position.
 /// </summary>
 public class UpdateLocationDto
 {
@@ -51,6 +67,10 @@ public class UpdateLocationDto
 
     [StringLength(1024, ErrorMessage = "Location description cannot exceed 1024 characters.")]
     public string? Description { get; set; }
+
+    public Guid? ParentId { get; set; }
+
+    public int? SortOrder { get; set; }
 }
 
 /// <summary>
@@ -69,4 +89,43 @@ public record LocationSummaryDto(
 public class LocationDetailsDto : LocationDto
 {
     public DiscoveryPrinterInfoDto[] Printers { get; set; } = [];
+}
+
+/// <summary>
+/// Nested tree structure DTO for location hierarchy display.
+/// </summary>
+public class LocationTreeDto
+{
+    public Guid Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public Guid? ParentId { get; set; }
+
+    public string Path { get; set; } = "/";
+
+    public int Depth { get; set; }
+
+    public int SortOrder { get; set; }
+
+    public int PrinterCount { get; set; }
+
+    public int TotalPrinterCount { get; set; }
+
+    public List<LocationTreeDto> Children { get; set; } = [];
+}
+
+/// <summary>
+/// Breadcrumb DTO for displaying location ancestor chain.
+/// </summary>
+public record LocationBreadcrumbDto(Guid Id, string Name);
+
+/// <summary>
+/// DTO for moving a location to a new parent.
+/// </summary>
+public class MoveLocationDto
+{
+    public Guid? NewParentId { get; set; }
 }

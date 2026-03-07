@@ -7,6 +7,7 @@ namespace Farm.Web.Api.Mapping;
 
 /// <summary>
 /// AutoMapper profile for mapping Location entities to DTOs.
+/// Supports hierarchy properties for tree-based location management.
 /// </summary>
 public class LocationMappingProfile : Profile
 {
@@ -18,6 +19,12 @@ public class LocationMappingProfile : Profile
             .ForMember(dest => dest.Name, opt => opt.MapFrom(src => src.Name))
             .ForMember(dest => dest.Description, opt => opt.MapFrom(src => src.Description))
             .ForMember(dest => dest.PrinterCount, opt => opt.MapFrom(src => src.Printers.Count))
+            .ForMember(dest => dest.ParentId, opt => opt.MapFrom(src => src.ParentId))
+            .ForMember(dest => dest.Path, opt => opt.MapFrom(src => src.Path))
+            .ForMember(dest => dest.Depth, opt => opt.MapFrom(src => src.Depth))
+            .ForMember(dest => dest.SortOrder, opt => opt.MapFrom(src => src.SortOrder))
+            .ForMember(dest => dest.TotalPrinterCount, opt => opt.MapFrom(src => src.TotalPrinterCount))
+            .ForMember(dest => dest.Children, opt => opt.Ignore())
             .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => src.CreatedAt))
             .ForMember(dest => dest.ModifiedAt, opt => opt.MapFrom(src => src.ModifiedAt))
             .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.IsActive));
@@ -28,6 +35,12 @@ public class LocationMappingProfile : Profile
             .ForMember(dest => dest.Name, opt => opt.MapFrom(src => src.Name))
             .ForMember(dest => dest.Description, opt => opt.MapFrom(src => src.Description))
             .ForMember(dest => dest.PrinterCount, opt => opt.MapFrom(src => src.Printers.Count))
+            .ForMember(dest => dest.ParentId, opt => opt.MapFrom(src => src.ParentId))
+            .ForMember(dest => dest.Path, opt => opt.MapFrom(src => src.Path))
+            .ForMember(dest => dest.Depth, opt => opt.MapFrom(src => src.Depth))
+            .ForMember(dest => dest.SortOrder, opt => opt.MapFrom(src => src.SortOrder))
+            .ForMember(dest => dest.TotalPrinterCount, opt => opt.MapFrom(src => src.TotalPrinterCount))
+            .ForMember(dest => dest.Children, opt => opt.Ignore())
             .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => src.CreatedAt))
             .ForMember(dest => dest.ModifiedAt, opt => opt.MapFrom(src => src.ModifiedAt))
             .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.IsActive))

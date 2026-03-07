@@ -1,0 +1,78 @@
+# Project Context
+
+- **Owner:** Jeff Papiez
+- **Project:** PrintFarmer — React TypeScript dashboard for managing multiple 3D printers
+- **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS, xUnit, Vitest
+- **Created:** 2026-03-06
+
+## Learnings
+
+<!-- Append new learnings below. Each entry is something lasting about the project. -->
+
+### Sprint 1 Test Strategy & Validation (2026-03-07)
+
+**Completed:**
+1. **Pre-Implementation Test Suites** (1109s)
+   - 22 Dispatch tests: DispatchScorerTests (scoring logic), JobDispatchServiceTests (dispatch flow), API endpoint coverage
+   - 21 Location tests: LocationTreeServiceTests (tree operations), LocationHierarchyApiTests (API contracts), React component stubs
+   - 43 total tests, all passing against current codebase (1572 API tests, 150 React tests)
+
+2. **Key Learnings Discovered:**
+   - **Manufacturer entity** has a shadow property `NameLowered` with UNIQUE index — cannot insert multiple manufacturers with the same name in tests
+   - **Printer entity** has a UNIQUE constraint on `ServerUrl` — test printers must use distinct URLs (e.g., `http://192.168.1.{n}`)
+   - **Location entity** has a UNIQUE constraint on `(ParentId, Name)` — duplicate child names under the same parent are rejected at the DB level
+   - **FolderNode** entity has no named `DbSet` — access via `_db.Set<FolderNode>()`; uses `Path` and `FolderType` properties (not Name/Category)
+   - **EF Core SaveChanges overrides** populate the `NameLowered` shadow property on Manufacturer from `Name.ToLowerInvariant()`
+   - **FK enforcement in unit tests** requires `TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled()` when creating `AppDbContext` directly
+
+3. **Test Infrastructure Insights:**
+   - `CustomWebApplicationFactory` handles proper DI + seeded test data
+   - Playwright UI validation suite spins up real API + React servers with fresh SQLite DB
+   - NetworkDiscovery__EnableDiscovery=false prevents hitting real network during tests
+   - DB_PROVIDER=sqlite + ConnectionStrings__Default controls test database location
+   - `/health` endpoint returns 503 (Unhealthy) when catalog health check fails — tests must accept both 200 and 503
+
+4. **Printer Creation Requirements:**
+   - Must seed `Manufacturer` and `PrinterModel` entities first, then reference their IDs
+   - Distinct ServerURL values required (unique constraint)
+   - `CreatedAt` / `UpdatedAt` must be explicitly set or defaults applied (not ignored)
+
+5. **API Response Handling:**
+   - Catalog API (`/api/catalog/manufacturers`) has a pre-existing DI bug: `CatalogCache` tries to resolve scoped `IDbContextFactory<AppDbContext>` from root provider
+   - On first run with empty DB, React app shows "Initializing system..." loading screen before interactive elements appear — tests cannot rely on buttons/links being immediately visible
+   - React dev server (vite) proxies `/api/*` and `/hubs/*` to localhost:5245, so browser tests can hit `localhost:3000/api/*`
+
+**Status**: All 43 tests created, validated, and passing. Suite ready for integration testing against new implementations.
+
+**Next Phase:** Execute full suite against Lambert's dispatch implementation + Ripley's location hierarchy to validate end-to-end behavior.
+
+### Previous: UI validation test suite (2025-12-XX)
+- **UI validation test suite** lives at `tests/ui-validation/` — standalone Playwright project that spins up real API + React servers with fresh SQLite DB
+- The catalog API (`/api/catalog/manufacturers`) has a pre-existing DI bug: `CatalogCache` tries to resolve scoped `IDbContextFactory<AppDbContext>` from root provider, causing 500 errors
+- The `/health` endpoint returns 503 (Unhealthy) when catalog health check fails — tests must accept 200 or 503
+- On first run with empty DB, the React app shows "Initializing system..." loading screen before any interactive elements appear — tests cannot rely on buttons/links being immediately visible
+- `dotnet run --project ./api/Farm.Web.Api.csproj` includes a build step that can take 60-90 seconds — global setup needs 180s timeout
+- DB_PROVIDER=sqlite with ConnectionStrings__Default=`Data Source=/path/to/db` controls the SQLite database path
+- NetworkDiscovery__EnableDiscovery=false prevents hitting the real network during tests
+- The React dev server (vite) proxies `/api/*` and `/hubs/*` to localhost:5245, so browser tests can hit `localhost:3000/api/*`
+- Existing Playwright e2e tests are in `src/Web/ReactApp/e2e/` — separate from the new UI validation suite
+- Default data seeding creates 29 manufacturers (not 8 as previously documented)
+- **Manufacturer entity** has a shadow property `NameLowered` with UNIQUE index — cannot insert multiple manufacturers with the same name in tests
+- **Printer entity** has a UNIQUE constraint on `ServerUrl` — test printers must use distinct URLs (e.g., `http://192.168.1.{n}`)
+- **Location entity** has a UNIQUE constraint on `(ParentId, Name)` — duplicate child names under the same parent are rejected at the DB level
+- **Creating Printers in unit tests** requires valid FK references: seed `Manufacturer` and `PrinterModel` entities first, then reference their IDs
+- **EF Core SaveChanges overrides** populate the `NameLowered` shadow property on Manufacturer from `Name.ToLowerInvariant()`
+- Unit tests that create `AppDbContext` directly (not via `CustomWebApplicationFactory`) need to call `TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled()` for FK enforcement
+- **FolderNode** entity has no named `DbSet` — access via `_db.Set<FolderNode>()`; uses `Path` and `FolderType` properties (not Name/Category)
+
+### Phase 2: Auto-Dispatch Tests (2025-07-XX)
+- **35 Phase 2 tests** added across 3 files (all passing, 0 failures):
+  - `AutoDispatchBackgroundServiceTests.cs` — 12 tests: idle→dispatch, disabled, manual mode, no jobs, no compatible, score below threshold, suggest mode, suggest logs, printer offline/disabled/active-job, dispatch exception
+  - `DispatchSettingsControllerTests.cs` — 12 tests: GET defaults, enum string serialization, PUT valid/suggest/negative-idle/score>100/negative-score/max-concurrent-zero, roundtrip, updatedAt changes, singleton constraint
+  - `AutoDispatchConcurrencyTests.cs` — 11 tests: two-printers-same-job race, multi-printer-multi-job uniqueness, max-concurrent, trigger notify/read/cancel/clear/multi-notify, DispatchSettings defaults/seeded, DTO events
+- **Race condition tests** require mock `DispatchJobAsync` to update the DB (set `AssignedPrinterId` and `Status = Starting`) — otherwise the semaphore serializes cycles but the second cycle still finds the job as Queued
+- **Manufacturer has no `CreatedAt`/`UpdatedAt`** properties; **PrinterModel has no `CreatedAt`/`UpdatedAt`** — do not set timestamps when seeding
+- **FluentAssertions v8** removed `BeLessOrEqualTo()` — use `BeInRange(0, N)` instead
+- **Controller tests** require `IAsyncLifetime` + `CreateAuthenticatedClientAsync` pattern for `[Authorize]` endpoints
+- **JSON deserialization in tests** needs `JsonSerializerOptions` with `JsonStringEnumConverter` and `PropertyNameCaseInsensitive = true`
+- Full suite: 1952 tests passing (1504 API + 448 slicer), 0 regressions
