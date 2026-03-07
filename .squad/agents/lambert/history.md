@@ -111,3 +111,26 @@ DB_PROVIDER=sqlserver dotnet ef migrations add AddLocationDispatchEntities \
 - Entity configurations via `IEntityTypeConfiguration<T>` in `Data/Configurations/` are auto-discovered by `ApplyConfigurationsFromAssembly`
 - DesignTimeDbContextFactory uses `--startup-project` pointing to the migration project itself (not API)
 - Both providers require `DB_PROVIDER` env var set for correct factory selection
+
+### Auto-Dispatch Phase 3 — Batch Dispatch & Load Balancing (2026-03-07)
+- **LoadBalancingStrategy enum** added in `DispatchModels.cs` — BestFit (0, default), RoundRobin (1), LeastBusy (2)
+- **DispatchSettings** extended with `LoadBalancingStrategy` property, EF config stores as string, seed defaults to BestFit
+- **IBatchDispatchService + BatchDispatchService** — core batch dispatch logic in `src/infra/Services/Queue/Dispatch/`
+  - `BatchDispatchAsync()` — dispatches multiple queued jobs with configurable strategy, thread-safe via `SemaphoreSlim`
+  - BestFit: pick highest-scoring printer per job; RoundRobin: cycle through eligible printers; LeastBusy: track DB + in-batch queue depth
+  - Respects `MaxConcurrentDispatches` from `DispatchSettings`
+  - SignalR events: `batchdispatchstarted`, `batchdispatchcompleted` broadcast to all clients
+  - `GetQueueStatusAsync()` — returns pending jobs, idle/busy printer counts, per-printer queue depth, 24h dispatch stats
+  - `GetDispatchHistoryAsync()` — paginated dispatch log with job/printer names, scores, actions
+- **API Endpoints:**
+  - `POST /api/job-queue/batch-dispatch` — batch dispatch with optional strategy override (`JobQueueController`)
+  - `GET /api/dispatch/queue-status` — dispatch dashboard queue status (`DispatchController`)
+  - `GET /api/dispatch/history?page=1&pageSize=20` — paginated dispatch history (`DispatchController`)
+- **DTOs added to DispatchDtos.cs:** BatchDispatchRequest, BatchDispatchResult, BatchDispatchItemResult, DispatchQueueStatusDto, PrinterQueueDepthDto, DispatchStatsDto, DispatchHistoryDto, BatchDispatchStartedEvent, BatchDispatchCompletedEvent
+- **DispatchSettingsDto/UpdateDispatchSettingsDto** — extended with `LoadBalancingStrategy` property
+- **DispatchSettingsController** — updated GET/PUT to include `LoadBalancingStrategy`
+- **Service registration** — `IBatchDispatchService` → `BatchDispatchService` as scoped in `ServiceCollectionExtensions`
+- **Existing test fix** — `JobQueueControllerTests` constructor updated with `IBatchDispatchService` mock
+- **Naming collision resolved:** renamed new `QueueStatusDto` → `DispatchQueueStatusDto` to avoid collision with existing `Farm.Infrastructure.QueueStatusDto`
+- **No EF migrations created yet** — `LoadBalancingStrategy` column pending migration generation
+- **Build:** 0 errors, 0 warnings; **Tests:** 1952/1952 pass (1504 API + 448 slicer)
