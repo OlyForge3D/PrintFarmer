@@ -116,3 +116,240 @@ To move implementations (not just delegate):
 - ✅ api.ts barrel re-exports all 3 for backward compat
 - ✅ New code should prefer specific service imports
 - ✅ Code SRP improved (monolithic → modular)
+
+---
+
+## Printer Groups — Backend Implementation (2026-03-10)
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-03-10  
+**Status:** ✅ IMPLEMENTED — pending migrations and frontend
+
+### Summary
+
+PrinterGroup entity and full backend stack implemented per Sprint 4 Item 1. Enables grouping identical printers so G-code sliced for a group only dispatches to printers within that group.
+
+### Key Design Decisions
+
+1. **PrinterGroupId lives on GcodeFile, not PrintJob** — The group constraint is inherent to the sliced gcode (it was sliced for specific hardware). Jobs inherit the constraint through their gcode file reference.
+
+2. **Dispatch elimination is a zero-weight hard gate** — Factor 10 (PrinterGroup) in DispatchScorer uses weight 0 and acts as a binary gate. It doesn't influence the scoring calculation — it only eliminates printers outside the required group. Backward compatible: no group on gcode means all printers pass.
+
+3. **Printer belongs to exactly one group** — Nullable FK (not many-to-many). PUT endpoint on `/api/printer-groups/{id}/printers/{printerId}` moves the printer to the new group automatically.
+
+4. **Unique name enforced at service layer** — The service checks name uniqueness before insert/update and throws `InvalidOperationException` with a user-friendly message. The DB also has a unique index as a safety net.
+
+### Pending Work
+
+- **EF migrations** — Schema changes need migration generation for PostgreSQL and SQL Server providers
+- **Frontend** — Ripley needs to build the PrinterGroup management UI and the gcode upload "which group?" dropdown
+- **Tests** — Kane should add test coverage for the new controller, service, and dispatch scorer integration
+
+### Files Created/Modified
+
+**New files (8):**
+- `src/infra/Domain/PrinterGroup.cs`
+- `src/infra/Data/Configurations/PrinterGroupConfiguration.cs`
+- `src/infra/Repositories/PrinterGroups/IPrinterGroupRepository.cs`
+- `src/infra/Repositories/PrinterGroups/EfPrinterGroupRepository.cs`
+- `src/infra/Services/PrinterGroups/IPrinterGroupService.cs`
+- `src/infra/Services/PrinterGroups/PrinterGroupService.cs`
+- `src/infra/Services/PrinterGroups/PrinterGroupDtos.cs`
+- `src/api/Controllers/PrinterGroupsController.cs`
+
+**Modified files (5):**
+- `src/infra/Domain/Printer.cs` — added PrinterGroupId FK + navigation
+- `src/infra/Domain/GcodeFile.cs` — added PrinterGroupId FK + navigation
+- `src/infra/Data/AppDbContext.cs` — added DbSet<PrinterGroup>
+- `src/infra/Data/Configurations/GcodeFileConfiguration.cs` — added PrinterGroup FK + index
+- `src/infra/Services/Queue/Dispatch/DispatchScorer.cs` — added Factor 10 (PrinterGroup gate)
+- `src/api/Infrastructure/ServiceCollectionExtensions.cs` — registered repo + service
+
+---
+
+## Location Subtree Printers Endpoint (2026-03-10)
+
+**Author:** Lambert (Backend Dev)
+**Date:** 2026-03-10
+**Status:** ✅ IMPLEMENTED
+
+### What
+
+New endpoint `GET /api/locations/{id}/printers/subtree` returns all printers assigned to a location and its entire descendant tree, enriched with real-time status from the printer status cache.
+
+### Key Decisions
+
+1. **Reused existing repository methods** (GetDescendantsAsync + GetPrintersInLocationAsync per location) rather than writing a raw SQL/EF query with path-based LIKE. The hierarchy is shallow (max 10 levels) so BFS traversal is acceptable. If performance becomes an issue on very large trees, we can add a path-based query later.
+
+2. **Injected IPrinterStatusCacheReader into LocationService** — this is the same singleton cache used by PrintersService for list endpoints. It provides O(1) per-printer status lookups without hitting external printer APIs.
+
+3. **Returns empty list for non-existent locations** — matches list endpoint semantics. The frontend can check if the location exists separately via `GET /api/locations/{id}`.
+
+4. **DTO is a flat record** (LocationSubtreePrinterDto) — lightweight for dashboard rendering. Full printer details available via existing printer endpoints if needed.
+
+### Files Changed
+
+- `src/infra/Dtos/LocationDtos.cs` — Added LocationSubtreePrinterDto record
+- `src/infra/Services/Locations/ILocationService.cs` — Added GetSubtreePrintersAsync method
+- `src/infra/Services/Locations/LocationService.cs` — Implemented method + added IPrinterStatusCacheReader dependency
+- `src/api/Controllers/LocationsController.cs` — Added GET endpoint
+- `src/infra/Services/PrinterGroups/PrinterGroupDtos.cs` — Fixed SA1516 warnings (unrelated cleanup)
+
+---
+
+## Printer Groups Frontend Architecture Decision (2026-03-11)
+
+**Date:** 2026-03-11  
+**Author:** Ripley (Frontend Developer)  
+**Status:** ✅ IMPLEMENTED  
+
+### Context
+
+PrintFarmer needed a frontend interface for managing printer groups — a feature that allows organizing printers into logical groups for easier management. Backend API was already built by Lambert.
+
+### Decision
+
+Implemented printer groups frontend following established project patterns:
+
+#### Component Architecture
+- Feature folder structure: `src/features/printer-groups/`
+- Separation: pages, components, with clear responsibility boundaries
+- Cards for list view, detail view for group management
+- Modal for create/edit operations
+- Dedicated component for printer assignment/removal
+
+#### API Integration
+- Added 7 methods to existing `ApiClient` class in `src/services/api.ts`
+- All methods follow existing pattern: `async methodName(): Promise<Type>`
+- Uses axios instance managed by ApiClient (auth headers, correlation IDs)
+- No separate service file (followed existing monolithic api.ts pattern)
+
+#### State Management
+- TanStack Query for server state
+- Query keys: `['printer-groups']` (list), `['printer-groups', id]` (detail)
+- staleTime: 30s for list, 10s for detail
+- Invalidation on all mutations (create, update, delete, assign, remove)
+- No optimistic updates (simpler pattern for admin-only feature)
+
+#### UI Patterns
+- All UI components from `@/common/components/ui` library
+- Modal from `@/common/components/modals/Modal`
+- Icons from `@/common/components/icons/MdiIcons`
+- Toast notifications via `sonner`
+- Controlled forms with `useState` (no react-hook-form)
+- PageTemplate for consistent page layout
+
+### Consequences
+
+**Positive**:
+- Consistent with existing codebase patterns
+- No new dependencies introduced
+- Full CRUD operations with clean UX
+- Admin-only feature with proper role protection
+- Type-safe API integration with TypeScript
+
+**Neutral**:
+- API methods added to monolithic `api.ts` (follows existing pattern, but could be extracted to `printerGroupService.ts` in future Phase 3 refactoring)
+- No optimistic updates (simpler, but slower perceived UX)
+
+**Future Considerations**:
+- If API service refactoring continues (Phase 3), these methods should be extracted to `printerGroupService.ts`
+- Could add optimistic updates for faster perceived performance
+- Could add printer group filtering to other pages (printers list, gcode upload)
+
+### Alternatives Considered
+
+1. **Separate printerGroupService.ts**: Rejected because existing pattern is to add methods to `api.ts`. Will be addressed in Phase 3 of service refactoring.
+
+2. **Optimistic updates**: Rejected because admin-only feature doesn't need the extra complexity. Server mutations are fast enough.
+
+3. **Inline forms instead of modal**: Rejected because modal provides better focus and follows existing edit pattern in the app.
+
+### Related Files
+- `src/Web/ReactApp/src/types/api.ts` (types)
+- `src/Web/ReactApp/src/services/api.ts` (API methods)
+- `src/Web/ReactApp/src/features/printer-groups/` (all components)
+- `src/Web/ReactApp/src/App.tsx` (route registration)
+
+---
+
+## Location Dashboard Frontend Implementation (2026-03-11)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-11  
+**Status:** ✅ IMPLEMENTED
+
+### Summary
+
+Built the Location Dashboard frontend feature that allows users to click any location in the tree and view all printers in that location's subtree with real-time status information.
+
+### Implementation Details
+
+#### New API Endpoint Integration
+- Backend endpoint: `GET /api/locations/{id}/printers/subtree`
+- Returns `LocationSubtreePrinterDto[]` with printer status and location context
+- Replaces previous client-side filtering approach with server-side subtree query
+
+#### TypeScript Type Definition
+Added `LocationSubtreePrinter` interface to `@/types/api.ts`:
+```typescript
+export interface LocationSubtreePrinter {
+  printerId: string;
+  printerName: string;
+  locationId: string;
+  locationName: string;
+  backendType: string;
+  isOnline: boolean;
+  currentState?: string | null;
+  currentJobName?: string | null;
+  progressPercent?: number | null;
+}
+```
+
+#### Data Fetching Strategy
+- TanStack Query with key `['locations', id, 'subtree-printers']`
+- staleTime: 10,000ms (10 seconds) for real-time-ish updates
+- When no location selected ("All Locations"), fetches all root location subtrees and combines
+- SignalR integration invalidates subtree-printers queries on printer status updates
+
+#### UI Enhancements
+**LocationPrinterList component**:
+- Groups printers by their immediate sub-location for better organization
+- Shows location name as section header with printer count
+- Displays current job name and progress percentage when printing
+- Search includes both printer names and location names
+- Status badges and filtering remain functional
+
+**LocationDashboardPage**:
+- Left panel: Location tree picker (unchanged)
+- Right panel: Stats card + grouped printer list
+- Real-time updates via SignalR
+
+#### Code Organization
+- API client method: `apiClient.getLocationSubtreePrinters(locationId)`
+- Hook: `useLocationPrinters(locationId)` in `useLocationDashboard.ts`
+- Shared helper: `findNode()` moved to `locationService.ts` for reuse
+- All imports use `@/` path aliases (no relative paths)
+
+### Key Decisions
+
+1. **Server-side subtree query** instead of client-side filtering improves performance and reduces data transfer for large farms.
+
+2. **Location grouping** in the printer list helps users understand physical printer distribution within the selected location's subtree.
+
+3. **"All Locations" mode** fetches each root location's subtree separately and combines results, ensuring consistent data structure regardless of selection.
+
+4. **Shared `findNode()` helper** in locationService reduces duplication and establishes it as the canonical tree traversal utility.
+
+### Validation
+
+- ✅ Build passes: 7.26s (0 TypeScript errors)
+- ✅ Lint passes: 2 pre-existing errors unrelated to changes
+- ✅ No breaking changes to existing location components
+
+### Future Considerations
+
+- Consider pagination for large location subtrees (100+ printers)
+- Add sorting options (by name, status, location)
+- Add "expand all locations" toggle in printer list
+- Consider caching subtree results with longer staleTime if API performance becomes an issue

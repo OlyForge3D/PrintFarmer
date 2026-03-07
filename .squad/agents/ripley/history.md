@@ -9,6 +9,46 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### 2026-03-10 - Location Dashboard Frontend Integration (Sprint 4 Day 3)
+
+**Context**: Built Location Dashboards frontend feature, wiring up Lambert's new subtree printers API endpoint.
+
+**What Was Built**:
+1. **TypeScript Type** (`api.ts`):
+   - Added `LocationSubtreePrinter` interface matching backend `LocationSubtreePrinterDto`
+   - Fields: printerId, printerName, locationId, locationName, backendType, isOnline, currentState, currentJobName, progressPercent
+
+2. **API Client Method** (`api.ts`):
+   - `getLocationSubtreePrinters(locationId: string): Promise<LocationSubtreePrinter[]>`
+   - Calls `GET /api/locations/{id}/printers/subtree` endpoint
+
+3. **Updated `useLocationDashboard.ts` Hook**:
+   - Replaced placeholder filtering logic with real API calls
+   - Query key: `['locations', id, 'subtree-printers']` with 10s staleTime
+   - When no location selected, fetches all root location subtrees and combines
+   - SignalR invalidation targets subtree-printers queries
+
+4. **Updated `LocationPrinterList.tsx`**:
+   - Changed from `Printer` to `LocationSubtreePrinter` type
+   - Added location grouping (printers grouped by sub-location name)
+   - Search now includes location names
+   - Shows job name and progress when available
+
+5. **Shared Helper** (`locationService.ts`):
+   - Moved `findNode()` helper to locationService for code reuse
+   - Exported from both locationService and useLocationDashboard
+
+**Key Patterns Confirmed**:
+- All API calls through `apiClient` singleton (no raw axios/fetch)
+- TanStack Query with appropriate staleTime (10s for real-time data)
+- Feature folder organization: `src/features/locations/`
+- Type definitions in `@/types/api.ts`
+- Service layer delegates to apiClient
+
+**Validation**: ✅ Build passes (7.26s), ✅ Lint passes (2 pre-existing errors unrelated to changes)
+
+**User Experience**: Users can now click any location in the tree and see all printers in that location's subtree with real-time status, job names, and progress. Printers are grouped by their immediate sub-location for better organization.
+
 ### Sprint 3 Summary (2026-03-07)
 
 **Completed:**
@@ -256,3 +296,61 @@ export const serviceName = {
 4. Remove methods from ApiClient class (Phase 3 cleanup)
 
 **Impact:** Monolithic api.ts now split into 3 focused modules (SRP improvement). Developer experience enhanced with grep-friendly module organization. Performance unchanged (same apiClient under the hood).
+
+### 2026-03-11 - Printer Groups Frontend Feature Implementation
+
+**Context**: Built complete CRUD frontend for managing printer groups — a feature that allows organizing printers into logical groups for easier management and optional targeting during gcode upload.
+
+**What Was Built**:
+1. **TypeScript Types** (`src/types/api.ts`):
+   - `PrinterGroup` interface (id, name, description, createdDate, updatedDate, printerCount)
+   - `PrinterGroupDetail` interface (same + printers: PrinterGroupPrinter[])
+   - `PrinterGroupPrinter` interface (id, name, backend, isAvailable, inMaintenance)
+   - `CreatePrinterGroupRequest` and `UpdatePrinterGroupRequest` interfaces
+
+2. **API Client Methods** (`src/services/api.ts`):
+   - `getPrinterGroups(): Promise<PrinterGroup[]>`
+   - `getPrinterGroup(id: string): Promise<PrinterGroupDetail>`
+   - `createPrinterGroup(dto): Promise<PrinterGroup>`
+   - `updatePrinterGroup(id, dto): Promise<PrinterGroup>`
+   - `deletePrinterGroup(id: string): Promise<void>`
+   - `assignPrinterToGroup(groupId, printerId): Promise<void>`
+   - `removePrinterFromGroup(groupId, printerId): Promise<void>`
+
+3. **UI Components** (`src/features/printer-groups/`):
+   - **PrinterGroupCard.tsx**: Card showing group name, description, printer count, with edit/delete actions
+   - **PrinterGroupModal.tsx**: Create/edit modal with name + description form fields, validation
+   - **PrinterGroupDetail.tsx**: Detail view showing assigned printers with metadata
+   - **PrinterAssignment.tsx**: UI for assigning/removing printers to/from groups via dropdown + table
+   - **PrinterGroupsPage.tsx**: Main page with list/detail views, empty states, delete confirmation
+
+4. **Route Registration** (`App.tsx`):
+   - Added `/printer-groups` route protected with `farm_admin` role requirement
+   - Imported `PrinterGroupsPage` component
+
+**Key Patterns Used**:
+- All imports use `@/` path aliases (never relative `../` paths)
+- `apiClient` singleton for all API calls (added methods to existing ApiClient class)
+- TanStack Query: `['printer-groups']` for list, `['printer-groups', id]` for detail
+- staleTime: 30_000 for list, 10_000 for detail
+- Query invalidation on all mutations (create, update, delete, assign, remove)
+- UI components from `@/common/components/ui` (Card, Button, Input, Select, FormField, Badge, Spinner)
+- Modal from `@/common/components/modals/Modal`
+- Icons from `@/common/components/icons/MdiIcons` (used ArrowLeftIcon, not BackIcon)
+- `toast` from `sonner` for all user feedback
+- Controlled `useState` for forms (not react-hook-form)
+- `PageTemplate` for page wrapper with title, subtitle, icon, actions
+- Delete confirmation modal for destructive actions
+
+**Icon Fix**: Initially used `BackIcon` which doesn't exist — corrected to `ArrowLeftIcon` for back navigation.
+
+**Lint Fix**: Added `eslint-disable` comments for `react-hooks/set-state-in-effect` in modal form reset (legitimate pattern for modal state initialization on open).
+
+**Backend Integration**: API endpoints at `/api/printer-groups` provided by Lambert (already built). Backend implements:
+- Printer belongs to exactly ONE group (nullable FK, mutually exclusive)
+- PrinterGroup.Name must be unique
+- GcodeFile has optional `PrinterGroupId` FK for group-targeted uploads
+
+**Validation**: ✅ Build passes (7.02s, 0 errors), ✅ Lint passes (0 errors after --fix), ✅ TypeScript compiles (0 errors)
+
+**User Experience**: Admin users can now create groups, assign printers to groups, view group details with assigned printers, and manage groups through full CRUD operations. The feature provides clean organization for printer farms with many printers.
