@@ -49,6 +49,7 @@ import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
 import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
+import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
 import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
@@ -175,6 +176,7 @@ function AuthenticatedAppRoutes() {
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="statistics" element={<StatisticsPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
+        <Route path="locations/dashboard" element={<LocationDashboardPage />} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
