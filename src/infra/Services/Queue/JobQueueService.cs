@@ -198,7 +198,7 @@ namespace Farm.Infrastructure.Services.Queue
                 ProjectFileId = j.ProjectFileId,
                 CreatedAt = j.CreatedAt,
                 UpdatedAt = j.UpdatedAt,
-                GcodeFileName = j.GcodeFile?.FileName ?? string.Empty,
+                GcodeFileName = j.GcodeFile?.Name ?? string.Empty,
                 AssignedPrinterName = j.AssignedPrinter?.Name ?? string.Empty
             }).ToList();
 
@@ -262,7 +262,7 @@ namespace Farm.Infrastructure.Services.Queue
             PrintJob job = new PrintJob
             {
                 Id = Guid.NewGuid(),
-                Name = gcode.FileName,
+                Name = gcode.Name,
                 GcodeFileId = request.GcodeFileId,
                 AssignedPrinterId = assignedPrinterId,
                 Status = PrintJobStatus.Queued,
@@ -308,7 +308,7 @@ namespace Farm.Infrastructure.Services.Queue
             {
                 Id = job.Id,
                 GcodeFileId = job.GcodeFileId,
-                GcodeFileName = gcode.FileName,
+                GcodeFileName = gcode.Name,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = (await _dataService.GetAvailablePrintersAsync(ct)).Find(p => p.Id == job.AssignedPrinterId)?.Name ?? "Unknown",
                 Status = (PrintJobStatus?)job.Status,
@@ -353,7 +353,7 @@ namespace Farm.Infrastructure.Services.Queue
                 {
                     Id = job.Id,
                     GcodeFileId = job.GcodeFileId,
-                    GcodeFileName = job.GcodeFile?.FileName ?? string.Empty,
+                    GcodeFileName = job.GcodeFile?.Name ?? string.Empty,
                     AssignedPrinterId = job.AssignedPrinterId,
                     AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
                     Status = (PrintJobStatus?)job.Status,
@@ -440,7 +440,7 @@ namespace Farm.Infrastructure.Services.Queue
             {
                 Id = job.Id,
                 GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile?.FileName ?? string.Empty,
+                GcodeFileName = job.GcodeFile?.Name ?? string.Empty,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
                 Status = (PrintJobStatus?)job.Status,
@@ -561,7 +561,7 @@ namespace Farm.Infrastructure.Services.Queue
             {
                 Id = job!.Id,
                 GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile?.FileName ?? string.Empty,
+                GcodeFileName = job.GcodeFile?.Name ?? string.Empty,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
                 Status = (PrintJobStatus?)job.Status,
