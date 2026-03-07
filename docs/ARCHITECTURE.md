@@ -100,6 +100,9 @@ Real-time communication:
   - `printerConnected` - Printer comes online
   - `printerDisconnected` - Printer goes offline
   - `jobProgressUpdated` - Job progress events
+  - `jobAutoDispatched` - Auto-dispatch event (when job auto-assigned)
+  - `dispatchSuggestion` - Dispatch suggestion event (Suggest mode)
+  - `dispatchFailed` - Dispatch failure event
 
 ### Database Schema
 
@@ -188,7 +191,220 @@ SignalR broadcast: printerUpdated
 All connected clients update UI
 ```
 
-## Frontend Architecture
+## Location Hierarchy Architecture
+
+The location system organizes printers into a tree structure using the **Adjacency List + Cached Path** approach, enabling hierarchical organization (Warehouse > Floor > Room > Rack) while maintaining query efficiency.
+
+### Schema Design
+
+```
+Locations Table
+├── Id (GUID, Primary Key)
+├── ParentId (FK → Locations, nullable)  — Enables tree structure
+├── Name (string)
+├── Path (string, indexed)               — Cached materialized path (e.g., "/Warehouse 1/Room A")
+├── Depth (int, indexed)                 — Tree depth (0 = root)
+├── SortOrder (int)                      — Display order among siblings
+├── LocationTypeId (FK → LocationTypes)  — Building, Floor, Room, Rack, etc.
+├── PrinterCount (int)                   — Printers directly assigned to this location
+├── TotalPrinterCount (int)              — All printers in subtree (denormalized)
+├── IsActive (bool)                      — Soft delete flag
+├── CreatedAt, ModifiedAt (DateTime)
+└── UNIQUE(ParentId, Name)              — No duplicate names at same level
+```
+
+### Key Design Decisions
+
+1. **Arbitrary Depth** — No fixed level limit. Customers define their own hierarchy.
+2. **User-Defined Types** — LocationType entity allows custom organizational vocabulary (7 seeded types: Building, Floor, Room, Zone, Rack, Shelf, Workstation).
+3. **Cached Path** — Single `Path` column (e.g., "/Warehouse 1/Room A/Rack 3") enables:
+   - Fast breadcrumb generation without recursion
+   - Efficient descendant queries using `Path LIKE '/Warehouse%'`
+   - Automatic propagation when moving locations
+4. **Printer Assignment** — Printers can attach to ANY level (leaf or intermediate nodes).
+5. **Denormalized Counts** — `TotalPrinterCount` avoids expensive recursive counting.
+
+### Tree Operations
+
+**GetTree** (nested hierarchy):
+```
+Query: SELECT * FROM Locations WHERE IsActive = true
+Execution: Build tree in-memory using ParentId as join key
+Result: Hierarchical LocationTreeDto with children
+```
+
+**GetAncestors** (breadcrumbs):
+```
+Query: SELECT * FROM Locations WHERE Path LIKE (target Path + '%')
+Execution: Path provides direct ancestry chain
+Result: Ordered list from root to target node
+```
+
+**GetDescendants** (subtree):
+```
+Query: SELECT * FROM Locations WHERE Path LIKE (parent Path + '%') AND IsActive = true
+Execution: Indexed Path lookup eliminates recursion
+Result: Flat list of all children/descendants
+```
+
+**Move** (reparent with circular reference detection):
+```
+Checks:
+  1. Validate new parent exists
+  2. Prevent circular reference (new parent cannot be descendant of node being moved)
+  3. Check max depth (prevent trees > 50 levels)
+  4. Verify no name duplication at destination level
+Operations:
+  1. Update Location.ParentId
+  2. Recalculate Path and Depth
+  3. Cascade Path updates to all descendants
+  4. Update TotalPrinterCount for affected nodes
+```
+
+### Frontend Components
+
+- **LocationTreePicker** — Tree selector for assignment UI
+- **LocationBreadcrumb** — Navigation breadcrumbs using ancestors
+- **LocationManagement** — CRUD and drag-drop reorganization
+- **LocationSelector** — Dropdown for printer assignment
+
+### API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/locations` | GET | Flat list of all locations |
+| `/api/locations/tree` | GET | Full hierarchy (nested) |
+| `/api/locations/{id}` | GET | Single location details |
+| `/api/locations/{id}/ancestors` | GET | Path to root (breadcrumbs) |
+| `/api/locations/{id}/descendants` | GET | All children (subtree) |
+| `/api/locations` | POST | Create new location |
+| `/api/locations/{id}` | PUT | Update location |
+| `/api/locations/{id}/move` | POST | Reparent location |
+| `/api/locations/{id}` | DELETE | Soft delete location |
+
+---
+
+## Auto-Dispatch Architecture
+
+The auto-dispatch system scores all available printers against job requirements using a **9-factor multi-criteria algorithm**, enabling intelligent printer selection with full transparency into scoring decisions.
+
+### Scoring Model
+
+**9 Scoring Factors** (4 hard filters + 5 soft scoring):
+
+| # | Factor | Weight | Type | Description |
+|---|--------|--------|------|-------------|
+| 1 | Material Match | 100 | HARD | Job material must exist on printer |
+| 2 | Nozzle Diameter | 100 | HARD | Must match ±0.01mm tolerance |
+| 3 | Build Volume | 50 | SOFT | Printer must fit part dimensions |
+| 4 | Enclosure | 80 | COND. | Bonus if available; required for some materials |
+| 5 | Nozzle Hardness | 80 | COND. | Bonus for hardened nozzles with abrasive materials |
+| 6 | Model Match | 60 | SOFT | Bonus for printer model matching job profile |
+| 7 | Queue Depth | 30 | SOFT | Penalty: printers with many queued jobs score lower |
+| 8 | Preferred | 40 | COND. | Bonus if user marked printer as preferred for material |
+| 9 | Availability | 0 | HARD | Pre-filter: must be online, idle, and accepting jobs |
+
+**Hard Filters** eliminate candidates immediately (score = 0, elimination reason logged).  
+**Soft Factors** contribute to final score (max 360 points possible).  
+**Conditional Factors** apply only in specific scenarios (e.g., enclosure bonus, preferred printer).
+
+### Dispatch Service Architecture
+
+```
+JobDispatchService (orchestration)
+├── DispatchScorer (algorithm)
+│   ├── EvaluateMaterialMatch()
+│   ├── EvaluateNozzleDiameter()
+│   ├── EvaluateBuildVolume()
+│   ├── EvaluateEnclosure()
+│   ├── EvaluateNozzleHardness()
+│   ├── EvaluateModelMatch()
+│   ├── EvaluateQueueDepth()
+│   ├── EvaluatePreferred()
+│   └── EvaluateAvailability()
+├── DispatchLog (audit trail)
+│   └── Records every dispatch decision + scores
+└── DispatchSettings (configuration)
+    └── AutoDispatchEnabled, AutoDispatchMode, IdleThresholdSeconds, MinimumScoreThreshold
+```
+
+### Background Service Pattern
+
+The **AutoDispatchBackgroundService** monitors idle printers and queued jobs using an event-driven model:
+
+```
+Architecture:
+  - Channel<Guid> for fire-and-forget idle notifications
+  - SemaphoreSlim(1, 1) to serialize dispatch decisions
+  - Per-printer CancellationTokenSource for cancellation
+  - DispatchSettings singleton for configuration
+
+Trigger:
+  1. Printer goes idle → MoonrakerSubscriptionService publishes idle event
+  2. Event queued to Channel<Guid>
+  3. Background service dequeues → FindCandidatesAsync(jobId)
+  4. Top candidate scored
+  5. Based on DispatchSettings.AutoDispatchMode:
+     - "Suggest": SignalR notify operator (UI shows recommendation)
+     - "Auto": Directly dispatch to top candidate
+
+Safety:
+  - Idle threshold (default 30s) prevents mid-print triggers
+  - Minimum score threshold prevents low-quality dispatch
+  - Max concurrent dispatches limits system load
+```
+
+### Dispatch Modes
+
+**Suggest Mode** (Default):
+- Operator receives notification: "Recommend Printer X for Job Y (score: 95/100)"
+- Operator confirms or selects different printer
+- Useful for safety-critical or high-value jobs
+
+**Auto Mode**:
+- System automatically dispatches to highest-scoring printer if score ≥ minimumScoreThreshold
+- No operator intervention required
+- Dispatcher monitors and can manually intervene if needed
+
+### SignalR Events
+
+| Event | Payload | Trigger |
+|-------|---------|---------|
+| `jobAutoDispatched` | `{ jobId, printerId, score, dispatchedBy, timestamp }` | Job auto-assigned (Auto mode) |
+| `dispatchSuggestion` | `{ jobId, topCandidates[], dispatchedBy, timestamp }` | Suggestion sent (Suggest mode) |
+| `dispatchFailed` | `{ jobId, reason, timestamp }` | Dispatch error or no eligible printers |
+
+### API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/job-queue/{id}/candidates` | GET | Score all printers for job |
+| `/api/job-queue/{id}/dispatch-to` | POST | Assign job to specific printer |
+| `/api/dispatch-settings` | GET | Read current settings |
+| `/api/dispatch-settings` | PUT | Update settings |
+
+### Dispatch Log
+
+All dispatch decisions recorded for audit, analysis, and machine learning:
+
+```
+DispatchLog Table
+├── Id (GUID)
+├── JobId (FK)
+├── PrinterId (FK)
+├── DispatchedBy (user email)
+├── DispatchScore (decimal)
+├── ScoreFactors (JSON: all 9 factors + individual scores)
+├── DispatchMode ("Suggest" or "Auto")
+├── IsSuccessful (bool)
+├── ErrorReason (nullable)
+├── CreatedAt (DateTime)
+└── Candidates (nullable JSON: all scored printers)
+```
+
+---
+
+
 
 ### Directory Structure
 

@@ -97,7 +97,8 @@
     "stats-gl": {
       "three": "0.180.0"
     },
-    "minimatch": "10.2.2"
+    "minimatch": ">=10.2.3",
+    "dompurify": ">=3.3.2"
   },
   "engines": {
     "node": ">=24.0.0",

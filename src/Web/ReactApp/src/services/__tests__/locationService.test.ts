@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { locationService, Location, CreateLocationRequest, UpdateLocationRequest } from '../locationService';
+import { locationService, Location, LocationTreeNode, LocationBreadcrumbItem, MoveLocationRequest, CreateLocationRequest, UpdateLocationRequest } from '../locationService';
 import { apiClient } from '../api';
 
 // Mock the api client
@@ -7,8 +7,12 @@ vi.mock('../api', () => ({
   apiClient: {
     getAllLocations: vi.fn(),
     getLocationById: vi.fn(),
+    getLocationTree: vi.fn(),
+    getLocationAncestors: vi.fn(),
+    getLocationDescendants: vi.fn(),
     createLocation: vi.fn(),
     updateLocation: vi.fn(),
+    moveLocation: vi.fn(),
     deleteLocation: vi.fn(),
   }
 }));
@@ -190,6 +194,166 @@ describe('locationService', () => {
       vi.mocked(apiClient.deleteLocation).mockRejectedValue(error);
 
       await expect(locationService.deleteLocation('1')).rejects.toThrow('Cannot delete location with printers');
+    });
+  });
+
+  describe('getLocationTree', () => {
+    it('should get the full location tree', async () => {
+      const mockTree: LocationTreeNode[] = [
+        {
+          id: '1',
+          name: 'Building A',
+          description: 'Main building',
+          parentId: null,
+          path: '/Building A',
+          depth: 0,
+          sortOrder: 0,
+          printerCount: 2,
+          totalPrinterCount: 5,
+          children: [
+            {
+              id: '2',
+              name: 'Floor 1',
+              description: '',
+              parentId: '1',
+              path: '/Building A/Floor 1',
+              depth: 1,
+              sortOrder: 0,
+              printerCount: 3,
+              totalPrinterCount: 3,
+              children: [],
+            },
+          ],
+        },
+      ];
+
+      vi.mocked(apiClient.getLocationTree).mockResolvedValue(mockTree as never);
+
+      const result = await locationService.getLocationTree();
+
+      expect(result).toEqual(mockTree);
+      expect(apiClient.getLocationTree).toHaveBeenCalled();
+    });
+
+    it('should return empty array for no locations', async () => {
+      vi.mocked(apiClient.getLocationTree).mockResolvedValue([] as never);
+
+      const result = await locationService.getLocationTree();
+
+      expect(result).toEqual([]);
+      expect(apiClient.getLocationTree).toHaveBeenCalled();
+    });
+
+    it('should propagate errors from apiClient', async () => {
+      vi.mocked(apiClient.getLocationTree).mockRejectedValue(new Error('Server error'));
+
+      await expect(locationService.getLocationTree()).rejects.toThrow('Server error');
+    });
+  });
+
+  describe('getLocationAncestors', () => {
+    it('should get ancestors for a location', async () => {
+      const mockAncestors: LocationBreadcrumbItem[] = [
+        { id: '1', name: 'Building A', depth: 0 },
+        { id: '2', name: 'Floor 1', depth: 1 },
+        { id: '3', name: 'Room 101', depth: 2 },
+      ];
+
+      vi.mocked(apiClient.getLocationAncestors).mockResolvedValue(mockAncestors as never);
+
+      const result = await locationService.getLocationAncestors('3');
+
+      expect(result).toEqual(mockAncestors);
+      expect(apiClient.getLocationAncestors).toHaveBeenCalledWith('3');
+    });
+
+    it('should return empty array for root location', async () => {
+      vi.mocked(apiClient.getLocationAncestors).mockResolvedValue([] as never);
+
+      const result = await locationService.getLocationAncestors('root-id');
+
+      expect(result).toEqual([]);
+      expect(apiClient.getLocationAncestors).toHaveBeenCalledWith('root-id');
+    });
+
+    it('should propagate errors from apiClient', async () => {
+      vi.mocked(apiClient.getLocationAncestors).mockRejectedValue(new Error('Not found'));
+
+      await expect(locationService.getLocationAncestors('missing-id')).rejects.toThrow('Not found');
+    });
+  });
+
+  describe('moveLocation', () => {
+    it('should move a location to a new parent', async () => {
+      const request: MoveLocationRequest = {
+        newParentId: '5',
+        sortOrder: 2,
+      };
+
+      const mockMoved: Location = {
+        id: '3',
+        name: 'Room 101',
+        description: '',
+        parentId: '5',
+        path: '/Building B/Room 101',
+        depth: 1,
+        sortOrder: 2,
+        printerCount: 1,
+        totalPrinterCount: 1,
+        createdAt: '2024-01-01T00:00:00Z',
+        modifiedAt: '2024-01-05T00:00:00Z',
+        isActive: true,
+      };
+
+      vi.mocked(apiClient.moveLocation).mockResolvedValue(mockMoved as never);
+
+      const result = await locationService.moveLocation('3', request);
+
+      expect(result).toEqual(mockMoved);
+      expect(apiClient.moveLocation).toHaveBeenCalledWith('3', request);
+    });
+
+    it('should move a location to root (null parent)', async () => {
+      const request: MoveLocationRequest = {
+        newParentId: null,
+      };
+
+      const mockMoved: Location = {
+        id: '3',
+        name: 'Room 101',
+        description: '',
+        parentId: null,
+        path: '/Room 101',
+        depth: 0,
+        sortOrder: 0,
+        printerCount: 1,
+        totalPrinterCount: 1,
+        createdAt: '2024-01-01T00:00:00Z',
+        modifiedAt: '2024-01-05T00:00:00Z',
+        isActive: true,
+      };
+
+      vi.mocked(apiClient.moveLocation).mockResolvedValue(mockMoved as never);
+
+      const result = await locationService.moveLocation('3', request);
+
+      expect(result.parentId).toBeNull();
+      expect(result.depth).toBe(0);
+      expect(apiClient.moveLocation).toHaveBeenCalledWith('3', request);
+    });
+
+    it('should propagate circular reference errors', async () => {
+      const request: MoveLocationRequest = {
+        newParentId: '3',
+      };
+
+      vi.mocked(apiClient.moveLocation).mockRejectedValue(
+        new Error('Circular reference detected'),
+      );
+
+      await expect(locationService.moveLocation('1', request)).rejects.toThrow(
+        'Circular reference detected',
+      );
     });
   });
 });

@@ -1,5 +1,4 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterLocationDragDrop } from '@/features/printers/components/PrinterLocationDragDrop';
 import type { Location } from '@/services/locationService';
@@ -57,9 +56,9 @@ vi.mock('@/services/printerLocationService', () => ({
   },
 }));
 
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+ 
 const { locationService } = await import('@/services/locationService') as typeof import('@/services/locationService');
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+ 
 const { printerLocationService } = await import('@/services/printerLocationService') as typeof import('@/services/printerLocationService');
 
 describe('PrinterLocationDragDrop', () => {

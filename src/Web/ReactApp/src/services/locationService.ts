@@ -1,56 +1,14 @@
 import { apiClient } from '@/services/api';
+import type {
+  Location,
+  LocationTreeNode,
+  LocationBreadcrumbItem,
+  CreateLocationRequest,
+  UpdateLocationRequest,
+  MoveLocationRequest,
+} from '@/types/api';
 
-export interface Location {
-  id: string;
-  name: string;
-  description?: string;
-  parentId?: string | null;
-  path?: string;
-  depth: number;
-  sortOrder: number;
-  printerCount: number;
-  totalPrinterCount: number;
-  createdAt: string;
-  modifiedAt: string;
-  isActive: boolean;
-}
-
-export interface LocationTreeNode {
-  id: string;
-  name: string;
-  description?: string;
-  parentId?: string | null;
-  path?: string;
-  depth: number;
-  sortOrder: number;
-  printerCount: number;
-  totalPrinterCount: number;
-  children: LocationTreeNode[];
-}
-
-export interface LocationBreadcrumbItem {
-  id: string;
-  name: string;
-  depth: number;
-}
-
-export interface MoveLocationRequest {
-  newParentId?: string | null;
-  sortOrder?: number;
-}
-
-export interface CreateLocationRequest {
-  name: string;
-  description?: string;
-  parentId?: string | null;
-  sortOrder?: number;
-}
-
-export interface UpdateLocationRequest {
-  name?: string;
-  description?: string;
-  sortOrder?: number;
-}
+export type { Location, LocationTreeNode, LocationBreadcrumbItem, CreateLocationRequest, UpdateLocationRequest, MoveLocationRequest };
 
 /**
  * Location service - delegated to apiClient singleton

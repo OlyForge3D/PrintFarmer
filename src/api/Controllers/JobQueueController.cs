@@ -26,6 +26,7 @@ public class JobQueueController(
     IPrintJobManagementService printJobManagementService,
     IPrintJobCompletionService printJobCompletionService,
     IJobDispatchService jobDispatchService,
+    IBatchDispatchService batchDispatchService,
     IPrinterStatusCacheReader printerStatusCache,
     ILogger<JobQueueController> logger) : ControllerBase
 {
@@ -364,6 +365,41 @@ public class JobQueueController(
         {
             logger.LogError(ex, "Error dispatching job {Id} to printer {PrinterId}", id, request.PrinterId);
             return Problem("An error occurred while dispatching the job", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Batch-dispatch multiple queued jobs to their best-fit printers.
+    /// Uses the configured load-balancing strategy (or an override per request).
+    /// </summary>
+    /// <param name="request">Batch dispatch parameters.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("batch-dispatch")]
+    [ProducesResponseType(typeof(BatchDispatchResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> BatchDispatchAsync([FromBody] BatchDispatchRequest request, CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        if (!request.DispatchAll && (request.JobIds is null || request.JobIds.Count == 0))
+        {
+            return BadRequest("Either set DispatchAll to true or provide at least one job ID.");
+        }
+
+        try
+        {
+            string userId = User.Identity?.Name ?? "anonymous";
+            BatchDispatchResult result = await batchDispatchService.BatchDispatchAsync(request, userId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error during batch dispatch");
+            return Problem("An error occurred during batch dispatch", statusCode: 500);
         }
     }
 }

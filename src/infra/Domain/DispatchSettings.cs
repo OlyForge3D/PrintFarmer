@@ -48,6 +48,12 @@ public class DispatchSettings
     public int MaxConcurrentDispatches { get; set; } = 3;
 
     /// <summary>
+    /// Strategy for distributing jobs across printers during batch dispatch.
+    /// BestFit (default) uses scoring, RoundRobin distributes evenly, LeastBusy prefers shortest queues.
+    /// </summary>
+    public LoadBalancingStrategy LoadBalancingStrategy { get; set; } = LoadBalancingStrategy.BestFit;
+
+    /// <summary>
     /// UTC timestamp of the last settings update.
     /// </summary>
     public DateTime UpdatedAt { get; set; } = new(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);

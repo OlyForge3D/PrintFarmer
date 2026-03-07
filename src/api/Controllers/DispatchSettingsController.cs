@@ -33,6 +33,7 @@ public class DispatchSettingsController(
             IdleThresholdSeconds = settings.IdleThresholdSeconds,
             MinimumScoreThreshold = settings.MinimumScoreThreshold,
             MaxConcurrentDispatches = settings.MaxConcurrentDispatches,
+            LoadBalancingStrategy = settings.LoadBalancingStrategy,
             UpdatedAt = settings.UpdatedAt,
         });
     }
@@ -69,17 +70,19 @@ public class DispatchSettingsController(
         settings.IdleThresholdSeconds = request.IdleThresholdSeconds;
         settings.MinimumScoreThreshold = request.MinimumScoreThreshold;
         settings.MaxConcurrentDispatches = request.MaxConcurrentDispatches;
+        settings.LoadBalancingStrategy = request.LoadBalancingStrategy;
         settings.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(
-            "[DispatchSettings] Updated: enabled={Enabled}, mode={Mode}, threshold={Threshold}s, minScore={MinScore}, maxConcurrent={Max}",
+            "[DispatchSettings] Updated: enabled={Enabled}, mode={Mode}, threshold={Threshold}s, minScore={MinScore}, maxConcurrent={Max}, strategy={Strategy}",
             settings.AutoDispatchEnabled,
             settings.AutoDispatchMode,
             settings.IdleThresholdSeconds,
             settings.MinimumScoreThreshold,
-            settings.MaxConcurrentDispatches);
+            settings.MaxConcurrentDispatches,
+            settings.LoadBalancingStrategy);
 
         return Ok(new DispatchSettingsDto
         {
@@ -88,6 +91,7 @@ public class DispatchSettingsController(
             IdleThresholdSeconds = settings.IdleThresholdSeconds,
             MinimumScoreThreshold = settings.MinimumScoreThreshold,
             MaxConcurrentDispatches = settings.MaxConcurrentDispatches,
+            LoadBalancingStrategy = settings.LoadBalancingStrategy,
             UpdatedAt = settings.UpdatedAt,
         });
     }

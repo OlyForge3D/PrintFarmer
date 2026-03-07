@@ -70,7 +70,7 @@ vi.mock('@/services/locationService', () => ({
   // Re-export the type so imports don't break
 }));
 
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+ 
 const { locationService } = await import('@/services/locationService') as typeof import('@/services/locationService');
 
 describe('LocationTreePicker', () => {

@@ -18,6 +18,7 @@ public class JobQueueControllerTests
     private readonly Mock<ILogger<JobQueueController>> _loggerMock;
     private readonly Mock<IPrintJobCompletionService> _printJobCompletionServiceMock;
     private readonly Mock<IJobDispatchService> _jobDispatchServiceMock;
+    private readonly Mock<IBatchDispatchService> _batchDispatchServiceMock;
     private readonly Mock<IPrinterStatusCacheReader> _printerStatusCacheMock;
     private readonly JobQueueController _controller;
 
@@ -28,12 +29,14 @@ public class JobQueueControllerTests
         _loggerMock = new Mock<ILogger<JobQueueController>>();
         _printJobCompletionServiceMock = new Mock<IPrintJobCompletionService>();
         _jobDispatchServiceMock = new Mock<IJobDispatchService>();
+        _batchDispatchServiceMock = new Mock<IBatchDispatchService>();
         _printerStatusCacheMock = new Mock<IPrinterStatusCacheReader>();
         _controller = new JobQueueController(
             _queueServiceMock.Object,
             _printJobManagementServiceMock.Object,
             _printJobCompletionServiceMock.Object,
             _jobDispatchServiceMock.Object,
+            _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _loggerMock.Object);
     }
@@ -47,6 +50,7 @@ public class JobQueueControllerTests
             _printJobManagementServiceMock.Object,
             _printJobCompletionServiceMock.Object,
             _jobDispatchServiceMock.Object,
+            _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _loggerMock.Object);
 
