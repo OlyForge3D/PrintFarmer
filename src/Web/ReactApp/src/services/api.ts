@@ -196,6 +196,11 @@ export class ApiClient {
     this.client = axios.create({
       baseURL: apiBaseUrl,
       timeout: 30000,
+      paramsSerializer: {
+        // ASP.NET Core expects repeated keys for arrays: tagIds=a&tagIds=b
+        // Axios v1+ defaults to bracket notation (tagIds[]=a) which .NET ignores
+        indexes: null,
+      },
     });
 
     // Request interceptor for authentication and correlationId
