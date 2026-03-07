@@ -18,7 +18,7 @@ test.describe('Navigation', () => {
   });
 
   test('key routes are accessible', async ({ page }) => {
-    const routes = ['/', '/printers', '/catalog'];
+    const routes = ['/', '/printers', '/catalog', '/locations', '/locations/dashboard'];
 
     for (const route of routes) {
       const response = await page.goto(route);
