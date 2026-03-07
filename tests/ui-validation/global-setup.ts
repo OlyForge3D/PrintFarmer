@@ -7,10 +7,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { FullConfig } from '@playwright/test';
 
-const REPO_ROOT = resolve(import.meta.dirname, '../..');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, '../..');
 const SRC_DIR = join(REPO_ROOT, 'src');
 const REACT_DIR = join(SRC_DIR, 'Web/ReactApp');
 
@@ -25,7 +27,7 @@ const MAX_REACT_WAIT_MS = 60_000;
 const POLL_INTERVAL_MS = 1_500;
 
 // Stash for teardown
-const STATE_FILE = join(import.meta.dirname, '.test-state.json');
+const STATE_FILE = join(__dirname, '.test-state.json');
 
 interface TestState {
   apiPid: number;

@@ -2,9 +2,11 @@
  * Global teardown — kills the API and React servers, removes temp database.
  */
 import { readFileSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const STATE_FILE = join(import.meta.dirname, '.test-state.json');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const STATE_FILE = join(__dirname, '.test-state.json');
 
 interface TestState {
   apiPid: number;

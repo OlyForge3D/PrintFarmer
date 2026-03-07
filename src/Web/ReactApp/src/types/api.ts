@@ -256,6 +256,8 @@ export interface LocationTreeNode {
 export interface LocationBreadcrumbItem {
   id: string;
   name: string;
+  /** Client-only field for UI rendering; not returned by the API. */
+  depth?: number;
 }
 
 /** Request DTO for creating a location. Matches backend CreateLocationDto. */
