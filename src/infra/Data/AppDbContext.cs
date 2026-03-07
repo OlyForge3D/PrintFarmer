@@ -60,6 +60,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<JobRetry> JobRetries => Set<JobRetry>();
 
+    public DbSet<DispatchLog> DispatchLogs => Set<DispatchLog>();
+
+    public DbSet<DispatchSettings> DispatchSettings => Set<DispatchSettings>();
+
     public DbSet<Toolhead> Toolheads => Set<Toolhead>();
 
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();

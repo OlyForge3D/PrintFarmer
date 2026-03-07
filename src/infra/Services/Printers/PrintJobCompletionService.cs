@@ -4,6 +4,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoPrint;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IAutoPrintService? _autoPrintService;
     private readonly IBackendClientFactory? _backendFactory;
     private readonly ISpoolmanService? _spoolmanService;
+    private readonly IAutoDispatchTrigger? _autoDispatchTrigger;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -81,7 +83,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         IPrintCostCalculator? costCalculator = null,
         IAutoPrintService? autoPrintService = null,
         IBackendClientFactory? backendFactory = null,
-        ISpoolmanService? spoolmanService = null)
+        ISpoolmanService? spoolmanService = null,
+        IAutoDispatchTrigger? autoDispatchTrigger = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -91,6 +94,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _autoPrintService = autoPrintService;
         _backendFactory = backendFactory;
         _spoolmanService = spoolmanService;
+        _autoDispatchTrigger = autoDispatchTrigger;
     }
 
     /// <summary>
@@ -234,6 +238,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             {
                 _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to trigger auto-print transition for printer {PrinterId}", printerId);
             }
+        }
+
+        // Trigger auto-dispatch scoring for this printer
+        if (_autoDispatchTrigger != null)
+        {
+            _autoDispatchTrigger.NotifyPrinterIdle(printerId);
+            _logger.LogDebug("[PrintJobCompletionService] Auto-dispatch trigger fired for printer {PrinterId}", printerId);
         }
 
         return true;

@@ -17,74 +17,79 @@ dotnet --info
 
 ## Repository layout
 - `src/`
-  - `client/` — Blazor WebAssembly Client (standalone frontend)
   - `api/` — ASP.NET Core API Server (standalone backend)
+  - `backends/` — Backend plugin architecture (Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge, Core)
+  - `Web/ReactApp/` — React TypeScript frontend
   - `shared/` — Shared DTOs/models
   - `farm-web.sln` — Solution file
 
 ## Restore and build
 ```powershell
 # From repo root
-cd .\src
+cd ./src
 # Restore
-dotnet restore .\farm-web.sln
+dotnet restore ./farm-web.sln
 # Build (Debug)
-dotnet build .\farm-web.sln -c Debug
+dotnet build ./farm-web.sln -c Debug
 # Build (Release)
-dotnet build .\farm-web.sln -c Release
+dotnet build ./farm-web.sln -c Release
 ```
 
 ## Run (development)
-Both API server and client need to be run separately during development.
+Both API server and React frontend need to be run separately during development.
 
 **API Server (Backend):**
-```powershell
+```bash
 # From repo root
-cd .\src
+cd ./src
 # Run API Server
-dotnet run --project .\api\Farm.Web.Api.csproj
+dotnet run --project ./api/Farm.Web.Api.csproj
 ```
 API will be available at http://localhost:5245
 
-**Client (Frontend) - Run in separate terminal:**
-```powershell
+**React Frontend (Frontend) - Run in separate terminal:**
+```bash
 # From repo root  
-cd .\src
-# Run Client
-dotnet run --project .\client\Farm.Web.Client.csproj
+cd ./src/Web/ReactApp
+npm run dev
 ```
-Client will be available at http://localhost:5000
+Frontend will be available at http://localhost:3000
 
 Stop both with Ctrl+C.
 
 Tip: Use hot-reload/watch during active development:
-```powershell
+```bash
 # API server (first terminal)
-cd .\src
-dotnet watch --project .\api\Farm.Web.Api.csproj run
+cd ./src
+dotnet watch --project ./api/Farm.Web.Api.csproj run
 
-# Client (second terminal)
-cd .\src
-dotnet watch --project .\client\Farm.Web.Client.csproj run
+# React frontend (second terminal)
+cd ./src/Web/ReactApp
+npm run dev
 ```
 
 ## Tests
-```powershell
+```bash
 # From repo root
-dotnet test .\src\farm-web.sln -c Debug
+cd ./src
+dotnet test ./farm-web.sln -c Debug
+
+# Frontend tests
+cd ./Web/ReactApp
+npm run test:run
 ```
 
 ## Code style and formatting
-- C#: prefer conventional .NET style (PascalCase for types/members, camelCase for locals/params).
+- C#: follow conventional .NET style (PascalCase for types/members, camelCase for locals/params).
 - TypeScript: Use camelCase for variables/functions, PascalCase for components/types, strict mode enabled
 - Run formatter/analyzers locally:
-```powershell
+```bash
 # Format C# code in the solution
-cd .\src
-dotnet format .\farm-web.sln
+cd ./src
+dotnet format ./farm-web.sln
 
 # Lint React/TypeScript code
-cd .\src\Web\ReactApp
+cd ./src/Web/ReactApp
 npm run lint
 ```
 

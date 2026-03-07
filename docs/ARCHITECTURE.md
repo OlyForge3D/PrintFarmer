@@ -15,11 +15,16 @@ PrintFarmer uses a **two-tier client-server architecture** with real-time commun
 ├────────────────────────────────────────┤
 │  HTTP/REST + WebSocket (SignalR)       │
 ├────────────────────────────────────────┤
-│   ASP.NET Core 9.0 API Backend         │
+│   ASP.NET Core 10 API Backend          │
 │ (Kestrel @ localhost:5245)             │
 │  - REST API endpoints                  │
-│  - Printer integration (Moonraker,     │
-│    PrusaLink, SDCP)                    │
+│  - Backend Plugin Architecture:        │
+│    • Moonraker (Klipper)               │
+│    • PrusaLink (Prusa)                 │
+│    • OctoPrint                         │
+│    • SDCP (Generic printers)           │
+│    • FlashForge (FlashForge printers)  │
+│    • Core (base interfaces)            │
 │  - Background services                 │
 │  - Job queue management                │
 │  - Profile/catalog management          │
@@ -57,8 +62,11 @@ REST API endpoints organized by feature:
 - `LocationsController` - Location organization
 - `CatalogController` - Printer models and manufacturers
 - `DiscoveryController` - Network printer discovery
-- `JobsController` - Job queue management
-- `ProfilesController` - Slicer profiles
+- `JobQueueController` - Job queue management
+- `TagsController` - Job tagging and categorization
+- `MaintenanceController` - Maintenance tracking
+- `JobSchedulingController` - Job scheduling and automation
+- `RetriesController` - Job retry management
 
 #### Services
 Business logic layer:
@@ -71,10 +79,12 @@ Business logic layer:
 
 #### Clients
 External API integration (typed HTTP clients via Refit):
-- `IMoonrakerClient` - Moonraker API
-- `IPrusaLinkClient` - PrusaLink API
-- `ISdcpClient` - SDCP protocol
-- `ISpoolmanClient` - Spoolman integration
+- `IMoonrakerClient` - Moonraker API (Klipper firmware)
+- `IPrusaLinkClient` - PrusaLink API (Prusa 3D printers)
+- `IOctoPrintClient` - OctoPrint API
+- `ISdcpClient` - SDCP protocol (generic printers)
+- `IFlashForgeClient` - FlashForge printer API
+- `ISpoolmanClient` - Spoolman integration (filament tracking)
 
 #### Repositories
 Data access abstraction:

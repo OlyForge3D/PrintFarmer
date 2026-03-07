@@ -138,4 +138,12 @@ public interface IPrintersRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The printer with this spool loaded, or null if no printer has it.</returns>
     Task<Printer?> FindByCurrentSpoolIdAsync(int spoolId, CancellationToken ct);
+
+    /// <summary>
+    /// Checks if a printer exists by ID.
+    /// </summary>
+    /// <param name="id">The printer's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True if a printer exists with the given ID.</returns>
+    Task<bool> ExistsAsync(Guid id, CancellationToken ct);
 }

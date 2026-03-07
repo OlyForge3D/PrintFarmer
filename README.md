@@ -79,7 +79,7 @@ PrintFarmer uses a **modern two-tier client-server architecture**:
 ```
 React TypeScript Frontend (http://localhost:3000)
     ↕ HTTP REST + WebSocket (SignalR)
-ASP.NET Core 9 API Backend (http://localhost:5245)
+ASP.NET Core 10 API Backend (http://localhost:5245)
     ↕ Entity Framework Core ORM
     ↓
 Database: SQLite / PostgreSQL / SQL Server / MySQL
@@ -88,17 +88,17 @@ Database: SQLite / PostgreSQL / SQL Server / MySQL
 ### Technology Stack
 
 **Backend:**
-- ASP.NET Core 9.0
+- ASP.NET Core 10 (.NET SDK 10.0)
 - Entity Framework Core (multi-database ORM)
 - SignalR (real-time WebSocket communication)
 - Refit (type-safe HTTP clients)
 - xUnit (testing framework)
 
 **Frontend:**
-- React 18+ with TypeScript
-- Vite 7.2.4 (build tool)
-- Tailwind CSS (styling)
-- React Query (server state management)
+- React 19+ with TypeScript
+- Vite (build tool)
+- Tailwind CSS v4 (styling)
+- TanStack React Query (server state management)
 - Vitest + React Testing Library (testing)
 
 See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data flow, and component breakdown.
@@ -178,12 +178,12 @@ All tests pass and are automated:
 # Backend tests
 cd ./src
 dotnet test ./farm-web.sln -c Debug
-# ✅ 496/496 API tests passing
+# ✅ 1572/1572 API tests passing
 
 # Frontend tests
 cd ./src/Web/ReactApp
 npm run test:run
-# ✅ 150/150 React tests passing
+# ✅ 365/365 React tests passing
 ```
 
 ## 🐳 Deployment
@@ -239,20 +239,20 @@ We welcome contributions! See **[Contributing Guide](./CONTRIBUTING.md)** for:
 
 | Component | Status |
 |-----------|--------|
-| API Backend | ✅ Build Success (0 errors, 0 warnings) |
+| API Backend | ✅ Build Success (0 errors, 134 warnings) |
 | React Frontend | ✅ Build Success (0 TypeScript errors) |
-| API Tests | ✅ 1676/1676 passing |
+| API Tests | ✅ 1572/1572 passing |
 | React Tests | ✅ 365/365 passing |
 | Docker Build | ✅ Multi-stage production ready |
 | Documentation | ✅ Comprehensive and organized |
-| Print Queue System | ✅ COMPLETE (3-tab dashboard, job management, tag analytics) |
+| Backend Plugins | ✅ 6 supported (Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge, Core) |
 | Phase 4 Automation | ✅ COMPLETE (Scheduling, Estimates, Notifications, Smart Retry) |
 
-**Latest Completion:** Phase 4.4 Smart Retry System (January 11, 2026)
-- 6 REST API endpoints for retry management
-- Configurable exponential backoff strategy
-- Error categorization and selective retry
-- Complete retry history tracking and audit trail
+**Latest Completion:** Discovery Probe Architecture Consolidation (December 21, 2025)
+- All discovery probes migrated to respective backend plugins
+- Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge, Core plugins fully integrated
+- All 1572 API tests passing with consolidated architecture
+- Zero circular dependencies between backend plugins
 
 ## 📝 License
 

@@ -62,12 +62,12 @@ Open **http://localhost:3000** in your browser. You'll see the PrintFarmer setup
 # .NET tests
 cd ./src
 dotnet test ./farm-web.sln -c Debug
-# ✅ 496/496 tests passing
+# ✅ 1572/1572 tests passing
 
 # React tests (non-interactive)
 cd ./src/Web/ReactApp
 npm run test:run
-# ✅ 150/150 tests passing
+# ✅ 365/365 tests passing
 
 # Watch mode for development
 npm test
