@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -98,7 +98,10 @@ public class DispatchQueueStatusTests : IAsyncLifetime
     private static async Task<Guid> EnsureRootFolderAsync(AppDbContext db)
     {
         FolderNode? existing = await db.Set<FolderNode>().FirstOrDefaultAsync();
-        if (existing is not null) return existing.Id;
+        if (existing is not null)
+        {
+            return existing.Id;
+        }
 
         var folder = new FolderNode
         {

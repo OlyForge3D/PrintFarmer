@@ -174,6 +174,7 @@ public static class ServiceCollectionExtensions
         // Dispatch scoring engine and service
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchScorer, Farm.Infrastructure.Services.Queue.Dispatch.DispatchScorer>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IBatchDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.BatchDispatchService>();
 
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();

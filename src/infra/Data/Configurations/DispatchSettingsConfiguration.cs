@@ -14,6 +14,10 @@ public class DispatchSettingsConfiguration : IEntityTypeConfiguration<DispatchSe
             .HasConversion<string>()
             .HasMaxLength(20);
 
+        _ = builder.Property(d => d.LoadBalancingStrategy)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
         // Seed singleton row with safe defaults (auto-dispatch OFF)
         _ = builder.HasData(new DispatchSettings
         {
@@ -23,6 +27,7 @@ public class DispatchSettingsConfiguration : IEntityTypeConfiguration<DispatchSe
             IdleThresholdSeconds = 30,
             MinimumScoreThreshold = 0.5,
             MaxConcurrentDispatches = 3,
+            LoadBalancingStrategy = Services.Queue.Dispatch.LoadBalancingStrategy.BestFit,
             UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
         });
     }

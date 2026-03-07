@@ -82,3 +82,18 @@ public enum AutoDispatchMode
     /// <summary>Score jobs and dispatch the best match automatically.</summary>
     Auto = 2
 }
+
+/// <summary>
+/// Strategy for distributing jobs across eligible printers during batch dispatch.
+/// </summary>
+public enum LoadBalancingStrategy
+{
+    /// <summary>Use the existing scoring algorithm — assign each job to its highest-scoring printer.</summary>
+    BestFit = 0,
+
+    /// <summary>Distribute jobs evenly across eligible printers in a round-robin cycle.</summary>
+    RoundRobin = 1,
+
+    /// <summary>Prefer printers with the shortest queue (fewest active/queued jobs).</summary>
+    LeastBusy = 2
+}

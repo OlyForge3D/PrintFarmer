@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -114,7 +114,10 @@ public class LoadBalancingTests : IAsyncLifetime
     private static async Task<Guid> EnsureRootFolderAsync(AppDbContext db)
     {
         FolderNode? existing = await db.Set<FolderNode>().FirstOrDefaultAsync();
-        if (existing is not null) return existing.Id;
+        if (existing is not null)
+        {
+            return existing.Id;
+        }
 
         var folder = new FolderNode
         {
