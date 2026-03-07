@@ -182,6 +182,24 @@ public class PrintJob
     // Phase 4.2: Completion Statistics (one-to-one relationship)
     public PrintJobStatistics? Statistics { get; set; }
 
+    // Dispatch tracking
+
+    /// <summary>
+    /// UTC timestamp when this job was dispatched to a printer via the scoring engine.
+    /// </summary>
+    public DateTime? DispatchedAt { get; set; }
+
+    /// <summary>
+    /// Weighted score the assigned printer received from the dispatch scorer.
+    /// </summary>
+    public double? DispatchScore { get; set; }
+
+    /// <summary>
+    /// How the printer was selected: Manual, Suggested (scored), or Auto (future).
+    /// Stored as string via JsonStringEnumConverter.
+    /// </summary>
+    public int? DispatchMode { get; set; }
+
     // Phase 4.4: Job Retry History
 
     /// <summary>

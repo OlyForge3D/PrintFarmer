@@ -311,4 +311,10 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
             .FirstOrDefaultAsync(p => p.CurrentSpoolId == spoolId, ct)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc/>
+    public async Task<bool> ExistsAsync(Guid id, CancellationToken ct)
+    {
+        return await _db.Printers.AnyAsync(p => p.Id == id, ct);
+    }
 }

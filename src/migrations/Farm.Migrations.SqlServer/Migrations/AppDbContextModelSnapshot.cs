@@ -198,6 +198,93 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Cameras", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<double?>("Score")
+                        .HasColumnType("float");
+
+                    b.Property<string>("ScoreBreakdown")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("PrinterId");
+
+                    b.ToTable("DispatchLogs");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AutoDispatchEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("AutoDispatchMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("IdleThresholdSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MaxConcurrentDispatches")
+                        .HasColumnType("int");
+
+                    b.Property<double>("MinimumScoreThreshold")
+                        .HasColumnType("float");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DispatchSettings");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            AutoDispatchEnabled = false,
+                            AutoDispatchMode = "Manual",
+                            IdleThresholdSeconds = 30,
+                            MaxConcurrentDispatches = 3,
+                            MinimumScoreThreshold = 0.5,
+                            UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.ExtruderModelDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1093,6 +1180,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<int>("Depth")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Description")
                         .HasMaxLength(1024)
                         .HasColumnType("nvarchar(1024)");
@@ -1110,7 +1202,27 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)")
+                        .HasDefaultValue("/");
+
                     b.Property<int>("PrinterCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("TotalPrinterCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(0);
@@ -1121,8 +1233,13 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("IsActive");
 
-                    b.HasIndex("Name")
-                        .IsUnique();
+                    b.HasIndex("ParentId");
+
+                    b.HasIndex("Path");
+
+                    b.HasIndex("ParentId", "Name")
+                        .IsUnique()
+                        .HasFilter("[ParentId] IS NOT NULL");
 
                     b.ToTable("Locations");
                 });
@@ -1996,6 +2113,15 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasDefaultValue(1);
 
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("DispatchMode")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("DispatchScore")
+                        .HasColumnType("float");
+
+                    b.Property<DateTime?>("DispatchedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<decimal?>("EstimatedCost")
@@ -3746,6 +3872,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
+                        .WithMany()
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PrintJob");
+
+                    b.Navigation("Printer");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.ExtruderModelDefinition", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Manufacturer", "Manufacturer")
@@ -3915,6 +4060,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("PrintJob");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Location", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Location", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Parent");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceAlert", b =>
@@ -4568,6 +4723,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Location", b =>
                 {
+                    b.Navigation("Children");
+
                     b.Navigation("Printers");
                 });
 

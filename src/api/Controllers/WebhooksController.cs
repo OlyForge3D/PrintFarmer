@@ -1,9 +1,8 @@
-﻿using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain.Webhooks;
+﻿using Farm.Infrastructure.Domain.Webhooks;
+using Farm.Infrastructure.Repositories.Webhooks;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -15,10 +14,14 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Webhooks")]
 [Authorize(Roles = "farm_admin")]
 public class WebhooksController(
-    AppDbContext db,
+    IWebhookRepository webhookRepository,
     IWebhookService webhookService,
     ILogger<WebhooksController> logger) : ControllerBase
 {
+    private readonly IWebhookRepository _webhookRepository = webhookRepository;
+    private readonly IWebhookService _webhookService = webhookService;
+    private readonly ILogger<WebhooksController> _logger = logger;
+
     /// <summary>
     /// List all webhook subscriptions
     /// </summary>
@@ -26,12 +29,8 @@ public class WebhooksController(
     [ProducesResponseType(typeof(List<WebhookSubscriptionDto>), 200)]
     public async Task<IActionResult> GetAllAsync(CancellationToken ct)
     {
-        var webhooks = await db.WebhookSubscriptions
-            .OrderByDescending(w => w.CreatedAt)
-            .Select(w => ToDto(w))
-            .ToListAsync(ct);
-
-        return Ok(webhooks);
+        var webhooks = await _webhookRepository.GetAllAsync(ct);
+        return Ok(webhooks.Select(ToDto).ToList());
     }
 
     /// <summary>
@@ -42,7 +41,7 @@ public class WebhooksController(
     [ProducesResponseType(404)]
     public async Task<IActionResult> GetByIdAsync(Guid id, CancellationToken ct)
     {
-        var webhook = await db.WebhookSubscriptions.FindAsync([id], ct);
+        var webhook = await _webhookRepository.GetByIdAsync(id, ct);
         if (webhook is null)
         {
             return NotFound(new { message = "Webhook not found" });
@@ -79,10 +78,9 @@ public class WebhooksController(
             MaxConsecutiveFailures = dto.MaxConsecutiveFailures ?? 10
         };
 
-        db.WebhookSubscriptions.Add(webhook);
-        await db.SaveChangesAsync(ct);
+        await _webhookRepository.AddAsync(webhook, ct);
 
-        logger.LogInformation("Webhook subscription created: {Id} → {Url}", webhook.Id, webhook.Url);
+        _logger.LogInformation("Webhook subscription created: {Id} → {Url}", webhook.Id, webhook.Url);
         return StatusCode(201, ToDto(webhook));
     }
 
@@ -94,7 +92,7 @@ public class WebhooksController(
     [ProducesResponseType(404)]
     public async Task<IActionResult> UpdateAsync(Guid id, [FromBody] UpdateWebhookDto dto, CancellationToken ct)
     {
-        var webhook = await db.WebhookSubscriptions.FindAsync([id], ct);
+        var webhook = await _webhookRepository.GetByIdAsync(id, ct);
         if (webhook is null)
         {
             return NotFound(new { message = "Webhook not found" });
@@ -141,7 +139,7 @@ public class WebhooksController(
             webhook.ConsecutiveFailures = 0;
         }
 
-        await db.SaveChangesAsync(ct);
+        await _webhookRepository.UpdateAsync(webhook, ct);
         return Ok(ToDto(webhook));
     }
 
@@ -153,16 +151,15 @@ public class WebhooksController(
     [ProducesResponseType(404)]
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
     {
-        var webhook = await db.WebhookSubscriptions.FindAsync([id], ct);
+        var webhook = await _webhookRepository.GetByIdAsync(id, ct);
         if (webhook is null)
         {
             return NotFound(new { message = "Webhook not found" });
         }
 
-        db.WebhookSubscriptions.Remove(webhook);
-        await db.SaveChangesAsync(ct);
+        await _webhookRepository.DeleteAsync(webhook, ct);
 
-        logger.LogInformation("Webhook subscription deleted: {Id}", id);
+        _logger.LogInformation("Webhook subscription deleted: {Id}", id);
         return NoContent();
     }
 
@@ -174,13 +171,13 @@ public class WebhooksController(
     [ProducesResponseType(404)]
     public async Task<IActionResult> TestAsync(Guid id, CancellationToken ct)
     {
-        var webhook = await db.WebhookSubscriptions.FindAsync([id], ct);
+        var webhook = await _webhookRepository.GetByIdAsync(id, ct);
         if (webhook is null)
         {
             return NotFound(new { message = "Webhook not found" });
         }
 
-        webhookService.Enqueue("webhook.test", new
+        _webhookService.Enqueue("webhook.test", new
         {
             webhookId = webhook.Id,
             message = "This is a test webhook delivery from PrintFarmer",
@@ -201,30 +198,27 @@ public class WebhooksController(
         [FromQuery] int limit = 50,
         CancellationToken ct = default)
     {
-        var exists = await db.WebhookSubscriptions.AnyAsync(w => w.Id == id, ct);
+        var exists = await _webhookRepository.ExistsAsync(id, ct);
         if (!exists)
         {
             return NotFound(new { message = "Webhook not found" });
         }
 
-        var logs = await db.WebhookDeliveryLogs
-            .Where(d => d.WebhookSubscriptionId == id)
-            .OrderByDescending(d => d.CreatedAt)
-            .Take(Math.Clamp(limit, 1, 200))
-            .Select(d => new WebhookDeliveryDto
-            {
-                Id = d.Id,
-                EventType = d.EventType,
-                StatusCode = d.StatusCode,
-                Success = d.Success,
-                ErrorMessage = d.ErrorMessage,
-                Attempt = d.Attempt,
-                DurationMs = d.DurationMs,
-                CreatedAt = d.CreatedAt
-            })
-            .ToListAsync(ct);
+        var logs = await _webhookRepository.GetDeliveryLogsAsync(id, limit, ct);
 
-        return Ok(logs);
+        var result = logs.Select(d => new WebhookDeliveryDto
+        {
+            Id = d.Id,
+            EventType = d.EventType,
+            StatusCode = d.StatusCode,
+            Success = d.Success,
+            ErrorMessage = d.ErrorMessage,
+            Attempt = d.Attempt,
+            DurationMs = d.DurationMs,
+            CreatedAt = d.CreatedAt
+        }).ToList();
+
+        return Ok(result);
     }
 
     /// <summary>

@@ -9,33 +9,39 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
-### Sprint 1 Summary (2026-03-07)
+### Sprint 2 Summary (2026-03-07)
 
 **Completed:**
-1. **Auto-Dispatch Phase 1** (1011s) — 9-factor scoring engine with DispatchScorer + JobDispatchService
-   - DispatchLog audit entity tracks all dispatch actions
-   - 2 API endpoints: GET /api/job-queue/{id}/candidates, POST /api/job-queue/{id}/dispatch-to
-   - 43 dispatch + controller tests all passing
-   - Schema changes pending review (PrintJob.DispatchedAt/Score/Mode + DispatchLog table)
+1. **Auto-Dispatch Phase 2 Backend** (Lambert, agent-20) — Event-driven background service with Channel-based idle trigger, per-printer idle timer, SemaphoreSlim concurrency control, DispatchSettings singleton entity, Suggest/Auto modes, SignalR events (jobautodispatched, dispatchsuggestion, dispatchfailed)
+   - Files: DispatchSettings entity, AutoDispatchTrigger (Channel reader), AutoDispatchBackgroundService (IHostedService), DispatchSettingsController (GET/PUT)
+   - 1917 API tests passing, 0 failures, 0 new warnings
+   - No EF migrations yet — pending review
 
-2. **Location Hierarchy Full-Stack** (1298s) — Tree service + React components
-   - LocationTreeService: GetTree, GetAncestors, GetDescendants, Move (with circular ref detection)
-   - 4 API endpoints for tree operations
-   - LocationTreePicker, LocationBreadcrumb, LocationManagement React components
-   - 21 location hierarchy tests all passing
+2. **Auto-Dispatch Phase 2 Tests** (Kane, agent-21) — Pre-implementation validation suite with concurrent safety tests
+   - 35 tests across 3 files: AutoDispatchBackgroundServiceTests (12), DispatchSettingsControllerTests (12), AutoDispatchConcurrencyTests (11)
+   - Race condition tests: two-printers-same-job, multi-printer uniqueness, max-concurrent enforcement
+   - Full suite: 1952 tests passing (1504 API + 448 slicer), 0 failures
 
-3. **Test Coverage** (1109s) — Pre-implementation test suites
-   - 22 DispatchScorerTests (unit + edge cases + integration stubs)
-   - 21 LocationHierarchyTests (service + API level)
-   - All 43 tests passing against current codebase
+3. **Location Hierarchy UI Tests** (Kane, agent-22) — Full component test suite per Jeff's mandate
+   - 78 tests across 6 test files: LocationTreePicker (19), LocationBreadcrumb (11), LocationManagement (21), LocationSelector (8), PrinterLocationDragDrop (12), LocationManagementAdminPage (3)
+   - Covers rendering, CRUD, interactions, error/loading/empty states, accessibility
+   - All passing, fulfills user directive: "UI tests for all new UI features"
 
 **Key Decisions:**
-- **Printer Groups recommended** for G-code dispatch (Dallas's Approach C) — user-curated groups of identical hardware
-- **Printer assignment at ANY level** — not restricted to leaf nodes (per user feedback)
-- **Location dashboards planned** — click location → show subtree printers with aggregated status
-- **API refactoring Phase 1 complete** — apiClient.ts with shared auth + correlation ID infrastructure
+- **Event-driven Channel** over polling for idle notifications (no DB thrashing)
+- **Suggest + Auto modes** for gradual automation trust-building
+- **SemaphoreSlim atomicity** prevents double-assignment race conditions
+- **DispatchSettings singleton** for type-safe configuration (not JSON key-value)
+- **UI test policy**: Every new component must have Vitest + RTL coverage (Jeff's directive, now team standard)
 
-### Controller-Repository Architecture Pattern (2025-03-05)
+**Learnings:**
+- **FluentAssertions v8** removed `BeLessOrEqualTo()` — use `BeInRange` instead
+- **Mock child components** when testing parents (isolation)
+- **Button text in spans** — use `getByRole` over `getByText` for disabled-state checks
+- **Dynamic mock imports** — `await import()` after `vi.mock()` for typed access
+- **ConfirmationModal** renders inline (no portal, works with waitFor)
+
+### Previous: Controller-Repository Architecture Pattern (2025-03-05)
 - **Controllers should never directly inject AppDbContext** — all database access flows through repositories/services
 - Controllers remain thin: receive request → call service → return response
 - Services contain business logic and coordinate repository calls
@@ -57,3 +63,51 @@
 - **9-factor scoring algorithm**: Material (100), Nozzle (100), BuildVolume (50), Enclosure (80), NozzleHardness (80), ModelMatch (60), QueueDepth (30), Preferred (40), Availability (pre-filter)
 - **Hard elimination factors**: Material, Nozzle, Availability always eliminate on mismatch. Enclosure/Hardness conditional on material needs.
 - **Phase 2**: Printer Groups integration (G-code compatibility), auto-dispatch mode (system auto-assigns), location proximity scoring
+
+
+### Auto-Dispatch Phase 2 — Background Service & Auto-Dispatch on Idle (2026-03-07)
+- **DispatchSettings singleton entity** added — `src/infra/Domain/DispatchSettings.cs`, EF config with `HasData` seeding (Id=1). Controls: `AutoDispatchEnabled`, `AutoDispatchMode` (Manual/Suggest/Auto), `IdleThresholdSeconds`, `MinimumScoreThreshold`, `MaxConcurrentDispatches`.
+- **AutoDispatchMode enum** added in `src/infra/Services/Queue/Dispatch/DispatchModels.cs` — Manual (0), Suggest (1), Auto (2). Distinct from `DispatchMode` which tracks how a job was assigned.
+- **Event-driven architecture via Channel<T>**:
+  - `AutoDispatchTrigger` (singleton) wraps a `BoundedChannel<Guid>` — fire-and-forget from scoped services, consumed by background service.
+  - `AutoDispatchBackgroundService` (IHostedService) reads from channel, waits idle threshold with per-printer cancellable CTS, then dispatches.
+  - `CancelPendingDispatch(printerId)` cancels the idle timer if printer goes offline before threshold elapses.
+- **Thread safety**: `SemaphoreSlim(1,1)` serializes the dispatch-decision window so two printers going idle simultaneously cannot grab the same job. `Interlocked` tracks in-flight count for `MaxConcurrentDispatches`.
+- **Scoring reuse**: Iterates unassigned queued jobs in priority order, calls existing `IDispatchScorer.ScorePrintersForJobAsync()` for each, checks if idle printer qualifies above threshold. No scoring logic duplication.
+- **Suggest mode**: Scores and emits `dispatchsuggestion` SignalR event but does NOT dispatch. Operator dispatches manually. Logged as `DispatchAction.Suggested` in audit trail.
+- **Auto mode**: Scores, dispatches via `IJobDispatchService.DispatchJobAsync()`, sets `DispatchMode = Auto`, emits `jobautodispatched` SignalR event.
+- **Hook point**: `PrintJobCompletionService.MarkCurrentJobAsCompletedAsync()` calls `IAutoDispatchTrigger.NotifyPrinterIdle(printerId)` after job completion (fire-and-forget, does not block completion flow).
+- **SignalR events**: `jobautodispatched`, `dispatchsuggestion`, `dispatchfailed` — all broadcast to All clients via `IHubContext<PrinterHub>`.
+- **API endpoints**: `GET /api/dispatch-settings`, `PUT /api/dispatch-settings` — `DispatchSettingsController` with validation.
+- **Service registration**: Trigger singleton in `ServiceCollectionExtensions.AddPrintFarmerServices()`, background service in `RegisterBackgroundServices()` (respects `disableBackgroundServices` flag).
+- **No EF migrations created** — entity + configuration only, schema change pending review.
+
+### EF Core Migrations — Location & Dispatch Entities (2026-03-07)
+
+**Migration:** `AddLocationDispatchEntities` (PostgreSQL: `20260307145233`, SqlServer: `20260307145247`)
+
+**What changed:**
+- Location table: added ParentId (self-referential FK, Restrict), Path, Depth, SortOrder, TotalPrinterCount columns; replaced unique `IX_Locations_Name` with composite `IX_Locations_ParentId_Name`
+- DispatchLog table created with FKs to PrintJobs/Printers (Cascade), indexes on PrintJobId, PrinterId, CreatedAtUtc
+- DispatchSettings singleton table with HasData seed (auto-dispatch OFF)
+- PrintJob columns: DispatchedAt, DispatchScore, DispatchMode
+
+**Commands used:**
+```bash
+cd src
+DB_PROVIDER=postgres dotnet ef migrations add AddLocationDispatchEntities \
+  --project ./migrations/Farm.Migrations.PostgreSQL/Farm.Migrations.PostgreSQL.csproj \
+  --startup-project ./migrations/Farm.Migrations.PostgreSQL/Farm.Migrations.PostgreSQL.csproj \
+  --context AppDbContext
+
+DB_PROVIDER=sqlserver dotnet ef migrations add AddLocationDispatchEntities \
+  --project ./migrations/Farm.Migrations.SqlServer/Farm.Migrations.SqlServer.csproj \
+  --startup-project ./migrations/Farm.Migrations.SqlServer/Farm.Migrations.SqlServer.csproj \
+  --context AppDbContext
+```
+
+**Learnings:**
+- EF tooling v10.0.2 works fine against runtime v10.0.3 (just a warning)
+- Entity configurations via `IEntityTypeConfiguration<T>` in `Data/Configurations/` are auto-discovered by `ApplyConfigurationsFromAssembly`
+- DesignTimeDbContextFactory uses `--startup-project` pointing to the migration project itself (not API)
+- Both providers require `DB_PROVIDER` env var set for correct factory selection

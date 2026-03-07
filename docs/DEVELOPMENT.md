@@ -13,6 +13,13 @@ src/
 │   ├── Hubs/              # SignalR hubs
 │   ├── Program.cs         # App startup
 │   └── appsettings.json   # Configuration
+├── backends/              # Backend plugin architecture
+│   ├── Farm.Backend.Plugin.Core/      # Base interfaces
+│   ├── Farm.Backend.Plugin.Moonraker/ # Klipper firmware
+│   ├── Farm.Backend.Plugin.PrusaLink/ # Prusa 3D
+│   ├── Farm.Backend.Plugin.OctoPrint/ # OctoPrint
+│   ├── Farm.Backend.Plugin.Sdcp/      # Generic SDCP
+│   └── Farm.Backend.Plugin.FlashForge/ # FlashForge
 ├── infra/
 │   ├── Domain/Entities.cs # Domain models
 │   ├── Models.cs          # DTOs
@@ -304,11 +311,10 @@ Optional detailed explanation of changes.
 
 ### Test Status
 
-**Current Coverage (Phase 22 - December 2025):**
-- ✅ **API Tests**: 1,772+ tests passing (0 failures)
-- ✅ **React Tests**: 150+ tests passing (0 failures)
-- **Farm.Web.Api Coverage**: 37-38% method coverage
-- **Farm.Infrastructure Coverage**: 8-9% method coverage
+**Current Coverage (Phase 24 - March 2026):**
+- ✅ **API Tests**: 1,572 tests passing (0 failures)
+- ✅ **React Tests**: 365 tests passing (0 failures)
+- **Farm.Web.Api Coverage**: 23-39% line coverage depending on module
 - **Coverage Goal**: Increase to 77%+ line coverage focusing on critical paths
 
 ### Backend Tests

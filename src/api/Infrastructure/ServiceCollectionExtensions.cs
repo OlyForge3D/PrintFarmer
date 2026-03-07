@@ -164,9 +164,21 @@ public static class ServiceCollectionExtensions
         RegisterImportingServices(services);
         RegisterCatalogServices(services);
 
+        // Statistics service (depends on database)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Statistics.IStatisticsService, Farm.Infrastructure.Services.Statistics.StatisticsService>();
+
         // Print job queue services (API-owned, not slicer-module)
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueDataService, Farm.Infrastructure.Services.Queue.QueueDataService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IJobQueueService, Farm.Infrastructure.Services.Queue.JobQueueService>();
+
+        // Dispatch scoring engine and service
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchScorer, Farm.Infrastructure.Services.Queue.Dispatch.DispatchScorer>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
+
+        // Auto-dispatch trigger (singleton event bus between scoped services and background service)
+        var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
+        _ = services.AddSingleton(autoDispatchTrigger);
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.Dispatch.IAutoDispatchTrigger>(autoDispatchTrigger);
 
         _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
         RegisterBackendClientPlugins(services, configuration);  // Register backend client plugins FIRST - they register HTTP clients
@@ -286,6 +298,9 @@ public static class ServiceCollectionExtensions
 
         // Authentication audit repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Authentication.IAuthAuditLogRepository, Farm.Infrastructure.Repositories.Authentication.EfAuthAuditLogRepository>();
+
+        // Webhook repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Webhooks.IWebhookRepository, Farm.Infrastructure.Repositories.Webhooks.EfWebhookRepository>();
     }
 
     #endregion
@@ -614,6 +629,9 @@ public static class ServiceCollectionExtensions
             // Discovery heartbeat monitor - tracks external discovery microservice status
             _ = services.AddSingleton<Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService>();
             _ = services.AddHostedService(sp => sp.GetRequiredService<Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService>());
+
+            // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
 
             // Slicer hosted services (WorkerHealthMonitor, JobDispatching,
             // JobTimeoutScanner, StaleWorkerCleanup) are now registered by

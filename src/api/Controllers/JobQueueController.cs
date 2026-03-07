@@ -7,6 +7,7 @@ using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,7 @@ public class JobQueueController(
     IJobQueueService queueService,
     IPrintJobManagementService printJobManagementService,
     IPrintJobCompletionService printJobCompletionService,
+    IJobDispatchService jobDispatchService,
     IPrinterStatusCacheReader printerStatusCache,
     ILogger<JobQueueController> logger) : ControllerBase
 {
@@ -298,6 +300,70 @@ public class JobQueueController(
         {
             logger.LogError(ex, "Error synchronizing orphaned jobs");
             return Problem("An error occurred while synchronizing orphaned jobs", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Find and score candidate printers for a job using multi-factor analysis.
+    /// Returns all printers ranked by compatibility, with eliminated printers at the end.
+    /// </summary>
+    /// <param name="id">The print job ID to find candidates for.</param>
+    [HttpGet("{id:guid}/candidates")]
+    [ProducesResponseType(typeof(List<DispatchCandidateDto>), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> GetCandidatesAsync(Guid id)
+    {
+        try
+        {
+            List<DispatchCandidateDto> candidates = await jobDispatchService.FindCandidatesAsync(id, CancellationToken.None);
+            return Ok(candidates);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning("Cannot find candidates for job {Id}: {Message}", id, ex.Message);
+            return NotFound(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error finding candidates for job {Id}", id);
+            return Problem("An error occurred while finding candidates", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Dispatch a job to a specific printer selected from scored candidates.
+    /// Assigns the job, records the dispatch score, and triggers print start.
+    /// </summary>
+    /// <param name="id">The print job ID to dispatch.</param>
+    /// <param name="request">The dispatch request containing the target printer ID.</param>
+    [HttpPost("{id:guid}/dispatch-to")]
+    [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> DispatchToAsync(Guid id, [FromBody] DispatchJobDto request)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        try
+        {
+            string userId = User.Identity?.Name ?? "anonymous";
+            QueuedPrintJobDto result = await jobDispatchService.DispatchJobAsync(id, request.PrinterId, userId, CancellationToken.None);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning("Cannot dispatch job {Id}: {Message}", id, ex.Message);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error dispatching job {Id} to printer {PrinterId}", id, request.PrinterId);
+            return Problem("An error occurred while dispatching the job", statusCode: 500);
         }
     }
 }
