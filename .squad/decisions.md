@@ -281,9 +281,39 @@ Full design document: `.squad/decisions/inbox/dallas-location-hierarchy-design.m
 
 ---
 
+### 13. Code Formatting & Linting Directive
+
+**Author:** Jeff Papiez  
+**Date:** 2026-03-07T16:03:48Z  
+**Status:** TEAM STANDARD — Mandatory pre-commit
+
+**Directive:** "Always run `npm run lint` (frontend) and `dotnet format` (backend) before any commits. No code should be committed without passing lint and format checks first."
+
+**Scope:** All developers, all code.
+
+**Enforcement:** Pre-commit CI checks will block commits failing linting or formatting.
+
+---
+
+### 14. Feature Branch Workflow Directive
+
+**Author:** Jeff Papiez  
+**Date:** 2026-03-07T14:47:00Z  
+**Status:** TEAM STANDARD — All feature work
+
+**Directive:** "The team should ALWAYS work in a feature branch, never commit directly to main."
+
+**Scope:** All feature development.
+
+**Pattern:** Feature branches named `feature/description`, deleted after merge.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
 - **UI Policy:** Every new component/feature must have Vitest + RTL tests (per Jeff 2026-03-06)
+- **Lint Policy:** All code must pass `npm run lint` and `dotnet format` before commit (per Jeff 2026-03-07)
+- **Branching:** Always use feature branches, never commit directly to main (per Jeff 2026-03-07)

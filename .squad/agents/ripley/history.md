@@ -9,27 +9,26 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
-### Sprint 1 Summary (2026-03-07)
+### Sprint 3 Summary (2026-03-07)
 
 **Completed:**
-1. **Location Hierarchy Full-Stack** (1298s) — Tree service + React components
-   - LocationTreeService: GetTree, GetAncestors, GetDescendants, Move (with circular ref detection + path propagation)
-   - 4 API endpoints: GET /api/locations/tree, GET /api/locations/{id}/ancestors, GET /api/locations/{id}/descendants, POST /api/locations/{id}/move
-   - React components: LocationTreePicker (multi-level dropdown), LocationBreadcrumb (path display), LocationManagement (CRUD + tree view)
-   - Tree constraints: circular ref detection, own-descendant prevention, path auto-update, depth validation, unique name within parent, cascade delete
-   - 21 location hierarchy tests all passing
+1. **Location Tree UI Components Phase 2** (6 components, 8 API methods)
+   - LocationTreePicker: Tree dropdown with search, expand/collapse, printer count badges
+   - LocationBreadcrumb: Ancestor path display with click navigation
+   - LocationManagement: Full CRUD tree management (create, edit, delete, move)
+   - LocationSelector: Backward-compat wrapper around TreePicker
+   - PrinterLocationDragDrop: Drag-drop UI for printer-location assignment
+   - LocationManagementAdminPage: Admin page wrapper with PageTemplate
+   - 8 API client methods (getLocationTree, getLocation, getAncestors, getDescendants, create, update, move, delete)
+   - All fully typed with TypeScript, accessibility patterns, error handling
 
-2. **API Service Architecture Refactoring Phase 1** (foundation for future)
-   - Created apiClient.ts with shared axios instance + auth/correlation ID interceptors
-   - Documented service architecture in src/services/README.md + REFACTOR_PLAN.md
-   - Existing services (locationService, cameraService, etc.) already follow the pattern
+**Key Pattern Established:**
+- Components canonical location: `@/features/locations/components/`
+- Types canonical location: `@/types/api.ts`
+- Re-export shims at old paths for backward compat
+- Service layer delegates to apiClient singleton
 
-**Key Decisions Integrated:**
-- **Printer assignment at ANY level** — not restricted to leaf nodes (per user feedback)
-- **Location dashboards planned** — click location → show subtree printers with aggregated status
-- **Type hierarchy enforcement deferred** — no rules like "Room must be inside Building" for now
-
-**Next Phase:** Extract top 3 services (printerService, queueService, catalogService) from monolithic api.ts
+**Next Phase:** Phase 2 dispatch scoring integration, location-based analytics.
 
 ### 2026-01-12 - API Service Architecture Refactoring (P1 Finding)
 

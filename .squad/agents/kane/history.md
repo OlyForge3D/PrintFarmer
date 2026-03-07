@@ -9,6 +9,27 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Sprint 3 Summary (2026-03-07)
+
+**Completed: 50 new Location Tree UI component tests**
+
+Test files created and passing:
+1. **LocationTreePicker.test.tsx** (13 tests) — Tree rendering, expand/collapse, search/filter, selection, disabled, badges, empty/error states
+2. **LocationBreadcrumb.test.tsx** (9 tests) — Multi-segment path, click navigation, accessibility, loading/error states
+3. **LocationManagement.test.tsx** (15 tests) — Tree table CRUD, create/edit/delete flows, validation, modal lifecycle
+4. **LocationSelector.test.tsx** (6 tests) — Backward-compat wrapper, props passthrough, disabled state
+5. **PrinterLocationDragDrop.test.tsx** (4 tests) — Unassigned printers, location columns, drag-drop structure
+6. **locationService API client.test.ts** (3 tests) — getLocationTree, getLocationAncestors, moveLocation methods
+
+**Key Test Patterns:**
+- Use `getByRole` for accessible queries (buttons, links, navigation landmarks)
+- Mock child components (e.g., PrinterLocationDragDrop) when testing parents to isolate units
+- Use `within()` for scoped queries in tree structures
+- Tree indentation verified via style.paddingLeft comparison
+- API tests mock apiClient and validate delegation + error propagation
+
+**Status:** All 50 tests passing. Fulfills Jeff's directive: "Every new UI component must have Vitest + RTL tests."
+
 ### Sprint 3 Playwright UI Validation Tests (2026-03-10)
 
 **Completed: 14 new Playwright tests across 2 files + 1 navigation update**
