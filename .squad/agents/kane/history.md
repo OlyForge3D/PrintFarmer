@@ -9,6 +9,24 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Sprint 3 Pre-Implementation Tests (2026-03-09)
+
+**Completed: 17 new tests across 3 files — ALL COMPILING (0 errors, 0 warnings)**
+
+**Test Coverage by Feature:**
+1. **BatchDispatchTests** (7 tests) — POST /api/job-queue/batch-dispatch: valid batch returns results, empty list returns 400, MaxConcurrentDispatches limit respected, already-assigned jobs skipped, no eligible printers returns per-job failures, unauthorized returns 401, individual failures don't fail entire batch
+2. **LoadBalancingTests** (5 tests) — BestFit uses scoring algorithm, RoundRobin distributes evenly, LeastBusy prefers shortest queue, strategy change via settings persists, invalid strategy returns 400
+3. **DispatchQueueStatusTests** (5 tests) — GET /api/dispatch/queue-status returns per-printer depth, includes unassigned count, GET /api/dispatch/history paginated, date range filtering, unauthorized returns 401
+
+**Key Patterns:**
+- **Local DTOs for pre-implementation tests** — defined `BatchDispatchRequest`, `BatchDispatchResponse`, `BatchDispatchItemResult`, `QueueStatusResponse`, `PrinterQueueDepth`, `DispatchHistoryResponse`, `DispatchHistoryEntry` locally in test files to avoid dependency on types Lambert hasn't created yet
+- **Extended settings DTO** for load balancing — `UpdateSettingsWithStrategyDto` adds `LoadBalancingStrategy` string field to the existing `UpdateDispatchSettingsDto` shape
+- **Data seeding in integration tests** — use `_factory.Services.CreateScope()` → resolve `AppDbContext` → seed Manufacturer → PrinterModel → Printer → GcodeFile → PrintJob chain
+- **Pre-existing MSB3021 path-too-long errors** — recursive `bin/Debug/net10.0/bin/Debug/...` nesting in api project causes build failures; fix with `rm -rf ./api/bin/Debug/net10.0/bin`
+- **DispatchAction enum** is in `Farm.Infrastructure.Services.Queue.Dispatch` namespace (not `Farm.Infrastructure.Domain`)
+
+**Status:** All 17 tests compile. Will return 404 until Lambert implements the batch dispatch, load balancing, and queue status endpoints.
+
 ### Sprint 2 Test Summary (2026-03-08)
 
 **Completed:**
