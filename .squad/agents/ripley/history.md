@@ -99,3 +99,19 @@ export const serviceName = {
 6. Remove monolithic api.ts when all methods migrated
 
 **Testing**: ✅ Build passes (7.06s), ✅ Tests pass (979/1024), ✅ Lint passes (0 errors)
+
+### 2026-03-08 - Location Tree UI Consolidation
+
+**Context**: Completed the 6-item Location Tree UI feature task, consolidating components into the canonical `features/locations/` folder and adding proper TypeScript types.
+
+**Changes Made**:
+1. **TypeScript types (api.ts)**: Added `Location`, `LocationTreeNode`, `LocationBreadcrumbItem`, `CreateLocationRequest`, `UpdateLocationRequest`, `MoveLocationRequest` interfaces matching backend DTOs
+2. **API client (api.ts)**: Replaced all `Record<string, unknown>` return types on location methods with proper typed interfaces
+3. **locationService.ts**: Now re-exports types from `@/types/api` instead of defining its own — single source of truth
+4. **Component relocation**: Moved LocationTreePicker, LocationBreadcrumb, LocationSelector, LocationManagement from `common/components/` and `features/catalog/` to `features/locations/components/`
+5. **Backward compat**: Left re-export shims at old paths so existing tests and imports continue working
+6. **Quality**: Replaced raw `<input>` and `<label>` elements in LocationManagement with `Input` and `FormField` from UI library
+
+**Key Pattern**: Re-export files at old locations prevent breaking changes while establishing the correct feature folder as canonical. New code should import from `@/features/locations/components/`.
+
+**Testing**: ✅ Build passes (7.46s), ✅ 138 location tests pass across 11 files, ✅ Lint passes (0 errors)
