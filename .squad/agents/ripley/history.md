@@ -172,3 +172,19 @@ export const serviceName = {
 **Key Pattern Confirmed**: Backend enums serialize as STRINGS via `JsonStringEnumConverter`, so TypeScript uses `string` type with string literal option values (`'BestFit'`, `'RoundRobin'`, `'LeastBusy'`) — never numeric.
 
 **Validation**: ✅ Lint passes (0 errors), ✅ Build passes (8.01s), ✅ 12 existing dispatch settings tests pass
+
+### Missing loadBalancingStrategy TypeScript Field Fix (2026-03-09)
+
+**Fixed:** DispatchSettingsPanel.tsx missing `loadBalancingStrategy` field from backend DTO.
+
+**Problem:** C# `DispatchSettingsDto` has `LoadBalancingStrategy` enum (BestFit, RoundRobin, LeastBusy), but TypeScript `DispatchSettings` interface was missing it. Caused silent data loss on API round-trips.
+
+**Changes:**
+1. Added `loadBalancingStrategy: string` to DispatchSettings interface
+2. Created `LOAD_BALANCING_STRATEGIES` options array with descriptive labels
+3. Added Select form field with helper text, disabled when auto-dispatch is off
+4. Default: `'BestFit'` matching C# enum default
+
+**Key Pattern:** Backend enums serialize as STRINGS via `JsonStringEnumConverter`, not numeric. TypeScript uses `string` type with string literal values.
+
+**Validation:** ✅ Lint 0 errors, ✅ Build passes (8.01s), ✅ 12 tests pass

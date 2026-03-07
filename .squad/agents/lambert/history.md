@@ -147,3 +147,16 @@ DB_PROVIDER=sqlserver dotnet ef migrations add AddLocationDispatchEntities \
 - **N+1 pattern in batch loops:** Any DB query inside a loop over items being processed should be a red flag. Hoist queries before the loop and track in-memory state for within-batch changes.
 - **`.Average()` on empty sequences:** Always use `.DefaultIfEmpty(fallback).Average()` or check `.Any()` before calling `.Average()` on LINQ sequences that could be empty after filtering.
 - **Build:** 0 errors, 0 new warnings
+
+### BatchDispatchService Bug Fixes (2026-03-07)
+
+**Fixed 2 bugs in `src/infra/Services/Queue/Dispatch/BatchDispatchService.cs`:**
+
+1. **N+1 Query in DispatchLeastBusyAsync (HIGH):** Queue depth DB query was inside foreach loop over jobs — dispatching N jobs triggered N separate DB round-trips. Moved query before loop; `batchAssignments` dict still correctly adjusts effective queue depth per printer within batch.
+
+2. **Divide-by-Zero in Average Score (MEDIUM):** `GetQueueStatusAsync` called `.Average()` on dispatch logs filtered by `.Where(l => l.Score.HasValue)` without guarding empty sequence. If all logs have null scores, throws `InvalidOperationException`. Fixed with `.DefaultIfEmpty(0).Average()`.
+
+**Learnings:**
+- **N+1 in batch loops:** Any DB query inside a loop should be a red flag. Hoist and track in-memory.
+- **`.Average()` on empty sequences:** Always guard with `.DefaultIfEmpty()` or `.Any()`.
+- **Build:** 0 errors, 0 new warnings
