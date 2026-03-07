@@ -181,3 +181,26 @@
 - **PrinterCard uses `printer.backendUrl`** but Printer interface has `serverUrl` — property mismatch in component (renders undefined), not a test concern
 - **Dynamic mock imports** — use `await import('@/services/locationService')` pattern for accessing mocked service functions after `vi.mock`
 - **ConfirmationModal renders inline** (no portal) — works fine in test environment with `waitFor`
+
+### Sprint 3 Location Tree UI Tests — Proactive (2026-03-10)
+
+**Completed: 50 new tests across 3 files — ALL PASSING**
+
+**Written proactively while Ripley builds enhanced location tree components.**
+
+**Test Coverage:**
+1. **LocationTreePicker** (26 tests) — Tree rendering with indentation verification, 3-level depth expansion, expand/collapse toggle with aria-expanded, search filtering (case-insensitive, parent-match-via-child, empty results), selection with onChange, printer count badges (show/hide by count), excludeId subtree removal, disabled state, clear selection, loading/empty/error states, tree role and aria-haspopup accessibility
+2. **LocationBreadcrumb** (15 tests) — Multi-segment path rendering, separator count verification, single-node and deep (5-level) paths, ancestor segments as clickable buttons with onNavigate, last segment non-clickable, no-onNavigate plain text mode, empty/error graceful rendering, accessible nav landmark, className passthrough, re-fetch on prop change
+3. **locationService API client** (9 new tests) — getLocationTree (success, empty, error propagation), getLocationAncestors (success, root empty, error), moveLocation (to parent, to root/null, circular reference error)
+
+**Key Patterns:**
+- Tests currently import from `@/common/components/` — will need import path update when Ripley creates `features/locations/components/` versions
+- Used `within()` from RTL for scoped queries (e.g., checking printer count badge absence on specific nodes)
+- Indentation verified via `style.paddingLeft` comparison between parent and child nodes
+- Deep path test (5 segments) validates separator count = segments - 1
+- API client tests follow existing pattern: mock `apiClient`, verify delegation + error propagation
+
+**Pre-existing failures (NOT from this work):**
+- 45 failures in SystemLogsContent.test.tsx and GcodeLibraryPage.test.tsx — `localStorage` mock issues unrelated to location tests
+
+**Status:** All 50 new tests passing. Ready for Ripley's component implementation — may need minor import path adjustments.
