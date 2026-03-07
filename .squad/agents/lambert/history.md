@@ -81,3 +81,33 @@
 - **API endpoints**: `GET /api/dispatch-settings`, `PUT /api/dispatch-settings` — `DispatchSettingsController` with validation.
 - **Service registration**: Trigger singleton in `ServiceCollectionExtensions.AddPrintFarmerServices()`, background service in `RegisterBackgroundServices()` (respects `disableBackgroundServices` flag).
 - **No EF migrations created** — entity + configuration only, schema change pending review.
+
+### EF Core Migrations — Location & Dispatch Entities (2026-03-07)
+
+**Migration:** `AddLocationDispatchEntities` (PostgreSQL: `20260307145233`, SqlServer: `20260307145247`)
+
+**What changed:**
+- Location table: added ParentId (self-referential FK, Restrict), Path, Depth, SortOrder, TotalPrinterCount columns; replaced unique `IX_Locations_Name` with composite `IX_Locations_ParentId_Name`
+- DispatchLog table created with FKs to PrintJobs/Printers (Cascade), indexes on PrintJobId, PrinterId, CreatedAtUtc
+- DispatchSettings singleton table with HasData seed (auto-dispatch OFF)
+- PrintJob columns: DispatchedAt, DispatchScore, DispatchMode
+
+**Commands used:**
+```bash
+cd src
+DB_PROVIDER=postgres dotnet ef migrations add AddLocationDispatchEntities \
+  --project ./migrations/Farm.Migrations.PostgreSQL/Farm.Migrations.PostgreSQL.csproj \
+  --startup-project ./migrations/Farm.Migrations.PostgreSQL/Farm.Migrations.PostgreSQL.csproj \
+  --context AppDbContext
+
+DB_PROVIDER=sqlserver dotnet ef migrations add AddLocationDispatchEntities \
+  --project ./migrations/Farm.Migrations.SqlServer/Farm.Migrations.SqlServer.csproj \
+  --startup-project ./migrations/Farm.Migrations.SqlServer/Farm.Migrations.SqlServer.csproj \
+  --context AppDbContext
+```
+
+**Learnings:**
+- EF tooling v10.0.2 works fine against runtime v10.0.3 (just a warning)
+- Entity configurations via `IEntityTypeConfiguration<T>` in `Data/Configurations/` are auto-discovered by `ApplyConfigurationsFromAssembly`
+- DesignTimeDbContextFactory uses `--startup-project` pointing to the migration project itself (not API)
+- Both providers require `DB_PROVIDER` env var set for correct factory selection
