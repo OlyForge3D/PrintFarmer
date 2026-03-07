@@ -348,6 +348,22 @@ Full design document: `.squad/decisions/inbox/dallas-location-hierarchy-design.m
 
 ---
 
+### 17. UI Tests for New Features (User Directive — Reinforced)
+
+**Author:** Jeff Papiez  
+**Date:** 2026-03-07T23:12:25Z  
+**Status:** TEAM STANDARD — All UI work must include tests
+
+**Directive:** "When the UI changes — whether new components or pages are created, updated, etc. — new UI tests must be created and executed before considering the work complete."
+
+**Scope:** All UI development, new components, page updates.
+
+**Rationale:** Ensures test coverage keeps pace with UI development. Prevents untested UI regressions in production.
+
+**Evidence:** Kane completed 67 comprehensive tests for Printer Groups UI (2026-03-07) validating this standard works at scale.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

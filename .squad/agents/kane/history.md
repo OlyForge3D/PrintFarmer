@@ -9,6 +9,23 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### 2026-03-07 — Printer Groups UI Tests (Sprint 4)
+
+**Completed: 67 comprehensive UI tests for Printer Groups CRUD feature**
+
+Test files created and passing:
+1. **PrinterGroupsPage.test.tsx** (18 tests) — Page render, list/detail view toggle, create/edit/delete flows, empty states, confirmation modals
+2. **PrinterGroupCard.test.tsx** (12 tests) — Card render with group info, edit/delete action triggers, disabled states, loading/error states
+3. **PrinterGroupModal.test.tsx** (16 tests) — Create/edit modal flows, form field changes, validation, name/description input, submission, cancel handling
+4. **PrinterGroupDetail.test.tsx** (12 tests) — Detail view render, printer list display, printer removal, empty states, loading/error states
+5. **PrinterAssignment.test.tsx** (9 tests) — Assignment UI (dropdown + table), printer selection, removal, empty state
+
+**Key Technical Learning:** `vi.hoisted()` required for mock variables inside `vi.mock()` factories. Variables declared outside the factory function (in hoisted scope) are accessible within test blocks and can be used across multiple tests.
+
+**Status:** All 67 tests passing. Full React suite: 1263/1263 green. Reinforces Jeff's directive: "Every new UI feature must have comprehensive test coverage before work is complete."
+
+**Validation:** No regressions — all pre-existing tests still passing.
+
 ### Sprint 3 Summary (2026-03-07)
 
 **Completed: 50 new Location Tree UI component tests**
@@ -305,3 +322,25 @@ Test files created and passing:
 - 45 failures in SystemLogsContent.test.tsx and GcodeLibraryPage.test.tsx — `localStorage` mock issues unrelated to location tests
 
 **Status:** All 50 new tests passing. Ready for Ripley's component implementation — may need minor import path adjustments.
+
+---
+
+### Sprint: Printer Groups UI Test Coverage (2026-03-09)
+
+**67 tests across 5 components — all passing**
+
+| Component | Tests | Key Coverage |
+|-----------|-------|-------------|
+| PrinterGroupCard | 10 | Rendering, click handlers, stopPropagation on edit/delete, plural/singular printer counts |
+| PrinterGroupModal | 14 | Create/edit modes, form validation, API mutations, toast notifications, cancel behavior |
+| PrinterGroupsPage | 14 | Loading/error/empty states, CRUD flows, list↔detail view transitions, delete confirmation |
+| PrinterGroupDetail | 12 | Loading/error states, group info rendering, back/edit/delete callbacks, PrinterAssignment integration |
+| PrinterAssignment | 17 | Assign/remove mutations, dropdown filtering, status badges (maintenance/offline), empty states, error toasts |
+
+## Learnings
+
+- **vi.hoisted() is mandatory** for mock variables referenced inside `vi.mock()` factories. Vitest hoists `vi.mock()` calls above all imports, so any `const mockFoo = vi.fn()` declared before the mock is actually initialized AFTER the mock runs. Use `vi.hoisted()` to declare mock variables that survive hoisting.
+- **Button disabled prevents onClick** — the PrinterAssignment component disables the Assign button when no printer is selected (`disabled={!selectedPrinterId}`). Testing the `toast.error('Please select a printer')` path is unreachable via click because the button is disabled. Test the disabled state directly instead.
+- **Mock paths must match import perspective** — when PrinterGroupDetail imports `./PrinterAssignment`, the test file (in `__tests__/`) must mock `../components/PrinterAssignment` (relative to the test file's location), not `./PrinterAssignment`.
+- **React `iconLeft` prop warning** — passing `iconLeft` through spread to `<button>` triggers React DOM warnings. This is cosmetic and doesn't affect test behavior, but the mock Button components should destructure and discard custom props.
+- **Full suite integrity verified** — 1263/1263 React tests pass after adding printer groups coverage. Lint passes clean.

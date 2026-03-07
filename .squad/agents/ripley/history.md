@@ -9,6 +9,33 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### 2026-03-11 — Printer Groups UI Tests Complete (Sprint 4, Validated by Kane)
+
+**Status:** ✅ Full test coverage complete (67 tests, all passing)
+
+**What Was Tested:** Comprehensive UI test coverage for the Printer Groups CRUD feature built 2026-03-11. Kane validated all 5 components with 67 tests across 5 test files:
+- PrinterGroupsPage.test.tsx (18 tests)
+- PrinterGroupCard.test.tsx (12 tests)
+- PrinterGroupModal.test.tsx (16 tests)
+- PrinterGroupDetail.test.tsx (12 tests)
+- PrinterAssignment.test.tsx (9 tests)
+
+**Coverage Scope:**
+- ✅ CRUD flows (create, read, update, delete)
+- ✅ Form validation and submission
+- ✅ Modal open/close and state reset
+- ✅ TanStack Query loading/error/success states
+- ✅ User interactions (click, type, select)
+- ✅ Error handling and toast feedback
+- ✅ Empty states and disabled conditions
+- ✅ Printer assignment and removal
+
+**Validation:** ✅ All 67 tests passing, ✅ Full React suite 1263/1263 green, ✅ Zero regressions
+
+**Key Learning** (from Kane): `vi.hoisted()` required for mock variables inside `vi.mock()` factories — variables must be declared outside the factory (in hoisted scope) to be accessible in test blocks.
+
+**Outcome:** Fulfills Jeff's directive (2026-03-07): "Every new UI feature must have comprehensive test coverage before work is complete." Printer Groups now has production-ready test coverage.
+
 ### 2026-03-10 - Location Dashboard Frontend Integration (Sprint 4 Day 3)
 
 **Context**: Built Location Dashboards frontend feature, wiring up Lambert's new subtree printers API endpoint.
