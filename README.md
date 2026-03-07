@@ -26,7 +26,8 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 
 ✅ **Multi-Printer Dashboard** - Manage unlimited 3D printers from a single interface  
 ✅ **Real-time Updates** - SignalR WebSocket for live status (temperatures, progress, state)  
-✅ **Location System** - Organize printers by workspace with drag-and-drop assignment  
+✅ **Hierarchical Location System** - Organize printers into custom hierarchies (Warehouse > Floor > Room > Rack)  
+✅ **Auto-Dispatch with 9-Factor Scoring** - Intelligent job assignment based on material, nozzle, build volume, and more  
 ✅ **Printer Discovery** - Auto-detect Moonraker and PrusaLink printers on network  
 ✅ **Automatic Camera Discovery** - Detect and populate camera URLs when importing printers  
 ✅ **Job Queue Management** - Monitor and control print jobs across all printers  
