@@ -368,7 +368,7 @@ public class CatalogController(
         try
         {
             HotendModelDto created = await _catalogService.CreateHotendModelAsync(dto, ct);
-            return CreatedAtAction(nameof(GetHotendsAsync), new { }, created);
+            return CreatedAtAction("GetHotends", new { }, created);
         }
         catch (KeyNotFoundException ex)
         {
@@ -443,7 +443,7 @@ public class CatalogController(
         try
         {
             ExtruderModelDto created = await _catalogService.CreateExtruderModelAsync(dto, ct);
-            return CreatedAtAction(nameof(GetExtrudersAsync), new { }, created);
+            return CreatedAtAction("GetExtruders", new { }, created);
         }
         catch (KeyNotFoundException ex)
         {
@@ -518,7 +518,7 @@ public class CatalogController(
         try
         {
             ToolheadModelDto created = await _catalogService.CreateToolheadModelAsync(dto, ct);
-            return CreatedAtAction(nameof(GetToolheadsAsync), new { }, created);
+            return CreatedAtAction("GetToolheads", new { }, created);
         }
         catch (KeyNotFoundException ex)
         {
@@ -593,7 +593,7 @@ public class CatalogController(
         try
         {
             NozzleModelDto created = await _catalogService.CreateNozzleModelAsync(dto, ct);
-            return CreatedAtAction(nameof(GetNozzlesAsync), new { }, created);
+            return CreatedAtAction("GetNozzles", new { }, created);
         }
         catch (KeyNotFoundException ex)
         {

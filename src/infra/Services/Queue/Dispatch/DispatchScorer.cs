@@ -66,7 +66,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         {
             requiredFilament = await db.FilamentTypes
                 .AsNoTracking()
-                .FirstOrDefaultAsync(f => string.Equals(f.Name, requiredMaterial, StringComparison.OrdinalIgnoreCase) && f.IsActive, ct);
+                .FirstOrDefaultAsync(f => EF.Functions.Like(f.Name, requiredMaterial) && f.IsActive, ct);
         }
 
         List<DispatchScore> results = [];
@@ -172,9 +172,22 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         }
 
         // Factor 6: Printer Model Match
-        // TODO: Upgrade to PrinterGroup compatibility when PrinterGroup entity is implemented (Phase 2)
+        // Updated: Uses PrinterGroup hard-elimination when GcodeFile has a group assigned.
+        // If gcode has a PrinterGroupId, the candidate MUST be in that group or be eliminated.
         FactorScore modelScore = ScoreModelMatch(printer, job.GcodeFile);
         breakdown["ModelMatch"] = modelScore;
+
+        // Factor 10: Printer Group (hard elimination)
+        FactorScore groupScore = ScorePrinterGroup(printer, job.GcodeFile);
+        breakdown["PrinterGroup"] = groupScore;
+        if (groupScore is { IsHardRequirement: true, Score: 0 })
+        {
+            eliminated = true;
+            if (groupScore.EliminationReason is not null)
+            {
+                eliminationReasons.Add(groupScore.EliminationReason);
+            }
+        }
 
         // Factor 7: Queue Depth
         int depth = queueDepths.GetValueOrDefault(printer.Id, 0);
@@ -461,5 +474,28 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
 
         // No preference set — neutral
         return new FactorScore("Preferred", 70, WeightPreferred, 70 * WeightPreferred, false);
+    }
+
+    /// <summary>
+    /// Hard elimination: if the G-code file specifies a PrinterGroupId, the candidate
+    /// printer MUST be in that group. If no group is specified, all printers pass (backward compat).
+    /// Weight is 0 — this is a gate, not a scoring factor.
+    /// </summary>
+    private static FactorScore ScorePrinterGroup(Printer printer, GcodeFile? gcode)
+    {
+        if (gcode?.PrinterGroupId is null)
+        {
+            // No group constraint — backward compatible, all printers pass
+            return new FactorScore("PrinterGroup", 100, 0, 0, false);
+        }
+
+        if (printer.PrinterGroupId == gcode.PrinterGroupId)
+        {
+            return new FactorScore("PrinterGroup", 100, 0, 0, true);
+        }
+
+        // Printer is not in the required group — hard eliminate
+        return new FactorScore("PrinterGroup", 0, 0, 0, true,
+            $"G-code requires printer group '{gcode.PrinterGroupId}' but printer is in group '{printer.PrinterGroupId?.ToString() ?? "none"}'");
     }
 }

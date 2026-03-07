@@ -99,7 +99,7 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
             }
 
             var template = await templateService.CreateTemplateAsync(request);
-            return CreatedAtAction(nameof(GetTemplateAsync), new { id = template.Id }, template);
+            return CreatedAtAction("GetTemplate", new { id = template.Id }, template);
         }
         catch (Exception ex)
         {
@@ -189,7 +189,7 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
             var file = await templateService.AddFileToTemplateAsync(id, request);
             return file is null
                 ? NotFound($"Template {id} not found")
-                : CreatedAtAction(nameof(GetTemplateAsync), new { id }, file);
+                : CreatedAtAction("GetTemplate", new { id }, file);
         }
         catch (Exception ex)
         {

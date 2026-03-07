@@ -99,7 +99,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
             }
 
             GcodeFileDto created = await gcodeService.UploadFileAsync(file, metadata, env.WebRootPath ?? env.ContentRootPath, CancellationToken.None);
-            return CreatedAtAction(nameof(GetFileAsync), new { id = created.Id }, created);
+            return CreatedAtAction("GetFile", new { id = created.Id }, created);
         }
         catch (InvalidOperationException inv) when (string.Equals(inv.Message, "duplicate", StringComparison.OrdinalIgnoreCase))
         {

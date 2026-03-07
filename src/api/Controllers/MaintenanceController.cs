@@ -621,7 +621,7 @@ public class MaintenanceController(
                 performedBy = createdLog.PerformedBy
             });
 
-            return CreatedAtAction(nameof(GetPrinterMaintenanceLogsAsync), new { printerId = createdLog.PrinterId }, createdLog);
+            return CreatedAtAction("GetPrinterMaintenanceLogs", new { printerId = createdLog.PrinterId }, createdLog);
         }
         catch (Exception ex)
         {

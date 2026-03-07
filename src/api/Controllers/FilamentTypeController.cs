@@ -138,7 +138,7 @@ public class FilamentTypeController(
         try
         {
             FilamentTypeDto created = await _filamentService.CreateFilamentTypeAsync(request, ct);
-            return CreatedAtAction(nameof(GetFilamentTypesAsync), new { id = created.Id }, created);
+            return CreatedAtAction("GetFilamentTypes", new { id = created.Id }, created);
         }
         catch (ArgumentException ae)
         {

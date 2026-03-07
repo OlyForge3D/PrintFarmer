@@ -225,7 +225,7 @@ public class JobQueueAnalyticsController(
 
             _webhookService.Enqueue("job.queued", new { jobId = job.Id, jobName = job.Name, priority = job.Priority });
 
-            return CreatedAtAction(nameof(GetAllQueueAsync), new { id = job.Id }, job);
+            return CreatedAtAction("GetAllQueue", new { id = job.Id }, job);
         }
         catch (ArgumentException ex)
         {

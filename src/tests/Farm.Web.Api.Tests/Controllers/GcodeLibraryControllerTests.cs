@@ -137,7 +137,7 @@ public class GcodeLibraryControllerTests
 
         // Assert
         CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
-        Assert.Equal(nameof(GcodeLibraryController.GetFileAsync), createdResult.ActionName);
+        Assert.Equal("GetFile", createdResult.ActionName);
         Assert.Equal(created, createdResult.Value);
     }
 

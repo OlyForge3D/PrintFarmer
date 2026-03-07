@@ -611,6 +611,7 @@ public class JobQueueServiceTests
         var gcodeFile = new GcodeFile
         {
             Id = Guid.NewGuid(),
+            Name = "test.gcode",
             FileName = "test.gcode",
             EstimatedPrintTimeMinutes = 120,
             EstimatedFilamentWeightG = 25.5
