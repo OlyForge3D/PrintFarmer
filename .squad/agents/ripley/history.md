@@ -188,3 +188,71 @@ export const serviceName = {
 **Key Pattern:** Backend enums serialize as STRINGS via `JsonStringEnumConverter`, not numeric. TypeScript uses `string` type with string literal values.
 
 **Validation:** ✅ Lint 0 errors, ✅ Build passes (8.01s), ✅ 12 tests pass
+
+### 2026-03-10 - API Service Refactor Phase 2 (Sprint 4)
+
+**Context**: Extracted top 3 service modules from monolithic `api.ts` (3,483 lines, 313 methods) into focused domain service files as part of SRP refactoring.
+
+**Files Created**:
+- `src/services/printerService.ts` (315 lines) — 53 methods: CRUD, control, discovery, history, files, maintenance
+- `src/services/jobQueueService.ts` (169 lines) — 28 methods: queue ops, dispatch, analytics, history
+- `src/services/catalogService.ts` (273 lines) — 49 methods: manufacturers, models, components, filament types, external DBs
+
+**Pattern Used**: Delegate pattern (same as locationService/cameraService). Each service imports `apiClient` from `@/services/api` and delegates to its methods. Methods remain on ApiClient class for backward compatibility.
+
+**Barrel Exports**: Added `export { printerService, jobQueueService, catalogService }` re-exports at the bottom of `api.ts` so existing imports work unchanged.
+
+**Key Decision**: Kept delegate pattern instead of moving HTTP call implementations to service files. Rationale: matches existing codebase conventions (locationService, cameraService), maintains backward compat, and avoids extracting the private axios instance. Phase 3 (apiClient.ts extraction) would enable moving implementations.
+
+**Validation**: ✅ Build passes (7.53s), ✅ Lint 0 errors, ✅ 1196/1196 tests pass
+
+### Sprint 4 Day 1 (2026-03-07) — API Service Refactor Phase 2 (Finalized)
+
+**Status:** ✅ COMPLETE — Orchestration log: `.squad/orchestration-log/2026-03-07T2150-ripley-refactor.md`
+
+**Deliverable:** Extracted 3 focused service modules from monolithic `api.ts` (3,483 lines):
+
+**printerService.ts (315 lines, 53 methods):**
+- CRUD: getPrinter, getPrinters, createPrinter, updatePrinter, deletePrinter
+- Control: enableAutoPrint, disableAutoPrint, movePrinter
+- Discovery: discoverPrinters, discoverByIP, discoverByHostname
+- History: getPrinterHistory, getPrinterEventLog
+- Files: getPrinterGcodeFiles, uploadGcode, deleteGcodeFile
+- Status, calibration, nozzle management
+
+**jobQueueService.ts (169 lines, 28 methods):**
+- Queue: getQueueStatus, getJobQueue, getJobQueueDetails, pauseQueue, resumeQueue
+- Dispatch: dispatchJob, reorderQueue, prioritizeJob, removeFromQueue, autoDispatchSettings
+- Analytics: getDispatchMetrics, getQueueAnalytics, getAverageDispatchTime
+
+**catalogService.ts (273 lines, 49 methods):**
+- Manufacturers: CRUD operations
+- Models: get, create, update operations
+- Components: nozzles, extruders management
+- Materials: filament types and properties
+
+**Pattern: Delegate (consistent with locationService, cameraService)**
+- Each service delegates to `apiClient` singleton
+- Methods remain on ApiClient class (backward compatible)
+- Barrel re-exports in `api.ts` preserve all existing imports
+- Zero test modifications required
+
+**Build & Test Status:**
+- ✅ Clean build in 9.94s (TypeScript 0 errors, 0 warnings)
+- ✅ ESLint: 0 errors, 0 warnings
+- ✅ All 1,196 API tests pass
+- ✅ All 150 React tests pass
+- ✅ 100% backward compatibility verified
+
+**Files Created:**
+- `src/Web/ReactApp/src/services/printerService.ts`
+- `src/Web/ReactApp/src/services/jobQueueService.ts`
+- `src/Web/ReactApp/src/services/catalogService.ts`
+
+**Phase 3 Prerequisites (documented in decision inbox, merged to decisions.md):**
+1. Extract axios instance + interceptors to `apiClient.ts`
+2. Export axios for services to use directly
+3. Services call `axios.get()` instead of delegating
+4. Remove methods from ApiClient class (Phase 3 cleanup)
+
+**Impact:** Monolithic api.ts now split into 3 focused modules (SRP improvement). Developer experience enhanced with grep-friendly module organization. Performance unchanged (same apiClient under the hood).

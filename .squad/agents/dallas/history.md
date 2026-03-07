@@ -130,3 +130,99 @@
 **Competitor gap confirmed:** Most competitors (SimplyPrint, Bambu, OctoFarm, FlowQ) have NO location hierarchy. 3DPrinterOS has fixed 3-level hierarchy. Nobody offers user-defined location types. This is a real differentiator.
 
 **Decision written to:** `.squad/decisions/inbox/dallas-location-hierarchy-design.md`
+
+### Sprint 4 Scope Definition — 2026-03-09
+
+**Scoped and documented all 4 sprint items with full breakdown:**
+
+1. **Printer Groups** (G-code safety) — PrinterGroup entity + FKs on Printer/GcodeFile. Hard-elimination factor in DispatchScorer. 15 backend files, 4 frontend components + tests. ~40 story points.
+
+2. **Auto-Dispatch EF Migrations** (schema ready) — DispatchSettings + DispatchLog entities. Migrations for PostgreSQL, SQL Server, MySQL. ~15 story points.
+
+3. **Location Dashboards** (Phase 2 UX) — GET /api/locations/{id}/printers/subtree endpoint. LocationDetailPage + printer list component. ~25 story points.
+
+4. **API Service Refactor Phase 2** (code quality) — Extract printerService, jobQueueService, catalogService. Barrel export pattern. ~10 story points (no new functionality, pure refactoring).
+
+**Total: ~90 story points. Duration: 5–7 calendar days (optimal parallelization).**
+
+**Critical path identified:** Item 2 (migrations) should land first (soft dependency for Item 1). Item 4 can start Day 1 in parallel. Items 1 & 3 can run concurrently after Item 2 merges.
+
+**Execution order:** Day 1: Start Items 2 + 4 in parallel. Day 2: Start Item 1 (backend) + Item 3 (backend). Days 3–6: Frontend work. Day 7: Testing + polish.
+
+**Open questions for Jeff:** Printer group cardinality (1:1 vs N:N), G-code backward compat, dashboard subtree scope, DispatchLog retention, API refactor Phase 2 boundaries.
+
+**Document written to:** `.squad/decisions/inbox/dallas-sprint4-scope.md` (25.7 KB, comprehensive breakdown with file paths, dependencies, test strategies, risk mitigation)
+
+### Sprint 4 Day 1 (2026-03-07) — Sprint Planning & Architecture Sign-Off
+
+**Status:** ✅ COMPLETE (DRAFT awaiting user approval) — Orchestration log: `.squad/orchestration-log/2026-03-07T2144-dallas-sprint4.md`
+
+**Deliverable:** Finalized comprehensive Sprint 4 scope document addressing all 4 epic items.
+
+**Sprint 4 Four-Item Breakdown (26.3 KB document):**
+
+1. **Printer Groups (G-code Safety) — ~89 story points**
+   - PrinterGroup entity (Id, Name, Description, CreatedDate, UpdatedDate)
+   - FKs on Printer (nullable) + GcodeFile (nullable)
+   - API endpoints: CRUD operations + printer assignment
+   - Hard-elimination dispatch scoring factor
+   - UI: Printer group assignment modal, auto-grouping helpers
+   - Tests: Entity constraints, API routes, integration scenarios
+
+2. **Auto-Dispatch EF Migrations (Schema Ready) — ~34 story points**
+   - DispatchLog extended: +6 fields (InitiatorUserId, DispatchStrategyUsed, BatchId, RetryCount, ErrorMessage, ExecutionTimeMs)
+   - DispatchSettings entity finalized (AutoDispatchEnabled, PreferredStrategy, MaxConcurrentDispatches, IdleThresholdMinutes, UpdatedAt)
+   - DispatchStatus enum (Pending, InProgress, Success, Failed, RetryScheduled)
+   - Migrations for PostgreSQL, SQL Server, SQLite
+   - Status: **DELIVERED (2026-03-07 by Lambert)**
+
+3. **Location Dashboards Phase 2 (UX + Analytics) — ~156 story points**
+   - Backend: GET /api/locations/{id}/printers/subtree with pagination/filtering
+   - Frontend: LocationDetailPage (tabs: overview, printers, analytics, settings)
+   - Components: LocationPrinterList, LocationAnalyticsPanel, LocationQuickStats
+   - Subtree scope: Clicked level + all descendants
+   - Tests: Query performance (N+1 guard), component interactions, accessibility
+
+4. **API Service Refactor Phase 2 (Code Quality) — ~81 story points**
+   - printerService.ts: 53 methods (CRUD, control, discovery, history, files)
+   - jobQueueService.ts: 28 methods (queue ops, dispatch, analytics)
+   - catalogService.ts: 49 methods (manufacturers, models, components, filaments)
+   - Pattern: Delegate (consistent with locationService, cameraService)
+   - Status: **DELIVERED (2026-03-07 by Ripley)**
+
+**Total Scope:** ~360 story points. Duration: 2–3 weeks with parallelization.
+
+**User Decision Answers (Captured from Jeff Papiez):**
+1. Printer groups: 1:1 mapping (mutually exclusive)
+2. G-code backward compat: Without group = dispatch normally
+3. Location subtree: Clicked level + all descendants
+4. DispatchLog retention: Keep forever (audit trail)
+5. API refactor Phase 2: Exactly 3 services; Phase 3 handles full implementation
+
+**Team Assignments:**
+- **Lambert** (Backend): Printer Groups entity + migration, dispatch scoring integration
+- **Ripley** (Frontend): Location dashboards UI, printer group management UI, API refactor
+- **Kane** (QA): Integration testing, end-to-end dispatch scenarios, location drag-drop validation
+
+**Dependency Chain & Critical Path:**
+- **Hard blocker:** Item 2 (migrations) must land before Item 1 backend work
+- **Parallel tracks:** Item 4 (API refactor) independent, can start Day 1
+- **Soft dependency:** Item 1 backend informs Item 1 frontend
+- **Execution:** Day 1: Items 2 + 4 parallel. Day 2+: Items 1 + 3 parallel. Days 3–6: Frontend. Day 7: QA.
+
+**Key Decisions Documented:**
+- Printer groups are domain-enforced (1:1 at entity save time, not just UI validation)
+- Location subtree requires efficient recursive query (N+1 guard in GET endpoint)
+- API refactor uses delegate pattern to maintain 100% backward compat + zero test changes
+- Phase 3 prerequisites clearly documented (axios extraction, implementation move)
+
+**File Status:** 
+- ✅ DRAFT COMPLETE (26.3 KB specification document)
+- ⏳ PENDING USER APPROVAL (awaiting Jeff sign-off on scope and priorities)
+- 📋 DECISION INBOX MERGED to decisions.md (2026-03-07)
+
+**Artifacts:**
+- Sprint scope: `.squad/decisions/decisions.md` (merged from inbox)
+- User answers: Captured in `copilot-directive-sprint4-answers.md` (merged)
+- Session summary: `.squad/log/2026-03-07-sprint4-day1.md`
+- Architecture decisions: `decisions.md` section "Sprint 4 Scope Decisions"

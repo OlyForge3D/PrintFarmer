@@ -45,3 +45,74 @@ These are patterns to watch for in code review:
    - **Type sync:** When C# adds a field to an API DTO, the TypeScript interface must be updated immediately to prevent silent data loss on round-trips.
 
 **Commit:** 3806a374 (`fix: resolve N+1 query, divide-by-zero, and missing TS field in dispatch`)
+
+---
+
+## Sprint 4 Scope Decisions (2026-03-07)
+
+**Author:** Jeff Papiez (via Dallas scoping session)  
+**Date:** 2026-03-07  
+**Status:** ✅ APPROVED — User directive answers captured
+
+### Key Decisions
+
+1. **Printer Groups Membership:** A printer belongs to exactly ONE group (mutually exclusive enforcement)
+2. **G-Code Backward Compatibility:** G-code without PrinterGroupId still dispatches normally (no group = any printer)
+3. **Location Subtree Query:** Clicking a location includes printers at that level AND all descendants
+4. **DispatchLog Retention Policy:** Keep forever (audit trail + regulatory compliance)
+5. **API Refactor Phase 2 Scope:** Extract exactly 3 services (printers, queue, catalog). Phase 3 handles full implementation migration.
+
+### Impact on Sprint 4
+
+- **Printer Groups:** Requires validation logic (1:1) at entity save time
+- **Location UI:** Recursive query optimization needed for large hierarchies
+- **API Refactor:** Delegate pattern chosen to maintain 100% backward compat + zero test changes
+
+### Files Affected
+
+- `src/infra/Data/Entities/PrinterGroup.cs` (validation)
+- `src/Web/ReactApp/src/services/printerService.ts` (group delegation)
+- `src/Web/ReactApp/src/services/jobQueueService.ts` (queue delegation)
+- `src/Web/ReactApp/src/services/catalogService.ts` (catalog delegation)
+
+---
+
+## API Service Refactor Phase 2 (2026-03-07)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-07  
+**Status:** ✅ IMPLEMENTED
+
+### Decision: Delegate Pattern
+
+Extract 3 service modules (printerService, jobQueueService, catalogService) using **delegate pattern** to match existing locationService/cameraService conventions.
+
+### Why Delegate
+
+1. **Consistency** — locationService and cameraService already use this pattern
+2. **Backward Compatibility** — All 1,196 tests pass without modification
+3. **No Private Exposure** — axios instance stays private on ApiClient; full implementation move deferred to Phase 3
+4. **Incremental** — New code imports from focused files; old code unchanged
+
+### What Was Created
+
+| Service | Lines | Methods | Domain |
+|---------|-------|---------|--------|
+| printerService.ts | 315 | 53 | CRUD, control, discovery, history, files |
+| jobQueueService.ts | 169 | 28 | Queue ops, dispatch, analytics |
+| catalogService.ts | 273 | 49 | Manufacturers, models, components, filaments |
+
+### Phase 3 Prerequisite
+
+To move implementations (not just delegate):
+1. Extract axios instance + interceptors to shared `apiClient.ts`
+2. Export axios for services to use directly
+3. Services call `axios.get()` instead of delegating
+4. Remove methods from ApiClient class (cleanup)
+
+### Impact
+
+- ✅ Zero test changes required
+- ✅ api.ts barrel re-exports all 3 for backward compat
+- ✅ New code should prefer specific service imports
+- ✅ Code SRP improved (monolithic → modular)
