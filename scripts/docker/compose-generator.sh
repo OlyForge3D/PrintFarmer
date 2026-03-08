@@ -63,6 +63,39 @@ else
     unset _elastic_stack_lower
 fi
 
+# Slicing capabilities (depends on architecture)
+SUPPORTS_SLICING="${ENABLE_SLICING:-}"
+SLICING_REASON=""
+
+if [[ -z "${SUPPORTS_SLICING}" ]]; then
+    case "$SYSTEM_ARCH" in
+        arm*|aarch64)
+            SUPPORTS_SLICING=false
+            SLICING_REASON="not supported on architecture $SYSTEM_ARCH"
+            ;;
+        *)
+            SUPPORTS_SLICING=true
+            ;;
+    esac
+else
+    _slicing_lower=$(printf '%s' "$SUPPORTS_SLICING" | tr '[:upper:]' '[:lower:]')
+    case "$_slicing_lower" in
+        true|yes|1)
+            SUPPORTS_SLICING=true
+            SLICING_REASON=""
+            ;;
+        false|no|0)
+            SUPPORTS_SLICING=false
+            SLICING_REASON="explicitly disabled via ENABLE_SLICING=${SUPPORTS_SLICING}"
+            ;;
+        *)
+            SUPPORTS_SLICING=false
+            SLICING_REASON="disabled (unrecognized ENABLE_SLICING value '${SUPPORTS_SLICING}')"
+            ;;
+    esac
+    unset _slicing_lower
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -693,29 +726,33 @@ generate_compose() {
         fi
     fi
     
-    # Conditionally merge orcaslicer-worker addon if enabled
-    local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-    # Parse yes/no and numeric values
-    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
-        if merge_addon_services "$compose_file" "orcaslicer-worker"; then
-            log_info "Merged OrcaSlicer worker service (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
-            addons_merged=true
-        else
-            log_warning "Failed to merge OrcaSlicer worker service, continuing without it"
-        fi
-
-        # Slicer-host always accompanies orca-worker (orchestrator for distributed slicing)
-        if merge_addon_services "$compose_file" "slicer-host"; then
-            log_info "Merged slicer-host service (distributed slicing orchestrator)"
-            addons_merged=true
-            # Switch nginx to the split-mode config that routes /api/slicer to slicer-host
-            sed -i 's|/deploy/nginx/${NGINX_CONFIG:-nginx-proxy.conf}|/deploy/nginx/nginx-proxy-split.conf|' "$compose_file"
-            log_info "Switched nginx config to nginx-proxy-split.conf for slicer routing"
-        else
-            log_warning "Failed to merge slicer-host service, continuing without it"
-        fi
+    # Conditionally merge orcaslicer-worker addon if enabled AND platform supports slicing
+    if [[ "$SUPPORTS_SLICING" != "true" ]]; then
+        log_info "ℹ️  Slicing services disabled${SLICING_REASON:+ ($SLICING_REASON)}"
     else
-        log_info "OrcaSlicer worker service disabled (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
+        local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
+        # Parse yes/no and numeric values
+        if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
+            if merge_addon_services "$compose_file" "orcaslicer-worker"; then
+                log_info "Merged OrcaSlicer worker service (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
+                addons_merged=true
+            else
+                log_warning "Failed to merge OrcaSlicer worker service, continuing without it"
+            fi
+
+            # Slicer-host always accompanies orca-worker (orchestrator for distributed slicing)
+            if merge_addon_services "$compose_file" "slicer-host"; then
+                log_info "Merged slicer-host service (distributed slicing orchestrator)"
+                addons_merged=true
+                # Switch nginx to the split-mode config that routes /api/slicer to slicer-host
+                sed -i 's|/deploy/nginx/${NGINX_CONFIG:-nginx-proxy.conf}|/deploy/nginx/nginx-proxy-split.conf|' "$compose_file"
+                log_info "Switched nginx config to nginx-proxy-split.conf for slicer routing"
+            else
+                log_warning "Failed to merge slicer-host service, continuing without it"
+            fi
+        else
+            log_info "OrcaSlicer worker service disabled (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
+        fi
     fi
     
     # Conditionally merge pgAdmin addon if enabled and using PostgreSQL

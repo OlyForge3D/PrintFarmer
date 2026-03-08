@@ -92,6 +92,7 @@ import {
   OfdImportResult,
   ConnectionDiagnosticsResponse,
   PagedResponse,
+  SystemCapabilities,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -2037,6 +2038,13 @@ export class ApiClient {
 
   async getBasicHealth(): Promise<{ status: string }> {
     const response = await this.client.get<{ status: string }>("/healthz");
+    return response.data;
+  }
+
+  // ============ System capabilities ============
+
+  async getSystemCapabilities(): Promise<SystemCapabilities> {
+    const response = await this.client.get<SystemCapabilities>('/system/capabilities');
     return response.data;
   }
 

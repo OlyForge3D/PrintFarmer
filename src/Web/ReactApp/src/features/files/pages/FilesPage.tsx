@@ -8,6 +8,7 @@ import { HarvestPage } from '@/features/gcode/pages/HarvestPage';
 import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
 import { useLocation, useNavigate } from 'react-router';
 import { useSlicer } from '@/hooks/useSlicer';
+import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 
 type TabId = 'models' | 'gcode' | 'harvest' | 'projects';
 
@@ -76,11 +77,18 @@ export function FilesPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isSlicerAvailable } = useSlicer();
+  const { data: capabilities } = useSystemCapabilities();
   
-  // Filter tabs based on slicer availability
+  // Filter tabs based on slicer availability AND platform capabilities
+  // Use `!== false` so tabs are visible before the capabilities query resolves
   const TABS = useMemo(() => {
-    return ALL_TABS.filter(tab => !tab.requiresSlicer || isSlicerAvailable);
-  }, [isSlicerAvailable]);
+    return ALL_TABS.filter(tab => {
+      if (tab.requiresSlicer && !isSlicerAvailable) return false;
+      if (tab.requiresSlicer && capabilities?.slicingEnabled === false) return false;
+      if (tab.id === 'models' && capabilities?.modelFilesEnabled === false) return false;
+      return true;
+    });
+  }, [isSlicerAvailable, capabilities]);
   
   // Initialize from URL path, then query param, then localStorage
   const [activeTab, setActiveTab] = useState<TabId>(() => {

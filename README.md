@@ -218,6 +218,41 @@ JWT_SECRET=your-secret-key-here
 SERILOG_LEVEL=Information
 ```
 
+### 🍓 ARM / Raspberry Pi Deployment
+
+PrintFarmer runs on ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with automatic graceful degradation — 3D model file support and slicing are disabled since their native libraries (lib3mf, Assimp) lack ARM builds.
+
+**What works on ARM64:**
+- ✅ Full printer fleet management (add, remove, monitor, control)
+- ✅ G-code file upload and print job queuing
+- ✅ Real-time printer status via SignalR
+- ✅ Auto-dispatch and bed-clear confirmation
+- ✅ Network discovery and Spoolman integration
+- ✅ Analytics, statistics, and reporting
+- ✅ All database providers (SQLite, PostgreSQL, MySQL)
+
+**What's disabled on ARM64:**
+- ❌ 3D model file upload (STL, OBJ, STEP, 3MF)
+- ❌ Slicing (OrcaSlicer/PrusaSlicer workers)
+- ❌ 3D model thumbnail generation
+
+**Minimum specs:** Raspberry Pi 4 (4GB RAM) or better. Pi 5 recommended.
+
+```bash
+# Docker deployment (auto-detects ARM and disables unsupported features)
+./scripts/deploy-docker.sh
+
+# Bare metal deployment
+./install.sh
+```
+
+**Force-enable** (if you've compiled native libs for ARM yourself):
+```bash
+PFARM__Platform__ModelFilesEnabled=true PFARM__Slicer__Enabled=true ./install.sh
+```
+
+See **[Deployment Guide](./docs/DEPLOYMENT.md)** for detailed ARM setup.
+
 ## 🔒 Security
 
 - **Authentication**: JWT tokens with secure HttpOnly cookies

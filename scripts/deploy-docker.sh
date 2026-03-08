@@ -151,6 +151,18 @@ if [[ "$SYSTEM_UNAME" == "Darwin" ]]; then
 fi
 # On Linux or other systems, leave DOCKER_BUILD_PLATFORM empty to use system defaults
 
+# ─── ARM platform capability detection ──────────────────────────────────────
+# On ARM (Linux, not macOS Rosetta), disable slicing/model features that lack native binaries
+IS_ARM_PLATFORM=false
+if [[ "$SYSTEM_UNAME" != "Darwin" ]]; then
+    case "$SYSTEM_ARCH" in
+        arm*|aarch64)
+            IS_ARM_PLATFORM=true
+            print_warning "ARM platform detected ($SYSTEM_ARCH) — 3D model and slicing features will be disabled"
+            ;;
+    esac
+fi
+
 # ============================================================================
 # CONSOLIDATED IMAGE DEFINITIONS FOR OFFLINE DEPLOYMENT
 # ============================================================================
@@ -1392,6 +1404,12 @@ load_images_from_tar() {
 cache_orcaslicer() {
     local target_dir="${1:-.}"
     local version="${2:-latest}"
+    
+    # Skip slicer downloads on ARM
+    if [ "$IS_ARM_PLATFORM" = "true" ]; then
+        print_warning "Skipping OrcaSlicer download — not available on ARM architecture"
+        return 0
+    fi
     
     print_header "⬇️ Caching OrcaSlicer Linux AppImage"
     
@@ -4063,6 +4081,19 @@ EXTERNAL_DATAPROTECTION_PATH=${EXTERNAL_DATAPROTECTION_PATH:-}
 EXTERNAL_PGADMIN_PATH=${EXTERNAL_PGADMIN_PATH:-}
 EOF
 
+    # Append ARM platform overrides if running on ARM
+    if [ "$IS_ARM_PLATFORM" = "true" ]; then
+        cat >> "$ENV_FILE" << EOF
+
+# ARM Platform — 3D model and slicing features disabled
+PFARM__Slicer__Enabled=false
+PFARM__Platform__ModelFilesEnabled=false
+PFARM__Platform__ThumbnailGenerationEnabled=false
+PFARM__Platform__Architecture=${SYSTEM_ARCH}
+EOF
+        print_info "ARM platform overrides written to .env"
+    fi
+
     # Small summary for generated environment file: show which sensitive values were included
     mask_secret() {
         local s="$1"
@@ -4508,6 +4539,10 @@ EOF
 
         # Build orcaslicer-binaries layer first if orca worker is enabled (optimized caching)
         # Note: All binary downloading and extraction is now consolidated in Dockerfile.multistage orcaslicer-binaries stage
+        if [ "$IS_ARM_PLATFORM" = "true" ] && [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+            print_warning "Skipping OrcaSlicer worker build — not available on ARM architecture"
+            ENABLE_ORCA_WORKER="no"
+        fi
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
             ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
             print_info "Building orcaslicer-binaries:${ORCA_VERSION} layer (optimized caching via Dockerfile.multistage)..."

@@ -182,6 +182,110 @@ For deployments without internet access:
 - Auto-reused on subsequent deployments
 - No manual flag needed
 
+## ARM / Raspberry Pi Deployment
+
+PrintFarmer supports ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with automatic platform detection and graceful feature degradation.
+
+### How It Works
+
+The installer and deploy scripts detect the CPU architecture at startup. On ARM64:
+- **Slicer services** (OrcaSlicer, PrusaSlicer workers) are excluded from Docker Compose
+- **3D model file handling** (upload, thumbnails, STL/OBJ/STEP/3MF) is disabled
+- **G-code upload, printer management, and all other features** work normally
+- The API exposes `GET /api/system/capabilities` so the frontend hides unavailable UI
+
+### Docker Deployment on ARM
+
+```bash
+# Auto-detects ARM and configures accordingly
+./scripts/deploy-docker.sh --non-interactive
+```
+
+The compose generator automatically:
+- Excludes `orcaslicer-worker` and `slicer-host` services
+- Sets `PFARM__Slicer__Enabled=false` in the API container environment
+- Sets `PFARM__Platform__ModelFilesEnabled=false`
+- Skips OrcaSlicer AppImage download (no ARM64 build available)
+
+### Bare Metal Deployment on ARM
+
+```bash
+# Installer detects ARM and creates appsettings.Platform.json
+./install.sh
+```
+
+The installer creates an `appsettings.Platform.json` override:
+```json
+{
+  "Slicer": { "Enabled": false },
+  "Platform": {
+    "ModelFilesEnabled": false,
+    "ThumbnailGenerationEnabled": false,
+    "Architecture": "arm64"
+  }
+}
+```
+
+### Minimum Hardware Requirements
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| Board | Raspberry Pi 4 | Raspberry Pi 5 |
+| RAM | 4 GB | 8 GB |
+| Storage | 32 GB microSD | 64 GB+ SSD (USB boot) |
+| OS | Raspberry Pi OS 64-bit | Ubuntu Server 24.04 ARM64 |
+
+### Feature Comparison: x86 vs ARM
+
+| Feature | x86/x64 | ARM64 (Pi) |
+|---------|---------|------------|
+| Printer fleet management | ✅ | ✅ |
+| G-code upload & print jobs | ✅ | ✅ |
+| Real-time status (SignalR) | ✅ | ✅ |
+| Auto-dispatch & bed-clear | ✅ | ✅ |
+| Network discovery | ✅ | ✅ |
+| Spoolman integration | ✅ | ✅ |
+| Analytics & reporting | ✅ | ✅ |
+| Multi-database support | ✅ | ✅ |
+| 3D model upload (STL/OBJ/3MF) | ✅ | ❌ |
+| Slicing (OrcaSlicer/PrusaSlicer) | ✅ | ❌ |
+| Model thumbnail generation | ✅ | ❌ |
+
+### Force-Enable (Advanced)
+
+If you've compiled the native libraries (`lib3mf.so`, Assimp) for ARM64 yourself:
+
+```bash
+# Docker
+PFARM__Platform__ModelFilesEnabled=true \
+PFARM__Slicer__Enabled=true \
+./scripts/deploy-docker.sh --non-interactive
+
+# Bare metal
+PFARM__Platform__ModelFilesEnabled=true \
+PFARM__Slicer__Enabled=true \
+./install.sh
+```
+
+### Checking Platform Capabilities
+
+Query the system capabilities endpoint to verify what's enabled:
+```bash
+curl -s http://localhost:5245/api/system/capabilities | jq
+```
+
+Response on ARM64:
+```json
+{
+  "architecture": "Arm64",
+  "slicingEnabled": false,
+  "modelFilesEnabled": false,
+  "thumbnailGenerationEnabled": false,
+  "gcodeUploadEnabled": true,
+  "platformNote": "Running on ARM64 — 3D model and slicing features are disabled"
+}
+```
+
 ## Advanced Features
 
 ### Distributed Slicing (OrcaSlicer Worker)
