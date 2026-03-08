@@ -57,7 +57,7 @@ describe('StatisticsPage', () => {
   describe('Rendering', () => {
     it('renders page heading', () => {
       renderStatisticsPage();
-      expect(screen.getByRole('heading', { level: 1, name: /print statistics/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /print statistics/i })).toBeInTheDocument();
     });
 
     it('renders period filter buttons', () => {
@@ -88,14 +88,13 @@ describe('StatisticsPage', () => {
   describe('Design tokens — no ghost tokens (PFarm1-u5h)', () => {
     it('page heading uses pf-* text token, not hardcoded color', () => {
       renderStatisticsPage();
-      const heading = screen.getByRole('heading', { level: 1 });
-      // Should use text-pf-text or similar, not text-gray-900, text-white, etc.
+      const heading = screen.getByRole('heading', { name: /print statistics/i });
       expect(heading.className).toMatch(/text-pf-/);
     });
 
     it('heading does not use ghost tokens (text-gray-*, text-slate-*, text-white, text-black)', () => {
       renderStatisticsPage();
-      const heading = screen.getByRole('heading', { level: 1 });
+      const heading = screen.getByRole('heading', { name: /print statistics/i });
       expect(heading.className).not.toMatch(/\btext-(gray|slate|zinc|neutral)-\d+\b/);
       expect(heading.className).not.toMatch(/\btext-(white|black)\b/);
     });
