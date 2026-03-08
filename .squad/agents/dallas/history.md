@@ -226,3 +226,79 @@
 - User answers: Captured in `copilot-directive-sprint4-answers.md` (merged)
 - Session summary: `.squad/log/2026-03-07-sprint4-day1.md`
 - Architecture decisions: `decisions.md` section "Sprint 4 Scope Decisions"
+
+### Analytics Architecture — 4 Missing Features (2026-03-09)
+
+**Task:** Architect comprehensive implementation plan for 4 analytics features identified by Brett's competitive analysis.
+
+**Context:** Brett found PrintFarmer has solid analytics foundations (StatisticsService with 5 endpoints, 8 KPI cards, 4 Recharts charts) but lacks Export/Reporting, Unified Dashboard, Correlation Charts, and Predictive Alerts that competitors offer.
+
+**Key findings from codebase examination:**
+
+1. **Existing infrastructure is robust:**
+   - `StatisticsController` has 5 endpoints (summary, jobs-over-time, cost-over-time, filament-by-material, printer-utilization)
+   - `StatisticsService` implements all core aggregation logic with proper date filtering
+   - Frontend: `StatisticsPage` with 8 KPI cards + 4 Recharts visualizations (JobsOverTimeChart, CostOverTimeChart, FilamentByMaterialChart, PrinterUtilizationChart)
+   - TanStack Query hooks: `useStatisticsSummary`, `useJobsOverTime`, `useCostOverTime`, `useFilamentByMaterial`, `usePrinterUtilization`
+   - `recharts` v3.6.0 already installed and extensively used
+   - `jspdf` v4.2.0 and `jspdf-autotable` v5.0.7 already installed (can leverage for PDF export)
+   - `react-csv` v2.2.2 already installed (can leverage for CSV export)
+
+2. **Data model is complete for advanced analytics:**
+   - `PrintJob` has all fields needed: `Status`, `RequiredMaterialType`, `AssignedPrinterId`, `ActualPrintTime`, `ActualFilamentUsage`, `ActualCost`, `FailureReason`
+   - `PrintJobStatistics` one-to-one entity with temperature data (`ActualHotendTemp`, `ActualBedTemp`, `PrintDurationMinutes`)
+   - `PrinterStatistics` cumulative entity with `TotalPrintHours`, `TotalJobsCompleted`, `TotalFilamentUsed`
+   - Join paths exist for correlation queries (PrintJob → PrintJobStatistics, PrintJob → Printer)
+
+3. **Anti-patterns avoided:**
+   - `StatisticsController` injects `DbContext` directly (bypasses repository pattern) — but this is acceptable for read-only analytics queries
+   - Frontend chart components follow consistent pattern: props interface with `data`, `isLoading`, `error`
+   - API client methods follow consistent pattern: `apiClient.get(endpoint)` with TanStack Query hooks
+
+**Architecture decisions:**
+
+1. **Export/Reporting:** New `IReportExportService` with PDF (QuestPDF) and CSV (CsvHelper) generation. Separate endpoints for each export type. Frontend: `ExportMenu` component with blob download pattern.
+
+2. **Unified Dashboard:** Frontend consolidation only. New `BusinessAnalyticsDashboard` page with tabs (Overview, Jobs, Costs, Printers). Reuses all existing endpoints. Keep original `StatisticsPage` as simpler view.
+
+3. **Correlation Charts:** New `ICorrelationAnalyticsService` with 5 methods: material success rates, printer × material performance, temperature vs quality, duration trends, failure reasons. New `CorrelationAnalyticsController` with 5 endpoints. Frontend: 5 new Recharts components in new `CorrelationAnalyticsPage`.
+
+4. **Predictive Alerts:** New `IPredictiveAnalyticsService` with heuristic-based prediction (no ML yet). Methods: job failure prediction, maintenance forecast, active alerts. New `PredictiveAnalyticsController` with 3 endpoints. Frontend: `AlertPanel`, `MaintenanceForecastPanel`, `JobRiskPredictor` components integrated into unified dashboard.
+
+**Build order:** All 4 features are independent and can be built in parallel. No blocking dependencies. Recommended Lambert order: Correlation → Export → Predictive (complexity ascending). Recommended Ripley order: Unified Dashboard → Correlation Charts → Export UI → Predictive UI.
+
+**New backend services:**
+- `IReportExportService` / `ReportExportService` (Feature 1)
+- `ICorrelationAnalyticsService` / `CorrelationAnalyticsService` (Feature 3)
+- `IPredictiveAnalyticsService` / `PredictiveAnalyticsService` (Feature 4)
+
+**New backend controllers:**
+- `StatisticsController` extended with export endpoints (Feature 1)
+- `CorrelationAnalyticsController` (Feature 3)
+- `PredictiveAnalyticsController` (Feature 4)
+
+**New backend DTOs:**
+- `ReportDtos.cs`: `ReportRequest`, `JobHistoryCsvRow`
+- `CorrelationAnalyticsDtos.cs`: 5 DTOs for correlation data
+- `PredictiveAnalyticsDtos.cs`: 7 DTOs for prediction/forecast/alerts
+
+**New frontend pages:**
+- `BusinessAnalyticsDashboard.tsx` (Feature 2)
+- `CorrelationAnalyticsPage.tsx` (Feature 3)
+
+**New frontend components:**
+- 13 new components for charts, tabs, exports, alerts, forecasts
+
+**New frontend hooks:**
+- `useCorrelationAnalytics.ts` with 5 hooks
+- `usePredictiveAnalytics.ts` with 3 hooks
+
+**Dependencies to add:**
+- Backend: `QuestPDF` v2024.12.4, `CsvHelper` v33.0.1
+- Frontend: None (all libraries already installed)
+
+**Effort estimate:** ~104 hours total (~13 days with parallelization). Lambert: ~36 hours. Ripley: ~44 hours. Testing: ~24 hours.
+
+**Plan written to:** `.squad/decisions/inbox/dallas-analytics-architecture.md` (62.5 KB comprehensive specification with exact file paths, endpoint signatures, component names, DTO definitions, and code examples).
+
+**Key reusability win:** Existing `recharts` library handles all new correlation charts. No new chart library needed. All new services extend existing `StatisticsService` patterns. No architectural disruption.

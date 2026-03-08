@@ -29,6 +29,7 @@ import {
   CameraIcon,
   NfcIcon,
   ChartIcon,
+  TrendingUpIcon,
   ExternalLinkIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -129,6 +130,11 @@ const navigation: NavigationElement[] = [
     name: 'Statistics',
     href: '/statistics',
     icon: ChartIcon,
+  },
+  {
+    name: 'Analytics',
+    href: '/analytics',
+    icon: TrendingUpIcon,
   },
   {
     name: 'API Keys',

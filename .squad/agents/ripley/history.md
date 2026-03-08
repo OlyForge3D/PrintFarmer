@@ -443,3 +443,64 @@ export const serviceName = {
 - **Test Results:** 1,293/1,293 tests pass, 0 lint errors
 - **Architecture:** Modular section components enable reuse across printer UIs and simplify future feature additions
 
+
+### 2026-03-09 — Analytics Dashboard Frontend (4 Features per Dallas Architecture)
+
+**Status:** ✅ Complete — Build passes, lint clean, all 4 features implemented
+
+**What Was Built:**
+
+1. **Unified Business Analytics Dashboard** (`/analytics` route)
+   - `src/features/analytics/pages/AnalyticsDashboardPage.tsx` — main page with KPI cards, date range selector (7d/30d/90d/1y/all), tabbed layout (Overview, Performance Correlations, Maintenance Forecast)
+   - Reuses existing statistics hooks and chart components for the overview tab
+   - Added `TrendingUpIcon` to sidebar navigation under Management section
+
+2. **Export/Reporting UI**
+   - `src/features/analytics/components/ExportMenu.tsx` — dropdown menu with 4 export options (PDF Report, Job History CSV, Cost CSV, Utilization CSV)
+   - Uses `apiClient` blob download + programmatic `<a>` click to trigger file download
+   - Loading state during export, toast feedback on success/error
+   - Added 4 new API methods to `apiClient`: `exportPdfReport`, `exportJobHistoryCsv`, `exportCostCsv`, `exportUtilizationCsv`
+
+3. **Performance Correlation Charts**
+   - `CorrelationChartsSection.tsx` — tabbed layout with 5 chart types
+   - `MaterialSuccessRateChart.tsx` — grouped bar chart (total/completed/success rate)
+   - `PrinterMaterialHeatmap.tsx` — grouped bar chart showing printer × material success rates
+   - `TemperatureScatterPlot.tsx` — scatter chart with success/failure coloring
+   - `DurationTrendChart.tsx` — line chart with avg/min/max duration trends
+   - `FailureReasonsChart.tsx` — horizontal bar chart of failure reasons
+   - `useCorrelationAnalytics.ts` — 5 query hooks for all correlation endpoints
+
+4. **Predictive Alerts Panel**
+   - `PredictiveAlertsPanel.tsx` — shows active alerts with severity badges (critical/warning/info)
+   - Positioned at top of analytics dashboard (above KPI cards)
+   - Auto-hides when no alerts exist
+   - `usePredictiveAnalytics.ts` — hooks for active alerts and maintenance forecast
+   - Maintenance forecast section in dashboard's third tab
+
+**Architecture Decisions:**
+- Feature folder: `src/features/analytics/` (separate from `statistics/` per Dallas's architecture)
+- Reused existing statistics hooks rather than duplicating queries
+- All correlation/predictive hooks use `apiClient.get()` pattern (matching existing hooks in `useStatistics.ts`)
+- Used `Tabs` compound component pattern from UI library (not raw HTML tabs)
+- All charts follow existing pattern: Card wrapper → ChartSkeleton → error → empty → ResponsiveContainer
+- 5-minute staleTime for correlation data (reference data), 60-second for alerts (near real-time)
+
+**Files Created (11 new):**
+- `features/analytics/hooks/useCorrelationAnalytics.ts`
+- `features/analytics/hooks/usePredictiveAnalytics.ts`
+- `features/analytics/components/MaterialSuccessRateChart.tsx`
+- `features/analytics/components/PrinterMaterialHeatmap.tsx`
+- `features/analytics/components/TemperatureScatterPlot.tsx`
+- `features/analytics/components/DurationTrendChart.tsx`
+- `features/analytics/components/FailureReasonsChart.tsx`
+- `features/analytics/components/ExportMenu.tsx`
+- `features/analytics/components/PredictiveAlertsPanel.tsx`
+- `features/analytics/components/CorrelationChartsSection.tsx`
+- `features/analytics/pages/AnalyticsDashboardPage.tsx`
+
+**Files Modified (3):**
+- `services/api.ts` — added 4 export blob methods
+- `App.tsx` — added `/analytics` route and import
+- `common/components/Layout.tsx` — added Analytics nav item with TrendingUpIcon
+
+**Validation:** ✅ Build 7.46s, ✅ Lint 0 errors/0 warnings

@@ -254,7 +254,7 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
 
         double previousRate = (double)previousCompleted / previousTotal;
 
-        if (previousRate == 0)
+        if (previousRate < 0.001)
         {
             return recentRate > 0 ? 1.5 : 1.0;
         }
