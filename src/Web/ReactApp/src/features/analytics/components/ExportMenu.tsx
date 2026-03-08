@@ -117,6 +117,7 @@ export const ExportMenu: React.FC<Props> = ({ days }) => {
           onKeyDown={handleMenuKeyDown}
         >
           {EXPORT_OPTIONS.map((opt, i) => (
+            // eslint-disable-next-line local/pf-no-raw-html-controls -- menuitem role requires native button for correct ARIA semantics
             <button
               key={opt.type}
               ref={(el) => { itemRefs.current[i] = el; }}

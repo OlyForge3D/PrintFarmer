@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { LocationSubtreePrinter } from '@/types/api';
+import type { Printer } from '@/types/api';
 
 vi.mock('@/common/components/ui', () => ({
   Card: Object.assign(
@@ -41,24 +41,22 @@ vi.mock('@/common/components/icons/MdiIcons', () => ({
 
 import { LocationPrinterList } from '../components/LocationPrinterList';
 
-const makePrinter = (overrides: Partial<LocationSubtreePrinter> = {}): LocationSubtreePrinter => ({
-  printerId: 'p1',
-  printerName: 'Test Printer',
-  locationId: 'loc1',
-  locationName: 'Test Location',
-  backendType: 'Moonraker',
+const makePrinter = (overrides: Partial<Printer> = {}): Printer => ({
+  id: 'p1',
+  name: 'Test Printer',
+  backend: 0,
+  backendUrl: 'http://localhost',
   isOnline: true,
-  currentState: 'Idle',
-  currentJobName: null,
-  progressPercent: null,
+  isReachable: true,
+  state: 'Idle',
   ...overrides,
-});
+} as Printer);
 
 describe('LocationPrinterList', () => {
-  const printers: LocationSubtreePrinter[] = [
-    makePrinter({ printerId: 'p1', printerName: 'Prusa MK4', isOnline: true, currentState: 'Printing', progressPercent: 75 }),
-    makePrinter({ printerId: 'p2', printerName: 'Voron 2.4', isOnline: true, currentState: 'Idle' }),
-    makePrinter({ printerId: 'p3', printerName: 'Ender 3', isOnline: false, currentState: 'Disconnected' }),
+  const printers: Printer[] = [
+    makePrinter({ id: 'p1', name: 'Prusa MK4', isOnline: true, state: 'Printing', progress: 75 }),
+    makePrinter({ id: 'p2', name: 'Voron 2.4', isOnline: true, state: 'Idle' }),
+    makePrinter({ id: 'p3', name: 'Ender 3', isOnline: false, state: 'Disconnected' }),
   ];
 
   beforeEach(() => {
@@ -79,7 +77,7 @@ describe('LocationPrinterList', () => {
 
   it('filters by search text', () => {
     render(<LocationPrinterList printers={printers} />);
-    const searchInput = screen.getByPlaceholderText('Search printers or locations...');
+    const searchInput = screen.getByPlaceholderText('Search printers...');
     fireEvent.change(searchInput, { target: { value: 'voron' } });
     expect(screen.getByText('Voron 2.4')).toBeInTheDocument();
     expect(screen.queryByText('Prusa MK4')).not.toBeInTheDocument();
@@ -101,7 +99,7 @@ describe('LocationPrinterList', () => {
 
   it('shows filter-no-match message when filters exclude all', () => {
     render(<LocationPrinterList printers={printers} />);
-    const searchInput = screen.getByPlaceholderText('Search printers or locations...');
+    const searchInput = screen.getByPlaceholderText('Search printers...');
     fireEvent.change(searchInput, { target: { value: 'nonexistent' } });
     expect(screen.getByText('No printers match the current filters.')).toBeInTheDocument();
   });
