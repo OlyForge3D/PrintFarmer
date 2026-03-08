@@ -72,3 +72,45 @@ export function useSetAllAutoPrintEnabled() {
     },
   });
 }
+
+export function useConfirmBedClear() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (printerId: string) => {
+      const res = await apiClient.post(`/autoprint/${printerId}/ready`);
+      return res.data;
+    },
+    onSuccess: (_data, printerId) => {
+      qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
+      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
+    },
+  });
+}
+
+export function useSkipNextJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (printerId: string) => {
+      const res = await apiClient.post(`/autoprint/${printerId}/skip`);
+      return res.data;
+    },
+    onSuccess: (_data, printerId) => {
+      qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
+      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
+    },
+  });
+}
+
+export function useCancelAutoPrint() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (printerId: string) => {
+      const res = await apiClient.post(`/autoprint/${printerId}/cancel`);
+      return res.data;
+    },
+    onSuccess: (_data, printerId) => {
+      qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
+      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
+    },
+  });
+}
