@@ -30,6 +30,7 @@ import {
   canPauseOrResume,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
+import { getStatusIndicatorColor } from '@/features/printers/utils/statusColors';
 
 interface CollapsedPrinterCardProps {
   printer: Printer;
@@ -89,13 +90,13 @@ export function CollapsedPrinterCard({
   const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
-  const statusDotClasses = (() => {
-    if (!isOnline) return 'bg-pf-disabled';
-    if (isPrinting) return 'bg-pf-success-bg';
-    if (isPaused) return 'bg-pf-warning';
-    if (isShutdown) return 'bg-pf-error';
-    return 'bg-pf-accent-bg';
-  })();
+  const statusDotClasses = getStatusIndicatorColor({
+    state,
+    isOnline,
+    isPrinting,
+    isPaused,
+    isShutdown,
+  });
 
   const toCamelCase = (str: string): string => {
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();

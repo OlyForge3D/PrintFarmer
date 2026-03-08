@@ -50,6 +50,7 @@ interface NavigationItem {
   requiresSlicer?: boolean;
   children?: NavigationItem[];
   isDivider?: false;
+  isSectionHeader?: false;
 }
 
 interface NavigationDivider {
@@ -57,11 +58,20 @@ interface NavigationDivider {
   isDivider: true;
 }
 
-type NavigationElement = NavigationItem | NavigationDivider;
+interface NavigationSectionHeader {
+  name: string;
+  isSectionHeader: true;
+  requiredRole?: string;
+}
 
-const isDivider = (item: NavigationElement): item is NavigationDivider => item.isDivider === true;
+type NavigationElement = NavigationItem | NavigationDivider | NavigationSectionHeader;
+
+const isDivider = (item: NavigationElement): item is NavigationDivider => 'isDivider' in item && item.isDivider === true;
+const isSectionHeader = (item: NavigationElement): item is NavigationSectionHeader => 'isSectionHeader' in item && item.isSectionHeader === true;
 
 const navigation: NavigationElement[] = [
+  // — Operations —
+  { name: 'Operations', isSectionHeader: true },
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
   {
     name: 'Printers',
@@ -88,6 +98,9 @@ const navigation: NavigationElement[] = [
     icon: HistoryIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
   },
+
+  // — Hardware —
+  { name: 'Hardware', isSectionHeader: true },
   { 
     name: 'Filament Inventory', 
     href: '/spools', 
@@ -103,6 +116,9 @@ const navigation: NavigationElement[] = [
     href: '/nfc-devices',
     icon: NfcIcon
   },
+
+  // — Management —
+  { name: 'Management', isSectionHeader: true },
   {
     name: 'Maintenance',
     href: '/maintenance',
@@ -114,13 +130,14 @@ const navigation: NavigationElement[] = [
     href: '/statistics',
     icon: ChartIcon,
   },
-  { name: '', isDivider: true },
   {
     name: 'API Keys',
     href: '/profile/api-keys',
     icon: KeyIcon
   },
-  { name: '', isDivider: true },
+
+  // — Admin —
+  { name: 'Admin', isSectionHeader: true, requiredRole: 'farm_admin' },
   {
     name: 'Locations',
     href: '/locations',
@@ -232,16 +249,24 @@ export function Layout() {
   // Filter navigation based on user permissions and slicer availability (stable memoization)
   const filteredNavigation = useMemo(() => {
     if (!isAuthenticated) {
-      // For non-authenticated users, show only public navigation (including dividers)
+      // For non-authenticated users, show only public navigation (including section headers)
       return navigation.filter(item => {
-        if (isDivider(item)) return true; // Always show dividers
+        if (isDivider(item)) return true;
+        if (isSectionHeader(item)) {
+          if (item.requiredRole) return false;
+          return true;
+        }
         if (item.requiresSlicer && !isSlicerAvailable) return false;
         return !item.requiredRole && !item.requiredPermission;
       });
     }
     
     return navigation.filter(item => {
-      if (isDivider(item)) return true; // Always show dividers
+      if (isDivider(item)) return true;
+      if (isSectionHeader(item)) {
+        if (item.requiredRole && !hasRole(item.requiredRole)) return false;
+        return true;
+      }
       if (item.requiredRole && !hasRole(item.requiredRole)) return false;
       if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
       if (item.requiresSlicer && !isSlicerAvailable) return false;
@@ -562,6 +587,15 @@ export function Layout() {
                     );
                   }
 
+                  // Handle section headers
+                  if (isSectionHeader(item)) {
+                    return (
+                      <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
+                        <div className="text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">{item.name}</div>
+                      </div>
+                    );
+                  }
+
                   const navItem = item as NavigationItem;
                   const Icon = navItem.icon;
                   const isExpanded = !!computedExpanded[navItem.name];
@@ -639,6 +673,22 @@ export function Layout() {
                   return (
                     <div key={`divider-${item.name || index}`} className="my-1.5">
                       <div className="border-t border-pf-border"></div>
+                    </div>
+                  );
+                }
+
+                // Section headers — hidden when collapsed, subtle uppercase label when expanded
+                if (isSectionHeader(item)) {
+                  if (navbarCollapsed) {
+                    return (
+                      <div key={`section-${item.name}`} className="my-1.5">
+                        <div className="border-t border-pf-border"></div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
+                      <div className="text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">{item.name}</div>
                     </div>
                   );
                 }

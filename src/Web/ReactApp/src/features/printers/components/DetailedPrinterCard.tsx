@@ -7,25 +7,18 @@ import type { Printer, TempTargets, MoveRequest, PrinterBackendCapabilitiesDto }
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
-import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, ControlPadButton, LoadedFilamentCard } from '@/common/components/ui';
+import { PrinterStatusHeader } from '@/features/printers/components/PrinterStatusHeader';
+import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
+import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
+import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
+import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
+import { Button, LoadedFilamentCard } from '@/common/components/ui';
 import { 
-  NozzleIcon, 
-  BedIcon, 
   EditIcon, 
-  PlayIcon, 
-  PauseIcon, 
-  EmergencyStopIcon, 
-  HomeIcon,
-  DisableMotorsIcon,
-  HistoryIcon,
-  RefreshIcon,
   ExternalLinkIcon,
   CameraIcon,
-  SnowflakeIcon,
-  XCircleIcon,
+  HistoryIcon,
   FileIcon,
-  FilamentLoadIcon,
-  FilamentUnloadIcon,
   FilamentChangeIcon,
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -48,32 +41,17 @@ import {
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
 import {
-  bedPresetOptions,
   getPresetTargets,
-  hotendPresetOptions,
-  materialPresets,
   getExtrudeMinTemp,
-  EXTRUDE_DISTANCE_OPTIONS,
   DEFAULT_EXTRUDE_DISTANCE_MM,
-  EXTRUDE_SPEED_OPTIONS,
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
-import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 
 interface DetailedPrinterCardProps {
   printer: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onEdit?: (printer: Printer) => void;
   onDismiss?: () => void;
-}
-
-function formatTemperature(temp: number | undefined): string {
-  if (temp === undefined || temp === null) return '---';
-  return `${temp.toFixed(1)}°C`;
-}
-
-function toCamelCase(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
 export function DetailedPrinterCard({ printer: initialPrinter, backendCapabilities, onEdit, onDismiss }: DetailedPrinterCardProps) {
@@ -142,28 +120,6 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
 
   const homedAxesRaw = printer.homedAxes;
-  const isHomedStateKnown = typeof homedAxesRaw === 'string';
-  const homedAxes = (homedAxesRaw ?? '').toLowerCase();
-  const isXHomed = isHomedStateKnown && homedAxes.includes('x');
-  const isYHomed = isHomedStateKnown && homedAxes.includes('y');
-  const isZHomed = isHomedStateKnown && homedAxes.includes('z');
-  const isXYHomed = isXHomed && isYHomed;
-  const isAllHomed = isXYHomed && isZHomed;
-
-  const statusDotClasses = (() => {
-    if (!isOnline) return 'bg-pf-disabled';
-    if (isPrinting) return 'bg-pf-success-bg';
-    if (isPaused) return 'bg-pf-warning';
-    if (isShutdown) return 'bg-pf-error';
-    return 'bg-pf-accent-bg';
-  })();
-
-  // Update progress bar width
-  useEffect(() => {
-    if (expandedProgressRef.current && printer.progress) {
-      expandedProgressRef.current.style.width = `${Math.max(0, Math.min(100, printer.progress))}%`;
-    }
-  }, [printer.progress]);
 
   // Camera URL handling
   const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
@@ -421,26 +377,15 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
     <div className="relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full min-w-[26rem]">
       {/* Header */}
       <div className="mb-4">
-        {/* Top row: Name + Status Pill (match collapsed card) */}
-        <div className="flex justify-between items-center mb-2 gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
-              {printer.name}
-            </div>
-            {(printer.modelName) && (
-              <div className="text-pf-text-secondary text-xs truncate">
-                {`${printer.modelName || ''}`.trim()}
-              </div>
-            )}
-          </div>
-
-          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-pf-bg-0/4 border border-white/10 text-pf-text-primary">
-            <span className={`h-2 w-2 rounded-full ${statusDotClasses}`} aria-hidden />
-            <span className="text-pf-text-secondary">
-              {isOnline ? toCamelCase(state) : 'Offline'}
-            </span>
-          </div>
-        </div>
+        <PrinterStatusHeader
+          name={printer.name}
+          modelName={printer.modelName}
+          state={state}
+          isOnline={isOnline}
+          isPrinting={isPrinting}
+          isPaused={isPaused}
+          isShutdown={isShutdown}
+        />
 
         {/* Subtle separator above actions (match collapsed card) */}
         <div className="h-px w-full bg-pf-bg-0/10 mb-2" aria-hidden />
@@ -562,6 +507,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             <div
               ref={expandedProgressRef}
               className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
+              style={{ width: `${Math.max(0, Math.min(100, printer.progress))}%` }}
             >
               <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, printer.progress))) }%</span>
             </div>
@@ -570,363 +516,80 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       )}
 
       {/* Temps Section */}
-      <div className="mb-2">
-        <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">Temps</div>
-        <div className="space-y-1">
-          <div className="flex justify-end gap-1 items-stretch h-8 pb-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={temperatureActionPending || !canCooldownNow}
-              onClick={() => handleApplyPreset('cooldown')}
-              title="Cooldown"
-              aria-label="Cooldown"
-              className="shrink-0 px-2!"
-              iconCenter={<SnowflakeIcon className={`h-4 w-4 ${((printer.hotendTarget ?? 0) > 0 || (printer.bedTarget ?? 0) > 0) ? 'text-pf-accent' : 'text-pf-text-secondary'}`} />}
-            >
-            </Button>
-            <div className="relative w-24">
-              <Select
-                value=""
-                disabled={temperatureActionPending || !canSetTemperaturesNow}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value) {
-                    handleApplyPreset(value);
-                  }
-                }}
-                className="h-8 text-[10px] uppercase tracking-wide font-semibold pr-6! border-transparent! bg-transparent! enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
-              >
-                <option value="">PRESETS</option>
-                {materialPresets.map((preset) => (
-                  <option key={preset.value} value={preset.value}>{preset.label}</option>
-                ))}
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-[minmax(0,1fr)_3rem_4.75rem_5rem_1.5rem] gap-2 pb-1 text-[10px] uppercase tracking-wide text-pf-text-secondary">
-            <span>Name</span>
-            <span className="text-right">State</span>
-            <span className="text-right">Current</span>
-            <span className="text-right">Target</span>
-            <span></span>
-          </div>
-
-          <TemperatureControlRow
-            icon={<NozzleIcon className="w-4 h-4 text-pf-error" isOn={(printer.hotendTarget ?? 0) > 0} />}
-            label="Hotend"
-            stateLabel={(printer.hotendTarget ?? 0) > 0 ? 'on' : 'off'}
-            liveReading={formatTemperature(printer.hotendTemp)}
-            value={hotendTemp}
-            onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
-            onKeyDown={handleHotendTempKeyDown}
-            disabled={temperatureActionPending || !canSetTemperaturesNow}
-            presetOptions={hotendPresetOptions}
-            onPresetSelect={(preset) => {
-              void handleApplySingleHeaterPreset('hotend', preset);
-            }}
-          />
-
-          <TemperatureControlRow
-            icon={<BedIcon className="w-4 h-4 text-pf-accent" isOn={(printer.bedTarget ?? 0) > 0} />}
-            label="Bed"
-            stateLabel={(printer.bedTarget ?? 0) > 0 ? 'on' : 'off'}
-            liveReading={formatTemperature(printer.bedTemp)}
-            value={bedTemp}
-            onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
-            onKeyDown={handleBedTempKeyDown}
-            disabled={temperatureActionPending || !canSetTemperaturesNow}
-            presetOptions={bedPresetOptions}
-            onPresetSelect={(preset) => {
-              void handleApplySingleHeaterPreset('bed', preset);
-            }}
-          />
-        </div>
-      </div>
+      <TemperatureControlSection
+        hotendTemp={hotendTemp}
+        bedTemp={bedTemp}
+        hotendTarget={printer.hotendTarget}
+        bedTarget={printer.bedTarget}
+        hotendCurrent={printer.hotendTemp}
+        bedCurrent={printer.bedTemp}
+        temperatureActionPending={temperatureActionPending}
+        canSetTemperatures={canSetTemperaturesNow}
+        canCooldown={canCooldownNow}
+        onHotendTempChange={setHotendTemp}
+        onBedTempChange={setBedTemp}
+        onHotendTempKeyDown={handleHotendTempKeyDown}
+        onBedTempKeyDown={handleBedTempKeyDown}
+        onApplyPreset={handleApplyPreset}
+        onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
+      />
 
       {/* Move and Control Section - Side by Side */}
       <div className="mb-2">
-        {/* Row 1: Labels and Pads side by side */}
         <div className="flex gap-4 items-start flex-wrap">
-          {/* Left Column: Move */}
-          <div className="flex flex-col gap-2 items-start flex-1 min-w-48">
-            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-              Move
-            </div>
-            <div className="flex gap-2 items-start">
-              {/* XY Pad */}
-              <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
-                {/* Top row */}
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleHome()}
-                  title="Home all axes"
-                  padSize="small"
-                  className={getHomeButtonStyle(isHomedStateKnown, isAllHomed).className}
-                  style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
-                >
-                  <HomeIcon className="h-4 w-4" />
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleMove('Y', step)}
-                  padSize="small"
-                >
-                  ▲
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={!canDisableMotorsNow}
-                  onClick={() => handleControlAction('disable-motors')}
-                  title="Disable Motors (M84)"
-                  padSize="small"
-                >
-                  <DisableMotorsIcon className="h-4 w-4" />
-                </ControlPadButton>
-                
-                {/* Middle row */}
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleMove('X', -step)}
-                  padSize="small"
-                >
-                  ◀
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleHome('xy')}
-                  title="Home X/Y"
-                  padSize="small"
-                  className={getHomeButtonStyle(isHomedStateKnown, isXYHomed).className}
-                  style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
-                >
-                  <HomeIcon className="h-4 w-4" />
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleMove('X', step)}
-                  padSize="small"
-                >
-                  ▶
-                </ControlPadButton>
-                
-                {/* Bottom row */}
-                <div></div>
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleMove('Y', -step)}
-                  padSize="small"
-                >
-                  ▼
-                </ControlPadButton>
-                <div></div>
-              </div>
+          {/* Movement Control */}
+          <MovementControlSection
+            moveX={moveX}
+            moveY={moveY}
+            moveZ={moveZ}
+            step={step}
+            extrudeStep={extrudeStep}
+            extrudeSpeed={extrudeSpeed}
+            printerX={printer.x}
+            printerY={printer.y}
+            printerZ={printer.z}
+            homedAxes={homedAxesRaw}
+            hotendTemp={printer.hotendTemp}
+            extrudeMinTemp={extrudeMinTemp}
+            movementActionPending={movementActionPending}
+            canMove={canMoveNow}
+            canDisableMotors={canDisableMotorsNow}
+            canSetStep={canSetStepNow}
+            canManualMove={canManualMoveNow}
+            canExtrude={canExtrudeNow}
+            onMoveXChange={setMoveX}
+            onMoveYChange={setMoveY}
+            onMoveZChange={setMoveZ}
+            onStepChange={handleStepChange}
+            onExtrudeStepChange={setExtrudeStep}
+            onExtrudeSpeedChange={setExtrudeSpeed}
+            onMove={handleMove}
+            onHome={handleHome}
+            onDisableMotors={() => handleControlAction('disable-motors')}
+            onExtrude={handleExtrude}
+          />
 
-              {/* Z Pad */}
-              <div className="flex flex-col gap-1 w-fit">
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleMove('Z', step)}
-                  padSize="small"
-                >
-                  Z+
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleHome('z')}
-                  title="Home Z"
-                  padSize="small"
-                  className={getHomeButtonStyle(isHomedStateKnown, isZHomed).className}
-                  style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
-                >
-                  <HomeIcon className="h-4 w-4" />
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={movementActionPending || !canMoveNow}
-                  onClick={() => handleMove('Z', -step)}
-                  padSize="small"
-                >
-                  Z-
-                </ControlPadButton>
-              </div>
-
-              {/* Extrude Pad - vertical sliders flanking E+/E- buttons */}
-              <div className="flex gap-1.5 items-center">
-                {/* Length vertical slider */}
-                <div className="flex flex-col items-center gap-0.5">
-                  <span className="text-[8px] text-pf-text-tertiary uppercase leading-none">len</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={EXTRUDE_DISTANCE_OPTIONS.length - 1}
-                    step={1}
-                    value={(EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) >= 0 ? (EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) : 0}
-                    onChange={(e) => setExtrudeStep(EXTRUDE_DISTANCE_OPTIONS[Number(e.target.value)])}
-                    disabled={!canExtrudeNow}
-                    className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                    style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
-                    aria-label="Extrude distance"
-                  />
-                  <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeStep}mm</span>
-                </div>
-
-                {/* E+ / E- buttons */}
-                <div className="flex flex-col gap-1 w-fit">
-                  <ControlPadButton
-                    disabled={movementActionPending || !canExtrudeNow}
-                    onClick={() => handleExtrude('extrude')}
-                    title={`Extrude filament (min ${extrudeMinTemp}°C)`}
-                    aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
-                    padSize="small"
-                  >
-                    E+
-                  </ControlPadButton>
-                  <div className="h-8 w-8" />
-                  <ControlPadButton
-                    disabled={movementActionPending || !canExtrudeNow}
-                    onClick={() => handleExtrude('retract')}
-                    title={`Retract filament (min ${extrudeMinTemp}°C)`}
-                    aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
-                    padSize="small"
-                  >
-                    E-
-                  </ControlPadButton>
-                </div>
-
-                {/* Speed vertical slider */}
-                <div className="flex flex-col items-center gap-0.5">
-                  <span className="text-[8px] text-pf-text-tertiary uppercase leading-none">spd</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={EXTRUDE_SPEED_OPTIONS.length - 1}
-                    step={1}
-                    value={(EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) >= 0 ? (EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) : 0}
-                    onChange={(e) => setExtrudeSpeed(EXTRUDE_SPEED_OPTIONS[Number(e.target.value)])}
-                    disabled={!canExtrudeNow}
-                    className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                    style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
-                    aria-label="Extrude speed"
-                  />
-                  <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeSpeed}mm/s</span>
-                </div>
-              </div>
-            </div>
-            {/* Move distance slider */}
-            <MoveDistanceSlider value={step} onChange={handleStepChange} disabled={!canSetStepNow} />
-          </div>
-
-          {/* Right Column: Control */}
+          {/* Right Column: Control and Filament */}
           <div className="flex flex-col gap-2 items-start">
-            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-              Control
-            </div>
-            <div className="grid grid-cols-3 gap-1 w-fit">
-              {/* Control buttons row - 3 equal-sized buttons */}
-              <ControlPadButton
-                disabled={controlActionPending || !canPauseOrResumeNow}
-                onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
-                title={isPaused ? 'Resume' : 'Pause'}
-                padSize="small"
-              >
-                {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
-              </ControlPadButton>
-              <ControlPadButton
-                disabled={controlActionPending || !canCancelNow}
-                onClick={() => handleControlAction('cancel')}
-                title="Cancel"
-                padSize="small"
-              >
-                <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
-              </ControlPadButton>
-              <ControlPadButton
-                variant={isShutdown ? 'secondary' : 'danger'}
-                disabled={controlActionPending || !canEmergencyStopNow}
-                onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
-                title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-                padSize="small"
-              >
-                {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
-              </ControlPadButton>
-            </div>
+            <PrinterActionBar
+              isPaused={isPaused}
+              isShutdown={isShutdown}
+              controlActionPending={controlActionPending}
+              canPauseOrResume={canPauseOrResumeNow}
+              canCancel={canCancelNow}
+              canEmergencyStop={canEmergencyStopNow}
+              onControlAction={handleControlAction}
+            />
             
             {/* Filament Macros - capability-based */}
             {support.supportsFilamentControl && (
-              <div className="flex flex-col gap-1 mt-2">
-                <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
-                  Filament
-                </div>
-                <div className="grid grid-cols-3 gap-1 w-fit">
-                  <ControlPadButton
-                    disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                    onClick={() => handleFilamentAction('load')}
-                    title="Load Filament"
-                    padSize="small"
-                  >
-                    <FilamentLoadIcon className="w-4 h-4" />
-                  </ControlPadButton>
-                  <ControlPadButton
-                    disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                    onClick={() => handleFilamentAction('unload')}
-                    title="Unload Filament"
-                    padSize="small"
-                  >
-                    <FilamentUnloadIcon className="w-4 h-4" />
-                  </ControlPadButton>
-                  <ControlPadButton
-                    disabled={filamentActionPending || !canFilamentChange({ isOnline, isEnabled, support })}
-                    onClick={() => handleFilamentAction('change')}
-                    title="Change Filament (M600)"
-                    padSize="small"
-                  >
-                    <FilamentChangeIcon className="w-4 h-4" />
-                  </ControlPadButton>
-                </div>
-              </div>
+              <FilamentControlSection
+                filamentActionPending={filamentActionPending}
+                canFilamentControl={canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                canFilamentChange={canFilamentChange({ isOnline, isEnabled, support })}
+                onFilamentAction={handleFilamentAction}
+              />
             )}
-          </div>
-        </div>
-
-        {/* Row 2: Axis Fields - 4 column grid with bracket-style position labels */}
-        <div className="grid grid-cols-4 gap-2 mt-3 w-72 pt-2">
-          <MovementInput
-            axis="X"
-            currentPosition={printer.x}
-            disabled={movementActionPending || !canManualMoveNow}
-            value={moveX}
-            onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-            className="w-full!"
-          />
-          <MovementInput
-            axis="Y"
-            currentPosition={printer.y}
-            disabled={movementActionPending || !canManualMoveNow}
-            value={moveY}
-            onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-            className="w-full!"
-          />
-          <MovementInput
-            axis="Z"
-            currentPosition={printer.z}
-            disabled={movementActionPending || !canManualMoveNow}
-            value={moveZ}
-            onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-            className="w-full!"
-          />
-          <div className="pt-2">
-            <ControlPadButton
-              disabled={movementActionPending || !canManualMoveNow || (moveX === '' && moveY === '' && moveZ === '')}
-              onClick={async () => {
-                if (moveX !== '') await handleMove('X', Number(moveX));
-                if (moveY !== '') await handleMove('Y', Number(moveY));
-                if (moveZ !== '') await handleMove('Z', Number(moveZ));
-              }}
-              title="Go to position"
-              padSize="small"
-            >
-              GO
-            </ControlPadButton>
           </div>
         </div>
       </div>
