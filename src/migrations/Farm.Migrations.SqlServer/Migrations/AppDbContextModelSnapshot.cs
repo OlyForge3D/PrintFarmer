@@ -212,6 +212,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("DispatchMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("DispatchedByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<Guid>("PrintJobId")
                         .HasColumnType("uniqueidentifier");
 
@@ -229,9 +248,23 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
+                    b.Property<string>("ScoringDetails")
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTimeOffset>("UpdatedDate")
+                        .HasColumnType("datetimeoffset");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("DispatchedAt");
 
                     b.HasIndex("PrintJobId");
 
@@ -256,8 +289,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<int>("IdleThresholdSeconds")
                         .HasColumnType("int");
+
+                    b.Property<string>("LoadBalancingStrategy")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<int>("MaxConcurrentDispatches")
                         .HasColumnType("int");
@@ -267,6 +308,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<DateTimeOffset>("UpdatedDate")
+                        .HasColumnType("datetimeoffset");
 
                     b.HasKey("Id");
 
@@ -278,10 +322,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                             Id = 1,
                             AutoDispatchEnabled = false,
                             AutoDispatchMode = "Manual",
+                            CreatedDate = new DateTimeOffset(new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                             IdleThresholdSeconds = 30,
+                            LoadBalancingStrategy = "BestFit",
                             MaxConcurrentDispatches = 3,
                             MinimumScoreThreshold = 0.5,
-                            UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                            UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            UpdatedDate = new DateTimeOffset(new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
                         });
                 });
 
@@ -571,6 +618,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double?>("PrintTemperature")
                         .HasColumnType("float");
 
+                    b.Property<Guid?>("PrinterGroupId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uniqueidentifier");
 
@@ -620,6 +670,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("HealthStatus");
 
                     b.HasIndex("LastHealthCheckDate");
+
+                    b.HasIndex("PrinterGroupId");
 
                     b.HasIndex("PrinterModelId");
 
@@ -2656,6 +2708,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Password")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("PrinterGroupId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -2683,10 +2738,41 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("ModelId");
 
+                    b.HasIndex("PrinterGroupId");
+
                     b.HasIndex("ServerUrl")
                         .IsUnique();
 
                     b.ToTable("Printers");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("PrinterGroups");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
@@ -3910,6 +3996,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .IsRequired();
 
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
+                        .WithMany()
+                        .HasForeignKey("PrinterGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Farm.Infrastructure.Domain.PrinterModel", "PrinterModel")
                         .WithMany()
                         .HasForeignKey("PrinterModelId")
@@ -3921,6 +4012,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.NoAction);
 
                     b.Navigation("Folder");
+
+                    b.Navigation("PrinterGroup");
 
                     b.Navigation("PrinterModel");
 
@@ -4378,11 +4471,18 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
+                        .WithMany("Printers")
+                        .HasForeignKey("PrinterGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Location");
 
                     b.Navigation("Manufacturer");
 
                     b.Navigation("Model");
+
+                    b.Navigation("PrinterGroup");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
@@ -4785,6 +4885,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Statistics");
 
                     b.Navigation("Toolheads");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
+                {
+                    b.Navigation("Printers");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
