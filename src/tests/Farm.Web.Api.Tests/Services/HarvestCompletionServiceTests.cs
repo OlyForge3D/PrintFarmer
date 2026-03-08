@@ -240,25 +240,17 @@ public class HarvestCompletionServiceTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_OnException_LogsAndContinues()
+    public async Task ProcessOperationsAsync_OnException_Throws()
     {
         // Arrange
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        // Act - service should handle exception gracefully without crashing
-        await _service.StartAsync(CancellationToken.None);
+        // Act & Assert - the exception propagates from ProcessOperationsAsync;
+        // ExecuteAsync catches it and keeps the service alive (tested via StartAsync/StopAsync below)
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None));
 
-        // Give the background loop time to encounter the exception
-        await Task.Delay(TimeSpan.FromMilliseconds(500));
-
-        try
-        {
-            await _service.StopAsync(CancellationToken.None);
-        }
-        catch (OperationCanceledException) { }
-
-        // Assert - the service stopped gracefully (no unhandled exception)
-        _harvestRepoMock.Verify(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        _harvestRepoMock.Verify(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }
