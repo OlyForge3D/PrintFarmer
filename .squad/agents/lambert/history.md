@@ -360,3 +360,59 @@ DB_PROVIDER=sqlserver dotnet ef migrations add AddLocationDispatchEntities \
 **Session Log**: `.squad/log/2026-03-11-sprint4-day3.md`
 
 **Status:** Sprint 4 infrastructure complete. Ready for E2E validation and deployment.
+
+## Sprint 5: Analytics Backend Implementation
+
+### Date: 2026-03-12
+
+### Overview
+Implemented analytics backend per Dallas's architecture plan (`.squad/decisions/inbox/dallas-analytics-architecture.md`).
+
+### Changes
+
+#### New Files Created:
+- **DTOs** (3 files in `src/infra/Dtos/`):
+  - `ReportDtos.cs` — ReportRequest and JobHistoryCsvRow records
+  - `CorrelationAnalyticsDtos.cs` — 5 DTO records for material/printer/temperature analytics
+  - `PredictiveAnalyticsDtos.cs` — 6 DTO records for prediction, maintenance, alerts
+
+- **Service Interfaces** (3 files in `src/infra/Services/Statistics/`):
+  - `IReportExportService.cs` — PDF/CSV export contract
+  - `ICorrelationAnalyticsService.cs` — Performance correlation contract
+  - `IPredictiveAnalyticsService.cs` — Predictive analytics contract
+
+- **Service Implementations** (3 files in `src/infra/Services/Statistics/`):
+  - `ReportExportService.cs` — QuestPDF PDF generation + CsvHelper CSV export
+  - `CorrelationAnalyticsService.cs` — 5 correlation query methods using LINQ GroupBy
+  - `PredictiveAnalyticsService.cs` — Heuristic prediction engine with configurable thresholds
+
+- **Controllers** (3 files in `src/api/Controllers/`):
+  - `ReportExportController.cs` — 4 endpoints under `/api/statistics/export/`
+  - `CorrelationAnalyticsController.cs` — 5 endpoints under `/api/correlation-analytics/`
+  - `PredictiveAnalyticsController.cs` — 3 endpoints under `/api/predictive-analytics/`
+
+#### Modified Files:
+- `src/infra/Farm.Infrastructure.csproj` — Added QuestPDF 2025.1.0 and CsvHelper 33.0.1
+- `src/api/Infrastructure/ServiceCollectionExtensions.cs` — 3 new scoped service registrations
+
+#### Fixed Pre-existing Test Files:
+- `src/tests/Farm.Web.Api.Tests/Services/Statistics/CorrelationAnalyticsServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/Statistics/ReportExportServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/Statistics/PredictiveAnalyticsServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Controllers/Analytics/AnalyticsControllerIntegrationTests.cs` (route fixes)
+
+### Learnings
+- `PrintJobStatistics.NozzleTemperature` is `int?`, not `double ActualHotendTemp`
+- `PrintJobStatistics.BedTemperature` is `int?`, not `double ActualBedTemp`
+- `PrintJobStatistics.ActualDurationMs` is `long?` — convert via `/ 60000.0` for minutes
+- `Printer.ModelId` not `PrinterModelId`, `Backend` is `int` (cast needed)
+- `AppDbContext.PrinterStatisticsSet` not `PrinterStatistics` (expression-bodied property)
+- `PrintJobStatus` enum is in `namespace Farm.Infrastructure;`, not `Farm.Infrastructure.Dtos`
+- QuestPDF 2024.12.4 doesn't exist; resolved to 2025.1.0
+- JWT Bearer auth in test environment: GET requests pass without token, POST requests require auth
+- `SlicerDisabledIntegrationTests.NonSlicerEndpoints_WhenSlicerDisabled_StillWork` is flaky (timing-dependent)
+
+### Validation
+- ✅ Build: 0 errors, 0 warnings
+- ✅ Tests: 2035/2035 pass (1587 API + 448 slicer)
+- ✅ Formatted with `dotnet format`

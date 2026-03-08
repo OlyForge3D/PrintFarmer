@@ -164,8 +164,11 @@ public static class ServiceCollectionExtensions
         RegisterImportingServices(services);
         RegisterCatalogServices(services);
 
-        // Statistics service (depends on database)
+        // Statistics services (depends on database)
         _ = services.AddScoped<Farm.Infrastructure.Services.Statistics.IStatisticsService, Farm.Infrastructure.Services.Statistics.StatisticsService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Statistics.IReportExportService, Farm.Infrastructure.Services.Statistics.ReportExportService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Statistics.ICorrelationAnalyticsService, Farm.Infrastructure.Services.Statistics.CorrelationAnalyticsService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Statistics.IPredictiveAnalyticsService, Farm.Infrastructure.Services.Statistics.PredictiveAnalyticsService>();
 
         // Print job queue services (API-owned, not slicer-module)
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueDataService, Farm.Infrastructure.Services.Queue.QueueDataService>();
