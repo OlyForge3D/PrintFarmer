@@ -61,15 +61,19 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
 
     public async Task<List<MaintenanceForecastDto>> ForecastMaintenanceAsync(int? days, CancellationToken ct = default)
     {
+        var horizon = days ?? 90;
         var printers = await _db.Printers.ToListAsync(ct);
+        var printerIds = printers.Select(p => p.Id).ToList();
+
+        var allStats = await _db.Set<PrinterStatistics>()
+            .Where(s => printerIds.Contains(s.PrinterId))
+            .ToDictionaryAsync(s => s.PrinterId, ct);
+
         var forecasts = new List<MaintenanceForecastDto>();
 
         foreach (var printer in printers)
         {
-            var stats = await _db.Set<PrinterStatistics>()
-                .FirstOrDefaultAsync(s => s.PrinterId == printer.Id, ct);
-
-            if (stats is null)
+            if (!allStats.TryGetValue(printer.Id, out var stats))
             {
                 continue;
             }
@@ -80,22 +84,30 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
 
             if (stats.TotalPrintHours > NozzleWarningHours)
             {
-                tasks.Add(new MaintenanceTaskDto
+                var daysUntilDue = EstimateDaysRemaining(stats.TotalPrintHours, NozzleReplacementHours, dailyRate);
+                if (daysUntilDue <= horizon)
                 {
-                    TaskName = "Nozzle Replacement",
-                    EstimatedDaysUntilDue = EstimateDaysRemaining(stats.TotalPrintHours, NozzleReplacementHours, dailyRate),
-                    Priority = stats.TotalPrintHours > NozzleReplacementHours * 0.96 ? "High" : "Medium",
-                });
+                    tasks.Add(new MaintenanceTaskDto
+                    {
+                        TaskName = "Nozzle Replacement",
+                        EstimatedDaysUntilDue = daysUntilDue,
+                        Priority = stats.TotalPrintHours > NozzleReplacementHours * 0.96 ? "High" : "Medium",
+                    });
+                }
             }
 
             if (stats.TotalPrintHours > HotendWarningHours)
             {
-                tasks.Add(new MaintenanceTaskDto
+                var daysUntilDue = EstimateDaysRemaining(stats.TotalPrintHours, HotendReplacementHours, dailyRate);
+                if (daysUntilDue <= horizon)
                 {
-                    TaskName = "Hotend Replacement",
-                    EstimatedDaysUntilDue = EstimateDaysRemaining(stats.TotalPrintHours, HotendReplacementHours, dailyRate),
-                    Priority = stats.TotalPrintHours > HotendReplacementHours * 0.95 ? "High" : "Medium",
-                });
+                    tasks.Add(new MaintenanceTaskDto
+                    {
+                        TaskName = "Hotend Replacement",
+                        EstimatedDaysUntilDue = daysUntilDue,
+                        Priority = stats.TotalPrintHours > HotendReplacementHours * 0.95 ? "High" : "Medium",
+                    });
+                }
             }
 
             if (tasks.Count > 0)

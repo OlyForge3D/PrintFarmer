@@ -42,9 +42,9 @@ export const PredictiveAlertsPanel: React.FC = () => {
         Predictive Alerts ({alerts.length})
       </h3>
       <div className="space-y-3">
-        {alerts.map((alert, idx) => (
+        {alerts.map((alert) => (
           <div
-            key={`${alert.alertType}-${idx}`}
+            key={`${alert.alertType}-${alert.message}`}
             className="flex flex-col gap-1 rounded-md border border-pf-border bg-pf-bg-1 p-3"
           >
             <div className="flex items-center gap-2">

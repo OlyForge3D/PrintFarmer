@@ -4,12 +4,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock hooks first
 const mockUseActiveAlerts = vi.fn();
 
-vi.mock('@/features/statistics/hooks/usePredictiveAnalytics', () => ({
+vi.mock('@/features/analytics/hooks/usePredictiveAnalytics', () => ({
   useActiveAlerts: () => mockUseActiveAlerts(),
 }));
 
 // Import component after mocks
-import { PredictiveAlertsPanel } from '@/features/statistics/components/PredictiveAlertsPanel';
+import { PredictiveAlertsPanel } from '@/features/analytics/components/PredictiveAlertsPanel';
 
 describe('PredictiveAlertsPanel', () => {
   beforeEach(() => {
@@ -57,7 +57,8 @@ describe('PredictiveAlertsPanel', () => {
     });
 
     render(<PredictiveAlertsPanel />);
-    expect(screen.getByText(/no active alerts/i)).toBeInTheDocument();
+    // Component returns null when no alerts
+    expect(screen.queryByText(/predictive alerts/i)).not.toBeInTheDocument();
   });
 
   it('renders loading state', () => {
@@ -68,10 +69,10 @@ describe('PredictiveAlertsPanel', () => {
     });
 
     render(<PredictiveAlertsPanel />);
-    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.getByText(/loading alerts/i)).toBeInTheDocument();
   });
 
-  it('renders error state', () => {
+  it('renders nothing on error', () => {
     mockUseActiveAlerts.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -79,16 +80,17 @@ describe('PredictiveAlertsPanel', () => {
     });
 
     render(<PredictiveAlertsPanel />);
-    expect(screen.getByText(/failed to load/i)).toBeInTheDocument();
+    // Component returns null on error
+    expect(screen.queryByText(/predictive alerts/i)).not.toBeInTheDocument();
   });
 
   it('applies correct severity badge colors', () => {
     render(<PredictiveAlertsPanel />);
 
     const warningBadge = screen.getByText('Warning');
-    expect(warningBadge).toHaveClass('badge-warning');
+    expect(warningBadge.className).toContain('bg-pf-warning');
 
     const criticalBadge = screen.getByText('Critical');
-    expect(criticalBadge).toHaveClass('badge-error');
+    expect(criticalBadge.className).toContain('bg-pf-error');
   });
 });

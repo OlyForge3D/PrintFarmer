@@ -166,9 +166,9 @@ const MaintenanceForecastSection: React.FC<MaintenanceForecastSectionProps> = ({
         <Card key={forecast.printerId} className="p-4">
           <h4 className="mb-2 font-semibold text-pf-text-primary">{forecast.printerName}</h4>
           <div className="space-y-2">
-            {forecast.upcomingTasks.map((task, idx) => (
+            {forecast.upcomingTasks.map((task) => (
               <div
-                key={`${task.taskName}-${idx}`}
+                key={`${forecast.printerId}-${task.taskName}`}
                 className="flex items-center justify-between rounded-md border border-pf-border bg-pf-bg-1 px-3 py-2"
               >
                 <span className="text-sm text-pf-text-primary">{task.taskName}</span>

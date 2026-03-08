@@ -97,7 +97,7 @@ export const ExportMenu: React.FC<Props> = ({ days }) => {
       {open && (
         <div
           className="absolute right-0 z-30 mt-1 w-48 rounded-md border border-pf-border bg-pf-bg-0 py-1 shadow-lg"
-          role="menu"
+          role="list"
         >
           {EXPORT_OPTIONS.map((opt) => (
             <Button

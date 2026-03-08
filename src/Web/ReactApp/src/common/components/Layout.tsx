@@ -29,7 +29,6 @@ import {
   CameraIcon,
   NfcIcon,
   ChartIcon,
-  TrendingUpIcon,
   ExternalLinkIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';

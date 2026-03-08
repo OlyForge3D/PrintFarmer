@@ -6,7 +6,7 @@
 public record ReportRequest
 {
     /// <summary>
-    /// Optional number of days to filter. If null, returns all-time data.
+    /// Optional number of days to filter. If null, defaults to 365 days for exports (capped at 10,000 records).
     /// </summary>
     public int? Days { get; init; }
 }
