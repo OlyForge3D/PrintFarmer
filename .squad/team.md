@@ -19,6 +19,7 @@
 | 📝 Ash | Documentation Specialist | .squad/agents/ash/charter.md | Active |
 | 🔍 Brett | Researcher | .squad/agents/brett/charter.md | Active |
 | ⚙️ Parker | DevOps & Deployment Engineer | .squad/agents/parker/charter.md | Active |
+| 🎨 Newt | Designer (Industrial UI) | .squad/agents/newt/charter.md | Active |
 | 📋 Scribe | Session Logger | .squad/agents/scribe/charter.md | Active |
 | 🔄 Ralph | Work Monitor | — | Active |
 

@@ -14,6 +14,7 @@ How to decide who handles what.
 | Documentation, API docs, user guides, README | Ash | API reference, user docs, changelogs, migration guides, config docs |
 | Research, competitive analysis, features | Brett | Market research, competitor analysis, feature recommendations, trends |
 | DevOps, Docker, deployment, CI/CD, infra | Parker | Dockerfiles, compose, deploy scripts, GitHub Actions, install automation |
+| UI/UX design, visual quality, styling, themes, design system | Newt | Component aesthetics, color systems, layout, spacing, dark theme, design tokens, visual audits |
 | Scope & priorities | Dallas | What to build next, trade-offs, decisions |
 | Async issue work (bugs, tests, small features) | @copilot 🤖 | Well-defined tasks matching capability profile |
 | Session logging | Scribe | Automatic — never needs routing |

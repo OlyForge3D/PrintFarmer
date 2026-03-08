@@ -353,3 +353,124 @@ export interface LocationSubtreePrinter {
 - Add sorting options (by name, status, location)
 - Add "expand all locations" toggle in printer list
 - Consider caching subtree results with longer staleTime if API performance becomes an issue
+
+---
+
+## UI/UX Design Audit — PrintFarmer React Frontend (2026-03-10)
+
+**Author:** Newt (Designer — Industrial UI)  
+**Status:** ✅ AUDIT COMPLETE — Findings for review  
+**Scope:** Full codebase audit of `src/Web/ReactApp/src/`
+
+### Executive Summary
+
+PrintFarmer has a **solid design system foundation** — the CSS custom property token architecture, three-theme support, Tailwind integration, and component library are well-built. The industrial design intent is visible: Bebas Neue headings, dark-first palettes, compact printer cards with status indicators.
+
+However, execution is **uneven across features**. The core (printers, dashboard, layout) follows the design system well. Satellite features (statistics, slicer, some admin pages) have **drifted significantly** — using non-existent tokens, hardcoded colors, and bypassing the component library. This creates a "two app" feel that undermines professionalism.
+
+**Bottom line:** The bones are great. Consistency is the problem. This needs a token hygiene pass, component decompositions, and standardized patterns for empty/loading/error states.
+
+### 🔴 Critical Issues (Actively Hurt Usability)
+
+**C1: Ghost Token References** (~20+ instances)
+- Files: `StatisticsPage.tsx`, `SettingRow.tsx`, `*Editor.tsx`, viewer components
+- Non-existent tokens: `text-pf-text`, `bg-pf-primary`, `bg-pf-surface`, `bg-pf-hover`, `hover:bg-pf-bg-3`
+- Impact: Invisible text, transparent backgrounds, broken hover states
+- Fix: Replace with correct tokens (`text-pf-text-primary`, `bg-pf-accent-bg`, `bg-pf-bg-1`, `bg-pf-bg-2`)
+- **Priority:** P0
+
+**C2: SlicerConfigModal — Entirely Light-Theme Hardcoded**
+- File: `SlicerConfigModal.tsx` (20+ occurrences)
+- Issue: Hardcoded Tailwind grays (`bg-gray-50`, `text-gray-600`, `border-gray-200`)
+- Impact: Near-invisible borders and unreadable text in default dark theme
+- Fix: Replace all stock Tailwind colors with `pf-` tokens. Use `Input` and `Select` from UI library.
+- **Priority:** P0
+
+**C3: 446 Non-Design-System Color Usages Across Features**
+- Scope: `features/**/*.tsx` — 446 instances of `bg-slate-*`, `bg-gray-*`, `text-gray-*`, `border-gray-*`
+- Issue: Nearly 450 color references bypass design system entirely. Won't respond to theme changes.
+- Impact: Theme switching broken. Visual inconsistency signals "work in progress."
+- Fix: Batch-replace by priority:
+  1. `text-gray-*` / `text-slate-*` → `text-pf-text-primary` / `-secondary` / `-tertiary`
+  2. `bg-gray-*` / `bg-slate-*` → `bg-pf-bg-0` / `-1` / `-2`
+  3. `border-gray-*` / `border-slate-*` → `border-pf-border` / `-light`
+  4. Direct semantic colors → `pf-success`, `pf-error`, `pf-warning`, `pf-accent`
+- **Priority:** P1 (systematic sweep, can be done incrementally)
+
+### 🟡 Important Issues (Significant Quality Gaps)
+
+**I1: StatisticsPage Bypasses PageTemplate**
+- File: `StatisticsPage.tsx`
+- Issue: Builds own layout from scratch — raw `<div>` with manual `<h1>`. No `PageTemplate`, no page icon, different padding.
+- Impact: Header height, font treatment, and spacing shift when navigating to/from Statistics.
+- Fix: Wrap in `PageTemplate` with icon and move filter buttons into `actions` slot.
+
+**I2: DetailedPrinterCard — 1,037-Line God Component**
+- File: `DetailedPrinterCard.tsx`
+- Issue: Single component handles status, temperature, movement, filament, camera, browser, history, spool picker, progress, actions.
+- Fix: Extract into composable sections: `PrinterStatusHeader`, `TemperatureControlSection`, `MovementControlSection`, `FilamentControlSection`, `PrinterActionBar`.
+
+**I3: Duplicated Status Color Logic**
+- Files: `CollapsedPrinterCard.tsx`, `DetailedPrinterCard.tsx`
+- Issue: Both compute `statusDotClasses` independently using raw Tailwind colors instead of design tokens.
+- Impact: Status indication won't adapt to themes. Duplication will drift.
+- Fix: Create shared `getStatusIndicatorColor(state, isOnline)` utility returning `pf-` token classes.
+
+**I4: No Standardized Empty State Component**
+- Scope: Multiple feature pages
+- Issue: Empty states are ad-hoc. Dashboard: `<div className="p-8 text-center"><h2>No Printers Found</h2></div>` — plain text, no icon, no illustration.
+- Fix: Create shared `<EmptyState icon={} title="" description="" action={<Button>} />` component.
+
+**I5: Loading State Inconsistency**
+- Scope: Dashboard, feature pages, chart components
+- Issue: Three different loading patterns coexist (colored rectangles, Skeleton components, animate-pulse, custom spinner)
+- Fix: Standardize on existing `Skeleton` component system. Replace Dashboard's ad-hoc loading bars.
+
+**I6: Select Component Missing Dropdown Chevron**
+- File: `common/components/ui/Select.tsx`
+- Issue: Sets `appearance-none` and reserves `pr-7` for chevron, but **no custom chevron is rendered**. Selects indistinguishable from text inputs.
+- Fix: Add positioned `ChevronDownIcon` inside wrapper div.
+
+**I7: Navigation Sidebar — 17+ Items Without Grouping**
+- File: `common/components/Layout.tsx`
+- Issue: 17+ nav items with only bare dividers. No section headers for scannable landmarks.
+- Fix: Add section headers:
+  - **Operations**: Dashboard, Printers, Files, Slice, Print Queue
+  - **Hardware**: Cameras, NFC Devices, Filament Inventory
+  - **Management**: Maintenance, Statistics
+  - **Admin**: Locations, Catalog, Users, Tags, Webhooks, Workers, Settings, System
+
+### 🟢 Polish — Refinements for Good → Great
+
+| Item | Issue | Fix |
+|---|---|---|
+| P1 | Badge variant tokens undefined | Define `pf-warning-bg`, `pf-success-text` tokens |
+| P2 | Heading typography too aggressive | Limit Bebas Neue to `h1`/`h2`. Use Inter for `h3`–`h6`. |
+| P3 | Large Tailwind safelist (~180+) | Audit and remove unused entries |
+| P4 | 110 hardcoded white/black references | `bg-white` → `bg-pf-bg-0`. Keep `text-white` only on colored backgrounds. |
+| P5 | User menu dropdown lacks click-outside dismiss | Add `useClickOutside` hook or backdrop overlay |
+
+### ✅ Strengths — Already Done Well
+
+| Strength | Notes |
+|---|---|
+| **Design system architecture** | CSS custom properties + Tailwind bridge, 3 themes, high-contrast, reduced motion, print styles |
+| **Component library quality** | Button (10 variants), Card (sub-components), Modal (focus management), FormField, Input, Tabs |
+| **PageTemplate consistency** | 40+ pages use it for uniform layout |
+| **Dark-first philosophy** | GitHub Dark default, PrintFarmer Dark variant, proper light alternative |
+| **Accessibility foundations** | Focus-visible, skip link, aria-live announcements, role="toolbar", reduced motion |
+| **Printer card industrial feel** | Status dots, Bebas Neue names, compact action toolbars, temperature displays |
+| **Skeleton loading components** | Purpose-built: PrinterCardSkeleton, FormSkeleton, QueueCardSkeleton, TableSkeleton |
+
+### Recommended Priority Order
+
+1. **C1** Ghost tokens — Quick fix, high impact, fixes rendering bugs
+2. **C2** SlicerConfigModal — Core workflow, visually broken
+3. **I6** Select chevron — Small fix, large usability improvement
+4. **I4** Empty state component — Create once, use everywhere
+5. **I1** StatisticsPage layout — Quick PageTemplate wrap
+6. **C3** Token sweep — Systematic, batch by feature area
+7. **I5** Loading consistency — Standardize on Skeleton system
+8. **I3** Status color utility — Extract, share, theme-ify
+9. **I7** Nav grouping — Visual organization improvement
+10. **I2** DetailedPrinterCard decomposition — Larger refactor
