@@ -62,7 +62,7 @@ export function PageTemplate({
           <div className="flex justify-between items-center mb-4">
             <div>
               <h2 className="text-2xl font-bold text-pf-text-primary flex items-center">
-                {Icon && <Icon className="h-6 w-6 mr-2" />}
+                {Icon && <Icon className="h-6 w-6 mr-2" aria-hidden="true" />}
                 {title}
               </h2>
               {subtitle && (

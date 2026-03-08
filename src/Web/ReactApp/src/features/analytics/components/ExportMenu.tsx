@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/common/components/ui';
 import { DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
@@ -39,22 +39,21 @@ function buildFilename(type: ExportType): string {
   return names[type];
 }
 
-async function fetchExport(type: ExportType, days?: number): Promise<Blob> {
-  const params = days ? `?days=${days}` : '';
-  const endpoints: Record<ExportType, string> = {
-    pdf: `/statistics/export/pdf${params}`,
-    'jobs-csv': `/statistics/export/jobs-csv${params}`,
-    'cost-csv': `/statistics/export/cost-csv${params}`,
-    'utilization-csv': `/statistics/export/utilization-csv${params}`,
+function fetchExport(type: ExportType, days?: number): Promise<Blob> {
+  const fetchers: Record<ExportType, (d?: number) => Promise<Blob>> = {
+    pdf: (d) => apiClient.exportPdfReport(d),
+    'jobs-csv': (d) => apiClient.exportJobHistoryCsv(d),
+    'cost-csv': (d) => apiClient.exportCostCsv(d),
+    'utilization-csv': (d) => apiClient.exportUtilizationCsv(d),
   };
-  const response = await apiClient.get(endpoints[type], { responseType: 'blob' });
-  return response.data as Blob;
+  return fetchers[type](days);
 }
 
 export const ExportMenu: React.FC<Props> = ({ days }) => {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -64,9 +63,25 @@ export const ExportMenu: React.FC<Props> = ({ days }) => {
     }
     if (open) {
       document.addEventListener('mousedown', handleClickOutside);
+      itemRefs.current[0]?.focus();
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
+
+  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const items = itemRefs.current.filter(Boolean) as HTMLButtonElement[];
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+
+    if (e.key === 'Escape') {
+      setOpen(false);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      items[(currentIndex + 1) % items.length]?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(currentIndex - 1 + items.length) % items.length]?.focus();
+    }
+  }, []);
 
   const handleExport = async (type: ExportType) => {
     setOpen(false);
@@ -89,7 +104,7 @@ export const ExportMenu: React.FC<Props> = ({ days }) => {
         iconLeft={<DownloadIcon />}
         loading={exporting}
         onClick={() => setOpen((prev) => !prev)}
-        aria-haspopup="true"
+        aria-haspopup="menu"
         aria-expanded={open}
       >
         Export
@@ -97,18 +112,21 @@ export const ExportMenu: React.FC<Props> = ({ days }) => {
       {open && (
         <div
           className="absolute right-0 z-30 mt-1 w-48 rounded-md border border-pf-border bg-pf-bg-0 py-1 shadow-lg"
-          role="list"
+          role="menu"
+          aria-label="Export options"
+          onKeyDown={handleMenuKeyDown}
         >
-          {EXPORT_OPTIONS.map((opt) => (
-            <Button
+          {EXPORT_OPTIONS.map((opt, i) => (
+            // eslint-disable-next-line local/pf-no-raw-html-controls -- menuitem role requires native button for correct ARIA semantics
+            <button
               key={opt.type}
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start rounded-none"
+              ref={(el) => { itemRefs.current[i] = el; }}
+              role="menuitem"
+              className="w-full px-3 py-1.5 text-left text-sm text-pf-text-primary hover:bg-pf-hover transition-colors"
               onClick={() => handleExport(opt.type)}
             >
               {opt.label}
-            </Button>
+            </button>
           ))}
         </div>
       )}

@@ -246,8 +246,7 @@ public class HarvestCompletionServiceTests
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        // Act & Assert - the exception propagates from ProcessOperationsAsync;
-        // ExecuteAsync catches it and keeps the service alive (tested via StartAsync/StopAsync below)
+        // Act & Assert - the exception propagates from ProcessOperationsAsync
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None));
 
