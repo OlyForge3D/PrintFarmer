@@ -21,3 +21,23 @@
 - **Test coverage:** 10 tests added for StatisticsPage PageTemplate validation (structure, formatted values, filter buttons)
 - **Validation:** 1,233/1,233 tests pass, full regression guard in place
 - **Migration path:** Clear pattern established for ~30 additional empty state migrations in future sprints
+
+### Batch 3: Printer Card Decomposition (2026-03-07)
+- **PFarm1-qhu - Status Color Utility**: Created shared `statusColors.ts` utility to eliminate duplicate status indicator logic
+  - Function `getStatusIndicatorColor()` returns consistent pf-* token classes for all printer states
+  - Maps offline/printing/paused/error/idle states to `bg-pf-disabled`, `bg-pf-success-bg animate-pulse`, `bg-pf-warning`, `bg-pf-error`, `bg-pf-accent-bg`
+  - Refactored both CollapsedPrinterCard and DetailedPrinterCard to use shared utility
+  - Eliminates 20+ lines of duplicate statusDotClasses logic
+- **PFarm1-4tc - DetailedPrinterCard Decomposition**: Broke 1037-line god component into 5 focused section components
+  - Created `PrinterStatusHeader` (name, status dot, online/offline badge) - 52 lines
+  - Created `TemperatureControlSection` (hotend/bed temps, presets, set-temp controls) - 151 lines
+  - Created `MovementControlSection` (XYZ movement, homing, extrusion, manual position inputs) - 347 lines
+  - Created `FilamentControlSection` (load/unload/change filament macros) - 54 lines
+  - Created `PrinterActionBar` (pause/resume/cancel/emergency stop) - 62 lines
+  - Refactored DetailedPrinterCard to compose these sections - reduced from 1037 to 701 lines
+  - Each section receives props from parent DetailedPrinterCard — no duplicate API calls or state
+  - All existing functionality preserved — pure refactor with no behavior changes
+  - All sections use pf-* design tokens exclusively
+- **Test Results:** 1,293/1,293 tests pass, 0 lint errors
+- **Architecture:** Modular section components enable reuse across printer UIs and simplify future feature additions
+
