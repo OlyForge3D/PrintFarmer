@@ -20,7 +20,6 @@ public class PredictiveAnalyticsController(IPredictiveAnalyticsService predictiv
     /// Predicts job failure likelihood based on historical patterns.
     /// </summary>
     [HttpPost("predict-job-failure")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(JobFailurePredictionDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> PredictJobFailureAsync(
         [FromBody] PredictionRequest request, CancellationToken ct)

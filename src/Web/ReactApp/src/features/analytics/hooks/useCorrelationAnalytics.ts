@@ -19,7 +19,7 @@ export interface PrinterMaterialPerformance {
 
 export interface TemperatureQualityCorrelation {
   jobId: string;
-  hotendTemp: number;
+  nozzleTemp: number;
   bedTemp: number;
   material: string;
   durationMinutes: number;

@@ -36,7 +36,7 @@ export const TemperatureScatterPlot: React.FC<Props> = ({ data, isLoading, error
         <ResponsiveContainer width="100%" height="90%">
           <ScatterChart margin={{ top: 16, right: 24, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis type="number" dataKey="hotendTemp" name="Hotend °C" unit="°C" tick={{ fontSize: 12 }} />
+            <XAxis type="number" dataKey="nozzleTemp" name="Nozzle °C" unit="°C" tick={{ fontSize: 12 }} />
             <YAxis type="number" dataKey="bedTemp" name="Bed °C" unit="°C" />
             <ZAxis type="number" dataKey="durationMinutes" range={[20, 200]} name="Duration" />
             <Tooltip cursor={{ strokeDasharray: '3 3' }} />

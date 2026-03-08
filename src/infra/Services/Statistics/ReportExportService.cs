@@ -24,9 +24,12 @@ public class ReportExportService(
     {
         QuestPDF.Settings.License = LicenseType.Community;
 
-        var summary = await _statisticsService.GetSummaryAsync(request.Days, ct);
-        var utilization = await _statisticsService.GetPrinterUtilizationAsync(request.Days, ct);
-        var filament = await _statisticsService.GetFilamentByMaterialAsync(request.Days, ct);
+        var summary = await _statisticsService.GetSummaryAsync(request.Days, ct)
+            ?? new StatisticsSummaryDto();
+        var utilization = await _statisticsService.GetPrinterUtilizationAsync(request.Days, ct)
+            ?? [];
+        var filament = await _statisticsService.GetFilamentByMaterialAsync(request.Days, ct)
+            ?? [];
 
         var document = Document.Create(container =>
         {
@@ -50,16 +53,13 @@ public class ReportExportService(
 
     public async Task<byte[]> GenerateJobHistoryCsvAsync(ReportRequest request, CancellationToken ct = default)
     {
-        var since = request.Days.HasValue ? DateTime.UtcNow.AddDays(-request.Days.Value) : (DateTime?)null;
-        var query = _db.Set<PrintJob>().AsQueryable();
+        var days = request.Days ?? 365;
+        var since = DateTime.UtcNow.AddDays(-days);
 
-        if (since.HasValue)
-        {
-            query = query.Where(j => j.QueuedAt >= since.Value);
-        }
-
-        var jobs = await query
+        var jobs = await _db.Set<PrintJob>()
+            .Where(j => j.QueuedAt >= since)
             .OrderByDescending(j => j.QueuedAt)
+            .Take(10000)
             .Select(j => new JobHistoryCsvRow
             {
                 JobName = j.Name,
