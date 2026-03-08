@@ -632,4 +632,110 @@ public class DispatchScorerPrinterGroupTests : IAsyncLifetime
         score.EliminationReasons.Should().NotBeEmpty();
         score.EliminationReasons.Should().Contain(r => r.Contains("requires printer group"), "reason should explain group mismatch");
     }
+
+    [Fact]
+    [Trait("Category", "DispatchScorer")]
+    public async Task ScorePrintersForJob_PrinterPendingBedClear_IsEliminated()
+    {
+        Guid jobId, printerId;
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            Manufacturer manufacturer = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = $"TestMfr_{Guid.NewGuid():N}",
+                Url = "https://test.com"
+            };
+            db.Manufacturers.Add(manufacturer);
+
+            PrinterModel model = new()
+            {
+                Id = Guid.NewGuid(),
+                ManufacturerId = manufacturer.Id,
+                Name = "Test Model",
+                MaxBedTemp = 100
+            };
+            db.PrinterModels.Add(model);
+
+            FilamentType? filament = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name == "PLA");
+            if (filament is null)
+            {
+                filament = new FilamentType
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "PLA",
+                    IsActive = true
+                };
+                db.FilamentTypes.Add(filament);
+            }
+
+            model.SupportedFilamentTypes.Add(filament);
+
+            FolderNode rootFolder = await db.Set<FolderNode>().FirstAsync(f => f.Path == "/" && f.FolderType == "gcode");
+
+            printerId = Guid.NewGuid();
+            Printer printer = new()
+            {
+                Id = printerId,
+                Name = "BedFullPrinter",
+                ServerUrl = "http://192.168.1.99",
+                Backend = (int)PrinterBackend.Moonraker,
+                IsEnabled = true,
+                IsAvailable = true,
+                InMaintenance = false,
+                ModelId = model.Id,
+                ManufacturerId = manufacturer.Id,
+                AutoPrintEnabled = true,
+                AutoPrintState = AutoPrintState.PendingReady
+            };
+            db.Printers.Add(printer);
+
+            GcodeFile gcodeFile = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "test.gcode",
+                FileName = $"{Guid.NewGuid()}.gcode",
+                FilePath = "/gcode/",
+                FolderId = rootFolder.Id,
+                FileHash = Guid.NewGuid().ToString("N"),
+                RequiredMaterial = "PLA",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                UploadedAt = DateTime.UtcNow
+            };
+            db.GcodeFiles.Add(gcodeFile);
+
+            PrintJob job = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "Test Job",
+                GcodeFileId = gcodeFile.Id,
+                Status = PrintJobStatus.Queued,
+                Priority = 1,
+                RequiredMaterialType = "PLA",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                QueuedAt = DateTime.UtcNow
+            };
+            db.PrintJobs.Add(job);
+            jobId = job.Id;
+
+            await db.SaveChangesAsync();
+        }
+
+        List<DispatchScore> scores;
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            DispatchScorer scorer = new(db, NullLogger<DispatchScorer>.Instance);
+            scores = await scorer.ScorePrintersForJobAsync(jobId);
+        }
+
+        DispatchScore? score = scores.FirstOrDefault(s => s.PrinterId == printerId);
+        score.Should().NotBeNull();
+        score!.Eliminated.Should().BeTrue("printer with PendingReady bed state should be eliminated");
+        score.EliminationReasons.Should().Contain(r => r.Contains("bed clear"));
+    }
 }

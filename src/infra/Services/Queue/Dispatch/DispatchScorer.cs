@@ -242,6 +242,11 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             issues.Add("disabled");
         }
 
+        if (printer.AutoPrintState == AutoPrintState.PendingReady)
+        {
+            issues.Add("waiting for bed clear confirmation");
+        }
+
         if (issues.Count > 0)
         {
             string reason = $"Printer is {string.Join(", ", issues)}";
