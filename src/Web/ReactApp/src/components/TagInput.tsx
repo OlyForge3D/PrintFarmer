@@ -275,7 +275,7 @@ export const TagInput: React.FC<TagInputProps> = ({
 
         {isLoading && (
           <div className="absolute right-3 top-2.5">
-            <div className="animate-spin h-5 w-5 text-indigo-600" />
+            <div className="animate-spin h-5 w-5 text-pf-accent" />
           </div>
         )}
 

@@ -114,8 +114,8 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
 
   if (error) {
     return (
-      <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-        <p className="text-sm text-red-400">Failed to load fleet statistics</p>
+      <div className="bg-pf-error/10 border border-pf-error/30 rounded-lg p-4">
+        <p className="text-sm text-pf-error">Failed to load fleet statistics</p>
       </div>
     );
   }

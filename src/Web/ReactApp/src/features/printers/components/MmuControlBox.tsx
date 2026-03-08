@@ -82,9 +82,9 @@ function gateStatusLabel(status: MmuGateStatus): string {
 function gateStatusColor(status: MmuGateStatus): string {
   switch (status) {
     case MmuGateStatus.Disabled: return 'text-pf-text-tertiary';
-    case MmuGateStatus.Empty: return 'text-red-400';
-    case MmuGateStatus.Available: return 'text-green-400';
-    default: return 'text-yellow-400';
+    case MmuGateStatus.Empty: return 'text-pf-error';
+    case MmuGateStatus.Available: return 'text-pf-success';
+    default: return 'text-pf-warning';
   }
 }
 
@@ -134,7 +134,7 @@ function GateSlot({ gate, isActive, onSelect }: GateSlotProps) {
       className={`
         flex flex-col items-center gap-1 p-2 rounded-lg border transition-colors cursor-pointer min-w-[70px]
         ${isActive
-          ? 'border-blue-500 bg-blue-500/10'
+          ? 'border-pf-accent bg-pf-accent-bg/15'
           : 'border-pf-border bg-pf-surface-secondary hover:bg-pf-surface-tertiary'}
       `}
       onClick={() => onSelect(gate.index)}
@@ -270,8 +270,8 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
 
   // Action status badge
   const actionBadge: ReactNode = mmuStatus.action && mmuStatus.action !== 'Idle' ? (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-400">
-      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-pf-accent-bg/15 text-pf-accent">
+      <span className="w-1.5 h-1.5 rounded-full bg-pf-accent animate-pulse" />
       {mmuStatus.action}
     </span>
   ) : null;
@@ -279,9 +279,9 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
   // Filament state indicator
   const filamentBadge: ReactNode = mmuStatus.filamentState ? (
     <span className={`text-[10px] font-bold uppercase tracking-wide ${
-      mmuStatus.filamentState === 'Loaded' ? 'text-green-400' :
+      mmuStatus.filamentState === 'Loaded' ? 'text-pf-success' :
       mmuStatus.filamentState === 'Unloaded' ? 'text-pf-text-tertiary' :
-      'text-yellow-400'
+      'text-pf-warning'
     }`}>
       {mmuStatus.filamentState}
     </span>
@@ -313,32 +313,32 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
           {/* MMU info badges */}
           <div className="flex items-center gap-2 text-[10px]">
             {isQidibox && (
-              <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">
+              <span className="px-1.5 py-0.5 rounded bg-pf-accent-bg/15 text-pf-accent font-medium">
                 QIDIBOX
               </span>
             )}
             {isAfc && (
-              <span className="px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-400 font-medium">
+              <span className="px-1.5 py-0.5 rounded bg-pf-success/10 text-pf-success font-medium">
                 AFC
               </span>
             )}
             {isAfc && mmuStatus.action && mmuStatus.action !== 'Idle' && mmuStatus.action !== 'Initialized' && (
-              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
+              <span className="px-1.5 py-0.5 rounded bg-pf-accent-bg/15 text-pf-accent font-medium">
                 {mmuStatus.action.toUpperCase()}
               </span>
             )}
             {!isQidibox && !isAfc && mmuStatus.endlessSpool && (
-              <span className="px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 font-medium">
+              <span className="px-1.5 py-0.5 rounded bg-pf-success/10 text-pf-success font-medium">
                 ENDLESS
               </span>
             )}
             {!isQidibox && !isAfc && mmuStatus.clogDetection && (
-              <span className="px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 font-medium">
+              <span className="px-1.5 py-0.5 rounded bg-pf-warning/10 text-pf-warning font-medium">
                 CLOG DET
               </span>
             )}
             {!isQidibox && !isAfc && !mmuStatus.isHomed && (
-              <span className="px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
+              <span className="px-1.5 py-0.5 rounded bg-pf-error/10 text-pf-error font-medium">
                 NOT HOMED
               </span>
             )}
@@ -387,7 +387,7 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
             )}
           </div>
           {pendingAction && (
-            <span className="text-blue-400 text-[10px] animate-pulse font-medium">
+            <span className="text-pf-accent text-[10px] animate-pulse font-medium">
               {pendingAction}…
             </span>
           )}

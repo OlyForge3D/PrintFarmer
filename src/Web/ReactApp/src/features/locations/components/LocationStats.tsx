@@ -25,10 +25,10 @@ interface StatCardProps {
 
 const VARIANT_STYLES: Record<StatCardProps['variant'], string> = {
   default: 'text-pf-text-primary',
-  success: 'text-green-500',
-  warning: 'text-yellow-500',
-  error: 'text-red-500',
-  info: 'text-blue-500',
+  success: 'text-pf-success',
+  warning: 'text-pf-warning',
+  error: 'text-pf-error',
+  info: 'text-pf-accent',
 };
 
 function StatCard({ label, value, variant }: StatCardProps) {

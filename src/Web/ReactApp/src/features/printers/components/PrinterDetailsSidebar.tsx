@@ -598,7 +598,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h2 className="text-lg font-bold text-pf-text-primary truncate">{printer.name}</h2>
-            <div className={`shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-500'}`} title={isOnline ? 'Online' : 'Offline'} />
+            <div className={`shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-pf-success' : 'bg-pf-disabled'}`} title={isOnline ? 'Online' : 'Offline'} />
           </div>
           <p className="text-xs text-pf-text-secondary">{printer.manufacturerName} {printer.modelName}</p>
           <p className="text-xs text-pf-text-secondary mt-1">{state}</p>
@@ -1033,7 +1033,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 }}
                 title="Move to entered coordinates"
                 padSize="small"
-                className="bg-green-600! hover:bg-green-700! text-white!"
+                className="bg-pf-success! hover:bg-pf-success-hover! text-white!"
               >
                 <span className="text-[10px] font-bold">GO</span>
               </ControlPadButton>
@@ -1088,7 +1088,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
           {/* Hotend Temperature Row */}
           <TemperatureControlRow
-            icon={<NozzleIcon className="w-4 h-4 text-red-500" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />}
+            icon={<NozzleIcon className="w-4 h-4 text-pf-error" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />}
             label="Hotend"
             stateLabel={(displayPrinter?.hotendTarget ?? 0) > 0 ? 'on' : 'off'}
             liveReading={formatCurrentTemp(
@@ -1107,7 +1107,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
           {/* Bed Temperature Row */}
           <TemperatureControlRow
-            icon={<BedIcon className="w-4 h-4 text-blue-500" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />}
+            icon={<BedIcon className="w-4 h-4 text-pf-accent" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />}
             label="Bed"
             stateLabel={(displayPrinter?.bedTarget ?? 0) > 0 ? 'on' : 'off'}
             liveReading={formatCurrentTemp(

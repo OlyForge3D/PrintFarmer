@@ -26,7 +26,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
 }) => {
 
   // Status color and label
-  const statusColor = printer.isOnline ? 'text-green-600' : 'text-gray-400';
+  const statusColor = printer.isOnline ? 'text-pf-success' : 'text-pf-text-tertiary';
   const statusLabel = printer.isOnline ? 'Online' : 'Offline';
   // Model/location string
   const modelLoc = [printer.manufacturerName, printer.modelName].filter(Boolean).join(' • ');
@@ -62,7 +62,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
     >
       <div className="flex items-center justify-between">
         <div className={`flex items-center ${compact ? 'gap-1' : 'gap-2'}`}> 
-          <span className={`w-2 h-2 rounded-full ${printer.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} aria-label={statusLabel} />
+          <span className={`w-2 h-2 rounded-full ${printer.isOnline ? 'bg-pf-success' : 'bg-pf-disabled'}`} aria-label={statusLabel} />
           <span className={compact ? 'font-semibold' : 'font-bold text-lg text-pf-text-primary'}>{printer.name}</span>
         </div>
         <button
@@ -156,7 +156,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
             const progressClass = `pf-progress-bar-${progressValue}`;
             return (
               <div
-                className={`w-full bg-gray-200 rounded-full ${compact ? 'pf-progress-bar-compact' : 'pf-progress-bar'} ${progressClass}`}
+                className={`w-full bg-pf-bg-2 rounded-full ${compact ? 'pf-progress-bar-compact' : 'pf-progress-bar'} ${progressClass}`}
               >
                 <div
                   className={`bg-pf-accent rounded-full transition-all duration-300 ${compact ? 'pf-progress-inner-compact' : 'pf-progress-inner'}`}
@@ -173,19 +173,19 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
         if (!errorInfo) return null;
 
         return (
-          <div className={`bg-red-50 border border-red-300 rounded-lg p-2 ${compact ? 'mb-1' : 'mb-2'}`}>
+          <div className={`bg-pf-error/10 border border-pf-error/30 rounded-lg p-2 ${compact ? 'mb-1' : 'mb-2'}`}>
             <div className="flex items-start gap-2">
-              <ErrorIcon type={errorInfo.iconType} className={compact ? 'w-3 h-3 text-red-600 shrink-0' : 'w-4 h-4 text-red-600 shrink-0'} />
+              <ErrorIcon type={errorInfo.iconType} className={compact ? 'w-3 h-3 text-pf-error shrink-0' : 'w-4 h-4 text-pf-error shrink-0'} />
               <div className="flex-1 min-w-0">
-                <p className={`font-semibold text-red-800 ${compact ? 'text-[10px]' : 'text-xs'}`}>
+                <p className={`font-semibold text-pf-error ${compact ? 'text-[10px]' : 'text-xs'}`}>
                   {errorInfo.title}
-                  {errorInfo.canRetry && <span className="ml-1 text-green-700">🔄</span>}
+                  {errorInfo.canRetry && <span className="ml-1 text-pf-success">🔄</span>}
                 </p>
-                <p className={`text-red-700 wrap-break-word ${compact ? 'text-[9px] mt-0.5' : 'text-xs mt-1'}`}>
+                <p className={`text-pf-error wrap-break-word ${compact ? 'text-[9px] mt-0.5' : 'text-xs mt-1'}`}>
                   {errorInfo.message}
                 </p>
                 {!compact && errorInfo.suggestion && (
-                  <p className={`text-red-600 mt-1 text-[10px] italic`}>
+                  <p className={`text-pf-error mt-1 text-[10px] italic`}>
                     💡 {errorInfo.suggestion}
                   </p>
                 )}
@@ -197,14 +197,14 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
 
       {/* Display cancellation message */}
       {operation && isCancelled && (
-        <div className={`bg-yellow-50 border border-yellow-300 rounded-lg p-2 ${compact ? 'mb-1' : 'mb-2'}`}>
+        <div className={`bg-pf-warning/10 border border-pf-warning/30 rounded-lg p-2 ${compact ? 'mb-1' : 'mb-2'}`}>
           <div className="flex items-start gap-2">
-            <svg className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+            <svg className="w-4 h-4 text-pf-warning shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
             <div className="flex-1 min-w-0">
-              <p className={`font-semibold text-yellow-800 ${compact ? 'text-[10px]' : 'text-xs'}`}>Harvest Cancelled</p>
-              <p className={`text-yellow-700 ${compact ? 'text-[9px] mt-0.5' : 'text-xs mt-1'}`}>
+              <p className={`font-semibold text-pf-warning ${compact ? 'text-[10px]' : 'text-xs'}`}>Harvest Cancelled</p>
+              <p className={`text-pf-warning ${compact ? 'text-[9px] mt-0.5' : 'text-xs mt-1'}`}>
                 The harvest operation was cancelled.
               </p>
             </div>
@@ -214,14 +214,14 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
 
       {/* Display completion message if harvest completed successfully */}
       {operation && isCompleted && !operation.error && (
-        <div className={`bg-green-50 border border-green-300 rounded-lg p-2 ${compact ? 'mb-1' : 'mb-2'}`}>
+        <div className={`bg-pf-success/10 border border-pf-success/30 rounded-lg p-2 ${compact ? 'mb-1' : 'mb-2'}`}>
           <div className="flex items-start gap-2">
-            <svg className="w-4 h-4 text-green-600 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+            <svg className="w-4 h-4 text-pf-success shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
             <div className="flex-1 min-w-0">
-              <p className={`font-semibold text-green-800 ${compact ? 'text-[10px]' : 'text-xs'}`}>Harvest Complete</p>
-              <p className={`text-green-700 ${compact ? 'text-[9px] mt-0.5' : 'text-xs mt-1'}`}>
+              <p className={`font-semibold text-pf-success ${compact ? 'text-[10px]' : 'text-xs'}`}>Harvest Complete</p>
+              <p className={`text-pf-success ${compact ? 'text-[9px] mt-0.5' : 'text-xs mt-1'}`}>
                 Added: {operation.filesAdded} • Skipped: {operation.filesSkipped} • Errors: {operation.filesErrored}
               </p>
             </div>
@@ -244,7 +244,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
         {isRunning && operation && (
           <>
             <button
-              className={`flex-1 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
+              className={`flex-1 rounded-lg bg-pf-error hover:bg-pf-error-hover text-white transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
               onClick={() => onCancelHarvest?.(operation.id)}
               aria-label={`Cancel harvest on ${printer.name}`}
               tabIndex={0}

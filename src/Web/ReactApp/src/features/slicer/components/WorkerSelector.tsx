@@ -42,7 +42,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
 
   if (error) {
     return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded-sm text-red-700 text-sm">
+      <div className="p-4 bg-pf-error/10 border border-pf-error/30 rounded-sm text-pf-error text-sm">
         <strong>Error:</strong> {error}
       </div>
     );
@@ -95,7 +95,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
                     {worker.status}
                   </span>
                   {available && (
-                    <BatteryIcon className="w-3.5 h-3.5 text-green-500" aria-label="Available for jobs" />
+                    <BatteryIcon className="w-3.5 h-3.5 text-pf-success" aria-label="Available for jobs" />
                   )}
                 </div>
 
@@ -137,7 +137,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
                   </div>
 
                   {worker.isDisabled && worker.disabledReason && (
-                    <div className="mt-2 text-xs text-red-600">
+                    <div className="mt-2 text-xs text-pf-error">
                       <strong>Disabled:</strong> {worker.disabledReason}
                     </div>
                   )}

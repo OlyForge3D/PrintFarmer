@@ -140,7 +140,7 @@ function PlanFormModal({ isOpen, plan, onClose }: PlanFormModalProps) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="plan-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
-            Name <span className="text-red-400">*</span>
+            Name <span className="text-pf-error">*</span>
           </label>
           <Input id="plan-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Prusa MK4 Preventive Maintenance" required maxLength={200} />
         </div>
@@ -244,12 +244,12 @@ function TaskFormModal({ isOpen, planId, task, onClose }: TaskFormModalProps) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="task-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
-            Task Name <span className="text-red-400">*</span>
+            Task Name <span className="text-pf-error">*</span>
           </label>
           <Input id="task-name" value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="e.g. Check belt tension" required maxLength={200} />
         </div>
         <div>
-          <label htmlFor="task-cat" className="block text-sm font-medium text-pf-text-secondary mb-1">Category <span className="text-red-400">*</span></label>
+          <label htmlFor="task-cat" className="block text-sm font-medium text-pf-text-secondary mb-1">Category <span className="text-pf-error">*</span></label>
           <Select id="task-cat" value={category} onChange={(e) => setCategory(e.target.value)}>
             {categories.length > 0 ? categories.map(c => (<option key={c} value={c}>{c}</option>)) : <option value={DEFAULT_CATEGORY}>{DEFAULT_CATEGORY}</option>}
           </Select>
@@ -343,7 +343,7 @@ function TaskRow({ task, onEdit, onDelete }: TaskRowProps) {
         <Button variant="subtle" size="sm" onClick={onEdit} aria-label={`Edit ${task.taskName}`}>
           <EditIcon className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="subtle" size="sm" onClick={onDelete} aria-label={`Delete ${task.taskName}`} className="hover:text-red-400">
+        <Button variant="subtle" size="sm" onClick={onDelete} aria-label={`Delete ${task.taskName}`} className="hover:text-pf-error">
           <DeleteIcon className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -430,7 +430,7 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
           <Button variant="subtle" size="sm" onClick={onEditPlan} aria-label={`Edit plan ${plan.name}`}>
             <EditIcon className="h-4 w-4" />
           </Button>
-          <Button variant="subtle" size="sm" onClick={onDeletePlan} aria-label={`Delete plan ${plan.name}`} className="hover:text-red-400">
+          <Button variant="subtle" size="sm" onClick={onDeletePlan} aria-label={`Delete plan ${plan.name}`} className="hover:text-pf-error">
             <DeleteIcon className="h-4 w-4" />
           </Button>
         </div>
@@ -581,7 +581,7 @@ export function MaintenancePlansTab() {
   if (error) {
     return (
       <div className="text-center py-12">
-        <AlertIcon className="h-10 w-10 text-red-400 mx-auto mb-3" />
+        <AlertIcon className="h-10 w-10 text-pf-error mx-auto mb-3" />
         <p className="text-pf-text-secondary">Failed to load maintenance plans</p>
         <p className="text-xs text-pf-text-tertiary mt-1">{(error as Error).message}</p>
       </div>

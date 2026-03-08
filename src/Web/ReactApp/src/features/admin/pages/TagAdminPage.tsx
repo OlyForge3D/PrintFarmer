@@ -361,7 +361,7 @@ export const TagAdminPage: React.FC = () => {
                                     }}
                                     title="Add new tag (A)"
                                 >
-                                    <kbd className="px-1 py-0.5 text-xs font-mono bg-white/20 rounded-sm">A</kbd>dd Tag
+                                    <kbd className="px-1 py-0.5 text-xs font-mono bg-pf-bg-0/20 rounded-sm">A</kbd>dd Tag
                                 </Button>
                             </div>
 

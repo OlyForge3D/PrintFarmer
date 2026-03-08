@@ -93,8 +93,8 @@ export function CriticalAlertsBanner() {
           key={item.id}
           className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border ${
             item.severity === 'critical'
-              ? 'bg-red-500/10 border-red-500/30 text-red-400'
-              : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+              ? 'bg-pf-error/10 border-pf-error/30 text-pf-error'
+              : 'bg-pf-warning/10 border-pf-warning/30 text-pf-warning'
           }`}
         >
           {item.icon}

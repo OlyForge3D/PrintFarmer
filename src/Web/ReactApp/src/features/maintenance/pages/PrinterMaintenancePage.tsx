@@ -111,10 +111,10 @@ export function PrinterMaintenancePage() {
 
   const getPriorityColor = (priority: number) => {
     switch (priority) {
-      case 4: return 'text-red-500 bg-red-500/10';
-      case 3: return 'text-orange-500 bg-orange-500/10';
-      case 2: return 'text-yellow-500 bg-yellow-500/10';
-      default: return 'text-blue-500 bg-blue-500/10';
+      case 4: return 'text-pf-error bg-pf-error/10';
+      case 3: return 'text-pf-warning bg-pf-warning/10';
+      case 2: return 'text-pf-warning bg-pf-warning/10';
+      default: return 'text-pf-accent bg-pf-accent-bg/15';
     }
   };
 
@@ -192,7 +192,7 @@ export function PrinterMaintenancePage() {
           {activeAlerts.length > 0 && (
             <section className="bg-pf-bg-card border border-pf-border rounded-lg p-6">
               <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center gap-2">
-                <ExclamationTriangleIcon className="h-5 w-5 text-yellow-500" />
+                <ExclamationTriangleIcon className="h-5 w-5 text-pf-warning" />
                 Active Alerts
               </h2>
               <div className="space-y-3">
@@ -251,7 +251,7 @@ export function PrinterMaintenancePage() {
                           )}
                           <div className="flex flex-wrap gap-3 mt-2 text-xs text-pf-text-tertiary">
                             <span>Deployed {formatDistanceToNow(new Date(deployment.deployedAt), { addSuffix: true })}</span>
-                            <span className={deployment.isActive ? 'text-green-500' : 'text-pf-text-tertiary'}>
+                            <span className={deployment.isActive ? 'text-pf-success' : 'text-pf-text-tertiary'}>
                               {deployment.isActive ? 'Active' : 'Inactive'}
                             </span>
                           </div>
@@ -273,7 +273,7 @@ export function PrinterMaintenancePage() {
             {/* Maintenance History */}
             <section className="bg-pf-bg-card border border-pf-border rounded-lg p-6">
               <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center gap-2">
-                <CheckCircleIcon className="h-5 w-5 text-green-500" />
+                <CheckCircleIcon className="h-5 w-5 text-pf-success" />
                 Maintenance History
               </h2>
               {logs.length === 0 ? (
@@ -352,9 +352,9 @@ interface StatCardProps {
 
 function StatCard({ icon: Icon, label, value, highlight }: StatCardProps) {
   return (
-    <div className={`p-4 rounded-lg border ${highlight ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-pf-bg-card border-pf-border'}`}>
+    <div className={`p-4 rounded-lg border ${highlight ? 'bg-pf-warning/10 border-pf-warning/30' : 'bg-pf-bg-card border-pf-border'}`}>
       <div className="flex items-center gap-3">
-        <Icon className={`h-8 w-8 ${highlight ? 'text-yellow-500' : 'text-pf-primary'}`} />
+        <Icon className={`h-8 w-8 ${highlight ? 'text-pf-warning' : 'text-pf-primary'}`} />
         <div>
           <p className="text-2xl font-bold text-pf-text-primary">{value}</p>
           <p className="text-xs text-pf-text-tertiary">{label}</p>

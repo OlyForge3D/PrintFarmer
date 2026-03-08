@@ -13,7 +13,7 @@ interface ViewCubeProps {
 export const ViewCube: React.FC<ViewCubeProps> = ({ onViewChange }) => {
 
   return (
-    <div className="absolute top-4 right-4 z-10 bg-white/90 rounded-lg shadow-lg p-2 border border-gray-300">
+    <div className="absolute top-4 right-4 z-10 bg-pf-bg-0/90 rounded-lg shadow-lg p-2 border border-pf-border">
       {/* Top face */}
       <div className="grid grid-cols-3 gap-1 mb-1">
         {/* Empty corner */}
@@ -70,7 +70,7 @@ export const ViewCube: React.FC<ViewCubeProps> = ({ onViewChange }) => {
       </div>
 
       {/* Front face */}
-      <div className="grid grid-cols-3 gap-1 mt-1 pt-1 border-t border-gray-300">
+      <div className="grid grid-cols-3 gap-1 mt-1 pt-1 border-t border-pf-border">
         {/* Empty corner */}
         <div className="w-6 h-6" />
         <button
@@ -90,7 +90,7 @@ export const ViewCube: React.FC<ViewCubeProps> = ({ onViewChange }) => {
       </div>
 
       {/* Legend */}
-      <div className="mt-2 pt-2 border-t border-gray-300 text-xs text-gray-600 text-center">
+      <div className="mt-2 pt-2 border-t border-pf-border text-xs text-pf-text-secondary text-center">
         <div>T=Top B=Bottom</div>
         <div>F=Front K=Back</div>
         <div>L=Left R=Right</div>

@@ -62,9 +62,9 @@ interface SummaryStatProps {
 function SummaryStat({ label, value, accent = 'default' }: SummaryStatProps) {
   const accentStyle: Record<string, string> = {
     default: 'text-pf-text-primary',
-    amber: 'text-amber-400',
-    red: 'text-red-400',
-    green: 'text-emerald-400',
+    amber: 'text-pf-warning',
+    red: 'text-pf-error',
+    green: 'text-pf-success',
   };
   return (
     <div className="text-center min-w-0">
@@ -233,7 +233,7 @@ export function MaintenanceDashboardPage() {
                 <section className="xl:col-span-1" aria-labelledby="alerts-heading">
                   <div className="bg-pf-panel border border-pf-border rounded-xl h-full">
                     <div className="px-5 py-4 border-b border-pf-border flex items-center gap-2">
-                      <AlertIcon className="h-5 w-5 text-amber-400" />
+                      <AlertIcon className="h-5 w-5 text-pf-warning" />
                       <div>
                         <h2 id="alerts-heading" className="text-base font-semibold text-pf-text-primary font-bebas uppercase tracking-wide">
                           Priority Alerts
@@ -527,8 +527,8 @@ export function MaintenanceDashboardPage() {
 
       {/* Error Display */}
       {(statsError || alertsError || tasksError || componentsError) && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mt-6" role="alert">
-          <p className="text-sm text-red-400">
+        <div className="bg-pf-error/10 border border-pf-error/30 rounded-xl p-4 mt-6" role="alert">
+          <p className="text-sm text-pf-error">
             {statsError?.message || alertsError?.message || tasksError?.message || componentsError?.message || 'An error occurred loading maintenance data'}
           </p>
         </div>

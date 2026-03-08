@@ -309,7 +309,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   if (!gcode) {
     return (
       <div className={`${className} flex items-center justify-center`}>
-        <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
       </div>
     );
   }
@@ -317,12 +317,12 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   return (
     <div className="space-y-4">
       {/* Header with Controls */}
-      <div className="bg-linear-to-r from-gray-900 to-gray-800 rounded-lg shadow-sm p-4 border border-gray-700">
+      <div className="bg-linear-to-r from-pf-bg-0 to-pf-bg-0 rounded-lg shadow-sm p-4 border border-pf-border">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-bold text-lg text-white">G-Code Viewer</h3>
             {printStats && (
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-pf-text-tertiary mt-1">
                 {printStats.layers} layers • {printStats.dimensions.x}×{printStats.dimensions.y}×{printStats.dimensions.z}mm
               </p>
             )}
@@ -335,7 +335,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                 variant="subtle"
                 size="sm"
                 onClick={() => setShowSettings(!showSettings)}
-                className="p-2 rounded-md text-gray-300 hover:text-white bg-transparent border-none shadow-none focus:ring-0"
+                className="p-2 rounded-md text-pf-text-secondary hover:text-white bg-transparent border-none shadow-none focus:ring-0"
                 title="Settings"
               >
                 <GearIcon className="w-5 h-5" />
@@ -345,17 +345,17 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
               {showSettings && (
                 <div 
                   ref={settingsRef}
-                  className="absolute right-0 top-full mt-2 w-72 bg-gray-800 rounded-lg shadow-xl border border-gray-700 p-4 z-50 space-y-3"
+                  className="absolute right-0 top-full mt-2 w-72 bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border p-4 z-50 space-y-3"
                 >
-                  <div className="border-b border-gray-600 pb-3">
+                  <div className="border-b border-pf-border pb-3">
                     <h4 className="text-sm font-semibold text-white mb-2">Rendering</h4>
                     <div className="space-y-2 text-sm">
                       <div>
-                        <label className="text-gray-300">Quality Level</label>
+                        <label className="text-pf-text-secondary">Quality Level</label>
                         <Select
                           value={renderQuality}
                           onChange={(e) => setRenderQuality(parseInt(e.target.value))}
-                          className="w-full bg-gray-700 text-white rounded-sm px-2 py-1 text-xs border-gray-600"
+                          className="w-full bg-pf-bg-1 text-white rounded-sm px-2 py-1 text-xs border-pf-border"
                         >
                           {RENDER_QUALITIES.map(q => (
                             <option key={q.value} value={q.value}>{q.label}</option>
@@ -371,15 +371,15 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                     </div>
                   </div>
                   
-                  <div className="border-b border-gray-600 pb-3">
+                  <div className="border-b border-pf-border pb-3">
                     <h4 className="text-sm font-semibold text-white mb-2">Display</h4>
                     <div className="space-y-2 text-sm">
                       <div>
-                        <label className="text-gray-300">Color Mode</label>
+                        <label className="text-pf-text-secondary">Color Mode</label>
                         <Select
                           value={colorMode}
                           onChange={(e) => setColorMode(parseInt(e.target.value))}
-                          className="w-full bg-gray-700 text-white rounded-sm px-2 py-1 text-xs border-gray-600"
+                          className="w-full bg-pf-bg-1 text-white rounded-sm px-2 py-1 text-xs border-pf-border"
                         >
                           {COLOR_MODES.map(m => (
                             <option key={m.id} value={m.id}>{m.label}</option>
@@ -405,7 +405,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                     <h4 className="text-sm font-semibold text-white mb-2">Colors</h4>
                     <div className="space-y-2 text-sm">
                       <div className="flex items-center space-x-2">
-                        <label className="text-gray-300 flex-1">Background</label>
+                        <label className="text-pf-text-secondary flex-1">Background</label>
                         <input 
                           type="color" 
                           value={backgroundColor}
@@ -414,7 +414,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                         />
                       </div>
                       <div className="flex items-center space-x-2">
-                        <label className="text-gray-300 flex-1">Grid</label>
+                        <label className="text-pf-text-secondary flex-1">Grid</label>
                         <input 
                           type="color" 
                           value={gridColor}
@@ -425,7 +425,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                       {colorMode === 1 && (
                         <>
                           <div className="flex items-center space-x-2">
-                            <label className="text-gray-300 flex-1">Min Speed</label>
+                            <label className="text-pf-text-secondary flex-1">Min Speed</label>
                             <input 
                               type="color" 
                               value={minFeedColor}
@@ -434,7 +434,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                             />
                           </div>
                           <div className="flex items-center space-x-2">
-                            <label className="text-gray-300 flex-1">Max Speed</label>
+                            <label className="text-pf-text-secondary flex-1">Max Speed</label>
                             <input 
                               type="color" 
                               value={maxFeedColor}
@@ -479,14 +479,14 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
             label="Travel Moves"
             checked={showMoves}
             onChange={(e) => setShowMoves(e.target.checked)}
-            className="text-sm text-gray-300"
+            className="text-sm text-pf-text-secondary"
           />
         </div>
       </div>
       
       {/* Layer Slider */}
-      <div className="bg-gray-800 rounded-lg shadow-sm p-4 border border-gray-700">
-        <div className="flex items-center justify-between text-sm text-gray-300 mb-2">
+      <div className="bg-pf-bg-1 rounded-lg shadow-sm p-4 border border-pf-border">
+        <div className="flex items-center justify-between text-sm text-pf-text-secondary mb-2">
           <span>Layer {currentLayer + 1} / {layers.length}</span>
           <span>Z: {layers[currentLayer]?.z.toFixed(2)}mm</span>
         </div>
@@ -500,12 +500,12 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
             setCurrentLayer(parseInt(e.target.value));
             setPlayAnimation(false);
           }}
-          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          className="w-full h-2 bg-pf-bg-1 rounded-lg appearance-none cursor-pointer accent-pf-accent"
         />
       </div>
 
       {/* 3D Viewer */}
-      <div className={`${className} border border-gray-700 rounded-lg overflow-hidden`}>
+      <div className={`${className} border border-pf-border rounded-lg overflow-hidden`}>
         <Canvas 
           camera={{ position: [100, 100, 100], fov: 45 }}
           style={{ background: backgroundColor }}

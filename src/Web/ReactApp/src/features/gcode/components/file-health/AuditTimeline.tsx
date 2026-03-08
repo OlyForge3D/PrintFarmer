@@ -75,19 +75,19 @@ export function AuditTimeline({ audits, getAuditTypeLabel, isLoading }: AuditTim
                       <div className="text-pf-text-secondary">Checked</div>
                     </div>
                     <div>
-                      <div className="text-green-600 dark:text-green-400 font-semibold">{audit.validCount}</div>
+                      <div className="text-pf-success font-semibold">{audit.validCount}</div>
                       <div className="text-pf-text-secondary">Valid</div>
                     </div>
                     <div>
-                      <div className="text-red-600 dark:text-red-400 font-semibold">{audit.missingCount}</div>
+                      <div className="text-pf-error font-semibold">{audit.missingCount}</div>
                       <div className="text-pf-text-secondary">Missing</div>
                     </div>
                     <div>
-                      <div className="text-orange-600 dark:text-orange-400 font-semibold">{audit.corruptedCount}</div>
+                      <div className="text-pf-warning font-semibold">{audit.corruptedCount}</div>
                       <div className="text-pf-text-secondary">Corrupted</div>
                     </div>
                     <div>
-                      <div className="text-purple-600 dark:text-purple-400 font-semibold">{audit.orphanedCount}</div>
+                      <div className="text-pf-accent dark:text-pf-accent font-semibold">{audit.orphanedCount}</div>
                       <div className="text-pf-text-secondary">Orphaned</div>
                     </div>
                   </div>

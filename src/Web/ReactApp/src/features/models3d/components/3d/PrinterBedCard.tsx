@@ -125,16 +125,16 @@ const ProgressBar: React.FC<{
   return (
     <div className="space-y-2">
       <div className="flex justify-between text-xs">
-        <span className="text-gray-400">Job Progress</span>
+        <span className="text-pf-text-tertiary">Job Progress</span>
         <span className="text-white font-mono">{Math.round(percentage)}%</span>
       </div>
-      <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+      <div className="h-2 bg-pf-bg-1 rounded-full overflow-hidden">
         <div
-          className="h-full bg-linear-to-r from-purple-500 to-pink-500 transition-all duration-300"
+          className="h-full bg-linear-to-r from-pf-accent to-pf-error transition-all duration-300"
           style={{ width: `${percentage}%` }}
         />
       </div>
-      {jobName && <p className="text-xs text-gray-400 truncate">{jobName}</p>}
+      {jobName && <p className="text-xs text-pf-text-tertiary truncate">{jobName}</p>}
     </div>
   );
 };
@@ -164,12 +164,12 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
   const visualizationHeight = isMobile ? 300 : 400;
 
   return (
-    <div className={`${widthClasses[width]} bg-gray-800/50 rounded-lg border border-gray-700 overflow-hidden`}>
+    <div className={`${widthClasses[width]} bg-pf-bg-1/50 rounded-lg border border-pf-border overflow-hidden`}>
       {/* Header */}
-      <div className="bg-gray-900/80 border-b border-gray-700 px-4 py-3 flex justify-between items-start">
+      <div className="bg-pf-bg-0/80 border-b border-pf-border px-4 py-3 flex justify-between items-start">
         <div className="flex-1">
           <h3 className="text-lg font-semibold text-white">{status.name}</h3>
-          <p className="text-xs text-gray-400">{printerModel.name}</p>
+          <p className="text-xs text-pf-text-tertiary">{printerModel.name}</p>
         </div>
         <StatusBadge state={status.state} />
       </div>
@@ -177,7 +177,7 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
       {/* Main Content - Visualization + Status Panel */}
       <div className="flex flex-col lg:flex-row">
         {/* 3D Visualization */}
-        <div className="flex-1 bg-gray-950">
+        <div className="flex-1 bg-pf-bg-0">
           <PrinterBedVisualization
             printerModel={printerModel}
             status={status}
@@ -189,7 +189,7 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
         </div>
 
         {/* Status Information Panel */}
-        <div className="w-full lg:w-64 bg-gray-900/50 border-t lg:border-t-0 lg:border-l border-gray-700 p-4 space-y-4">
+        <div className="w-full lg:w-64 bg-pf-bg-0/50 border-t lg:border-t-0 lg:border-l border-pf-border p-4 space-y-4">
           {/* Controls */}
           {showControls && (
             <div className="space-y-2">
@@ -198,7 +198,7 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
                   checked={autoRotate}
                   onChange={(e) => setAutoRotate(e.target.checked)}
                 />
-                <span className="text-sm text-gray-300">Auto-rotate</span>
+                <span className="text-sm text-pf-text-secondary">Auto-rotate</span>
               </label>
 
               {onRefresh && (
@@ -216,8 +216,8 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
 
           {/* Temperature Data */}
           {status.temperatures && (
-            <div className="space-y-3 pt-2 border-t border-gray-700">
-              <p className="text-xs font-semibold text-gray-400 uppercase">Temperatures</p>
+            <div className="space-y-3 pt-2 border-t border-pf-border">
+              <p className="text-xs font-semibold text-pf-text-tertiary uppercase">Temperatures</p>
               <TemperatureGauge
                 label="Hotend"
                 current={status.temperatures.hotend}
@@ -235,19 +235,19 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
 
           {/* Position Data */}
           {status.nozzlePosition && (
-            <div className="space-y-2 pt-2 border-t border-gray-700">
-              <p className="text-xs font-semibold text-gray-400 uppercase">Position</p>
+            <div className="space-y-2 pt-2 border-t border-pf-border">
+              <p className="text-xs font-semibold text-pf-text-tertiary uppercase">Position</p>
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div>
-                  <p className="text-xs text-gray-500">X</p>
+                  <p className="text-xs text-pf-text-secondary">X</p>
                   <p className="text-sm font-mono text-white">{status.nozzlePosition.x.toFixed(1)}mm</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Y</p>
+                  <p className="text-xs text-pf-text-secondary">Y</p>
                   <p className="text-sm font-mono text-white">{status.nozzlePosition.y.toFixed(1)}mm</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Z</p>
+                  <p className="text-xs text-pf-text-secondary">Z</p>
                   <p className="text-sm font-mono text-white">{status.nozzlePosition.z.toFixed(1)}mm</p>
                 </div>
               </div>
@@ -256,15 +256,15 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
 
           {/* Progress */}
           {status.progress !== undefined && (
-            <div className="pt-2 border-t border-gray-700">
+            <div className="pt-2 border-t border-pf-border">
               <ProgressBar progress={status.progress} jobName={status.jobName} />
             </div>
           )}
 
           {/* Error Message */}
           {status.state === 'Error' && status.state === 'Error' && (
-            <div className="bg-red-900/30 border border-red-700 rounded-sm p-2">
-              <p className="text-xs text-red-200">Error: Check printer status</p>
+            <div className="bg-pf-error/10 border border-pf-error rounded-sm p-2">
+              <p className="text-xs text-pf-error">Error: Check printer status</p>
             </div>
           )}
         </div>
@@ -272,7 +272,7 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
 
       {/* Footer - Controls Info */}
       {showControls && (
-        <div className="bg-gray-900/50 border-t border-gray-700 px-4 py-2 text-xs text-gray-500">
+        <div className="bg-pf-bg-0/50 border-t border-pf-border px-4 py-2 text-xs text-pf-text-secondary">
           <p>Use mouse: Left-drag to rotate • Right-drag to pan • Scroll to zoom</p>
         </div>
       )}

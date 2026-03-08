@@ -322,11 +322,11 @@ export function UserManagementPage() {
   const getRoleBadgeColor = (roleName: string) => {
     switch (roleName) {
       case 'farm_admin':
-        return 'bg-red-100 text-red-800 border-red-200';
+        return 'bg-pf-error/10 text-pf-error border-pf-error/30';
       case 'farm_user':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
+        return 'bg-pf-accent-bg/15 text-pf-accent border-pf-accent/30';
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return 'bg-pf-bg-1 text-pf-text-primary border-pf-border';
     }
   };
 
@@ -335,7 +335,7 @@ export function UserManagementPage() {
     return (
       <div className="flex items-center justify-center min-h-screen" aria-live="polite" aria-label="Access denied message">
         <div className="text-center" role="alert">
-          <Shield className="h-16 w-16 mx-auto text-red-500 mb-4" aria-hidden="true" />
+          <Shield className="h-16 w-16 mx-auto text-pf-error mb-4" aria-hidden="true" />
           <h2 className="text-xl font-semibold text-pf-text-primary mb-2">
             Access Denied
           </h2>
@@ -439,13 +439,13 @@ export function UserManagementPage() {
                     <div className="flex items-center">
                       {user.isActive ? (
                         <>
-                          <UserCheck className="h-4 w-4 text-green-500 mr-2" />
-                          <span className="text-sm text-green-700">Active</span>
+                          <UserCheck className="h-4 w-4 text-pf-success mr-2" />
+                          <span className="text-sm text-pf-success">Active</span>
                         </>
                       ) : (
                         <>
-                          <UserX className="h-4 w-4 text-red-500 mr-2" />
-                          <span className="text-sm text-red-700">Inactive</span>
+                          <UserX className="h-4 w-4 text-pf-error mr-2" />
+                          <span className="text-sm text-pf-error">Inactive</span>
                         </>
                       )}
                     </div>
@@ -489,7 +489,7 @@ export function UserManagementPage() {
                         variant="subtle"
                         size="sm"
                         onClick={() => setUserToDelete(user)}
-                        className="!p-2 !h-auto hover:text-red-500"
+                        className="!p-2 !h-auto hover:text-pf-error"
                         title="Delete user"
                       >
                         <DeleteIcon className="h-4 w-4" />
@@ -554,9 +554,9 @@ export function UserManagementPage() {
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
                       </svg>
                     )}
-                    {usernameStatus === 'available' && <span className="text-green-600">✓ Available</span>}
-                    {usernameStatus === 'taken' && <span className="text-red-500">✗ Already taken</span>}
-                    {usernameStatus === 'error' && <span className="text-orange-500">✗ Check failed</span>}
+                    {usernameStatus === 'available' && <span className="text-pf-success">✓ Available</span>}
+                    {usernameStatus === 'taken' && <span className="text-pf-error">✗ Already taken</span>}
+                    {usernameStatus === 'error' && <span className="text-pf-warning">✗ Check failed</span>}
                   </div>
                 )}
               </FormField>
@@ -584,9 +584,9 @@ export function UserManagementPage() {
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
                       </svg>
                     )}
-                    {emailStatus === 'available' && <span className="text-green-600">✓ Available</span>}
-                    {emailStatus === 'taken' && <span className="text-red-500">✗ Already taken</span>}
-                    {emailStatus === 'error' && <span className="text-orange-500">✗ Check failed</span>}
+                    {emailStatus === 'available' && <span className="text-pf-success">✓ Available</span>}
+                    {emailStatus === 'taken' && <span className="text-pf-error">✗ Already taken</span>}
+                    {emailStatus === 'error' && <span className="text-pf-warning">✗ Check failed</span>}
                   </div>
                 )}
               </FormField>
@@ -623,26 +623,26 @@ export function UserManagementPage() {
                 />
                 {passwordPolicy && (
                   <ul className="mt-3 space-y-1 text-xs">
-                    <li className={newUser.password.length >= passwordPolicy.minLength ? 'text-green-600' : 'text-pf-text-secondary'}>
+                    <li className={newUser.password.length >= passwordPolicy.minLength ? 'text-pf-success' : 'text-pf-text-secondary'}>
                       ✓ Min length: {passwordPolicy.minLength}
                     </li>
                     {passwordPolicy.requireUppercase && (
-                      <li className={/[A-Z]/.test(newUser.password) ? 'text-green-600' : 'text-pf-text-secondary'}>
+                      <li className={/[A-Z]/.test(newUser.password) ? 'text-pf-success' : 'text-pf-text-secondary'}>
                         ✓ At least one uppercase letter
                       </li>
                     )}
                     {passwordPolicy.requireLowercase && (
-                      <li className={/[a-z]/.test(newUser.password) ? 'text-green-600' : 'text-pf-text-secondary'}>
+                      <li className={/[a-z]/.test(newUser.password) ? 'text-pf-success' : 'text-pf-text-secondary'}>
                         ✓ At least one lowercase letter
                       </li>
                     )}
                     {passwordPolicy.requireDigit && (
-                      <li className={/[0-9]/.test(newUser.password) ? 'text-green-600' : 'text-pf-text-secondary'}>
+                      <li className={/[0-9]/.test(newUser.password) ? 'text-pf-success' : 'text-pf-text-secondary'}>
                         ✓ At least one digit
                       </li>
                     )}
                     {passwordPolicy.requireSymbol && (
-                      <li className={/[^A-Za-z0-9]/.test(newUser.password) ? 'text-green-600' : 'text-pf-text-secondary'}>
+                      <li className={/[^A-Za-z0-9]/.test(newUser.password) ? 'text-pf-success' : 'text-pf-text-secondary'}>
                         ✓ At least one symbol
                       </li>
                     )}
@@ -712,7 +712,7 @@ export function UserManagementPage() {
                         <div className="flex-1">
                           <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
                           <div className="text-xs text-pf-text-secondary">{area.description}</div>
-                          {isDisabled && <div className="text-xs text-yellow-600 mt-1">Included with admin role</div>}
+                          {isDisabled && <div className="text-xs text-pf-warning mt-1">Included with admin role</div>}
                         </div>
                       </label>
                     );
@@ -943,7 +943,7 @@ export function UserManagementPage() {
                       <div className="flex-1">
                         <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
                         <div className="text-xs text-pf-text-secondary">{area.description}</div>
-                        {isDisabled && <div className="text-xs text-yellow-600 mt-1">Included with admin role</div>}
+                        {isDisabled && <div className="text-xs text-pf-warning mt-1">Included with admin role</div>}
                       </div>
                     </label>
                   );

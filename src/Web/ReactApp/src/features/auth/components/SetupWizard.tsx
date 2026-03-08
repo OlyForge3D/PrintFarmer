@@ -452,23 +452,23 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <div>
           <label htmlFor="firstName" className="block text-sm font-medium text-pf-text-primary mb-2"><AccountIcon className="inline h-4 w-4 mr-1"/>First Name *</label>
           <input id="firstName" type="text" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="given-name" disabled={submitting} />
-          {accountFormState.errors.firstName && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.firstName}</p>}
+          {accountFormState.errors.firstName && <p className="text-xs text-pf-error" role="alert">{accountFormState.errors.firstName}</p>}
         </div>
         <div>
           <label htmlFor="lastName" className="block text-sm font-medium text-pf-text-primary mb-2">Last Name *</label>
           <input id="lastName" type="text" value={formData.lastName} onChange={e => handleInputChange('lastName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="family-name" disabled={submitting} />
-          {accountFormState.errors.lastName && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.lastName}</p>}
+          {accountFormState.errors.lastName && <p className="text-xs text-pf-error" role="alert">{accountFormState.errors.lastName}</p>}
         </div>
       </div>
       <div>
         <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-2"><AccountIcon className="inline h-4 w-4 mr-1"/>Username *</label>
         <input id="username" type="text" name="username" value={formData.username} onChange={e => handleInputChange('username', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="username" disabled={submitting} />
-        {accountFormState.errors.username && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.username}</p>}
+        {accountFormState.errors.username && <p className="text-xs text-pf-error" role="alert">{accountFormState.errors.username}</p>}
       </div>
       <div>
         <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-2"><EmailIcon className="inline h-4 w-4 mr-1"/>Email *</label>
         <input id="email" type="email" name="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="email" disabled={submitting} />
-        {accountFormState.errors.email && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.email}</p>}
+        {accountFormState.errors.email && <p className="text-xs text-pf-error" role="alert">{accountFormState.errors.email}</p>}
       </div>
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Password *</label>
@@ -487,18 +487,18 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           </Button>
         </div>
         <ul className="mt-2 text-xs space-y-0.5">
-          <li className={formData.password.length >= passwordPolicy.minLength ? 'text-green-500':'text-pf-text-tertiary'}>Min {passwordPolicy.minLength} characters</li>
-          <li className={/[A-Z]/.test(formData.password)?'text-green-500':'text-pf-text-tertiary'}>Uppercase (recommended)</li>
-          <li className={/[a-z]/.test(formData.password)?'text-green-500':'text-pf-text-tertiary'}>Lowercase (recommended)</li>
-          <li className={/[0-9]/.test(formData.password)?'text-green-500':'text-pf-text-tertiary'}>Digit (recommended)</li>
-          <li className={/[^A-Za-z0-9]/.test(formData.password)?'text-green-500':'text-pf-text-tertiary'}>Symbol (recommended)</li>
+          <li className={formData.password.length >= passwordPolicy.minLength ? 'text-pf-success':'text-pf-text-tertiary'}>Min {passwordPolicy.minLength} characters</li>
+          <li className={/[A-Z]/.test(formData.password)?'text-pf-success':'text-pf-text-tertiary'}>Uppercase (recommended)</li>
+          <li className={/[a-z]/.test(formData.password)?'text-pf-success':'text-pf-text-tertiary'}>Lowercase (recommended)</li>
+          <li className={/[0-9]/.test(formData.password)?'text-pf-success':'text-pf-text-tertiary'}>Digit (recommended)</li>
+          <li className={/[^A-Za-z0-9]/.test(formData.password)?'text-pf-success':'text-pf-text-tertiary'}>Symbol (recommended)</li>
         </ul>
-        {accountFormState.errors.password && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.password}</p>}
+        {accountFormState.errors.password && <p className="text-xs text-pf-error" role="alert">{accountFormState.errors.password}</p>}
       </div>
       <div>
         <label htmlFor="confirmPassword" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Confirm Password *</label>
         <input id="confirmPassword" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={e => handleInputChange('confirmPassword', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" disabled={submitting} />
-        {accountFormState.errors.confirmPassword && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.confirmPassword}</p>}
+        {accountFormState.errors.confirmPassword && <p className="text-xs text-pf-error" role="alert">{accountFormState.errors.confirmPassword}</p>}
       </div>
       <div className="flex justify-end">
         <Button
@@ -543,7 +543,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         >
           Add Range
         </Button>
-        {networkErrors && <p className="text-xs text-red-500" role="alert">{networkErrors}</p>}
+        {networkErrors && <p className="text-xs text-pf-error" role="alert">{networkErrors}</p>}
       </div>
       {/* Advanced network scan settings */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -642,7 +642,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
             
             {scanError && (
-              <div className="text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded-sm p-2">
+              <div className="text-xs text-pf-error bg-pf-error/10 border border-pf-error/30 rounded-sm p-2">
                 {scanError}
               </div>
             )}
@@ -674,7 +674,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             )}
             
             {scanResults.length > 0 && availableInstances.length === 0 && (
-              <div className="text-xs text-orange-400 bg-orange-950/30 border border-orange-800/40 rounded-sm p-2">
+              <div className="text-xs text-pf-warning bg-pf-warning/10 border border-pf-warning/30 rounded-sm p-2">
                 Found {scanResults.length} address(es) but no Spoolman instances were responding
               </div>
             )}
@@ -695,7 +695,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 type="button"
                 onClick={testSpoolman}
                 disabled={testingSpoolman}
-                className="px-3 py-2 bg-blue-600 text-white rounded-sm text-sm hover:bg-blue-700 disabled:opacity-50"
+                className="px-3 py-2 bg-pf-accent-bg text-white rounded-sm text-sm hover:bg-pf-accent-bg disabled:opacity-50"
               >
                 {testingSpoolman ? 'Testing...' : 'Test URL'}
               </button>
@@ -703,10 +703,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           </div>
 
           {spoolmanTestResult && (
-            <p className={`text-xs ${spoolmanTestOk ? 'text-green-500':'text-red-500'}`}>{spoolmanTestResult}</p>
+            <p className={`text-xs ${spoolmanTestOk ? 'text-pf-success':'text-pf-error'}`}>{spoolmanTestResult}</p>
           )}
           {!spoolmanTestOk && spoolmanErrorCategory && (
-            <div className="relative text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded-sm p-2 flex gap-2 group">
+            <div className="relative text-xs text-pf-error bg-pf-error/10 border border-pf-error/30 rounded-sm p-2 flex gap-2 group">
               <AlertIcon className="h-4 w-4 shrink-0" />
               <div className="space-y-1">
                 <div className="font-semibold">{getSpoolmanFriendly(spoolmanErrorCategory)}</div>
@@ -753,10 +753,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <div><strong>Spoolman:</strong> {spoolmanEnabled ? (
             <span>
               {normalizeSpoolmanBaseUrl(spoolmanUrl)} {spoolmanTestOk && spoolmanVersion && (
-                <span className="text-green-500">(v{spoolmanVersion}{spoolmanEndpoint ? ` · ${spoolmanEndpoint}`:''})</span>
+                <span className="text-pf-success">(v{spoolmanVersion}{spoolmanEndpoint ? ` · ${spoolmanEndpoint}`:''})</span>
               )}
               {!spoolmanTestOk && spoolmanErrorCategory && (
-                <span className="text-red-400 inline-flex items-center gap-1">
+                <span className="text-pf-error inline-flex items-center gap-1">
                   (last test: {getSpoolmanFriendly(spoolmanErrorCategory)}{getSpoolmanFriendly(spoolmanErrorCategory) !== spoolmanErrorCategory ? ` [${spoolmanErrorCategory}]` : ''})
                   {spoolmanTestResult && (
                     <span className="text-pf-text-tertiary" title={spoolmanTestResult}>
@@ -768,7 +768,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </span>
           ) : 'Not configured'}</div>
         </div>
-        {globalError && <div className="text-sm text-red-500" role="alert">{globalError}</div>}
+        {globalError && <div className="text-sm text-pf-error" role="alert">{globalError}</div>}
         <div className="flex justify-between">
           <Button
             type="button"
@@ -827,8 +827,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               </span>
             </div>
             {globalError && (
-              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <div className="text-sm text-red-600">{globalError}</div>
+              <div className="mt-4 p-4 bg-pf-error/10 border border-pf-error/30 rounded-lg">
+                <div className="text-sm text-pf-error">{globalError}</div>
               </div>
             )}
           </div>)
@@ -853,7 +853,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div key={label} className={`px-2 py-1 rounded-sm ${idx===step ? 'bg-pf-accent text-white':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
               ))}
             </div>
-            {globalError && step !== 3 && <div className="mb-4 text-sm text-red-500" role="alert">{globalError}</div>}
+            {globalError && step !== 3 && <div className="mb-4 text-sm text-pf-error" role="alert">{globalError}</div>}
             {step === 0 && renderAccountStep()}
             {step === 1 && renderNetworkStep()}
             {step === 2 && renderSpoolmanStep()}

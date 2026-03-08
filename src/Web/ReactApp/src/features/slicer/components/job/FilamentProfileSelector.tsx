@@ -67,7 +67,7 @@ export const FilamentProfileSelector: React.FC<FilamentProfileSelectorProps> = (
             {MATERIAL_PRESETS[selectedFilamentMaterial].nozzleTemp}°C nozzle, {MATERIAL_PRESETS[selectedFilamentMaterial].bedTemp}°C bed
           </div>
           {hasPrinterModelSelected && (
-            <p className="text-xs text-amber-500 mt-1">No filament profiles for this model - using presets</p>
+            <p className="text-xs text-pf-warning mt-1">No filament profiles for this model - using presets</p>
           )}
         </>
       )}

@@ -531,7 +531,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
         <div className="flex items-center justify-center py-12">
           <div className="text-center">
             <LoadingIcon className="w-8 h-8 animate-spin mx-auto mb-2" />
-            <p className="text-gray-500">Loading printers...</p>
+            <p className="text-pf-text-secondary">Loading printers...</p>
           </div>
         </div>
       </Modal>
@@ -552,7 +552,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             <p>{dataError.message || 'Unable to load manufacturers and models'}</p>
           </Alert>
           <div className="mt-4 flex justify-end">
-            <Button onClick={onClose} className="bg-gray-600 hover:bg-gray-700">
+            <Button onClick={onClose} className="bg-pf-bg-2 hover:bg-pf-bg-1">
               Close
             </Button>
           </div>

@@ -137,7 +137,7 @@ export const JobStatisticsPanel: React.FC<JobStatisticsPanelProps> = ({
       {/* Content */}
       <div className="p-4">
         {isLoading && <div className="text-sm pf-text-secondary">Loading statistics...</div>}
-        {error && <div className="text-sm text-red-600">Failed to load statistics</div>}
+        {error && <div className="text-sm text-pf-error">Failed to load statistics</div>}
         {!isLoading && !error && (
           <>
             {view === 'material' && materialQuery.data && (

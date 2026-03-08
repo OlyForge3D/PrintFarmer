@@ -176,10 +176,10 @@ export function ComponentModelCard<T extends ComponentModelCardData>({
         {/* Header: Name and Actions */}
         <div className="flex justify-between items-start">
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+            <h3 className="text-lg font-semibold text-pf-text-primary dark:text-white truncate">
               {model.name}
             </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-pf-text-secondary">
               {model.manufacturerName || 'Unknown Manufacturer'}
             </p>
           </div>
@@ -242,7 +242,7 @@ export function ComponentModelCard<T extends ComponentModelCardData>({
                 onClick={() => onDelete(model)}
                 disabled={isLoading}
                 aria-label={`Delete ${model.name}`}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-900/20"
+                className="text-pf-error hover:text-pf-error hover:bg-pf-error/10 dark:hover:text-pf-error"
               >
                 <svg
                   className="w-4 h-4"
@@ -268,7 +268,7 @@ export function ComponentModelCard<T extends ComponentModelCardData>({
 
         {/* Description */}
         {model.description && (
-          <p className="mt-3 text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
+          <p className="mt-3 text-sm text-pf-text-secondary line-clamp-2">
             {model.description}
           </p>
         )}
@@ -279,7 +279,7 @@ export function ComponentModelCard<T extends ComponentModelCardData>({
             href={model.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+            className="mt-2 inline-flex items-center gap-1 text-sm text-pf-accent hover:underline"
           >
             <svg
               className="w-3 h-3"

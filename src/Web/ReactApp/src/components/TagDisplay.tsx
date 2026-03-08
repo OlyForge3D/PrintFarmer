@@ -95,7 +95,7 @@ export const TagDisplay: React.FC<TagDisplayProps> = ({
         <Button
           onClick={handleRemoveClick}
           onKeyDown={handleRemoveKeyDown}
-          className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-white/30 transition-colors duration-150"
+          className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-pf-bg-0/30 transition-colors duration-150"
           aria-label={`Remove tag ${tag.name}`}
           title={`Remove ${tag.name}`}
           disabled={disabled}

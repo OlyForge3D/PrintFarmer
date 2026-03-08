@@ -309,7 +309,7 @@ function FilamentRow({
   return (
     <tr
       className={`border-t border-pf-border cursor-pointer hover:bg-pf-surface-hover ${
-        isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+        isSelected ? 'bg-pf-accent-bg/15' : ''
       }`}
       onClick={() => onToggle(filament.id)}
     >

@@ -28,10 +28,10 @@ export function SpoolUsageBar({
   }, [remainingPct]);
 
   const colorClass = remainingWeight <= criticalThreshold
-    ? 'bg-red-500'
+    ? 'bg-pf-error'
     : remainingWeight <= lowThreshold
-      ? 'bg-orange-500'
-      : 'bg-blue-500';
+      ? 'bg-pf-warning'
+      : 'bg-pf-accent-bg';
 
   return (
     <div

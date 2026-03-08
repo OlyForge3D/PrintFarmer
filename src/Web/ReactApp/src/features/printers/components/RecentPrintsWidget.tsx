@@ -36,8 +36,8 @@ export function RecentPrintsWidget({ maxPrints = 5, className = '' }: RecentPrin
     <DashboardWidget
       title="Recent Prints"
       icon={TrendingUpIcon}
-      iconColorClass={hasPrints ? 'text-green-400' : 'text-pf-text-tertiary'}
-      iconBgClass={hasPrints ? 'bg-green-500/20' : 'bg-pf-bg-2'}
+      iconColorClass={hasPrints ? 'text-pf-success' : 'text-pf-text-tertiary'}
+      iconBgClass={hasPrints ? 'bg-pf-success/10' : 'bg-pf-bg-2'}
       subtitle={
         hasPrints
           ? `${printCount} recent print${printCount !== 1 ? 's' : ''}`
@@ -79,9 +79,9 @@ export function RecentPrintsWidget({ maxPrints = 5, className = '' }: RecentPrin
                 </p>
                 <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
                   entry.status === 'Completed'
-                    ? 'bg-green-500/20 text-green-400' 
+                    ? 'bg-pf-success/10 text-pf-success' 
                     : entry.status === 'Failed' 
-                    ? 'bg-red-500/20 text-red-400'
+                    ? 'bg-pf-error/10 text-pf-error'
                     : 'bg-pf-border-medium text-pf-text-secondary'
                 }`}>
                   {entry.status}

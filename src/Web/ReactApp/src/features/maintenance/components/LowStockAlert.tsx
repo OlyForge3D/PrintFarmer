@@ -40,11 +40,11 @@ export function LowStockAlert({ maxItems = 5, onViewAll }: LowStockAlertProps) {
   const remaining = lowStock.length - visible.length;
 
   return (
-    <div className="rounded-lg border border-amber-500/40 bg-amber-500/5">
+    <div className="rounded-lg border border-pf-warning/40 bg-pf-warning/5">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/20">
-        <AlertIcon className="h-5 w-5 text-amber-400 shrink-0" aria-hidden="true" />
-        <h3 className="text-sm font-semibold text-amber-400">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-pf-warning/20">
+        <AlertIcon className="h-5 w-5 text-pf-warning shrink-0" aria-hidden="true" />
+        <h3 className="text-sm font-semibold text-pf-warning">
           Low Stock Alert
         </h3>
         <Badge variant="warning" className="text-xs ml-auto">
@@ -53,7 +53,7 @@ export function LowStockAlert({ maxItems = 5, onViewAll }: LowStockAlertProps) {
       </div>
 
       {/* Items */}
-      <div className="divide-y divide-amber-500/10">
+      <div className="divide-y divide-pf-warning/10">
         {visible.map((part: MaintenanceComponentDto) => {
           const deficit = Math.max(0, part.minimumStock - part.inStock);
           return (
@@ -63,7 +63,7 @@ export function LowStockAlert({ maxItems = 5, onViewAll }: LowStockAlertProps) {
                   <span className="text-sm font-medium text-pf-text-primary truncate">{part.name}</span>
                   <Badge variant="default" className="text-[10px]">{part.category}</Badge>
                 </div>
-                <p className="text-xs text-amber-400 mt-0.5">
+                <p className="text-xs text-pf-warning mt-0.5">
                   {part.inStock} in stock (min: {part.minimumStock}, need {deficit} more)
                 </p>
               </div>
@@ -85,7 +85,7 @@ export function LowStockAlert({ maxItems = 5, onViewAll }: LowStockAlertProps) {
 
       {/* Footer */}
       {(remaining > 0 || onViewAll) && (
-        <div className="px-4 py-2.5 border-t border-amber-500/20 flex items-center justify-between">
+        <div className="px-4 py-2.5 border-t border-pf-warning/20 flex items-center justify-between">
           {remaining > 0 && (
             <span className="text-xs text-pf-text-muted">
               +{remaining} more part{remaining !== 1 ? 's' : ''} below minimum

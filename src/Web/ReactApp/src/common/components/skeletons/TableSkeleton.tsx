@@ -9,11 +9,11 @@ export const TableSkeleton: React.FC<{ rows?: number; cols?: number; className?:
     5: 'grid-cols-5', 6: 'grid-cols-6', 7: 'grid-cols-7', 8: 'grid-cols-8'
   }[Math.min(cols, 8)] || 'grid-cols-5';
   return (
-    <div className={`border border-gray-200 rounded-lg overflow-hidden ${className ?? ''}`} aria-busy="true" aria-live="polite" aria-label="Loading table">
+    <div className={`border border-pf-border rounded-lg overflow-hidden ${className ?? ''}`} aria-busy="true" aria-live="polite" aria-label="Loading table">
       <div className="bg-pf-bg-0 border-b border-pf-border px-4 py-3">
         <div className="h-4 w-40 bg-pf-bg-2 rounded-sm animate-pulse" />
       </div>
-      <div className="divide-y divide-gray-200">
+      <div className="divide-y divide-pf-border">
         {rowArray.map((_, r) => (
           <div key={r} className={`grid ${colClass}`}>
             {colArray.map((__, c) => (

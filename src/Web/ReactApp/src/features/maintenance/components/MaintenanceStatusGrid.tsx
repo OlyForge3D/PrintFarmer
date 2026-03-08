@@ -45,24 +45,24 @@ function getStatusIndicator(printer: PrinterMaintenanceStatus): {
   label: string;
 } {
   if (!printer.isOnline) {
-    return { color: 'text-gray-400', bgColor: 'bg-gray-500/20', label: 'Offline' };
+    return { color: 'text-pf-text-tertiary', bgColor: 'bg-pf-disabled/20', label: 'Offline' };
   }
   if (printer.inMaintenance) {
-    return { color: 'text-blue-400', bgColor: 'bg-blue-500/20', label: 'In Maintenance' };
+    return { color: 'text-pf-accent', bgColor: 'bg-pf-accent-bg/15', label: 'In Maintenance' };
   }
   if (printer.criticalAlerts > 0) {
-    return { color: 'text-red-400', bgColor: 'bg-red-500/20', label: 'Critical' };
+    return { color: 'text-pf-error', bgColor: 'bg-pf-error/10', label: 'Critical' };
   }
   if (printer.highAlerts > 0) {
-    return { color: 'text-orange-400', bgColor: 'bg-orange-500/20', label: 'Needs Attention' };
+    return { color: 'text-pf-warning', bgColor: 'bg-pf-warning/10', label: 'Needs Attention' };
   }
   if (printer.mediumAlerts > 0) {
-    return { color: 'text-amber-400', bgColor: 'bg-amber-500/20', label: 'Warning' };
+    return { color: 'text-pf-warning', bgColor: 'bg-pf-warning/10', label: 'Warning' };
   }
   if (printer.lowAlerts > 0) {
-    return { color: 'text-blue-400', bgColor: 'bg-blue-500/20', label: 'Minor' };
+    return { color: 'text-pf-accent', bgColor: 'bg-pf-accent-bg/15', label: 'Minor' };
   }
-  return { color: 'text-emerald-400', bgColor: 'bg-emerald-500/20', label: 'Healthy' };
+  return { color: 'text-pf-success', bgColor: 'bg-pf-success/20', label: 'Healthy' };
 }
 
 function PrinterCard({ printer, onClick }: PrinterCardProps) {
@@ -93,7 +93,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
             </h4>
             <p className="text-xs text-pf-text-tertiary flex items-center gap-1">
               <CircleIcon 
-                className={`h-2 w-2 ${printer.isOnline ? 'text-emerald-400' : 'text-gray-400'}`} 
+                className={`h-2 w-2 ${printer.isOnline ? 'text-pf-success' : 'text-pf-text-tertiary'}`} 
                 aria-hidden="true"
               />
               {printer.isOnline ? 'Online' : 'Offline'}
@@ -104,7 +104,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         {/* Maintenance mode indicator */}
         {printer.inMaintenance && (
           <div className="shrink-0" title="In maintenance mode">
-            <WrenchIcon className="h-4 w-4 text-blue-400" aria-hidden="true" />
+            <WrenchIcon className="h-4 w-4 text-pf-accent" aria-hidden="true" />
           </div>
         )}
       </div>
@@ -120,7 +120,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <CheckCircleIcon className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+            <CheckCircleIcon className="h-4 w-4 text-pf-success" aria-hidden="true" />
             <span className="text-sm text-pf-text-secondary">Healthy</span>
           </div>
         )}
@@ -129,22 +129,22 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         {hasAlerts && (
           <div className="flex items-center gap-1">
             {printer.criticalAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-red-500/20 text-red-400 rounded-sm">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-error/10 text-pf-error rounded-sm">
                 {printer.criticalAlerts}
               </span>
             )}
             {printer.highAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-orange-500/20 text-orange-400 rounded-sm">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
                 {printer.highAlerts}
               </span>
             )}
             {printer.mediumAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-400 rounded-sm">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
                 {printer.mediumAlerts}
               </span>
             )}
             {printer.lowAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-500/20 text-blue-400 rounded-sm">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-accent-bg/15 text-pf-accent rounded-sm">
                 {printer.lowAlerts}
               </span>
             )}

@@ -3,7 +3,7 @@ interface ErrorIconProps {
   className?: string;
 }
 
-export function ErrorIcon({ type, className = 'w-5 h-5 text-red-600 shrink-0 mt-0.5' }: ErrorIconProps) {
+export function ErrorIcon({ type, className = 'w-5 h-5 text-pf-error shrink-0 mt-0.5' }: ErrorIconProps) {
   switch (type) {
     case 'connection':
       return (

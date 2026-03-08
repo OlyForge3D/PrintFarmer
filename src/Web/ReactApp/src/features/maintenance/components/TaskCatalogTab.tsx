@@ -294,7 +294,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreat
             {/* Name */}
             <div>
               <label htmlFor="task-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
-                Name <span className="text-red-400">*</span>
+                Name <span className="text-pf-error">*</span>
               </label>
               <Input id="task-name" value={taskName} onChange={e => setTaskName(e.target.value)} placeholder="e.g. Clean nozzle" required maxLength={200} />
             </div>
@@ -302,7 +302,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreat
             {/* Category */}
             <div>
               <label htmlFor="task-category" className="block text-sm font-medium text-pf-text-secondary mb-1">
-                Category <span className="text-red-400">*</span>
+                Category <span className="text-pf-error">*</span>
               </label>
               <Select id="task-category" value={category} onChange={e => setCategory(e.target.value)}>
                 {categories.map(c => (
@@ -453,7 +453,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreat
                               <td className="px-3 py-2 text-right">{tc.quantity}</td>
                               <td className="px-3 py-2 text-pf-text-muted">{comp?.sku ?? '—'}</td>
                               <td className="px-3 py-2 text-right">
-                                <span className={isLow ? 'text-amber-400' : ''}>{comp?.inStock ?? '—'}</span>
+                                <span className={isLow ? 'text-pf-warning' : ''}>{comp?.inStock ?? '—'}</span>
                                 {isLow && <Badge variant="warning" className="text-[10px] ml-1">Low</Badge>}
                               </td>
                               <td className="px-3 py-2 text-pf-text-muted italic text-xs">{tc.notes ?? '—'}</td>
@@ -463,7 +463,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreat
                                   size="sm"
                                   onClick={() => setRemovingTc(tc)}
                                   aria-label={`Remove ${tc.componentName ?? 'part'}`}
-                                  className="text-red-400 hover:text-red-300"
+                                  className="text-pf-error hover:text-pf-error"
                                 >
                                   <DeleteIcon className="h-4 w-4" aria-hidden="true" />
                                 </Button>
@@ -671,7 +671,7 @@ export function TaskCatalogTab() {
 
   if (error) {
     return (
-      <div className="text-center py-12 text-red-400" role="alert">
+      <div className="text-center py-12 text-pf-error" role="alert">
         Failed to load task catalog. {error instanceof Error ? error.message : ''}
       </div>
     );
@@ -789,7 +789,7 @@ export function TaskCatalogTab() {
                     size="sm"
                     onClick={() => setDeletingTask(task)}
                     aria-label={`Delete ${task.taskName}`}
-                    className="text-red-400 hover:text-red-300"
+                    className="text-pf-error hover:text-pf-error"
                   >
                     <DeleteIcon className="h-4 w-4" aria-hidden="true" />
                   </Button>

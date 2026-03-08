@@ -52,30 +52,30 @@ function formatDate(timestamp: number): string {
 function getStatusIcon(status: string) {
   switch (status.toLowerCase()) {
     case 'completed':
-      return <CheckCircleIcon className="h-4 w-4 text-green-500" />;
+      return <CheckCircleIcon className="h-4 w-4 text-pf-success" />;
     case 'cancelled':
-      return <XCircleIcon className="h-4 w-4 text-red-500" />;
+      return <XCircleIcon className="h-4 w-4 text-pf-error" />;
     case 'paused':
       return <PauseIcon className="h-4 w-4" ariaLabel="Paused" />;
     case 'printing':
       return <PlayIcon className="h-4 w-4" ariaLabel="Printing" />;
     default:
-      return <FileIcon className="h-4 w-4 text-gray-500" />;
+      return <FileIcon className="h-4 w-4 text-pf-text-secondary" />;
   }
 }
 
 function getStatusColor(status: string): string {
   switch (status.toLowerCase()) {
     case 'completed':
-      return 'bg-green-100 text-green-800';
+      return 'bg-pf-success/10 text-pf-success';
     case 'cancelled':
-      return 'bg-red-100 text-red-800';
+      return 'bg-pf-error/10 text-pf-error';
     case 'paused':
-      return 'bg-yellow-100 text-yellow-800';
+      return 'bg-pf-warning/10 text-pf-warning';
     case 'printing':
-      return 'bg-blue-100 text-blue-800';
+      return 'bg-pf-accent-bg/15 text-pf-accent';
     default:
-      return 'bg-gray-100 text-gray-800';
+      return 'bg-pf-bg-1 text-pf-text-primary';
   }
 }
 
@@ -143,7 +143,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
         </div>
       ) : error ? (
         <div className="text-center py-8">
-          <XCircleIcon className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <XCircleIcon className="h-12 w-12 text-pf-error mx-auto mb-4" />
           <h3 className="text-lg font-medium text-pf-text-primary mb-2">Failed to Load History</h3>
           <p className="text-pf-text-secondary mb-4">{error.message}</p>
           <Button
@@ -186,7 +186,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                 {/* Total Print Time */}
                 <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                   <div className="flex items-center space-x-2 mb-2">
-                    <TimerIcon className="h-4 w-4 text-blue-500" />
+                    <TimerIcon className="h-4 w-4 text-pf-accent" />
                     <span className="text-sm font-medium text-pf-text-secondary">Total Print Time</span>
                   </div>
                   <div className="text-2xl font-bold text-pf-text-primary">
@@ -197,7 +197,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                 {/* Total Filament */}
                 <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                   <div className="flex items-center space-x-2 mb-2">
-                    <PackageIcon className="h-4 w-4 text-green-500" />
+                    <PackageIcon className="h-4 w-4 text-pf-success" />
                     <span className="text-sm font-medium text-pf-text-secondary">Total Filament</span>
                   </div>
                   <div className="text-2xl font-bold text-pf-text-primary">
@@ -209,7 +209,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                 {(totalsData.jobTotals.longestPrint || 0) > 0 && (
                   <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                     <div className="flex items-center space-x-2 mb-2">
-                      <ClockIcon className="h-4 w-4 text-purple-500" />
+                      <ClockIcon className="h-4 w-4 text-pf-accent" />
                       <span className="text-sm font-medium text-pf-text-secondary">Longest Print</span>
                     </div>
                     <div className="text-2xl font-bold text-pf-text-primary">
@@ -222,7 +222,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                   (totalsData.jobTotals.longestJob || 0) !== (totalsData.jobTotals.longestPrint || 0) && (
                     <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                       <div className="flex items-center space-x-2 mb-2">
-                        <CalendarIcon className="h-4 w-4 text-orange-500" />
+                        <CalendarIcon className="h-4 w-4 text-pf-warning" />
                         <span className="text-sm font-medium text-pf-text-secondary">Longest Job</span>
                       </div>
                       <div className="text-2xl font-bold text-pf-text-primary">

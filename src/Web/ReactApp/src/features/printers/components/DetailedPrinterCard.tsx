@@ -151,11 +151,11 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const isAllHomed = isXYHomed && isZHomed;
 
   const statusDotClasses = (() => {
-    if (!isOnline) return 'bg-slate-400';
+    if (!isOnline) return 'bg-pf-disabled';
     if (isPrinting) return 'bg-pf-success-bg';
-    if (isPaused) return 'bg-yellow-500';
-    if (isShutdown) return 'bg-red-500';
-    return 'bg-blue-500';
+    if (isPaused) return 'bg-pf-warning';
+    if (isShutdown) return 'bg-pf-error';
+    return 'bg-pf-accent-bg';
   })();
 
   // Update progress bar width
@@ -434,7 +434,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             )}
           </div>
 
-          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-white/4 border border-white/10 text-pf-text-primary">
+          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-pf-bg-0/4 border border-white/10 text-pf-text-primary">
             <span className={`h-2 w-2 rounded-full ${statusDotClasses}`} aria-hidden />
             <span className="text-pf-text-secondary">
               {isOnline ? toCamelCase(state) : 'Offline'}
@@ -443,7 +443,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         </div>
 
         {/* Subtle separator above actions (match collapsed card) */}
-        <div className="h-px w-full bg-white/10 mb-2" aria-hidden />
+        <div className="h-px w-full bg-pf-bg-0/10 mb-2" aria-hidden />
 
         {/* Action buttons row */}
         <div className="flex w-full items-center justify-between gap-2" role="toolbar" aria-label="Printer actions">
@@ -615,7 +615,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           </div>
 
           <TemperatureControlRow
-            icon={<NozzleIcon className="w-4 h-4 text-red-500" isOn={(printer.hotendTarget ?? 0) > 0} />}
+            icon={<NozzleIcon className="w-4 h-4 text-pf-error" isOn={(printer.hotendTarget ?? 0) > 0} />}
             label="Hotend"
             stateLabel={(printer.hotendTarget ?? 0) > 0 ? 'on' : 'off'}
             liveReading={formatTemperature(printer.hotendTemp)}
@@ -630,7 +630,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           />
 
           <TemperatureControlRow
-            icon={<BedIcon className="w-4 h-4 text-blue-500" isOn={(printer.bedTarget ?? 0) > 0} />}
+            icon={<BedIcon className="w-4 h-4 text-pf-accent" isOn={(printer.bedTarget ?? 0) > 0} />}
             label="Bed"
             stateLabel={(printer.bedTarget ?? 0) > 0 ? 'on' : 'off'}
             liveReading={formatTemperature(printer.bedTemp)}

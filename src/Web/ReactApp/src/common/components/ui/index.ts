@@ -11,6 +11,7 @@ export { CollapsibleSection } from './CollapsibleSection';
 export { ColorPicker, type ColorPickerProps } from './ColorPicker';
 export { ControlPadButton, type ControlPadButtonProps } from './ControlPadButton';
 export { DataTable, type DataTableProps, type DataTableColumn } from './DataTable';
+export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { FileUpload, type FileUploadProps } from './FileUpload';
 export { FormField, type FormFieldProps } from './FormField';
 export { Input, type InputProps } from './Input';

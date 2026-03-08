@@ -32,9 +32,9 @@ const getStatusClass = (status: string) => {
     case 'Imported':
       return 'bg-pf-bg-0/50';
     case 'Failed':
-      return 'bg-red-500/10';
+      return 'bg-pf-error/10';
     case 'Skipped':
-      return 'bg-yellow-500/10';
+      return 'bg-pf-warning/10';
     default:
       return '';
   }

@@ -763,7 +763,7 @@ export const NewSliceJobPage: React.FC = () => {
                 {selectedPrinterForSlicing.nozzleDiameter && ` • ${selectedPrinterForSlicing.nozzleDiameter}mm nozzle`}
               </p>
             ) : (
-              <p className="text-xs text-amber-500 mb-2">
+              <p className="text-xs text-pf-warning mb-2">
                 Select a printer above to see available machine profiles
               </p>
             )}
@@ -798,10 +798,10 @@ export const NewSliceJobPage: React.FC = () => {
               ))}
             </Select>
             {selectedPrinterId && availableMachineProfiles.length === 0 && selectedManufacturer && selectedPrinterModel && (
-              <p className="text-xs text-amber-500 mt-1">No machine profiles available for this printer model</p>
+              <p className="text-xs text-pf-warning mt-1">No machine profiles available for this printer model</p>
             )}
             {selectedPrinterId && !selectedManufacturer && (
-              <p className="text-xs text-amber-500 mt-1">
+              <p className="text-xs text-pf-warning mt-1">
                 No matching slicer profiles found for this printer's manufacturer
               </p>
             )}

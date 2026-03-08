@@ -26,7 +26,7 @@ export const CompletionPredictionCard: React.FC<CompletionPredictionCardProps> =
       case 'High':
         return 'bg-pf-success-bg text-pf-success';
       case 'Medium':
-        return 'bg-yellow-100 text-yellow-700';
+        return 'bg-pf-warning/10 text-pf-warning';
       case 'Low':
         return 'bg-pf-error-bg text-pf-error-text';
       default:

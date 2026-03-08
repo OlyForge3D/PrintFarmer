@@ -98,11 +98,11 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
   const getSeverityColor = (severity: number): string => {
     switch (severity) {
-      case 4: return 'text-red-600 bg-red-50 border-red-200'; // Critical
-      case 3: return 'text-orange-600 bg-orange-50 border-orange-200'; // High
-      case 2: return 'text-yellow-600 bg-yellow-50 border-yellow-200'; // Medium
-      case 1: return 'text-blue-600 bg-blue-50 border-blue-200'; // Low
-      default: return 'text-gray-600 bg-gray-50 border-gray-200';
+      case 4: return 'text-pf-error bg-pf-error/10 border-pf-error/30'; // Critical
+      case 3: return 'text-pf-warning bg-pf-warning/10 border-pf-warning/30'; // High
+      case 2: return 'text-pf-warning bg-pf-warning/10 border-pf-warning/30'; // Medium
+      case 1: return 'text-pf-accent bg-pf-accent-bg/15 border-pf-accent/30'; // Low
+      default: return 'text-pf-text-secondary bg-pf-bg-1 border-pf-border';
     }
   };
 
@@ -119,21 +119,21 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
   const getStatusBadge = (status: MaintenanceAlertStatus): string => {
     switch (status) {
       case MaintenanceAlertStatus.Active:
-        return 'bg-red-100 text-red-800';
+        return 'bg-pf-error/10 text-pf-error';
       case MaintenanceAlertStatus.Acknowledged:
-        return 'bg-yellow-100 text-yellow-800';
+        return 'bg-pf-warning/10 text-pf-warning';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-pf-bg-1 text-pf-text-primary';
     }
   };
 
   if (loading && alerts.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-4">
+      <div className="bg-pf-bg-0 rounded-lg shadow-sm p-4">
         <h3 className="text-lg font-semibold mb-3">Maintenance Alerts</h3>
         <div className="flex items-center justify-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <span className="ml-3 text-gray-600">Loading alerts...</span>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+          <span className="ml-3 text-pf-text-secondary">Loading alerts...</span>
         </div>
       </div>
     );
@@ -141,14 +141,14 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
   if (error) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-4">
+      <div className="bg-pf-bg-0 rounded-lg shadow-sm p-4">
         <h3 className="text-lg font-semibold mb-3">Maintenance Alerts</h3>
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-red-800">Error: {error}</p>
+        <div className="bg-pf-error/10 border border-pf-error/30 rounded-md p-4">
+          <p className="text-pf-error">Error: {error}</p>
           <Button
             variant="link"
             onClick={loadAlerts}
-            className="mt-2 text-sm text-red-600 hover:text-red-800"
+            className="mt-2 text-sm text-pf-error hover:text-pf-error"
           >
             Retry
           </Button>
@@ -158,20 +158,20 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm p-4">
+    <div className="bg-pf-bg-0 rounded-lg shadow-sm p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-lg font-semibold">Maintenance Alerts</h3>
         {alerts.length > 0 && (
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-pf-text-secondary">
             {alerts.length} active {alerts.length === 1 ? 'alert' : 'alerts'}
           </span>
         )}
       </div>
 
       {alerts.length === 0 ? (
-        <div className="text-center py-8 text-gray-500">
+        <div className="text-center py-8 text-pf-text-secondary">
           <svg
-            className="mx-auto h-12 w-12 text-gray-400"
+            className="mx-auto h-12 w-12 text-pf-text-tertiary"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -184,7 +184,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
             />
           </svg>
           <p className="mt-2">No active maintenance alerts</p>
-          <p className="text-sm text-gray-400">All printers are in good condition</p>
+          <p className="text-sm text-pf-text-tertiary">All printers are in good condition</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -240,7 +240,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
       {alerts.length > 0 && maxAlerts < alerts.length && (
         <div className="mt-3 text-center">
-          <Button variant="link" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+          <Button variant="link" className="text-sm text-pf-accent hover:text-pf-accent font-medium">
             View all alerts →
           </Button>
         </div>

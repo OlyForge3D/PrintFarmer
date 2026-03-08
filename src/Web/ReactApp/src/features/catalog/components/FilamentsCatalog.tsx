@@ -44,7 +44,7 @@ function FilamentTypeCard({ filament, onEdit, onClone, onDelete, isDeleting }: F
         {/* Header: Name and Actions */}
         <div className="flex justify-between items-start">
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+            <h3 className="text-lg font-semibold text-pf-text-primary dark:text-white truncate">
               {filament.name}
             </h3>
           </div>
@@ -102,7 +102,7 @@ function FilamentTypeCard({ filament, onEdit, onClone, onDelete, isDeleting }: F
               onClick={() => onDelete(filament)}
               disabled={isDeleting}
               aria-label={`Delete ${filament.name}`}
-              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-900/20"
+              className="text-pf-error hover:text-pf-error hover:bg-pf-error/10 dark:hover:text-pf-error"
             >
               <svg
                 className="w-4 h-4"
@@ -163,7 +163,7 @@ function FilamentTypeCard({ filament, onEdit, onClone, onDelete, isDeleting }: F
             </Badge>
           )}
           {!filament.isAbrasive && !filament.needsEnclosure && (
-            <span className="text-sm text-gray-500 dark:text-gray-400">Standard</span>
+            <span className="text-sm text-pf-text-secondary">Standard</span>
           )}
         </div>
       </div>
@@ -479,7 +479,7 @@ export function FilamentsCatalog() {
   if (isError) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-red-500">Failed to load filament types</div>
+        <div className="text-pf-error">Failed to load filament types</div>
       </div>
     );
   }
@@ -587,7 +587,7 @@ export function FilamentsCatalog() {
                 title={`Delete ${item.name}`}
                 disabled={deleteMutation.isPending && deletingFilament?.id === item.id}
               >
-                <DeleteIcon className="w-4 h-4 text-red-500" />
+                <DeleteIcon className="w-4 h-4 text-pf-error" />
               </Button>
             </div>
           )}

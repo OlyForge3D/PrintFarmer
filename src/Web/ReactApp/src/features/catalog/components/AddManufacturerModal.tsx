@@ -79,8 +79,8 @@ export function AddManufacturerModal({
       <div className="space-y-4 p-4">
         {/* Manufacturer Name - Required */}
         <div>
-          <label htmlFor="mfg-name" className="block text-sm font-medium text-pf-text-primary mb-1">
-            Manufacturer Name <span className="text-red-500">*</span>
+          <label htmlFor="mfg-name" className="block text-sm font-medium text-pf-text mb-1">
+            Manufacturer Name <span className="text-pf-error">*</span>
           </label>
           <Input
             id="mfg-name"
@@ -96,7 +96,7 @@ export function AddManufacturerModal({
 
         {/* Website URL - Optional */}
         <div>
-          <label htmlFor="mfg-url" className="block text-sm font-medium text-pf-text-primary mb-1">
+          <label htmlFor="mfg-url" className="block text-sm font-medium text-pf-text mb-1">
             Website URL <span className="text-xs text-pf-text-secondary">(optional)</span>
           </label>
           <Input
@@ -113,7 +113,7 @@ export function AddManufacturerModal({
 
         {/* Description - Optional */}
         <div>
-          <label htmlFor="mfg-desc" className="block text-sm font-medium text-pf-text-primary mb-1">
+          <label htmlFor="mfg-desc" className="block text-sm font-medium text-pf-text mb-1">
             Description <span className="text-xs text-pf-text-secondary">(optional)</span>
           </label>
           <Textarea
@@ -130,7 +130,7 @@ export function AddManufacturerModal({
 
         {/* Error Message */}
         {error && (
-          <div className="p-3 bg-red-900/20 border border-red-600 rounded-sm text-red-400 text-sm">
+          <div className="p-3 bg-pf-error/10 border border-pf-error rounded-sm text-pf-error text-sm">
             {error}
           </div>
         )}

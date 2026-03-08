@@ -70,7 +70,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
             <h4 className="font-medium text-pf-text-primary">Machine Profiles</h4>
             <span className="text-sm text-pf-text-tertiary">({selectedMachines.size} selected)</span>
             {importedMachineCount > 0 && (
-              <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+              <span className="text-xs text-pf-success flex items-center gap-1">
                 <CheckCircle className="h-3 w-3" />
                 {importedMachineCount} already imported
               </span>
@@ -84,7 +84,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
                   key={name}
                   className={`text-xs px-2 py-1 rounded ${
                     importedMachineSet.has(name)
-                      ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                      ? 'bg-pf-success/10 text-pf-success'
                       : 'bg-pf-bg-2'
                   }`}
                 >
@@ -104,7 +104,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
             <h4 className="font-medium text-pf-text-primary">Process Profiles</h4>
             <span className="text-sm text-pf-text-tertiary">({processProfiles.length} auto-included)</span>
             {importedProcessCount > 0 && (
-              <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+              <span className="text-xs text-pf-success flex items-center gap-1">
                 <CheckCircle className="h-3 w-3" />
                 {importedProcessCount} already imported
               </span>
@@ -122,7 +122,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
             <h4 className="font-medium text-pf-text-primary">Filament Profiles</h4>
             <span className="text-sm text-pf-text-tertiary">({selectedFilaments.size} selected)</span>
             {importedFilamentCount > 0 && (
-              <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+              <span className="text-xs text-pf-success flex items-center gap-1">
                 <CheckCircle className="h-3 w-3" />
                 {importedFilamentCount} already imported
               </span>
@@ -137,7 +137,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
                     key={name}
                     className={`text-xs px-2 py-1 rounded ${
                       importedFilamentSet.has(name)
-                        ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                        ? 'bg-pf-success/10 text-pf-success'
                         : 'bg-pf-bg-2'
                     }`}
                   >

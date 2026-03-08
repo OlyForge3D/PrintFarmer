@@ -68,7 +68,7 @@ export function ForgotPasswordPage() {
           </div>
 
           <div className="p-6 space-y-4">
-            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md text-sm">
+            <div className="bg-pf-success/10 border border-pf-success/30 text-pf-success px-4 py-3 rounded-md text-sm">
               If an account exists with that email address, you will receive password reset instructions.
               Please check your email inbox.
             </div>

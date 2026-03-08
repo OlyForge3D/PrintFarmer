@@ -54,30 +54,30 @@ const severityConfig: Record<number, {
 }> = {
   4: { 
     label: 'Critical', 
-    bgColor: 'bg-red-500/10', 
-    textColor: 'text-red-400', 
-    borderColor: 'border-red-500/30',
+    bgColor: 'bg-pf-error/10', 
+    textColor: 'text-pf-error', 
+    borderColor: 'border-pf-error/30',
     icon: AlertCircleIcon 
   },
   3: { 
     label: 'High', 
-    bgColor: 'bg-orange-500/10', 
-    textColor: 'text-orange-400', 
-    borderColor: 'border-orange-500/30',
+    bgColor: 'bg-pf-warning/10', 
+    textColor: 'text-pf-warning', 
+    borderColor: 'border-pf-warning/30',
     icon: AlertCircleIcon 
   },
   2: { 
     label: 'Medium', 
-    bgColor: 'bg-amber-500/10', 
-    textColor: 'text-amber-400', 
-    borderColor: 'border-amber-500/30',
+    bgColor: 'bg-pf-warning/10', 
+    textColor: 'text-pf-warning', 
+    borderColor: 'border-pf-warning/30',
     icon: AlertCircleIcon 
   },
   1: { 
     label: 'Low', 
-    bgColor: 'bg-blue-500/10', 
-    textColor: 'text-blue-400', 
-    borderColor: 'border-blue-500/30',
+    bgColor: 'bg-pf-accent-bg/15', 
+    textColor: 'text-pf-accent', 
+    borderColor: 'border-pf-accent/30',
     icon: AlertCircleIcon 
   },
 };
@@ -187,7 +187,7 @@ function AlertItem({ alert, compact, onActionComplete }: AlertItemProps) {
               </span>
               <span>{timeAgo}</span>
               {isAcknowledged && (
-                <span className="flex items-center gap-1 text-blue-400">
+                <span className="flex items-center gap-1 text-pf-accent">
                   <CheckCircleIcon className="h-3 w-3" aria-hidden="true" />
                   Acknowledged
                 </span>
@@ -213,7 +213,7 @@ function AlertItem({ alert, compact, onActionComplete }: AlertItemProps) {
                   size="sm"
                   onClick={handleResolve}
                   disabled={!!isActioning}
-                  className="text-xs text-emerald-400 hover:text-emerald-300"
+                  className="text-xs text-pf-success hover:text-pf-success"
                 >
                   <WrenchIcon className="h-3 w-3 mr-1" aria-hidden="true" />
                   {isActioning === 'resolve' ? 'Resolving...' : 'Resolve'}
@@ -269,7 +269,7 @@ function AlertItem({ alert, compact, onActionComplete }: AlertItemProps) {
               size="sm"
               onClick={handleResolve}
               disabled={!!isActioning}
-              className="text-xs text-emerald-400"
+              className="text-xs text-pf-success"
             >
               <WrenchIcon className="h-3 w-3 mr-1" aria-hidden="true" />
               {isActioning === 'resolve' ? 'Resolving...' : 'Resolve'}
@@ -328,10 +328,10 @@ export function MaintenancePriorityList({
 
   if (alerts.length === 0) {
     return (
-      <div className={`bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-6 text-center ${className}`}>
-        <CheckCircleIcon className="h-10 w-10 mx-auto text-emerald-400 mb-3" aria-hidden="true" />
-        <p className="font-medium text-emerald-400">All Clear!</p>
-        <p className="text-sm text-emerald-300/80 mt-1">
+      <div className={`bg-pf-success/10 border border-pf-success/30 rounded-xl p-6 text-center ${className}`}>
+        <CheckCircleIcon className="h-10 w-10 mx-auto text-pf-success mb-3" aria-hidden="true" />
+        <p className="font-medium text-pf-success">All Clear!</p>
+        <p className="text-sm text-pf-success mt-1">
           No active maintenance alerts
         </p>
       </div>

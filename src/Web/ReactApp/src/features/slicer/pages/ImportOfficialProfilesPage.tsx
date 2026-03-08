@@ -253,11 +253,11 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                             <p className="text-pf-text-muted">Select a printer to see available profiles</p>
                         </div>
                     ) : profilesError ? (
-                        <div className="card bg-red-900/50 border border-red-700 rounded-sm shadow-sm p-8 text-center">
-                            <AlertCircleIcon className="w-12 h-12 text-red-400 mx-auto mb-4" />
-                            <p className="text-red-200 font-medium mb-2">Failed to Load Profiles</p>
-                            <p className="text-red-300 text-sm">{(profilesError as Error).message}</p>
-                            <p className="text-red-300 text-xs mt-3 italic">The OrcaSlicer worker service may not be running. Please check the server logs and ensure the worker is started.</p>
+                        <div className="card bg-pf-error/10 border border-pf-error rounded-sm shadow-sm p-8 text-center">
+                            <AlertCircleIcon className="w-12 h-12 text-pf-error mx-auto mb-4" />
+                            <p className="text-pf-error font-medium mb-2">Failed to Load Profiles</p>
+                            <p className="text-pf-error text-sm">{(profilesError as Error).message}</p>
+                            <p className="text-pf-error text-xs mt-3 italic">The OrcaSlicer worker service may not be running. Please check the server logs and ensure the worker is started.</p>
                         </div>
                     ) : profilesLoading ? (
                         <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-8 text-center">

@@ -37,7 +37,7 @@ export function TemperatureInput({
   return (
     <div className="flex items-center">
       {label && (
-        <span className="absolute left-2 text-slate-500 text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
+        <span className="absolute left-2 text-pf-text-secondary text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
           {label}
         </span>
       )}
@@ -58,7 +58,7 @@ export function TemperatureInput({
           className={`h-9 ${label ? 'pl-10' : 'pl-2'} pr-8 text-xs [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0`}
           {...props}
         />
-        <span className="absolute right-2 bottom-1.5 text-slate-500 pointer-events-none text-sm">
+        <span className="absolute right-2 bottom-1.5 text-pf-text-secondary pointer-events-none text-sm">
           °C
         </span>
       </div>

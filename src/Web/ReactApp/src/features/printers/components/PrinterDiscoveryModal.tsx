@@ -197,7 +197,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
       case PrinterBackend.Moonraker: return 'bg-pf-accent-bg text-pf-text-primary border border-pf-border-medium';
       case PrinterBackend.PrusaLink: return 'bg-pf-warning text-pf-bg-0 border border-pf-border-medium';
       case PrinterBackend.SDCP: return 'bg-pf-accent text-pf-bg-0 border border-pf-border-medium';
-      case PrinterBackend.FlashForge: return 'bg-orange-600 text-white border border-pf-border-medium';
+      case PrinterBackend.FlashForge: return 'bg-pf-warning text-white border border-pf-border-medium';
       default: return 'bg-pf-bg-2 text-pf-text-primary border border-pf-border';
     }
   };

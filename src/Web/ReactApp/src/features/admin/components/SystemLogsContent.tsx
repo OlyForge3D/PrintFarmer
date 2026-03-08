@@ -277,7 +277,7 @@ export function SystemLogsContent() {
                         {visibleColumns.exception && log.exception && (
                           <div>
                             <h4 className="text-xs font-semibold text-pf-text-primary mb-1">Exception Details</h4>
-                            <p className="text-xs text-red-400 bg-pf-bg-0 p-2 rounded-sm whitespace-pre-wrap wrap-break-word font-mono overflow-y-auto max-h-48">
+                            <p className="text-xs text-pf-error bg-pf-bg-0 p-2 rounded-sm whitespace-pre-wrap wrap-break-word font-mono overflow-y-auto max-h-48">
                               {log.exception}
                             </p>
                           </div>
