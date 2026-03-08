@@ -115,8 +115,8 @@ export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange, onDragRota
             onMouseLeave={() => setHoveredFace(null)}
             className={`absolute w-full h-full flex items-center justify-center font-bold text-xs rounded transition-all ${
               hoveredFace === 'front'
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'bg-blue-400 text-white hover:bg-blue-500'
+                ? 'bg-pf-accent-bg text-white shadow-lg'
+                : 'bg-pf-accent text-white hover:bg-pf-accent-bg'
             }`}
             style={{
               transform: 'translateZ(80px)',
@@ -135,8 +135,8 @@ export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange, onDragRota
             onMouseLeave={() => setHoveredFace(null)}
             className={`absolute w-full h-full flex items-center justify-center font-bold text-xs rounded transition-all ${
               hoveredFace === 'back'
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'bg-blue-400 text-white hover:bg-blue-500'
+                ? 'bg-pf-accent-bg text-white shadow-lg'
+                : 'bg-pf-accent text-white hover:bg-pf-accent-bg'
             }`}
             style={{
               transform: 'rotateY(180deg) translateZ(80px)',
@@ -155,8 +155,8 @@ export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange, onDragRota
             onMouseLeave={() => setHoveredFace(null)}
             className={`absolute w-full h-full flex items-center justify-center font-bold text-xs rounded transition-all ${
               hoveredFace === 'right'
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'bg-blue-400 text-white hover:bg-blue-500'
+                ? 'bg-pf-accent-bg text-white shadow-lg'
+                : 'bg-pf-accent text-white hover:bg-pf-accent-bg'
             }`}
             style={{
               transform: 'rotateY(90deg) translateZ(80px)',
@@ -175,8 +175,8 @@ export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange, onDragRota
             onMouseLeave={() => setHoveredFace(null)}
             className={`absolute w-full h-full flex items-center justify-center font-bold text-xs rounded transition-all ${
               hoveredFace === 'left'
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'bg-blue-400 text-white hover:bg-blue-500'
+                ? 'bg-pf-accent-bg text-white shadow-lg'
+                : 'bg-pf-accent text-white hover:bg-pf-accent-bg'
             }`}
             style={{
               transform: 'rotateY(-90deg) translateZ(80px)',
@@ -195,8 +195,8 @@ export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange, onDragRota
             onMouseLeave={() => setHoveredFace(null)}
             className={`absolute w-full h-full flex items-center justify-center font-bold text-xs rounded transition-all ${
               hoveredFace === 'top'
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'bg-blue-400 text-white hover:bg-blue-500'
+                ? 'bg-pf-accent-bg text-white shadow-lg'
+                : 'bg-pf-accent text-white hover:bg-pf-accent-bg'
             }`}
             style={{
               transform: 'rotateX(90deg) translateZ(80px)',
@@ -215,8 +215,8 @@ export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange, onDragRota
             onMouseLeave={() => setHoveredFace(null)}
             className={`absolute w-full h-full flex items-center justify-center font-bold text-xs rounded transition-all ${
               hoveredFace === 'bottom'
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'bg-blue-400 text-white hover:bg-blue-500'
+                ? 'bg-pf-accent-bg text-white shadow-lg'
+                : 'bg-pf-accent text-white hover:bg-pf-accent-bg'
             }`}
             style={{
               transform: 'rotateX(-90deg) translateZ(80px)',

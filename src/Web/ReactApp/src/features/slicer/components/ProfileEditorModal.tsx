@@ -171,7 +171,7 @@ export function ProfileEditorModal({
         <div className="flex items-center justify-between w-full">
           <div className="text-sm text-pf-text-muted">
             {hasChanges && (
-              <span className="text-amber-500">Settings modified</span>
+              <span className="text-pf-warning">Settings modified</span>
             )}
           </div>
           <div className="flex gap-2">

@@ -199,7 +199,7 @@ export const Models3DViewerPage: React.FC = () => {
                   className="bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
                 >
                   {/* Model Icon/Thumbnail */}
-                  <div className="bg-linear-to-br from-pf-accent to-blue-700 rounded-lg h-32 flex items-center justify-center mb-3 group-hover:shadow-lg transition-shadow">
+                  <div className="bg-linear-to-br from-pf-accent to-pf-accent-bg rounded-lg h-32 flex items-center justify-center mb-3 group-hover:shadow-lg transition-shadow">
                     <CubeIcon className="w-12 h-12 text-white opacity-75" />
                   </div>
 

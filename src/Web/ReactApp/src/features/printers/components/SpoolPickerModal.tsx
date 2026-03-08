@@ -171,7 +171,7 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
       </div>
 
       {error && (
-        <div className="text-red-400 text-sm mb-3">{error}</div>
+        <div className="text-pf-error text-sm mb-3">{error}</div>
       )}
 
       {/* Table header */}

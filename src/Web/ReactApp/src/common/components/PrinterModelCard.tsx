@@ -134,10 +134,10 @@ export function PrinterModelCard({
         {/* Header: Name and Actions */}
         <div className="flex justify-between items-start">
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+            <h3 className="text-lg font-semibold text-pf-text-primary dark:text-white truncate">
               {model.name}
             </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-pf-text-secondary">
               {model.manufacturerName || 'Unknown Manufacturer'}
             </p>
           </div>
@@ -175,7 +175,7 @@ export function PrinterModelCard({
                 onClick={() => onClone(model)}
                 disabled={isLoading}
                 aria-label={`Clone ${model.name}`}
-                className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:text-green-300 dark:hover:bg-green-900/20"
+                className="text-pf-success hover:text-pf-success hover:bg-pf-success/10"
               >
                 <svg
                   className="w-4 h-4"
@@ -200,7 +200,7 @@ export function PrinterModelCard({
                 onClick={() => onDelete(model)}
                 disabled={isLoading}
                 aria-label={`Delete ${model.name}`}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-900/20"
+                className="text-pf-error hover:text-pf-error hover:bg-pf-error/10 dark:hover:text-pf-error"
               >
                 <svg
                   className="w-4 h-4"
@@ -237,7 +237,7 @@ export function PrinterModelCard({
 
         {/* Build Volume */}
         {buildVolume && (
-          <div className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+          <div className="mt-2 text-sm text-pf-text-secondary">
             <span className="font-medium">Build:</span> {buildVolume}
           </div>
         )}
@@ -272,7 +272,7 @@ export function PrinterModelCard({
         </div>
 
         {/* Secondary Info: Temperatures & Speed */}
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-pf-text-secondary">
           {model.maxBedTemp && (
             <div>
               <span className="font-medium">Max Bed:</span> {model.maxBedTemp}°C
@@ -293,7 +293,7 @@ export function PrinterModelCard({
         {/* Supported Filament Types */}
         {model.supportedFilamentTypes && model.supportedFilamentTypes.length > 0 && (
           <div className="mt-3">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+            <p className="text-xs font-medium text-pf-text-secondary mb-1">
               Supported Materials:
             </p>
             <div className="flex flex-wrap gap-1">

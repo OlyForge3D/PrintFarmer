@@ -27,10 +27,10 @@ export interface MaintenanceAlertsWidgetProps {
  */
 function getSeverityConfig(severity: number): { label: string; color: string; bgColor: string } {
   switch (severity) {
-    case 4: return { label: 'Critical', color: 'text-red-400', bgColor: 'bg-red-500/20' };
-    case 3: return { label: 'High', color: 'text-orange-400', bgColor: 'bg-orange-500/20' };
-    case 2: return { label: 'Medium', color: 'text-amber-400', bgColor: 'bg-amber-500/20' };
-    default: return { label: 'Low', color: 'text-blue-400', bgColor: 'bg-blue-500/20' };
+    case 4: return { label: 'Critical', color: 'text-pf-error', bgColor: 'bg-pf-error/10' };
+    case 3: return { label: 'High', color: 'text-pf-warning', bgColor: 'bg-pf-warning/10' };
+    case 2: return { label: 'Medium', color: 'text-pf-warning', bgColor: 'bg-pf-warning/10' };
+    default: return { label: 'Low', color: 'text-pf-accent', bgColor: 'bg-pf-accent-bg/15' };
   }
 }
 
@@ -63,7 +63,7 @@ export function MaintenanceAlertsWidget({
 
   const emptyState = (
     <div className="text-center py-6">
-      <CheckCircleIcon className="h-10 w-10 text-green-500 mx-auto mb-2" />
+      <CheckCircleIcon className="h-10 w-10 text-pf-success mx-auto mb-2" />
       <p className="text-sm text-pf-text-primary font-medium">No Active Alerts</p>
       <p className="text-xs text-pf-text-tertiary mt-1">
         Your fleet is running smoothly
@@ -76,8 +76,8 @@ export function MaintenanceAlertsWidget({
       title="Maintenance Alerts"
       subtitle={subtitle}
       icon={WrenchIcon}
-      iconColorClass={criticalCount > 0 ? 'text-red-400' : 'text-pf-text-tertiary'}
-      iconBgClass={criticalCount > 0 ? 'bg-red-500/20' : 'bg-pf-bg-2'}
+      iconColorClass={criticalCount > 0 ? 'text-pf-error' : 'text-pf-text-tertiary'}
+      iconBgClass={criticalCount > 0 ? 'bg-pf-error/10' : 'bg-pf-bg-2'}
       moreInfoLink="/maintenance"
       moreInfoText="View All"
       collapsible

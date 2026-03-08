@@ -23,7 +23,7 @@ export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, 
   return (
     <div
       className={`bg-pf-bg-1 border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors ${
-        isSelected ? 'border-blue-500 ring-1 ring-blue-500/30' : (spool.remainingWeightG ?? Infinity) <= 10 ? 'border-red-500' : (spool.remainingWeightG ?? Infinity) <= 50 ? 'border-orange-500' : 'border-pf-border'
+        isSelected ? 'border-pf-accent ring-1 ring-pf-accent/30' : (spool.remainingWeightG ?? Infinity) <= 10 ? 'border-pf-error' : (spool.remainingWeightG ?? Infinity) <= 50 ? 'border-pf-warning' : 'border-pf-border'
       }`}
     >
       <div className="flex items-center gap-2 mb-1">
@@ -45,7 +45,7 @@ export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, 
           <DeleteIcon className="h-3.5 w-3.5" />
         </Button>
         {spool.archived && (
-          <span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span>
+          <span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-pf-error/20 text-pf-error border border-pf-error/30 uppercase tracking-wide">Archived</span>
         )}
       </div>
       <div className="flex items-center gap-2 mb-3">
@@ -59,7 +59,7 @@ export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, 
       <div className="space-y-2">
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           {spool.material && (
-            <span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-blue-600/20 text-blue-300 border border-blue-600/40 uppercase tracking-wide">
+            <span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-pf-accent-bg/20 text-pf-accent border border-pf-accent/30 uppercase tracking-wide">
               {spool.material}
             </span>
           )}
@@ -69,9 +69,9 @@ export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, 
           <div className="flex justify-between text-xs">
             <span className="text-pf-text-secondary">Weight</span>
             <span className={`font-medium ${
-              (spool.remainingWeightG ?? Infinity) <= 50 ? 'text-orange-400' : ''
+              (spool.remainingWeightG ?? Infinity) <= 50 ? 'text-pf-warning' : ''
             } ${
-              (spool.remainingWeightG ?? Infinity) <= 10 ? 'text-red-400' : ''
+              (spool.remainingWeightG ?? Infinity) <= 10 ? 'text-pf-error' : ''
             }`}>
               {formatSpoolWeight(spool.remainingWeightG)}
             </span>

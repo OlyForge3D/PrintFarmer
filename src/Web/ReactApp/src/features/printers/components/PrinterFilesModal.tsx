@@ -280,7 +280,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               </div>
             ) : error ? (
               <div className="text-center py-8">
-                <AlertIcon className="h-12 w-12 text-red-500 mx-auto mb-4" />
+                <AlertIcon className="h-12 w-12 text-pf-error mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-pf-text-primary mb-2">Failed to Load Files</h3>
                 <p className="text-pf-text-secondary mb-4">{error}</p>
                 <Button
@@ -431,11 +431,11 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                               size="sm"
                               onClick={() => handleDeleteFile(file.fileName)}
                               disabled={isDeleting === file.fileName}
-                              className="!p-2 !h-auto text-red-500 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="!p-2 !h-auto text-pf-error hover:text-pf-error disabled:opacity-50 disabled:cursor-not-allowed"
                               title={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
                               aria-label={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
                               iconCenter={isDeleting === file.fileName ? (
-                                <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                                <div className="h-4 w-4 border-2 border-pf-error border-t-transparent rounded-full animate-spin" />
                               ) : (
                                 <DeleteIcon className="h-4 w-4" />
                               )}
@@ -452,7 +452,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                             </div>
                             <div className="w-full h-2 bg-pf-bg-2 rounded-full overflow-hidden border border-pf-border">
                               <div
-                                className="h-full bg-linear-to-r from-pf-accent to-cyan-400 transition-all duration-300 ease-out rounded-full"
+                                className="h-full bg-linear-to-r from-pf-accent to-pf-accent transition-all duration-300 ease-out rounded-full"
                                 style={{ width: `${isHarvesting.percentComplete}%` }}
                               />
                             </div>

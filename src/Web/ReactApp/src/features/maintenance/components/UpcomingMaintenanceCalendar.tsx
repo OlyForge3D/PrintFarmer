@@ -46,12 +46,12 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
  * Get priority color for task indicator
  */
 function getPriorityColor(task: UpcomingMaintenanceTask): string {
-  if (task.isOverdue) return 'bg-red-500';
+  if (task.isOverdue) return 'bg-pf-error';
   switch (task.priority) {
-    case 4: return 'bg-red-400';
-    case 3: return 'bg-orange-400';
-    case 2: return 'bg-amber-400';
-    default: return 'bg-blue-400';
+    case 4: return 'bg-pf-error';
+    case 3: return 'bg-pf-warning';
+    case 2: return 'bg-pf-warning';
+    default: return 'bg-pf-accent';
   }
 }
 
@@ -109,7 +109,7 @@ function DayCell({ date, tasks, isCurrentMonth, isSelected, onClick }: DayCellPr
 
       {/* Overdue indicator */}
       {hasOverdue && (
-        <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+        <span className="absolute top-1 right-1 w-2 h-2 bg-pf-error rounded-full animate-pulse" />
       )}
     </Button>
   );
@@ -207,7 +207,7 @@ export function UpcomingMaintenanceCalendar({
             <p className="text-xs text-pf-text-tertiary">
               {monthStats.totalTasks} task{monthStats.totalTasks !== 1 ? 's' : ''} scheduled
               {monthStats.overdueTasks > 0 && (
-                <span className="text-red-400 ml-1">
+                <span className="text-pf-error ml-1">
                   ({monthStats.overdueTasks} overdue)
                 </span>
               )}
@@ -282,23 +282,23 @@ export function UpcomingMaintenanceCalendar({
       <div className="px-4 py-2 border-t border-pf-border bg-pf-bg-2">
         <div className="flex items-center gap-4 text-xs text-pf-text-tertiary">
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-red-500" />
+            <span className="w-2 h-2 rounded-full bg-pf-error" />
             <span>Overdue</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-red-400" />
+            <span className="w-2 h-2 rounded-full bg-pf-error" />
             <span>Critical</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-orange-400" />
+            <span className="w-2 h-2 rounded-full bg-pf-warning" />
             <span>High</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
+            <span className="w-2 h-2 rounded-full bg-pf-warning" />
             <span>Medium</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-blue-400" />
+            <span className="w-2 h-2 rounded-full bg-pf-accent" />
             <span>Low</span>
           </div>
         </div>

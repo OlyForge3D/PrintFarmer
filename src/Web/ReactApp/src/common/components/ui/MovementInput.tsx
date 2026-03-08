@@ -38,7 +38,7 @@ export function MovementInput({
       <span className="absolute -top-0.5 right-2 px-1 bg-pf-bg-1 text-[10px] font-bold text-pf-text-secondary z-10">
         {positionLabel}
       </span>
-      <span className="absolute left-2 bottom-1.5 text-slate-500 text-xs pointer-events-none z-10">
+      <span className="absolute left-2 bottom-1.5 text-pf-text-secondary text-xs pointer-events-none z-10">
         {axis}
       </span>
       <Input

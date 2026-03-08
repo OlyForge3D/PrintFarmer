@@ -57,8 +57,8 @@ export function AlertsWidget({ className = '' }: AlertsWidgetProps) {
       title="Alerts"
       collapsible
       icon={AlertCircleIcon}
-      iconColorClass={hasAlerts ? 'text-red-400' : 'text-pf-text-tertiary'}
-      iconBgClass={hasAlerts ? 'bg-red-500/20' : 'bg-pf-bg-2'}
+      iconColorClass={hasAlerts ? 'text-pf-error' : 'text-pf-text-tertiary'}
+      iconBgClass={hasAlerts ? 'bg-pf-error/10' : 'bg-pf-bg-2'}
       subtitle={
         hasAlerts
           ? `${alertCount} active alert${alertCount !== 1 ? 's' : ''}`
@@ -69,7 +69,7 @@ export function AlertsWidget({ className = '' }: AlertsWidgetProps) {
       className={className}
       emptyState={
         <div className="text-center py-6">
-          <CheckCircleIcon className="h-10 w-10 text-green-500 mx-auto mb-2" />
+          <CheckCircleIcon className="h-10 w-10 text-pf-success mx-auto mb-2" />
           <p className="text-sm text-pf-text-primary font-medium">No Active Alerts</p>
           <p className="text-xs text-pf-text-tertiary mt-1">All systems operating normally</p>
         </div>

@@ -5,12 +5,12 @@ export function MetricsSummaryWidgets() {
   const { metrics, loadedKeys } = useStreamingMetrics();
 
   const widgets = [
-    { key: 'requestsPerSecond', label: 'Request Rate', value: metrics?.requestsPerSecond ?? 0, unit: 'req/s', decimals: 1, color: 'text-blue-400' },
-    { key: 'errorRatePercent', label: 'Error Rate', value: metrics?.errorRatePercent ?? 0, unit: '%', decimals: 1, color: metrics?.errorRatePercent !== undefined && metrics.errorRatePercent > 1 ? 'text-red-400' : 'text-green-400' },
-    { key: 'p95LatencyMs', label: 'P95 Latency', value: metrics?.p95LatencyMs ?? 0, unit: 'ms', decimals: 1, color: metrics?.p95LatencyMs !== undefined && metrics.p95LatencyMs > 500 ? 'text-yellow-400' : 'text-green-400' },
-    { key: 'memoryUsageMb', label: 'Memory', value: metrics?.memoryUsageMb ?? 0, unit: 'MB', decimals: 1, color: 'text-purple-400' },
-    { key: 'activePrinters', label: 'Active Printers', value: metrics?.activePrinters ?? 0, unit: '', decimals: 0, color: 'text-cyan-400' },
-    { key: 'apiCallsLast24h', label: 'API Calls (24h)', value: metrics?.apiCallsLast24h ?? 0, unit: '', decimals: 0, color: 'text-sky-400' },
+    { key: 'requestsPerSecond', label: 'Request Rate', value: metrics?.requestsPerSecond ?? 0, unit: 'req/s', decimals: 1, color: 'text-pf-accent' },
+    { key: 'errorRatePercent', label: 'Error Rate', value: metrics?.errorRatePercent ?? 0, unit: '%', decimals: 1, color: metrics?.errorRatePercent !== undefined && metrics.errorRatePercent > 1 ? 'text-pf-error' : 'text-pf-success' },
+    { key: 'p95LatencyMs', label: 'P95 Latency', value: metrics?.p95LatencyMs ?? 0, unit: 'ms', decimals: 1, color: metrics?.p95LatencyMs !== undefined && metrics.p95LatencyMs > 500 ? 'text-pf-warning' : 'text-pf-success' },
+    { key: 'memoryUsageMb', label: 'Memory', value: metrics?.memoryUsageMb ?? 0, unit: 'MB', decimals: 1, color: 'text-pf-accent' },
+    { key: 'activePrinters', label: 'Active Printers', value: metrics?.activePrinters ?? 0, unit: '', decimals: 0, color: 'text-pf-accent' },
+    { key: 'apiCallsLast24h', label: 'API Calls (24h)', value: metrics?.apiCallsLast24h ?? 0, unit: '', decimals: 0, color: 'text-pf-accent' },
   ];
 
   return (

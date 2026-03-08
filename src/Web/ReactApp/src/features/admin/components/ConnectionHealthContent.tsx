@@ -33,9 +33,9 @@ function formatTimestamp(ts: string | null): string {
 function SummaryCards({ data }: { data: ConnectionDiagnosticsResponse }) {
   const cards = [
     { label: 'Total Printers', value: data.totalPrinters, color: 'text-pf-text-primary' },
-    { label: 'Connected', value: data.connectedCount, color: 'text-green-400' },
-    { label: 'Reconnecting', value: data.reconnectingCount, color: 'text-yellow-400' },
-    { label: 'Offline', value: data.offlineCount, color: 'text-red-400' },
+    { label: 'Connected', value: data.connectedCount, color: 'text-pf-success' },
+    { label: 'Reconnecting', value: data.reconnectingCount, color: 'text-pf-warning' },
+    { label: 'Offline', value: data.offlineCount, color: 'text-pf-error' },
   ];
 
   return (

@@ -187,12 +187,12 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
                   <div
                     key={alias.id}
                     className={`flex items-center justify-between gap-2 rounded px-3 py-2 ${
-                      alias.isNew ? 'bg-green-500/10 border border-green-500/30' : 'bg-pf-bg-secondary'
+                      alias.isNew ? 'bg-pf-success/10 border border-pf-success/30' : 'bg-pf-bg-secondary'
                     }`}
                   >
                     <span className="text-sm text-pf-text">
                       {alias.slicerModelName}
-                      {alias.isNew && <span className="ml-2 text-xs text-green-500">(new)</span>}
+                      {alias.isNew && <span className="ml-2 text-xs text-pf-success">(new)</span>}
                     </span>
                     <Button
                       onClick={() => handleDeleteAlias(alias.id)}
@@ -201,7 +201,7 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
                       size="sm"
                       title="Delete alias"
                     >
-                      <DeleteIcon className="h-4 w-4 text-red-400" />
+                      <DeleteIcon className="h-4 w-4 text-pf-error" />
                     </Button>
                   </div>
                 ))}

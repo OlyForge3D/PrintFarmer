@@ -327,7 +327,7 @@ export function ToolheadsCatalog() {
   if (isError) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-red-500">Failed to load toolhead models</div>
+        <div className="text-pf-error">Failed to load toolhead models</div>
       </div>
     );
   }
@@ -406,7 +406,7 @@ export function ToolheadsCatalog() {
                 title={`Delete ${item.name}`}
                 disabled={deleteMutation.isPending && deletingModel?.id === item.id}
               >
-                <DeleteIcon className="w-4 h-4 text-red-500" />
+                <DeleteIcon className="w-4 h-4 text-pf-error" />
               </Button>
             </div>
           )}

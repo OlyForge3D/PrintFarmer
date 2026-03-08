@@ -324,7 +324,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
           </div>
 
           {successState.startError && (
-            <div className="mt-4 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
+            <div className="mt-4 text-sm text-pf-error bg-pf-error/10 p-3 rounded-lg">
               {successState.startError}
             </div>
           )}
@@ -377,7 +377,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
         </div>
 
         {noModelMatch && (
-          <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
+          <div className="text-sm text-pf-warning bg-pf-warning/10 p-3 rounded-lg">
             <div className="font-medium">No compatible printers found</div>
             <div className="text-sm mt-1">
               No printers match the required model &ldquo;{requiredModel}&rdquo;.
@@ -402,14 +402,14 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
         )}
 
         {noPrintersAvailable && !requiredModel && !overrideModelFilter && (
-          <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
+          <div className="text-sm text-pf-warning bg-pf-warning/10 p-3 rounded-lg">
             <div className="font-medium">No printers configured</div>
             <div className="text-sm mt-1">Add at least one printer before queuing jobs.</div>
           </div>
         )}
 
         {overrideModelFilter && (
-          <div className="text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+          <div className="text-sm text-pf-accent bg-pf-accent-bg/15 p-3 rounded-lg">
             <div className="font-medium">Model filter bypassed</div>
             <div className="text-sm mt-1">
               Showing all printers. The file expects model &ldquo;{requiredModel}&rdquo; — select the correct printer manually.
@@ -418,7 +418,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
         )}
 
         {!noPrintersAvailable && noAvailablePrinters && (
-          <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
+          <div className="text-sm text-pf-warning bg-pf-warning/10 p-3 rounded-lg">
             <div className="font-medium">All compatible printers are offline</div>
             <div className="text-sm mt-1">Please wait for at least one printer to come online.</div>
           </div>
@@ -486,7 +486,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
         )}
 
         {error && (
-          <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
+          <div className="text-sm text-pf-error bg-pf-error/10 p-3 rounded-lg">
             {error}
           </div>
         )}

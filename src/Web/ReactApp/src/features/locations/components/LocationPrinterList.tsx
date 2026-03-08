@@ -127,7 +127,7 @@ export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
                     <div
                       className={clsx(
                         'w-2.5 h-2.5 rounded-full flex-shrink-0',
-                        printer.isOnline ? 'bg-green-500' : 'bg-red-500',
+                        printer.isOnline ? 'bg-pf-success' : 'bg-pf-error',
                       )}
                       aria-hidden="true"
                     />

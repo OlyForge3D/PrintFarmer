@@ -290,7 +290,7 @@ export function ManufacturerSelector({
       >
         <div className="space-y-4">
           <div>
-            <label htmlFor="new-manufacturer-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label htmlFor="new-manufacturer-name" className="block text-sm font-medium text-pf-text-primary mb-1">
               Manufacturer Name
             </label>
             <Input
@@ -308,7 +308,7 @@ export function ManufacturerSelector({
               }}
             />
             {addError && (
-              <p className="mt-1 text-sm text-red-600 dark:text-red-400">{addError}</p>
+              <p className="mt-1 text-sm text-pf-error">{addError}</p>
             )}
           </div>
 

@@ -59,7 +59,7 @@ export const MaintenanceReport: React.FC = () => {
           headers={headers}
           filename="maintenance-report.csv"
           ref={csvLinkRef}
-          className="px-3 py-1 bg-green-600 text-white rounded-sm focus:outline-solid focus-visible:ring-3"
+          className="px-3 py-1 bg-pf-success text-white rounded-sm focus:outline-solid focus-visible:ring-3"
           aria-label="Export CSV"
         >
           Export CSV
@@ -70,7 +70,7 @@ export const MaintenanceReport: React.FC = () => {
           <thead>
             <tr>
               {headers.map(h => (
-                <th key={h.key} className="border px-2 py-1 bg-gray-100 text-left">{h.label}</th>
+                <th key={h.key} className="border px-2 py-1 bg-pf-bg-1 text-left">{h.label}</th>
               ))}
             </tr>
           </thead>

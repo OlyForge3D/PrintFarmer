@@ -467,7 +467,7 @@ export function SpoolsTab() {
       />
 
       {health && (!health.configured || !health.success) && (
-        <div className="bg-amber-900/40 border border-amber-700 text-amber-200 px-4 py-3 rounded-sm">
+        <div className="bg-pf-warning/10 border border-pf-warning text-pf-warning px-4 py-3 rounded-sm">
           {!health.configured ? (
             <span>Spoolman is not configured yet. Set a base URL in Settings to enable spool tracking.</span>
           ) : (
@@ -554,7 +554,7 @@ export function SpoolsTab() {
                   {tableColumns.map((c, i) => (
                     <li
                       key={c.id}
-                      className={`flex items-center gap-2 group rounded-sm ${dragColId === c.id ? 'bg-blue-600/20' : 'hover:bg-pf-bg-2'}`}
+                      className={`flex items-center gap-2 group rounded-sm ${dragColId === c.id ? 'bg-pf-accent-bg/20' : 'hover:bg-pf-bg-2'}`}
                       draggable
                       onDragStart={(e) => onDragStart(e, c.id)}
                       onDragOver={onDragOver}
@@ -610,7 +610,7 @@ export function SpoolsTab() {
               href={spoolmanBaseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+              className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
               aria-label="Open Spoolman"
               title="Open Spoolman"
             >
@@ -621,14 +621,14 @@ export function SpoolsTab() {
       </div>
 
       {spoolmanError && (
-        <div className="bg-red-900/50 border border-red-700 text-red-100 px-4 py-3 rounded-sm flex items-center gap-3">
+        <div className="bg-pf-error/10 border border-pf-error text-pf-error px-4 py-3 rounded-sm flex items-center gap-3">
           <PackageIcon className="h-5 w-5 shrink-0" />
           <div>
             <div className="font-medium">Spoolman Connection Error</div>
             <div className="text-sm">{spoolmanError}</div>
             {!spoolmanBaseUrl && (
               <div className="mt-2">
-                <a href="/settings" className="text-blue-300 hover:text-blue-200 underline">
+                <a href="/settings" className="text-pf-accent hover:text-pf-accent underline">
                   Configure Spoolman URL in Settings
                 </a>
               </div>
@@ -670,7 +670,7 @@ export function SpoolsTab() {
                     setCurrentPage(0);
                   }}
                   placeholder="Name, vendor, material..."
-                  className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                  className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
                   aria-label="Search spools"
                 />
               </div>
@@ -838,16 +838,16 @@ export function SpoolsTab() {
 
           {viewMode === 'cards' && (
             <div className="text-xs text-pf-text-secondary flex flex-wrap gap-4 items-center">
-              <div className="flex items-center gap-1"><span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span> = Spool not for active use</div>
+              <div className="flex items-center gap-1"><span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-pf-error/20 text-pf-error border border-pf-error/30 uppercase tracking-wide">Archived</span> = Spool not for active use</div>
               <div>Usage shows Used % / Remaining % (hover for weight details)</div>
             </div>
           )}
 
           {/* Bulk selection toolbar */}
           {someSelected && (
-            <div className="bg-blue-900/30 border border-blue-700/50 rounded-xl px-4 py-3 flex items-center justify-between">
+            <div className="bg-pf-accent-bg/15 border border-pf-accent/50 rounded-xl px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-blue-200">
+                <span className="text-sm font-medium text-pf-accent">
                   {selectedIds.size} spool{selectedIds.size !== 1 ? 's' : ''} selected
                 </span>
                 <Button

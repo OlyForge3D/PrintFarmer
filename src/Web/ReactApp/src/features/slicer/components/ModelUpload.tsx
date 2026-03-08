@@ -7,7 +7,7 @@ const ProgressBar: React.FC<{ percent: number }> = ({ percent }) => {
   useEffect(() => {
     if (ref.current) ref.current.style.width = `${Math.min(percent, 100)}%`;
   }, [percent]);
-  return <div ref={ref} className="bg-blue-600 h-2 rounded-sm transition-all duration-300" />;
+  return <div ref={ref} className="bg-pf-accent-bg h-2 rounded-sm transition-all duration-300" />;
 };
 
 export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) => void }) {
@@ -54,9 +54,9 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
         onDrop={onDrop}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
-        className={`border-2 rounded-md p-6 text-center ${dragOver ? 'border-blue-400 bg-blue-50' : 'border-dashed'}`}>
+        className={`border-2 rounded-md p-6 text-center ${dragOver ? 'border-pf-accent bg-pf-accent-bg/15' : 'border-dashed'}`}>
         <p className="mb-2">Drag & drop model file here (.stl, .3mf, .obj, .ply, .step)</p>
-        <p className="text-sm text-gray-500">Or click to select a file</p>
+        <p className="text-sm text-pf-text-secondary">Or click to select a file</p>
         <FileUpload
           id="model-upload-input"
           accept=".stl,.3mf,.obj,.ply,.step"
@@ -71,12 +71,12 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
         {progress !== null && (
           <div className="mt-4">
             <div className="text-sm">Uploading: {progress}%</div>
-            <div className="w-full bg-gray-200 h-2 rounded-sm mt-1">
+            <div className="w-full bg-pf-bg-2 h-2 rounded-sm mt-1">
               <ProgressBar percent={progress} />
             </div>
           </div>
         )}
-        {error && <div className="mt-3 text-red-600">Error: {error}</div>}
+        {error && <div className="mt-3 text-pf-error">Error: {error}</div>}
       </div>
     </div>
   );

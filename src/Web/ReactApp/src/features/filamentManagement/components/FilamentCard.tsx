@@ -18,7 +18,7 @@ interface FilamentCardProps {
 export function FilamentCard({ filament: f, isSelected, onToggleSelect, onEdit, onClone, onDelete }: FilamentCardProps) {
   return (
     <div
-      className={`bg-pf-bg-1 border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors ${isSelected ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-pf-border'}`}
+      className={`bg-pf-bg-1 border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors ${isSelected ? 'border-pf-accent ring-1 ring-pf-accent/30' : 'border-pf-border'}`}
     >
       <div className="flex items-center gap-2 mb-1">
         <Checkbox
@@ -47,7 +47,7 @@ export function FilamentCard({ filament: f, isSelected, onToggleSelect, onEdit, 
       </div>
       <div className="space-y-1.5">
         {f.material && (
-          <span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-blue-600/20 text-blue-300 border border-blue-600/40 uppercase tracking-wide">
+          <span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-pf-accent-bg/20 text-pf-accent border border-pf-accent/30 uppercase tracking-wide">
             {f.material}
           </span>
         )}

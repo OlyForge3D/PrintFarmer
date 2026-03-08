@@ -88,16 +88,16 @@ export function calculateWorkerUtilization(worker: WorkerResponse): number {
 export function getWorkerStatusColor(status: string): string {
   switch (status) {
     case WorkerStatus.Online:
-      return 'bg-green-500';
+      return 'bg-pf-success';
     case WorkerStatus.Busy:
-      return 'bg-yellow-500';
+      return 'bg-pf-warning';
     case WorkerStatus.Offline:
-      return 'bg-gray-500';
+      return 'bg-pf-disabled';
     case WorkerStatus.Error:
-      return 'bg-red-500';
+      return 'bg-pf-error';
     case WorkerStatus.Draining:
-      return 'bg-orange-500';
+      return 'bg-pf-warning';
     default:
-      return 'bg-gray-400';
+      return 'bg-pf-disabled';
   }
 }

@@ -71,15 +71,15 @@ export function PrinterTableViewPage() {
       <div className="space-y-6">
         <div className="flex justify-between items-center">
           <div className="space-y-2">
-            <div className="h-8 w-32 bg-gray-200 rounded-sm animate-pulse"></div>
-            <div className="h-4 w-64 bg-gray-200 rounded-sm animate-pulse"></div>
+            <div className="h-8 w-32 bg-pf-bg-2 rounded-sm animate-pulse"></div>
+            <div className="h-4 w-64 bg-pf-bg-2 rounded-sm animate-pulse"></div>
           </div>
-          <div className="h-10 w-32 bg-gray-200 rounded-sm animate-pulse"></div>
+          <div className="h-10 w-32 bg-pf-bg-2 rounded-sm animate-pulse"></div>
         </div>
-        <div className="bg-white shadow-sm rounded-lg p-6">
+        <div className="bg-pf-bg-0 shadow-sm rounded-lg p-6">
           <div className="animate-pulse space-y-4">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-16 bg-gray-200 rounded-sm"></div>
+              <div key={i} className="h-16 bg-pf-bg-2 rounded-sm"></div>
             ))}
           </div>
         </div>
@@ -132,7 +132,7 @@ export function PrinterTableViewPage() {
       ) : (
         <div className="text-center py-12">
           <svg
-            className="mx-auto h-12 w-12 text-gray-400"
+            className="mx-auto h-12 w-12 text-pf-text-tertiary"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -146,8 +146,8 @@ export function PrinterTableViewPage() {
               d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
             />
           </svg>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No printers</h3>
-          <p className="mt-1 text-sm text-gray-500">Get started by adding your first 3D printer.</p>
+          <h3 className="mt-2 text-sm font-medium text-pf-text-primary">No printers</h3>
+          <p className="mt-1 text-sm text-pf-text-secondary">Get started by adding your first 3D printer.</p>
           {hasPermission('printers', 'create') && (
             <div className="mt-6">
               <AddPrinterButton onSuccess={() => refetch()} />

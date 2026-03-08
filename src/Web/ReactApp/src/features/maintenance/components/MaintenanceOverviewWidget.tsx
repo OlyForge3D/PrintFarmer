@@ -47,7 +47,7 @@ export function MaintenanceOverviewWidget({
 
   const emptyState = (
     <div className="text-center py-4">
-      <CheckCircleIcon className="h-8 w-8 text-green-500 mx-auto mb-2" />
+      <CheckCircleIcon className="h-8 w-8 text-pf-success mx-auto mb-2" />
       <p className="text-sm text-pf-text-primary">All caught up!</p>
       <p className="text-xs text-pf-text-tertiary">No upcoming maintenance</p>
     </div>
@@ -57,8 +57,8 @@ export function MaintenanceOverviewWidget({
     <DashboardWidget
       title="Maintenance Overview"
       icon={WrenchIcon}
-      iconColorClass={hasIssues ? 'text-amber-400' : 'text-green-500'}
-      iconBgClass={hasIssues ? 'bg-amber-500/20' : 'bg-green-500/20'}
+      iconColorClass={hasIssues ? 'text-pf-warning' : 'text-pf-success'}
+      iconBgClass={hasIssues ? 'bg-pf-warning/10' : 'bg-pf-success/10'}
       moreInfoLink="/maintenance"
       moreInfoText="Dashboard"
       collapsible
@@ -71,13 +71,13 @@ export function MaintenanceOverviewWidget({
       {/* Stats Grid */}
       <div className="grid grid-cols-3 gap-3 pb-3 mb-3 border-b border-pf-border -mx-3 px-3 -mt-3 pt-3">
         <div className="text-center">
-          <div className={`text-2xl font-bold ${overdueCount > 0 ? 'text-red-400' : 'text-pf-text-primary'}`}>
+          <div className={`text-2xl font-bold ${overdueCount > 0 ? 'text-pf-error' : 'text-pf-text-primary'}`}>
             {overdueCount}
           </div>
           <div className="text-xs text-pf-text-tertiary">Overdue</div>
         </div>
         <div className="text-center">
-          <div className={`text-2xl font-bold ${dueSoonCount > 0 ? 'text-amber-400' : 'text-pf-text-primary'}`}>
+          <div className={`text-2xl font-bold ${dueSoonCount > 0 ? 'text-pf-warning' : 'text-pf-text-primary'}`}>
             {dueSoonCount}
           </div>
           <div className="text-xs text-pf-text-tertiary">Due Soon</div>
@@ -100,12 +100,12 @@ export function MaintenanceOverviewWidget({
             key={task.id}
             className={`
               flex items-center gap-3 p-2 rounded-lg
-              ${task.isOverdue ? 'bg-red-500/10' : 'bg-pf-bg-1'}
+              ${task.isOverdue ? 'bg-pf-error/10' : 'bg-pf-bg-1'}
             `}
           >
             <div className={`
               w-2 h-2 rounded-full shrink-0
-              ${task.isOverdue ? 'bg-red-500' : task.isDueToday ? 'bg-amber-500' : 'bg-blue-500'}
+              ${task.isOverdue ? 'bg-pf-error' : task.isDueToday ? 'bg-pf-warning' : 'bg-pf-accent-bg'}
             `} />
             <div className="flex-1 min-w-0">
               <p className="text-sm text-pf-text-primary truncate">
@@ -117,7 +117,7 @@ export function MaintenanceOverviewWidget({
             </div>
             <div className="text-right shrink-0">
               <p className={`text-xs font-medium ${
-                task.isOverdue ? 'text-red-400' : task.isDueToday ? 'text-amber-400' : 'text-pf-text-secondary'
+                task.isOverdue ? 'text-pf-error' : task.isDueToday ? 'text-pf-warning' : 'text-pf-text-secondary'
               }`}>
                 {task.intervalType === 'hours'
                   ? (task.isOverdue

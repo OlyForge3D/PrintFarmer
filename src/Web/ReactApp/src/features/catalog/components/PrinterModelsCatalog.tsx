@@ -347,7 +347,7 @@ export function PrinterModelsCatalog() {
                 title={`Delete ${item.name}`}
                 disabled={deleteMutation.isPending && deletingModel?.id === item.id}
               >
-                <DeleteIcon className="w-4 h-4 text-red-500" />
+                <DeleteIcon className="w-4 h-4 text-pf-error" />
               </Button>
             </div>
           )}

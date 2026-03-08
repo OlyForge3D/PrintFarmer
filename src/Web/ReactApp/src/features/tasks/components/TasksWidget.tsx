@@ -26,9 +26,9 @@ function TaskTypeIcon({ taskType, className }: { taskType: TaskType; className?:
 function getPriorityClasses(priority: TaskPriority): string {
   switch (priority) {
     case TaskPriority.High:
-      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+      return 'bg-pf-error/10 text-pf-error';
     case TaskPriority.Normal:
-      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
+      return 'bg-pf-warning/10 text-pf-warning';
     case TaskPriority.Low:
       return 'bg-pf-border-light text-pf-text-secondary';
     default:

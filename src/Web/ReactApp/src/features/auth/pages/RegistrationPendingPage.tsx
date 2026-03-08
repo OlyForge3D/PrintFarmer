@@ -3,10 +3,10 @@ import { Link } from 'react-router';
 
 export const RegistrationPendingPage: React.FC = () => {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
-      <div className="bg-white p-8 rounded-sm shadow-md max-w-md w-full text-center">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-pf-bg-1">
+      <div className="bg-pf-bg-0 p-8 rounded-sm shadow-md max-w-md w-full text-center">
         <h1 className="text-2xl font-bold mb-4">Registration Submitted</h1>
-        <p className="mb-6 text-gray-700">
+        <p className="mb-6 text-pf-text-primary">
           Your account has been created, but you cannot access PrintFarmer until an administrator approves your registration.<br />
           You will be notified once your account is approved.
         </p>

@@ -80,7 +80,7 @@ export function AddManufacturerModal({
         {/* Manufacturer Name - Required */}
         <div>
           <label htmlFor="mfg-name" className="block text-sm font-medium text-pf-text mb-1">
-            Manufacturer Name <span className="text-red-500">*</span>
+            Manufacturer Name <span className="text-pf-error">*</span>
           </label>
           <Input
             id="mfg-name"
@@ -130,7 +130,7 @@ export function AddManufacturerModal({
 
         {/* Error Message */}
         {error && (
-          <div className="p-3 bg-red-900/20 border border-red-600 rounded-sm text-red-400 text-sm">
+          <div className="p-3 bg-pf-error/10 border border-pf-error rounded-sm text-pf-error text-sm">
             {error}
           </div>
         )}

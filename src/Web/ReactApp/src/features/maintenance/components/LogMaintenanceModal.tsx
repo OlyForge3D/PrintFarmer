@@ -163,7 +163,7 @@ export function LogMaintenanceModal({
       {/* Form */}
       <form id="log-maintenance-form" onSubmit={handleSubmit} className="space-y-4">
         {error && (
-          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-500 text-sm">
+          <div className="p-3 bg-pf-error/10 border border-pf-error/30 rounded-lg text-pf-error text-sm">
             {error}
           </div>
         )}
@@ -199,7 +199,7 @@ export function LogMaintenanceModal({
         {/* Task Name (editable if custom) */}
         <div>
           <label className="block text-sm font-medium text-pf-text-primary mb-1">
-            Task Name <span className="text-red-500">*</span>
+            Task Name <span className="text-pf-error">*</span>
           </label>
           <Input
             value={taskName}

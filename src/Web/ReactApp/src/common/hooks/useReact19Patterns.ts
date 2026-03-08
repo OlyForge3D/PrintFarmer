@@ -231,7 +231,7 @@ export function useSimpleFormAction<T = any>(
  *   return (
  *     <form action={formAction}>
  *       <input name="username" required />
- *       {state.error && <p className="text-red-600">{state.error}</p>}
+ *       {state.error && <p className="text-pf-error">{state.error}</p>}
  *       <button disabled={isPending}>{isPending ? 'Creating...' : 'Create'}</button>
  *     </form>
  *   );

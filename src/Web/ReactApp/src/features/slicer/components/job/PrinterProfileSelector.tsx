@@ -94,7 +94,7 @@ export const PrinterProfileSelector: React.FC<PrinterProfileSelectorProps> = ({
           ))}
         </Select>
         {selectedPrinterModel && availableMachineProfiles.length === 0 && (
-          <p className="text-xs text-amber-500 mt-1">No machine profiles available for this model</p>
+          <p className="text-xs text-pf-warning mt-1">No machine profiles available for this model</p>
         )}
       </div>
     </div>

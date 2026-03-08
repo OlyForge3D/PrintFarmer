@@ -133,12 +133,12 @@ export class SliceJobService {
    */
   getStatusColor(status: SliceJobStatus): string {
     switch (status) {
-      case SliceJobStatus.Queued: return 'text-blue-600 bg-blue-100';
-      case SliceJobStatus.Processing: return 'text-yellow-600 bg-yellow-100';
-      case SliceJobStatus.Completed: return 'text-green-600 bg-green-100';
-      case SliceJobStatus.Failed: return 'text-red-600 bg-red-100';
-      case SliceJobStatus.Cancelled: return 'text-gray-600 bg-gray-100';
-      default: return 'text-gray-600 bg-gray-100';
+      case SliceJobStatus.Queued: return 'text-pf-accent bg-pf-accent-bg/15';
+      case SliceJobStatus.Processing: return 'text-pf-warning bg-pf-warning/10';
+      case SliceJobStatus.Completed: return 'text-pf-success bg-pf-success/10';
+      case SliceJobStatus.Failed: return 'text-pf-error bg-pf-error/10';
+      case SliceJobStatus.Cancelled: return 'text-pf-text-secondary bg-pf-bg-1';
+      default: return 'text-pf-text-secondary bg-pf-bg-1';
     }
   }
 

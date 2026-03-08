@@ -29,10 +29,10 @@ interface StatsCardProps {
 
 const variantStyles: Record<StatsCardProps['variant'], string> = {
   default: 'bg-pf-border-medium text-pf-text-secondary',
-  success: 'bg-emerald-500/20 text-emerald-400',
-  warning: 'bg-amber-500/20 text-amber-400',
-  error: 'bg-red-500/20 text-red-400',
-  info: 'bg-blue-500/20 text-blue-400',
+  success: 'bg-pf-success/20 text-pf-success',
+  warning: 'bg-pf-warning/10 text-pf-warning',
+  error: 'bg-pf-error/10 text-pf-error',
+  info: 'bg-pf-accent-bg/15 text-pf-accent',
 };
 
 function StatsCard({ title, value, subtitle, icon: Icon, variant }: StatsCardProps) {
@@ -63,10 +63,10 @@ interface SeverityBadgeProps {
 }
 
 const severityColors: Record<SeverityBadgeProps['variant'], string> = {
-  critical: 'bg-red-500/20 text-red-400 border-red-500/30',
-  high: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  medium: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  low: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  critical: 'bg-pf-error/10 text-pf-error border-pf-error/30',
+  high: 'bg-pf-warning/10 text-pf-warning border-pf-warning/30',
+  medium: 'bg-pf-warning/10 text-pf-warning border-pf-warning/30',
+  low: 'bg-pf-accent-bg/15 text-pf-accent border-pf-accent/30',
 };
 
 function SeverityBadge({ label, count, variant }: SeverityBadgeProps) {
@@ -125,12 +125,12 @@ export function FleetMaintenanceOverview({
 
   if (error) {
     return (
-      <div className={`bg-red-500/10 border border-red-500/30 rounded-xl p-6 ${className}`}>
+      <div className={`bg-pf-error/10 border border-pf-error/30 rounded-xl p-6 ${className}`}>
         <div className="flex items-center gap-3">
-          <AlertCircleIcon className="h-6 w-6 text-red-400" aria-hidden="true" />
+          <AlertCircleIcon className="h-6 w-6 text-pf-error" aria-hidden="true" />
           <div>
-            <p className="font-semibold text-red-400">Failed to load maintenance statistics</p>
-            <p className="text-sm text-red-300/80">{error.message}</p>
+            <p className="font-semibold text-pf-error">Failed to load maintenance statistics</p>
+            <p className="text-sm text-pf-error/80">{error.message}</p>
           </div>
         </div>
       </div>

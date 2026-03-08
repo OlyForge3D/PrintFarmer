@@ -126,7 +126,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                     </span>
                     {selectedPrinter.isOnline !== undefined && (
                       <span className={`w-2 h-2 rounded-full shrink-0 ${
-                        selectedPrinter.isOnline ? 'bg-green-500' : 'bg-gray-400'
+                        selectedPrinter.isOnline ? 'bg-pf-success' : 'bg-pf-disabled'
                       }`} title={selectedPrinter.isOnline ? 'Online' : 'Offline'} />
                     )}
                   </div>

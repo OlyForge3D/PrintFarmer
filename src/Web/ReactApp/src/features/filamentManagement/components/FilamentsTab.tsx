@@ -358,7 +358,7 @@ export function FilamentsTab() {
   return (
     <div className="space-y-4">
       {error && (
-        <div className="bg-red-900/50 border border-red-700 text-red-100 px-4 py-3 rounded-sm flex items-center gap-3">
+        <div className="bg-pf-error/10 border border-pf-error text-pf-error px-4 py-3 rounded-sm flex items-center gap-3">
           <PackageIcon className="h-5 w-5 shrink-0" />
           <div>
             <div className="font-medium">Spoolman Connection Error</div>
@@ -488,7 +488,7 @@ export function FilamentsTab() {
                   {tableColumns.map((c, i) => (
                     <li
                       key={c.id}
-                      className={`flex items-center gap-2 group rounded-sm ${dragColId === c.id ? 'bg-blue-600/20' : 'hover:bg-pf-bg-2'}`}
+                      className={`flex items-center gap-2 group rounded-sm ${dragColId === c.id ? 'bg-pf-accent-bg/20' : 'hover:bg-pf-bg-2'}`}
                       draggable
                       onDragStart={(e) => onDragStart(e, c.id)}
                       onDragOver={onDragOver}
@@ -570,7 +570,7 @@ export function FilamentsTab() {
                 value={filters.search}
                 onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
                 placeholder="Name, vendor, material..."
-                className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
                 aria-label="Search filaments"
               />
             </div>
@@ -668,9 +668,9 @@ export function FilamentsTab() {
 
       {/* Bulk edit toolbar */}
       {someSelected && (
-        <div className="bg-blue-900/30 border border-blue-700/50 rounded-xl px-4 py-3 flex items-center justify-between">
+        <div className="bg-pf-accent-bg/15 border border-pf-accent/50 rounded-xl px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-blue-200">
+            <span className="text-sm font-medium text-pf-accent">
               {selectedIds.size} filament{selectedIds.size !== 1 ? 's' : ''} selected
             </span>
             <Button

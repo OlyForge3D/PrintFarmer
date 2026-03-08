@@ -37,7 +37,7 @@ export function CameraCard({
     : cameraSnapshotUrl;
 
   return (
-    <div className="rounded-xl shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
+    <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
       {/* Camera feed - main content */}
       <div className="relative w-full aspect-video bg-pf-bg-2 flex items-center justify-center">
         {hasCameraUrls && !imageError ? (

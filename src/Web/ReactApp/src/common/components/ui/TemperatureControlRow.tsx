@@ -54,8 +54,8 @@ export function TemperatureControlRow({
         <div className="shrink-0">{icon}</div>
         <span className="text-xs text-pf-text-secondary truncate">{label}</span>
       </div>
-      <span className="text-xs text-slate-400 text-right tabular-nums">{stateLabel ?? '—'}</span>
-      <span className="text-xs text-slate-400 text-right tabular-nums">{liveReading}</span>
+      <span className="text-xs text-pf-text-tertiary text-right tabular-nums">{stateLabel ?? '—'}</span>
+      <span className="text-xs text-pf-text-tertiary text-right tabular-nums">{liveReading}</span>
       <TemperatureInput
         value={value}
         onChange={onChange}

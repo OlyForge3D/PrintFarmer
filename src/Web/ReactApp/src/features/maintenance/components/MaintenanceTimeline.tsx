@@ -53,10 +53,10 @@ interface TaskGroup {
  */
 function getPriorityConfig(priority: number): { label: string; color: string; bgColor: string } {
   switch (priority) {
-    case 4: return { label: 'Critical', color: 'text-red-400', bgColor: 'bg-red-500/20' };
-    case 3: return { label: 'High', color: 'text-orange-400', bgColor: 'bg-orange-500/20' };
-    case 2: return { label: 'Medium', color: 'text-amber-400', bgColor: 'bg-amber-500/20' };
-    default: return { label: 'Low', color: 'text-blue-400', bgColor: 'bg-blue-500/20' };
+    case 4: return { label: 'Critical', color: 'text-pf-error', bgColor: 'bg-pf-error/10' };
+    case 3: return { label: 'High', color: 'text-pf-warning', bgColor: 'bg-pf-warning/10' };
+    case 2: return { label: 'Medium', color: 'text-pf-warning', bgColor: 'bg-pf-warning/10' };
+    default: return { label: 'Low', color: 'text-pf-accent', bgColor: 'bg-pf-accent-bg/15' };
   }
 }
 
@@ -150,7 +150,7 @@ function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) 
       className={`
         flex items-start gap-3 p-3 rounded-lg border transition-colors
         ${task.isOverdue 
-          ? 'bg-red-500/10 border-red-500/30 hover:bg-red-500/20' 
+          ? 'bg-pf-error/10 border-pf-error/30 hover:bg-pf-error/10' 
           : 'bg-pf-bg-1 border-pf-border hover:bg-pf-border/30'
         }
       `}
@@ -184,22 +184,22 @@ function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) 
           <div className="flex items-center gap-1.5 text-xs">
             {task.intervalType === 'hours' ? (
               <>
-                {(task.isOverdue ? <AlertIcon className="h-3.5 w-3.5 text-red-400" /> : <ClockIcon className="h-3.5 w-3.5 text-pf-text-tertiary" />)}
-                <span className={`${task.isOverdue ? 'text-red-400 font-medium' : 'text-pf-text-tertiary'}`}>
+                {(task.isOverdue ? <AlertIcon className="h-3.5 w-3.5 text-pf-error" /> : <ClockIcon className="h-3.5 w-3.5 text-pf-text-tertiary" />)}
+                <span className={`${task.isOverdue ? 'text-pf-error font-medium' : 'text-pf-text-tertiary'}`}>
                   {runtimeDueText}
                 </span>
               </>
             ) : task.isOverdue ? (
               <>
-                <AlertIcon className="h-3.5 w-3.5 text-red-400" />
-                <span className="text-red-400 font-medium">
+                <AlertIcon className="h-3.5 w-3.5 text-pf-error" />
+                <span className="text-pf-error font-medium">
                   {Math.abs(task.daysUntilDue ?? 0)} day{Math.abs(task.daysUntilDue ?? 0) !== 1 ? 's' : ''} overdue
                 </span>
               </>
             ) : task.isDueToday ? (
               <>
-                <ClockIcon className="h-3.5 w-3.5 text-amber-400" />
-                <span className="text-amber-400 font-medium">Due today</span>
+                <ClockIcon className="h-3.5 w-3.5 text-pf-warning" />
+                <span className="text-pf-warning font-medium">Due today</span>
               </>
             ) : (
               <>
@@ -282,7 +282,7 @@ export function MaintenanceTimeline({
   if (tasks.length === 0) {
     return (
       <div className={`text-center py-8 ${className}`}>
-        <CheckCircleIcon className="h-12 w-12 text-green-500 mx-auto mb-3" />
+        <CheckCircleIcon className="h-12 w-12 text-pf-success mx-auto mb-3" />
         <h3 className="font-medium text-pf-text-primary">All caught up!</h3>
         <p className="text-sm text-pf-text-tertiary mt-1">
           No upcoming maintenance tasks scheduled
@@ -309,7 +309,7 @@ export function MaintenanceTimeline({
           {/* Group header */}
           <h3 className={`
             text-xs font-semibold uppercase tracking-wider mb-2 flex items-center gap-2
-            ${group.isOverdue ? 'text-red-400' : 'text-pf-text-tertiary'}
+            ${group.isOverdue ? 'text-pf-error' : 'text-pf-text-tertiary'}
           `}>
             {group.isOverdue && <AlertIcon className="h-3.5 w-3.5" />}
             {group.label}

@@ -150,24 +150,24 @@ export function DataManagementPage() {
       <div className="space-y-6">
         {/* Status Messages */}
         {error && (
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <div className="bg-pf-error/10 border border-pf-error/30 rounded-lg p-4">
             <div className="flex items-start">
-              <AlertCircleIcon className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 mr-3 shrink-0" />
+              <AlertCircleIcon className="w-5 h-5 text-pf-error mt-0.5 mr-3 shrink-0" />
               <div className="flex-1">
-                <h3 className="text-sm font-medium text-red-800 dark:text-red-200">Error</h3>
-                <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
+                <h3 className="text-sm font-medium text-pf-error">Error</h3>
+                <p className="text-sm text-pf-error mt-1">{error}</p>
               </div>
             </div>
           </div>
         )}
 
         {success && (
-          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+          <div className="bg-pf-success/10 border border-pf-success/30 rounded-lg p-4">
             <div className="flex items-start">
-              <CheckCircleIcon className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 mr-3 shrink-0" />
+              <CheckCircleIcon className="w-5 h-5 text-pf-success mt-0.5 mr-3 shrink-0" />
               <div className="flex-1">
-                <h3 className="text-sm font-medium text-green-800 dark:text-green-200">Success</h3>
-                <p className="text-sm text-green-700 dark:text-green-300 mt-1">{success}</p>
+                <h3 className="text-sm font-medium text-pf-success">Success</h3>
+                <p className="text-sm text-pf-success mt-1">{success}</p>
               </div>
             </div>
           </div>
@@ -265,7 +265,7 @@ export function DataManagementPage() {
                   <div className="text-sm font-medium text-pf-text-primary">
                     Replace
                   </div>
-                  <div className="text-xs text-red-600 dark:text-red-400">
+                  <div className="text-xs text-pf-error">
                     ⚠️ WARNING: Deletes ALL existing data before import. Use for factory reset only.
                   </div>
                 </div>
@@ -338,8 +338,8 @@ export function DataManagementPage() {
               
               {importResult.warnings.length > 0 && (
                 <div className="mt-3">
-                  <h4 className="text-xs font-semibold text-yellow-600 dark:text-yellow-400 mb-1">Warnings:</h4>
-                  <ul className="text-xs text-yellow-700 dark:text-yellow-300 list-disc list-inside">
+                  <h4 className="text-xs font-semibold text-pf-warning mb-1">Warnings:</h4>
+                  <ul className="text-xs text-pf-warning list-disc list-inside">
                     {importResult.warnings.map((warning, idx) => (
                       <li key={idx}>{warning}</li>
                     ))}
@@ -349,8 +349,8 @@ export function DataManagementPage() {
               
               {importResult.errors.length > 0 && (
                 <div className="mt-3">
-                  <h4 className="text-xs font-semibold text-red-600 dark:text-red-400 mb-1">Errors:</h4>
-                  <ul className="text-xs text-red-700 dark:text-red-300 list-disc list-inside">
+                  <h4 className="text-xs font-semibold text-pf-error mb-1">Errors:</h4>
+                  <ul className="text-xs text-pf-error list-disc list-inside">
                     {importResult.errors.map((err, idx) => (
                       <li key={idx}>{err}</li>
                     ))}

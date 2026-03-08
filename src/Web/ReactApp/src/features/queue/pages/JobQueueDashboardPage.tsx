@@ -167,7 +167,7 @@ export function JobQueueDashboardPage() {
  <div className="mt-4 p-4 bg-pf-success/10 border border-pf-success/30 rounded-lg">
  <div className="flex items-center justify-between">
  <div className="flex-1">
- <h4 className="text-sm font-semibold text-green-900 mb-1">✓ Slicing Complete</h4>
+ <h4 className="text-sm font-semibold text-pf-success mb-1">✓ Slicing Complete</h4>
  <p className="text-xs text-pf-success">Your G-code is ready to download</p>
  </div>
  <a

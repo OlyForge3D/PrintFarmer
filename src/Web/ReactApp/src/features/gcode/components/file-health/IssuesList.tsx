@@ -42,27 +42,27 @@ export function IssuesList({ data, isLoading }: IssuesListProps) {
       label: 'Missing Files',
       count: data.missingFiles.length,
       items: data.missingFiles,
-      color: 'text-red-600 dark:text-red-400',
-      bgColor: 'bg-red-50 dark:bg-red-900/20',
-      borderColor: 'border-red-200 dark:border-red-800',
+      color: 'text-pf-error',
+      bgColor: 'bg-pf-error/10',
+      borderColor: 'border-pf-error/30',
     },
     {
       id: 'corrupted' as const,
       label: 'Corrupted Files',
       count: data.corruptedFiles.length,
       items: data.corruptedFiles,
-      color: 'text-orange-600 dark:text-orange-400',
-      bgColor: 'bg-orange-50 dark:bg-orange-900/20',
-      borderColor: 'border-orange-200 dark:border-orange-800',
+      color: 'text-pf-warning',
+      bgColor: 'bg-pf-warning/10',
+      borderColor: 'border-pf-warning/30',
     },
     {
       id: 'inaccessible' as const,
       label: 'Inaccessible Files',
       count: data.inaccessibleFiles.length,
       items: data.inaccessibleFiles,
-      color: 'text-purple-600 dark:text-purple-400',
-      bgColor: 'bg-purple-50 dark:bg-purple-900/20',
-      borderColor: 'border-purple-200 dark:border-purple-800',
+      color: 'text-pf-accent dark:text-pf-accent',
+      bgColor: 'bg-pf-accent-bg/15',
+      borderColor: 'border-pf-accent/30',
     },
   ];
 
@@ -93,7 +93,7 @@ export function IssuesList({ data, isLoading }: IssuesListProps) {
             >
               {tab.label}
               {tab.count > 0 && (
-                <span className="ml-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                <span className="ml-2 bg-pf-error/10 text-pf-error text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
                   {tab.count}
                 </span>
               )}

@@ -78,7 +78,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
           <div className="flex-1">
             <div className="flex items-center space-x-2">
-              <h4 className="font-medium text-gray-900">
+              <h4 className="font-medium text-pf-text-primary">
                 Harvest from {operation.printerName}
               </h4>
               <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-${config.color}-100 text-${config.color}-800`}>
@@ -86,7 +86,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
               </span>
             </div>
 
-            <div className="mt-1 text-sm text-gray-500">
+            <div className="mt-1 text-sm text-pf-text-secondary">
               Started {formatDistanceToNow(parseApiDateTimeValue(operation.startedAt), { addSuffix: true })}
               {operation.completedAt && (
                 <span> • Duration: {formatDuration(operation.startedAt, operation.completedAt)}</span>
@@ -100,10 +100,10 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
                   <span>{operation.filesProcessed} / {operation.filesFound} files</span>
                   <span>{Math.round(progress)}%</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                <div className="w-full bg-pf-bg-2 rounded-full h-1.5">
                   <div
                     ref={progressRef}
-                    className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                    className="bg-pf-accent-bg h-1.5 rounded-full transition-all duration-300"
                   />
                 </div>
               </div>
@@ -112,18 +112,18 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
             {/* Results summary */}
             {operation.status === GcodeHarvestStatus.Completed && (
               <div className="mt-2 flex items-center space-x-4 text-sm">
-                <span className="text-gray-600">
-                  <span className="font-medium text-green-600">{operation.filesProcessed}</span> files harvested
+                <span className="text-pf-text-secondary">
+                  <span className="font-medium text-pf-success">{operation.filesProcessed}</span> files harvested
                 </span>
 
                 {operation.totalSizeBytes && (
-                  <span className="text-gray-600">
+                  <span className="text-pf-text-secondary">
                     <span className="font-medium">{formatBytes(operation.totalSizeBytes)}</span> total size
                   </span>
                 )}
 
                 {operation.duplicatesSkipped > 0 && (
-                  <span className="text-gray-600">
+                  <span className="text-pf-text-secondary">
                     {operation.duplicatesSkipped} duplicates skipped
                   </span>
                 )}
@@ -132,7 +132,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
             {/* Error message */}
             {operation.status === GcodeHarvestStatus.Failed && operation.error && (
-              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-sm text-sm text-red-700">
+              <div className="mt-2 p-2 bg-pf-error/10 border border-pf-error/30 rounded-sm text-sm text-pf-error">
                 {operation.error}
               </div>
             )}
@@ -141,13 +141,13 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
         <div className="flex items-center space-x-2">
           {operation.status === GcodeHarvestStatus.Running && onViewDetails && (
-            <Button onClick={() => onViewDetails(operation)} variant="subtle" className="text-sm text-blue-600 hover:text-blue-800">View Details</Button>
+            <Button onClick={() => onViewDetails(operation)} variant="subtle" className="text-sm text-pf-accent hover:text-pf-accent">View Details</Button>
           )}
 
           {operation.status === GcodeHarvestStatus.Completed && hasPermission('gcode_harvest', 'read') && (
             <Link
               to={`/files?harvest=${operation.id}`}
-              className="text-sm text-blue-600 hover:text-blue-800"
+              className="text-sm text-pf-accent hover:text-pf-accent"
             >
               View Files
             </Link>
@@ -169,7 +169,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
             </Button>
           )}
 
-          <Button onClick={() => setShowDetails(!showDetails)} variant="subtle" className="text-gray-400 hover:text-gray-600" title="Toggle details">
+          <Button onClick={() => setShowDetails(!showDetails)} variant="subtle" className="text-pf-text-tertiary hover:text-pf-text-secondary" title="Toggle details">
             <ChevronDownIcon className={`w-4 h-4 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
           </Button>
         </div>
@@ -177,32 +177,32 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
       {/* Expanded details */}
       {showDetails && (
-        <div className="mt-4 pt-4 border-t border-gray-200">
+        <div className="mt-4 pt-4 border-t border-pf-border">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span className="text-gray-600">Operation ID:</span>
-              <div className="font-mono text-xs text-gray-900 mt-1">
+              <span className="text-pf-text-secondary">Operation ID:</span>
+              <div className="font-mono text-xs text-pf-text-primary mt-1">
                 {operation.id.substring(0, 8)}...
               </div>
             </div>
 
             <div>
-              <span className="text-gray-600">File Types:</span>
-              <div className="font-medium text-gray-900 mt-1">
+              <span className="text-pf-text-secondary">File Types:</span>
+              <div className="font-medium text-pf-text-primary mt-1">
                 {operation.options?.fileTypes?.join(', ') || 'All'}
               </div>
             </div>
 
             <div>
-              <span className="text-gray-600">Include Subfolders:</span>
-              <div className="font-medium text-gray-900 mt-1">
+              <span className="text-pf-text-secondary">Include Subfolders:</span>
+              <div className="font-medium text-pf-text-primary mt-1">
                 {operation.options?.includeSubfolders ? 'Yes' : 'No'}
               </div>
             </div>
 
             <div>
-              <span className="text-gray-600">Min File Size:</span>
-              <div className="font-medium text-gray-900 mt-1">
+              <span className="text-pf-text-secondary">Min File Size:</span>
+              <div className="font-medium text-pf-text-primary mt-1">
                 {operation.options?.minFileSize ? formatBytes(operation.options.minFileSize) : 'None'}
               </div>
             </div>
@@ -210,15 +210,15 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
           {operation.filesPaths && operation.filesPaths.length > 0 && (
             <div className="mt-4">
-              <span className="text-sm text-gray-600">Sample Files:</span>
+              <span className="text-sm text-pf-text-secondary">Sample Files:</span>
               <div className="mt-1 text-xs font-mono space-y-1">
                 {operation.filesPaths.slice(0, 3).map((path, i) => (
-                  <div key={i} className="text-gray-700 truncate">
+                  <div key={i} className="text-pf-text-primary truncate">
                     {path}
                   </div>
                 ))}
                 {operation.filesPaths.length > 3 && (
-                  <div className="text-gray-500">
+                  <div className="text-pf-text-secondary">
                     +{operation.filesPaths.length - 3} more files...
                   </div>
                 )}

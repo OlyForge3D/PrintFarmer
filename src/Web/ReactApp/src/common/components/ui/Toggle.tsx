@@ -61,7 +61,7 @@ export const Toggle: React.FC<ToggleProps> = ({
       >
         <div
           className={clsx(
-            'absolute top-0.5 left-0.5 rounded-full bg-white shadow-sm transition-transform',
+            'absolute top-0.5 left-0.5 rounded-full bg-pf-bg-0 shadow-sm transition-transform',
             sizeClasses[size].thumb,
             checked && sizeClasses[size].translate
           )}

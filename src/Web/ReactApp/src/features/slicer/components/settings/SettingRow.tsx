@@ -143,8 +143,8 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
             variant="subtle"
             type="button"
             onClick={onReset}
-            className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors
-                       hover:bg-orange-400/10 rounded"
+            className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
+                       hover:bg-pf-warning/10 rounded"
             title={`Reset to original: ${formatOriginalValue(originalValue)}`}
             aria-label={`Reset ${label} to original value`}
           >
@@ -157,7 +157,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           htmlFor={id} 
           className={`font-semibold transition-colors ${
             isModified 
-              ? 'text-orange-400' 
+              ? 'text-pf-warning' 
               : 'text-pf-text'
           }`}
         >
@@ -642,8 +642,8 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
             variant="subtle"
             type="button"
             onClick={onReset}
-            className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors
-                       hover:bg-orange-400/10 rounded"
+            className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
+                       hover:bg-pf-warning/10 rounded"
             title={`Reset to original: ${formatOriginalValue(originalValue)}`}
             aria-label={`Reset ${label} to original value`}
           >
@@ -655,7 +655,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
           htmlFor={id} 
           className={`text-sm transition-colors ${
             isModified 
-              ? 'text-orange-400 font-medium' 
+              ? 'text-pf-warning font-medium' 
               : 'text-pf-text'
           }`}
           title={tooltip}

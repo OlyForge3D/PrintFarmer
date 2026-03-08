@@ -146,7 +146,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <div className="flex items-center gap-2">
                   {file.extractedHotendTemp && (
                     <div className="flex items-center gap-1 flex-1">
-                      <FireIcon className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                      <FireIcon className="w-3.5 h-3.5 text-pf-warning shrink-0" />
                       <span title={`Hotend: ${formatTemperature(file.extractedHotendTemp)}`}>
                         {formatTemperature(file.extractedHotendTemp)}
                       </span>
@@ -154,7 +154,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                   )}
                   {file.extractedBedTemp && (
                     <div className="flex items-center gap-1 flex-1">
-                      <RectangleStackIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <RectangleStackIcon className="w-3.5 h-3.5 text-pf-accent shrink-0" />
                       <span title={`Bed: ${formatTemperature(file.extractedBedTemp)}`}>
                         {formatTemperature(file.extractedBedTemp)}
                       </span>

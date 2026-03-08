@@ -203,10 +203,10 @@ export function Table({
       registerRow, 
       unregisterRow 
     }}>
-      <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+      <div className="overflow-x-auto rounded-lg border border-pf-border">
         <table
           ref={tableRef}
-          className={`min-w-full divide-y divide-gray-200 dark:divide-gray-700 ${className}`}
+          className={`min-w-full divide-y divide-pf-border ${className}`}
           tabIndex={keyboardNavigation ? 0 : undefined}
           onKeyDown={keyboardNavigation ? handleKeyDown : undefined}
           {...props}
@@ -224,7 +224,7 @@ export function Table({
 export function TableHead({ children, className = '', ...props }: TableHeadProps) {
   return (
     <thead
-      className={`bg-gray-50 dark:bg-gray-800 ${className}`}
+      className={`bg-pf-bg-1 ${className}`}
       {...props}
     >
       {children}
@@ -238,7 +238,7 @@ export function TableHead({ children, className = '', ...props }: TableHeadProps
 export function TableBody({ children, className = '', ...props }: TableBodyProps) {
   return (
     <tbody
-      className={`divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-900 ${className}`}
+      className={`divide-y divide-pf-border bg-pf-bg-0 ${className}`}
       {...props}
     >
       {children}
@@ -282,9 +282,9 @@ export function TableRow({
   }, [context, assignedIndex]);
 
   const isFocused = context ? context.focusedRowIndex === assignedIndex : false;
-  const selectedClass = isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : '';
-  const hoverClass = isHoverable ? 'hover:bg-gray-50 dark:hover:bg-gray-800/50' : '';
-  const focusClass = isFocused ? 'ring-2 ring-inset ring-blue-500 dark:ring-blue-400' : '';
+  const selectedClass = isSelected ? 'bg-pf-accent-bg/15' : '';
+  const hoverClass = isHoverable ? 'hover:bg-pf-bg-1' : '';
+  const focusClass = isFocused ? 'ring-2 ring-inset ring-pf-accent' : '';
   
   const handleClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
     if (context && assignedIndex >= 0) {
@@ -314,13 +314,13 @@ function SortIndicator({ direction }: { direction: SortDirection }) {
   return (
     <span className="ml-1 inline-flex flex-col text-xs leading-none" aria-hidden="true">
       <svg 
-        className={`w-3 h-3 ${direction === 'asc' ? 'text-blue-500' : 'text-gray-300 dark:text-gray-600'}`}
+        className={`w-3 h-3 ${direction === 'asc' ? 'text-pf-accent' : 'text-pf-text-secondary'}`}
         viewBox="0 0 24 24"
       >
         <path fill="currentColor" d="M7,15L12,10L17,15H7Z" />
       </svg>
       <svg 
-        className={`w-3 h-3 -mt-1 ${direction === 'desc' ? 'text-blue-500' : 'text-gray-300 dark:text-gray-600'}`}
+        className={`w-3 h-3 -mt-1 ${direction === 'desc' ? 'text-pf-accent' : 'text-pf-text-secondary'}`}
         viewBox="0 0 24 24"
       >
         <path fill="currentColor" d="M7,10L12,15L17,10H7Z" />
@@ -347,7 +347,7 @@ export function TableHeaderCell({
     }
   };
 
-  const sortableClass = sortable ? 'cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors' : '';
+  const sortableClass = sortable ? 'cursor-pointer select-none hover:bg-pf-bg-1 transition-colors' : '';
   
   // Compute aria-sort value as a constant
   const ariaSortValue: 'ascending' | 'descending' | 'none' | undefined = 
@@ -357,7 +357,7 @@ export function TableHeaderCell({
   
   return (
     <th
-      className={`px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider ${sortableClass} ${className}`}
+      className={`px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider ${sortableClass} ${className}`}
       onClick={sortable ? handleClick : undefined}
       aria-sort={ariaSortValue}
       {...props}
@@ -376,7 +376,7 @@ export function TableHeaderCell({
 export function TableCell({ children, className = '', ...props }: TableCellProps) {
   return (
     <td
-      className={`px-4 py-3 text-sm text-gray-900 dark:text-gray-100 ${className}`}
+      className={`px-4 py-3 text-sm text-pf-text-primary ${className}`}
       {...props}
     >
       {children}

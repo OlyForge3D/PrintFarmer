@@ -44,8 +44,8 @@ function getComponentIcon(): React.ReactNode {
  */
 function getComponentColor(data: ComponentMaintenanceData): string {
   if (data.scheduleCount === 0) return 'text-pf-text-tertiary';
-  if (data.maintenanceCount === 0) return 'text-amber-400';
-  return 'text-green-400';
+  if (data.maintenanceCount === 0) return 'text-pf-warning';
+  return 'text-pf-success';
 }
 
 interface ComponentCardProps {

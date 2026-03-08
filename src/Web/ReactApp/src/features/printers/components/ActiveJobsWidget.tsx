@@ -34,8 +34,8 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
       <DashboardWidget
         title="Active & Queued Jobs"
         icon={PlayIcon}
-        iconColorClass={hasJobs ? 'text-blue-400' : 'text-pf-text-tertiary'}
-        iconBgClass={hasJobs ? 'bg-blue-500/20' : 'bg-pf-bg-2'}
+        iconColorClass={hasJobs ? 'text-pf-accent' : 'text-pf-text-tertiary'}
+        iconBgClass={hasJobs ? 'bg-pf-accent-bg/15' : 'bg-pf-bg-2'}
         subtitle={
           hasJobs
             ? `${jobCount} job${jobCount !== 1 ? 's' : ''} in queue`
@@ -97,8 +97,8 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
                 {/* Status badge */}
                 <span className={`ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
                   item.job.status === 'Printing' 
-                    ? 'bg-green-500/20 text-green-400'
-                    : 'bg-blue-500/20 text-blue-400'
+                    ? 'bg-pf-success/10 text-pf-success'
+                    : 'bg-pf-accent-bg/15 text-pf-accent'
                 }`}>
                   {item.job.status}
                 </span>

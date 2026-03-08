@@ -1423,16 +1423,16 @@ export const SlicerProfilesPage: React.FC = () => {
             </div>
           )}
           {reseedStatus === 'success' && (
-            <CheckCircleIcon className="h-12 w-12 text-green-500" />
+            <CheckCircleIcon className="h-12 w-12 text-pf-success" />
           )}
           {reseedStatus === 'error' && (
-            <AlertCircleIcon className="h-12 w-12 text-red-500" />
+            <AlertCircleIcon className="h-12 w-12 text-pf-error" />
           )}
 
           {/* Status Message */}
           <p className={`text-center text-sm ${reseedStatus === 'loading' ? 'text-pf-text-secondary' :
-            reseedStatus === 'success' ? 'text-green-600 dark:text-green-400' :
-              'text-red-600 dark:text-red-400'
+            reseedStatus === 'success' ? 'text-pf-success' :
+              'text-pf-error'
             }`}>
             {reseedMessage}
           </p>

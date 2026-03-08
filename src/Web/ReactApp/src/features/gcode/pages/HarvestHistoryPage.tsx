@@ -34,15 +34,15 @@ export function HarvestHistoryPage() {
   const getStatusBadgeClass = (status: GcodeHarvestStatus) => {
     switch (status) {
       case GcodeHarvestStatus.Running:
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
+        return 'bg-pf-accent-bg/15 text-pf-accent';
       case GcodeHarvestStatus.Completed:
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
+        return 'bg-pf-success/10 text-pf-success';
       case GcodeHarvestStatus.Failed:
-        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300';
+        return 'bg-pf-error/10 text-pf-error';
       case GcodeHarvestStatus.Cancelled:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300';
+        return 'bg-pf-bg-1 text-pf-text-primary';
       default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300';
+        return 'bg-pf-bg-1 text-pf-text-primary';
     }
   };
 

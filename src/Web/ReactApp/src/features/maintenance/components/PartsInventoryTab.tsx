@@ -128,13 +128,13 @@ function ComponentFormModal({ isOpen, component, categories, onClose }: Componen
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="comp-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
-              Name <span className="text-red-400">*</span>
+              Name <span className="text-pf-error">*</span>
             </label>
             <Input id="comp-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="LM8UU Linear Bearing" required maxLength={200} />
           </div>
           <div>
             <label htmlFor="comp-cat" className="block text-sm font-medium text-pf-text-secondary mb-1">
-              Category <span className="text-red-400">*</span>
+              Category <span className="text-pf-error">*</span>
             </label>
             <Select id="comp-cat" value={category} onChange={(e) => setCategory(e.target.value)} required>
               <option value="">Select category...</option>
@@ -314,7 +314,7 @@ export function PartsInventoryTab() {
   if (error) {
     return (
       <div className="text-center py-12">
-        <AlertIcon className="h-10 w-10 text-red-400 mx-auto mb-3" />
+        <AlertIcon className="h-10 w-10 text-pf-error mx-auto mb-3" />
         <p className="text-pf-text-secondary">Failed to load parts inventory</p>
         <p className="text-xs text-pf-text-tertiary mt-1">{(error as Error).message}</p>
       </div>
@@ -369,7 +369,7 @@ export function PartsInventoryTab() {
         {categoryFilter ? ` in ${categoryFilter}` : ''}
         {search ? ` matching "${search}"` : ''}
         {lowStockCount > 0 && (
-          <span className="text-amber-400"> • {lowStockCount} low stock</span>
+          <span className="text-pf-warning"> • {lowStockCount} low stock</span>
         )}
       </p>
 
@@ -412,7 +412,7 @@ export function PartsInventoryTab() {
               <div
                 key={comp.id}
                 className={`flex items-center gap-4 p-4 rounded-lg border transition-colors bg-pf-bg-2 ${
-                  isLow ? 'border-amber-500/40' : 'border-pf-border hover:border-pf-accent/40'
+                  isLow ? 'border-pf-warning/40' : 'border-pf-border hover:border-pf-accent/40'
                 }`}
               >
                 <div className="flex-1 min-w-0">
@@ -428,7 +428,7 @@ export function PartsInventoryTab() {
                     {comp.sku && <span>SKU: {comp.sku}</span>}
                     {comp.supplier && <span>{comp.supplier}</span>}
                     {comp.unitCost != null && <span>${comp.unitCost.toFixed(2)}/ea</span>}
-                    <span className={isLow ? 'text-amber-400 font-medium' : ''}>
+                    <span className={isLow ? 'text-pf-warning font-medium' : ''}>
                       {comp.inStock} in stock (min: {comp.minimumStock})
                     </span>
                     {comp.url?.startsWith('http') && (
@@ -449,7 +449,7 @@ export function PartsInventoryTab() {
                   <Button variant="subtle" size="sm" onClick={() => { setEditingComponent(comp); setIsFormOpen(true); }} aria-label={`Edit ${comp.name}`}>
                     <EditIcon className="h-4 w-4" />
                   </Button>
-                  <Button variant="subtle" size="sm" onClick={() => setDeletingComponent(comp)} aria-label={`Delete ${comp.name}`} className="hover:text-red-400">
+                  <Button variant="subtle" size="sm" onClick={() => setDeletingComponent(comp)} aria-label={`Delete ${comp.name}`} className="hover:text-pf-error">
                     <DeleteIcon className="h-4 w-4" />
                   </Button>
                 </div>

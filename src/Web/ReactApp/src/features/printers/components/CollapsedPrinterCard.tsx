@@ -90,11 +90,11 @@ export function CollapsedPrinterCard({
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
   const statusDotClasses = (() => {
-    if (!isOnline) return 'bg-slate-400';
+    if (!isOnline) return 'bg-pf-disabled';
     if (isPrinting) return 'bg-pf-success-bg';
-    if (isPaused) return 'bg-yellow-500';
-    if (isShutdown) return 'bg-red-500';
-    return 'bg-blue-500';
+    if (isPaused) return 'bg-pf-warning';
+    if (isShutdown) return 'bg-pf-error';
+    return 'bg-pf-accent-bg';
   })();
 
   const toCamelCase = (str: string): string => {
@@ -160,7 +160,7 @@ export function CollapsedPrinterCard({
         </div>
         
         {/* Status chip (enterprise/subtle) */}
-        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-white/[0.04] border border-white/10 text-pf-text-primary">
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-pf-bg-0/[0.04] border border-white/10 text-pf-text-primary">
           <span className={`h-2 w-2 rounded-full ${statusDotClasses}`} aria-hidden />
           <span className="text-pf-text-secondary">
             {isOnline ? toCamelCase(state) : 'Offline'}
@@ -169,7 +169,7 @@ export function CollapsedPrinterCard({
       </div>
 
       {/* Subtle separator above actions */}
-      <div className="h-px w-full bg-white/10 mb-2" aria-hidden />
+      <div className="h-px w-full bg-pf-bg-0/10 mb-2" aria-hidden />
 
       {/* Action buttons row */}
       <div

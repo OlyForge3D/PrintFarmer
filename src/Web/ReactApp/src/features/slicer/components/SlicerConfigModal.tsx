@@ -192,17 +192,17 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
     >
       <div className="space-y-6">
           {/* Model info */}
-          <div className="bg-gray-50 rounded-lg p-4">
+          <div className="bg-pf-bg-1 rounded-lg p-4">
             <h4 className="font-medium mb-2">Model Information</h4>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span className="text-gray-600">File:</span>
+                <span className="text-pf-text-secondary">File:</span>
                 <span className="ml-2 font-medium">
                   {modelFile ? modelFile.name : (modelName || 'Unknown Model')}
                 </span>
               </div>
               <div>
-                <span className="text-gray-600">Size:</span>
+                <span className="text-pf-text-secondary">Size:</span>
                 <span className="ml-2 font-medium">
                   {modelFile ? `${(modelFile.size / 1024 / 1024).toFixed(1)} MB` : 'Unknown'}
                 </span>
@@ -212,7 +212,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
             {/* Validation status */}
             {validationResult && (
               <div className={`mt-3 flex items-start space-x-2 text-sm ${
-                validationResult.valid ? 'text-green-700' : 'text-red-700'
+                validationResult.valid ? 'text-pf-success' : 'text-pf-error'
               }`}>
                 {validationResult.valid ? (
                   <CheckCircleIcon className="w-4 h-4 shrink-0 mt-0.5" />
@@ -239,7 +239,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
 
           {/* Printer selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-pf-text-primary mb-2">
               Select Printer
             </label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -249,17 +249,17 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                   onClick={() => setSelectedPrinter(printer)}
                   className={`p-3 border rounded-lg cursor-pointer transition-colors ${
                     selectedPrinter?.id === printer.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
+                      ? 'border-pf-accent bg-pf-accent-bg/15'
+                      : 'border-pf-border hover:border-pf-border'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div>
                       <h5 className="font-medium">{printer.name}</h5>
-                      <p className="text-sm text-gray-500">{printer.backend}</p>
+                      <p className="text-sm text-pf-text-secondary">{printer.backend}</p>
                     </div>
                     <div className={`w-3 h-3 rounded-full ${
-                      printer.isReachable ? 'bg-green-500' : 'bg-red-500'
+                      printer.isReachable ? 'bg-pf-success' : 'bg-pf-error'
                     }`} />
                   </div>
                 </div>
@@ -269,7 +269,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
 
           {/* Slicer engine selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-pf-text-primary mb-2">
               Slicer Engine
             </label>
             <div className="flex space-x-4">
@@ -284,7 +284,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 />
                 <span className="flex items-center">
                   PrusaSlicer
-                  <span className="ml-2 px-2 py-1 text-xs bg-orange-100 text-orange-800 rounded-sm">
+                  <span className="ml-2 px-2 py-1 text-xs bg-pf-warning/10 text-pf-warning rounded-sm">
                     Reliable
                   </span>
                 </span>
@@ -301,7 +301,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 />
                 <span className="flex items-center">
                   OrcaSlicer
-                  <span className="ml-2 px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-sm">
+                  <span className="ml-2 px-2 py-1 text-xs bg-pf-accent-bg/15 text-pf-accent rounded-sm">
                     Advanced
                   </span>
                 </span>
@@ -312,7 +312,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
           {/* Profile settings */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-pf-text-primary mb-1">
                 Quality
               </label>
               <select
@@ -323,7 +323,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                   const quality = e.target.value as 'draft' | 'standard' | 'fine';
                   setProfile(DEFAULT_PROFILES[quality]);
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent"
               >
                 <option value="draft">Draft (0.3mm)</option>
                 <option value="standard">Standard (0.2mm)</option>
@@ -332,7 +332,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-pf-text-primary mb-1">
                 Material
               </label>
               <select
@@ -344,7 +344,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                   nozzleTemperature: e.target.value === 'PLA' ? 210 : e.target.value === 'PETG' ? 240 : 250,
                   bedTemperature: e.target.value === 'PLA' ? 60 : e.target.value === 'PETG' ? 80 : 90
                 })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent"
               >
                 <option value="PLA">PLA</option>
                 <option value="PETG">PETG</option>
@@ -354,7 +354,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-pf-text-primary mb-1">
                 Infill ({profile.infillPercentage}%)
               </label>
               <input
@@ -366,12 +366,12 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 step="5"
                 value={profile.infillPercentage}
                 onChange={(e) => updateProfile({ infillPercentage: parseInt(e.target.value) })}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                className="w-full h-2 bg-pf-bg-2 rounded-lg appearance-none cursor-pointer"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-pf-text-primary mb-1">
                 Print Speed ({profile.printSpeed}mm/s)
               </label>
               <input
@@ -383,12 +383,12 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 step="5"
                 value={profile.printSpeed}
                 onChange={(e) => updateProfile({ printSpeed: parseInt(e.target.value) })}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                className="w-full h-2 bg-pf-bg-2 rounded-lg appearance-none cursor-pointer"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-pf-text-primary mb-1">
                 Nozzle Temperature (°C)
               </label>
               <input
@@ -399,12 +399,12 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 max="300"
                 value={profile.nozzleTemperature}
                 onChange={(e) => updateProfile({ nozzleTemperature: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-pf-text-primary mb-1">
                 Bed Temperature (°C)
               </label>
               <input
@@ -415,7 +415,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 max="120"
                 value={profile.bedTemperature}
                 onChange={(e) => updateProfile({ bedTemperature: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent"
               />
             </div>
           </div>
@@ -431,35 +431,35 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 onChange={(e) => updateProfile({ supports: e.target.checked })}
                 className="mr-2"
               />
-              <span className="text-sm font-medium text-gray-700">Generate support structures</span>
+              <span className="text-sm font-medium text-pf-text-primary">Generate support structures</span>
             </label>
           </div>
 
           {/* Slicing progress */}
           {slicingProgress && (
-            <div className="bg-blue-50 rounded-lg p-4">
+            <div className="bg-pf-accent-bg/15 rounded-lg p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-blue-900">
+                <span className="text-sm font-medium text-pf-accent">
                   {slicingProgress.status === 'queued' ? 'Queued for slicing...' :
                    slicingProgress.status === 'slicing' ? 'Slicing in progress...' :
                    slicingProgress.status === 'completed' ? 'Slicing completed!' :
                    'Slicing failed'}
                 </span>
-                <span className="text-sm text-blue-700">{Math.round(slicingProgress.progress)}%</span>
+                <span className="text-sm text-pf-accent">{Math.round(slicingProgress.progress)}%</span>
               </div>
-              <div className="w-full bg-blue-200 rounded-full h-2 overflow-hidden">
+              <div className="w-full bg-pf-accent-bg/15 rounded-full h-2 overflow-hidden">
                 {(() => {
                   const pct = Math.max(0, Math.min(100, Math.round(slicingProgress.progress)));
                   const step = Math.round(pct / 5) * 5;
                   const widthClass = `w-[${step}%]` as const;
                   return <>
                     <span className="sr-only">Slicing progress {pct}%</span>
-                    <div className={`h-2 bg-blue-600 transition-all duration-300 ${widthClass}`} aria-hidden="true" />
+                    <div className={`h-2 bg-pf-accent-bg transition-all duration-300 ${widthClass}`} aria-hidden="true" />
                   </>;
                 })()}
               </div>
               {slicingProgress.message && (
-                <div className="mt-2 text-sm text-blue-700">{slicingProgress.message}</div>
+                <div className="mt-2 text-sm text-pf-accent">{slicingProgress.message}</div>
               )}
             </div>
           )}

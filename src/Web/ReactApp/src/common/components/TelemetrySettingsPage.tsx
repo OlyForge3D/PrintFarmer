@@ -74,18 +74,18 @@ export function TelemetrySettingsPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center space-x-3">
-        <CogIcon className="h-8 w-8 text-gray-700" />
+        <CogIcon className="h-8 w-8 text-pf-text-primary" />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">OpenTelemetry Settings</h1>
-          <p className="text-gray-600">Configure system observability and tracing options</p>
+          <h1 className="text-2xl font-bold text-pf-text-primary">OpenTelemetry Settings</h1>
+          <p className="text-pf-text-secondary">Configure system observability and tracing options</p>
         </div>
       </div>
 
       {/* Status Card */}
-      <div className="bg-white rounded-lg shadow-xs border p-6">
+      <div className="bg-pf-bg-0 rounded-lg shadow-xs border p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Telemetry Status</h2>
-          <div className={`flex items-center space-x-2 ${telemetryStatus ? 'text-green-600' : 'text-red-600'}`}>
+          <h2 className="text-lg font-semibold text-pf-text-primary">Telemetry Status</h2>
+          <div className={`flex items-center space-x-2 ${telemetryStatus ? 'text-pf-success' : 'text-pf-error'}`}>
             {telemetryStatus ? (
               <CheckCircleIcon className="h-5 w-5" />
             ) : (
@@ -99,26 +99,26 @@ export function TelemetrySettingsPage() {
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <p className="text-sm text-gray-600">Service Name</p>
+            <p className="text-sm text-pf-text-secondary">Service Name</p>
             <p className="font-mono text-sm">PrintFarmer.Frontend</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Environment</p>
+            <p className="text-sm text-pf-text-secondary">Environment</p>
             <p className="font-mono text-sm">{import.meta.env.MODE}</p>
           </div>
         </div>
       </div>
 
       {/* Configuration */}
-      <div className="bg-white rounded-lg shadow-xs border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-6">Configuration</h2>
+      <div className="bg-pf-bg-0 rounded-lg shadow-xs border p-6">
+        <h2 className="text-lg font-semibold text-pf-text-primary mb-6">Configuration</h2>
         
         <div className="space-y-6">
           {/* Enable Telemetry */}
           <div className="flex items-center justify-between">
             <div>
-              <label htmlFor="enable-telemetry" className="text-sm font-medium text-gray-700">Enable Telemetry</label>
-              <p className="text-sm text-gray-500">Master switch for all telemetry collection</p>
+              <label htmlFor="enable-telemetry" className="text-sm font-medium text-pf-text-primary">Enable Telemetry</label>
+              <p className="text-sm text-pf-text-secondary">Master switch for all telemetry collection</p>
             </div>
             <Checkbox
               id="enable-telemetry"
@@ -130,8 +130,8 @@ export function TelemetrySettingsPage() {
           {/* Console Logging */}
           <div className="flex items-center justify-between">
             <div>
-              <label htmlFor="console-logging" className="text-sm font-medium text-gray-700">Console Logging</label>
-              <p className="text-sm text-gray-500">Output traces to browser console</p>
+              <label htmlFor="console-logging" className="text-sm font-medium text-pf-text-primary">Console Logging</label>
+              <p className="text-sm text-pf-text-secondary">Output traces to browser console</p>
             </div>
             <Checkbox
               id="console-logging"
@@ -142,7 +142,7 @@ export function TelemetrySettingsPage() {
 
           {/* OTLP Endpoint */}
           <div>
-            <label htmlFor="otlp-endpoint" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="otlp-endpoint" className="block text-sm font-medium text-pf-text-primary mb-2">
               OTLP Endpoint
             </label>
             <div className="flex space-x-2">
@@ -167,14 +167,14 @@ export function TelemetrySettingsPage() {
                 )}
               </Button>
             </div>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-pf-text-secondary mt-1">
               External collector endpoint for trace export
             </p>
           </div>
 
           {/* Sampling Rate */}
           <div>
-            <label htmlFor="sampling-rate" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="sampling-rate" className="block text-sm font-medium text-pf-text-primary mb-2">
               Sampling Rate
             </label>
             <input
@@ -185,9 +185,9 @@ export function TelemetrySettingsPage() {
               step="0.1"
               value={settings.samplingRate}
               onChange={(e) => handleSettingChange('samplingRate', parseFloat(e.target.value))}
-              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+              className="w-full h-2 bg-pf-bg-2 rounded-lg appearance-none cursor-pointer"
             />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
+            <div className="flex justify-between text-xs text-pf-text-secondary mt-1">
               <span>0% (Disabled)</span>
               <span className="font-medium">{(settings.samplingRate * 100).toFixed(0)}%</span>
               <span>100% (All traces)</span>
@@ -197,14 +197,14 @@ export function TelemetrySettingsPage() {
       </div>
 
       {/* Instrumentation Options */}
-      <div className="bg-white rounded-lg shadow-xs border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-6">Instrumentation</h2>
+      <div className="bg-pf-bg-0 rounded-lg shadow-xs border p-6">
+        <h2 className="text-lg font-semibold text-pf-text-primary mb-6">Instrumentation</h2>
         
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <label htmlFor="track-interactions" className="text-sm font-medium text-gray-700">Track User Interactions</label>
-              <p className="text-sm text-gray-500">Monitor clicks, form submissions, etc.</p>
+              <label htmlFor="track-interactions" className="text-sm font-medium text-pf-text-primary">Track User Interactions</label>
+              <p className="text-sm text-pf-text-secondary">Monitor clicks, form submissions, etc.</p>
             </div>
             <Checkbox
               id="track-interactions"
@@ -215,8 +215,8 @@ export function TelemetrySettingsPage() {
 
           <div className="flex items-center justify-between">
             <div>
-              <label htmlFor="track-api-calls" className="text-sm font-medium text-gray-700">Track API Calls</label>
-              <p className="text-sm text-gray-500">Monitor HTTP requests and responses</p>
+              <label htmlFor="track-api-calls" className="text-sm font-medium text-pf-text-primary">Track API Calls</label>
+              <p className="text-sm text-pf-text-secondary">Monitor HTTP requests and responses</p>
             </div>
             <Checkbox
               id="track-api-calls"
@@ -227,8 +227,8 @@ export function TelemetrySettingsPage() {
 
           <div className="flex items-center justify-between">
             <div>
-              <label htmlFor="track-components" className="text-sm font-medium text-gray-700">Track Component Lifecycle</label>
-              <p className="text-sm text-gray-500">Monitor React component mount/unmount</p>
+              <label htmlFor="track-components" className="text-sm font-medium text-pf-text-primary">Track Component Lifecycle</label>
+              <p className="text-sm text-pf-text-secondary">Monitor React component mount/unmount</p>
             </div>
             <Checkbox
               id="track-components"
