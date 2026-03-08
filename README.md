@@ -113,6 +113,7 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 
 **Implementation details:**
 - **[API Reference](./docs/API.md)** - REST endpoints and SignalR events
+- **[Design System](./docs/DESIGN_SYSTEM.md)** - UI component library, design tokens, theming
 - **[UI Documentation](./docs/UI.md)** - Frontend components and pages
 - **[Database Guide](./docs/DATABASE.md)** - Schema, migrations, multi-provider support
 

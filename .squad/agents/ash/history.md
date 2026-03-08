@@ -7,6 +7,60 @@
 
 ## Learnings
 
+### Design System Documentation (2026-03-21)
+
+**Files Created:**
+- **docs/DESIGN_SYSTEM.md** — Comprehensive reference for PrintFarmer UI component library, design tokens (pf-* CSS variables), theme system, and usage patterns (7,500+ words)
+
+**Files Updated:**
+- **README.md** — Added reference to Design System docs in "Implementation details" section
+
+**Design System Scope:**
+- 40+ React components with complete prop APIs and usage examples (Button, Input, Select, FormField, Card, Badge, Spinner, Modal, Tabs, DataTable, Alert, Toggle, FileUpload, Checkbox, Radio, ProgressBar, Tooltip, Textarea)
+- CSS custom properties for dynamic theming (GitHub Dark, PrintFarmer Dark, Light)
+- Design tokens: colors (primary, text, status, accents, errors, borders, gradients), spacing, typography, state indicators
+- Accessibility features (WCAG 2.2 AA compliance) with keyboard navigation and screen reader support
+- Common patterns for forms, data tables, modals, loading states, conditional rendering
+- Troubleshooting guide and best practices for UI development
+
+**Design Token System (Three Layers):**
+1. **CSS Custom Properties** — `--pf-bg-0`, `--pf-text-primary`, `--pf-accent` (theme-aware variables in theme.css)
+2. **Tailwind Utilities** — `bg-pf-bg-0`, `text-pf-text-primary` (defined via tailwind.config.js CSS color mappings)
+3. **React Components** — Button, Input, Card, Modal (composed from Tailwind + tokens, zero hardcoded colors)
+
+**Theme Architecture:**
+- GitHub Dark (default) — GitHub's official colors, 13.6:1 contrast on primary text
+- PrintFarmer Dark — Custom dark theme with 4.5:1 minimum contrast on all text
+- Light — High-contrast light theme for daytime use, daylight accessibility
+- Dynamic theme switching via `document.documentElement.setAttribute('data-theme', 'light')`
+- All 40+ CSS variables per theme recalculate on switch (zero rebuild overhead)
+
+**Accessibility Integration:**
+- WCAG 2.2 Level AA compliance: 4.5:1 contrast for normal text, 3:1 for large text (18.5px+)
+- Semantic HTML (`<button>`, `<input>`, `<label>`, `<fieldset>`) with ARIA attributes
+- Keyboard navigation: Tab, Arrow keys (in composites), Enter/Space, Escape
+- Focus indicators visible on all interactive elements (customizable ring color)
+- Respects `prefers-reduced-motion` and `prefers-contrast` media queries
+- All form inputs have associated `<label>` elements and error messages linked via `aria-describedby`
+
+**Root Causes Addressed:**
+- No centralized design system documentation — component reference scattered across multiple markdown files
+- Component library grown to 40+ components without unified prop documentation
+- New contributors didn't understand three-layer architecture (custom properties → Tailwind → React)
+- Design token system (pf-* naming) was underdocumented and inconsistently applied
+- Theme switching architecture not explained (how CSS variables enable dynamic themes)
+- Accessibility features and WCAG compliance not documented for component users
+- Common UI patterns (forms, modals, data tables) lacked complete code examples
+
+**Documentation Quality:**
+- 7,500+ words with 20+ complete code examples
+- All 40+ components documented with props interfaces, usage patterns, and variants
+- Design token reference table with default values, usage, and contrast ratios
+- Three theme variants documented with color specifications
+- Accessibility section with keyboard shortcuts, screen reader support, WCAG compliance info
+- Troubleshooting section for common styling/theming issues
+- Best practices and anti-patterns (Do's and Don'ts)
+
 ### Sprint 1+2 API Documentation (2026-03-21)
 
 **Files Updated:**
