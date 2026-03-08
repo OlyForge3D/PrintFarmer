@@ -249,6 +249,7 @@ export function Layout() {
   // Filter navigation based on user permissions and slicer availability (stable memoization)
   const filteredNavigation = useMemo(() => {
     if (!isAuthenticated) {
+      // For non-authenticated users, show only public navigation (including section headers)
       return navigation.filter(item => {
         if (isDivider(item)) return true;
         if (isSectionHeader(item)) {
@@ -298,7 +299,7 @@ export function Layout() {
       // Auto-expand groups containing current route during initialization
       // Note: filteredNavigation not available yet, so use navigation directly
       for (const item of navigation) {
-        if (!isDivider(item) && !isSectionHeader(item) && item.children) {
+        if (!isDivider(item) && item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild && !(item.name in parsed)) {
             parsed[item.name] = true;
@@ -311,7 +312,7 @@ export function Layout() {
       // If parsing fails, at least auto-expand current route
       const autoExpanded: Record<string, boolean> = {};
       for (const item of navigation) {
-        if (!isDivider(item) && !isSectionHeader(item) && item.children) {
+        if (!isDivider(item) && item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild) {
             autoExpanded[item.name] = true;
@@ -338,7 +339,7 @@ export function Layout() {
       
       // Find item to get child count (from filtered list so it's permission-safe)
       const itemDef = filteredNavigation.find(i => i.name === name);
-      const childCount = itemDef && !isDivider(itemDef) && !isSectionHeader(itemDef) ? itemDef.children?.length ?? 0 : 0;
+      const childCount = itemDef && !isDivider(itemDef) ? itemDef.children?.length ?? 0 : 0;
       const message = nextValue
         ? `${name} section expanded. ${childCount} item${childCount === 1 ? '' : 's'}.`
         : `${name} section collapsed.`;
@@ -377,7 +378,7 @@ export function Layout() {
     
     // Auto-expand groups containing current route
     for (const item of filteredNavigation) {
-      if (!isDivider(item) && !isSectionHeader(item) && item.children) {
+      if (!isDivider(item) && item.children) {
         const hasActiveChild = item.children.some(c => path.startsWith(c.href));
         // Only auto-expand if user hasn't explicitly set it
         if (hasActiveChild && expanded[item.name] === undefined) {
@@ -577,22 +578,20 @@ export function Layout() {
               {/* Navigation - identical to desktop */}
               <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
                 {filteredNavigation.map((item, index) => {
-                  // Handle section headers
-                  if (isSectionHeader(item)) {
-                    return (
-                      <div key={`section-${item.name}`} className={index === 0 ? 'pt-0' : 'pt-4'}>
-                        <span className="px-3 text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">
-                          {item.name}
-                        </span>
-                      </div>
-                    );
-                  }
-
                   // Handle dividers
                   if (isDivider(item)) {
                     return (
                       <div key={`divider-${item.name || index}`} className="my-1.5">
                         <div className="border-t border-pf-border"></div>
+                      </div>
+                    );
+                  }
+
+                  // Handle section headers
+                  if (isSectionHeader(item)) {
+                    return (
+                      <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
+                        <div className="text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">{item.name}</div>
                       </div>
                     );
                   }
@@ -670,28 +669,26 @@ export function Layout() {
           <div className={`flex flex-col ${navbarCollapsed ? 'w-14' : 'w-56'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
             <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
               {filteredNavigation.map((item, index) => {
-                // Handle section headers
-                if (isSectionHeader(item)) {
-                  if (navbarCollapsed) {
-                    return (
-                      <div key={`section-${item.name}`} className={index === 0 ? '' : 'my-1.5'}>
-                        {index > 0 && <div className="border-t border-pf-border"></div>}
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={`section-${item.name}`} className={index === 0 ? 'pt-0' : 'pt-4'}>
-                      <span className="px-3 text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">
-                        {item.name}
-                      </span>
-                    </div>
-                  );
-                }
-
                 if (isDivider(item)) {
                   return (
                     <div key={`divider-${item.name || index}`} className="my-1.5">
                       <div className="border-t border-pf-border"></div>
+                    </div>
+                  );
+                }
+
+                // Section headers — hidden when collapsed, subtle uppercase label when expanded
+                if (isSectionHeader(item)) {
+                  if (navbarCollapsed) {
+                    return (
+                      <div key={`section-${item.name}`} className="my-1.5">
+                        <div className="border-t border-pf-border"></div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
+                      <div className="text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">{item.name}</div>
                     </div>
                   );
                 }
