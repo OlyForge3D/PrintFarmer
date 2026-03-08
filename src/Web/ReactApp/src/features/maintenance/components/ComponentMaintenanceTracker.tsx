@@ -299,11 +299,11 @@ export function ComponentMaintenanceTracker({
       <div className={`grid grid-cols-1 lg:grid-cols-3 gap-6 ${className}`}>
         <div className="lg:col-span-1 space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-32 bg-pf-border/50 rounded-xl animate-pulse" />
+            <div key={i} className="h-32 pf-skeleton pf-animate-skeleton rounded-xl" />
           ))}
         </div>
         <div className="lg:col-span-2">
-          <div className="h-96 bg-pf-border/50 rounded-xl animate-pulse" />
+          <div className="h-96 pf-skeleton pf-animate-skeleton rounded-xl" />
         </div>
       </div>
     );

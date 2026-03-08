@@ -572,7 +572,7 @@ export function MaintenancePlansTab() {
     return (
       <div className="space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-24 bg-pf-border/50 rounded-lg animate-pulse" />
+          <div key={i} className="h-24 pf-skeleton pf-animate-skeleton rounded-lg" />
         ))}
       </div>
     );

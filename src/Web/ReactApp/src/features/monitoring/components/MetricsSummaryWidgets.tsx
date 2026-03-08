@@ -29,7 +29,7 @@ export function MetricsSummaryWidgets() {
                       {w.unit && <span className="text-xs ml-0.5 text-pf-text-secondary">{w.unit}</span>}
                     </>
                   )
-                  : <span className="inline-block w-12 h-6 bg-pf-surface-secondary rounded animate-pulse" />
+                  : <span className="inline-block pf-skeleton pf-animate-skeleton w-12 h-6 rounded" />
                 }
               </div>
             </Card.Body>

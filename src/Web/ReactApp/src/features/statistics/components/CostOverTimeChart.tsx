@@ -9,6 +9,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
+import { ChartSkeleton } from '@/common/components/skeletons/ChartSkeleton';
 import type { DailyCost } from '../hooks/useStatistics';
 
 interface Props {
@@ -20,7 +21,7 @@ interface Props {
 export const CostOverTimeChart: React.FC<Props> = ({ data, isLoading, error }) => (
   <Card title="Cost Over Time" className="h-96">
     {isLoading ? (
-      <div className="flex h-full items-center justify-center">Loading...</div>
+      <ChartSkeleton />
     ) : error ? (
       <div className="text-pf-error-text">Error loading cost data</div>
     ) : data.length === 0 ? (

@@ -107,7 +107,7 @@ export function FleetMaintenanceOverview({
           {[1, 2, 3, 4].map((i) => (
             <div 
               key={i} 
-              className="bg-pf-bg-1 border border-pf-border rounded-xl p-5 animate-pulse"
+              className="pf-skeleton pf-animate-skeleton border border-pf-border rounded-xl p-5"
             >
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-pf-border rounded-lg" />

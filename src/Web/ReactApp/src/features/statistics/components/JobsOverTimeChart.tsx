@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
+import { ChartSkeleton } from '@/common/components/skeletons/ChartSkeleton';
 import type { DailyJobCount } from '../hooks/useStatistics';
 
 interface Props {
@@ -21,7 +22,7 @@ interface Props {
 export const JobsOverTimeChart: React.FC<Props> = ({ data, isLoading, error }) => (
   <Card title="Jobs Over Time" className="h-96">
     {isLoading ? (
-      <div className="flex h-full items-center justify-center">Loading...</div>
+      <ChartSkeleton />
     ) : error ? (
       <div className="text-pf-error-text">Error loading job data</div>
     ) : data.length === 0 ? (

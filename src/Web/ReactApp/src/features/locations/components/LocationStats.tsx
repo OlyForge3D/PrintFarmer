@@ -55,8 +55,8 @@ export const LocationStats: React.FC<LocationStatsProps> = ({
         {Array.from({ length: 6 }).map((_, i) => (
           <Card key={i}>
             <Card.Body className="flex flex-col items-center justify-center p-4">
-              <div className="h-9 w-12 bg-pf-bg-1 rounded animate-pulse" />
-              <div className="h-4 w-16 bg-pf-bg-1 rounded animate-pulse mt-2" />
+              <div className="h-9 w-12 pf-skeleton pf-animate-skeleton rounded" />
+              <div className="h-4 w-16 pf-skeleton pf-animate-skeleton rounded mt-2" />
             </Card.Body>
           </Card>
         ))}

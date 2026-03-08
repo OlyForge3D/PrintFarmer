@@ -71,15 +71,15 @@ export function PrinterTableViewPage() {
       <div className="space-y-6">
         <div className="flex justify-between items-center">
           <div className="space-y-2">
-            <div className="h-8 w-32 bg-pf-bg-2 rounded-sm animate-pulse"></div>
-            <div className="h-4 w-64 bg-pf-bg-2 rounded-sm animate-pulse"></div>
+            <div className="pf-skeleton pf-animate-skeleton h-8 w-32 rounded-sm"></div>
+            <div className="pf-skeleton pf-animate-skeleton h-4 w-64 rounded-sm"></div>
           </div>
-          <div className="h-10 w-32 bg-pf-bg-2 rounded-sm animate-pulse"></div>
+          <div className="pf-skeleton pf-animate-skeleton h-10 w-32 rounded-sm"></div>
         </div>
         <div className="bg-pf-bg-0 shadow-sm rounded-lg p-6">
-          <div className="animate-pulse space-y-4">
+          <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-16 bg-pf-bg-2 rounded-sm"></div>
+              <div key={i} className="pf-skeleton pf-animate-skeleton h-16 rounded-sm"></div>
             ))}
           </div>
         </div>

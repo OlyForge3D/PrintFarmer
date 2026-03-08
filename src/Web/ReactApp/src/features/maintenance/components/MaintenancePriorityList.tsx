@@ -310,7 +310,7 @@ export function MaintenancePriorityList({
         {[1, 2, 3].map((i) => (
           <div 
             key={i} 
-            className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 animate-pulse"
+            className="pf-skeleton pf-animate-skeleton border border-pf-border rounded-lg p-4"
           >
             <div className="flex items-start gap-3">
               <div className="w-5 h-5 bg-pf-border rounded-sm" />

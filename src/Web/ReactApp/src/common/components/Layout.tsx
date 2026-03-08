@@ -50,6 +50,7 @@ interface NavigationItem {
   requiresSlicer?: boolean;
   children?: NavigationItem[];
   isDivider?: false;
+  isSectionHeader?: false;
 }
 
 interface NavigationDivider {
@@ -57,11 +58,20 @@ interface NavigationDivider {
   isDivider: true;
 }
 
-type NavigationElement = NavigationItem | NavigationDivider;
+interface NavigationSectionHeader {
+  name: string;
+  isSectionHeader: true;
+  requiredRole?: string;
+}
 
-const isDivider = (item: NavigationElement): item is NavigationDivider => item.isDivider === true;
+type NavigationElement = NavigationItem | NavigationDivider | NavigationSectionHeader;
+
+const isDivider = (item: NavigationElement): item is NavigationDivider => 'isDivider' in item && item.isDivider === true;
+const isSectionHeader = (item: NavigationElement): item is NavigationSectionHeader => 'isSectionHeader' in item && item.isSectionHeader === true;
 
 const navigation: NavigationElement[] = [
+  // — Operations —
+  { name: 'Operations', isSectionHeader: true },
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
   {
     name: 'Printers',
@@ -88,6 +98,9 @@ const navigation: NavigationElement[] = [
     icon: HistoryIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
   },
+
+  // — Hardware —
+  { name: 'Hardware', isSectionHeader: true },
   { 
     name: 'Filament Inventory', 
     href: '/spools', 
@@ -103,6 +116,9 @@ const navigation: NavigationElement[] = [
     href: '/nfc-devices',
     icon: NfcIcon
   },
+
+  // — Management —
+  { name: 'Management', isSectionHeader: true },
   {
     name: 'Maintenance',
     href: '/maintenance',
@@ -114,13 +130,14 @@ const navigation: NavigationElement[] = [
     href: '/statistics',
     icon: ChartIcon,
   },
-  { name: '', isDivider: true },
   {
     name: 'API Keys',
     href: '/profile/api-keys',
     icon: KeyIcon
   },
-  { name: '', isDivider: true },
+
+  // — Admin —
+  { name: 'Admin', isSectionHeader: true, requiredRole: 'farm_admin' },
   {
     name: 'Locations',
     href: '/locations',
@@ -232,16 +249,23 @@ export function Layout() {
   // Filter navigation based on user permissions and slicer availability (stable memoization)
   const filteredNavigation = useMemo(() => {
     if (!isAuthenticated) {
-      // For non-authenticated users, show only public navigation (including dividers)
       return navigation.filter(item => {
-        if (isDivider(item)) return true; // Always show dividers
+        if (isDivider(item)) return true;
+        if (isSectionHeader(item)) {
+          if (item.requiredRole) return false;
+          return true;
+        }
         if (item.requiresSlicer && !isSlicerAvailable) return false;
         return !item.requiredRole && !item.requiredPermission;
       });
     }
     
     return navigation.filter(item => {
-      if (isDivider(item)) return true; // Always show dividers
+      if (isDivider(item)) return true;
+      if (isSectionHeader(item)) {
+        if (item.requiredRole && !hasRole(item.requiredRole)) return false;
+        return true;
+      }
       if (item.requiredRole && !hasRole(item.requiredRole)) return false;
       if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
       if (item.requiresSlicer && !isSlicerAvailable) return false;
@@ -274,7 +298,7 @@ export function Layout() {
       // Auto-expand groups containing current route during initialization
       // Note: filteredNavigation not available yet, so use navigation directly
       for (const item of navigation) {
-        if (!isDivider(item) && item.children) {
+        if (!isDivider(item) && !isSectionHeader(item) && item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild && !(item.name in parsed)) {
             parsed[item.name] = true;
@@ -287,7 +311,7 @@ export function Layout() {
       // If parsing fails, at least auto-expand current route
       const autoExpanded: Record<string, boolean> = {};
       for (const item of navigation) {
-        if (!isDivider(item) && item.children) {
+        if (!isDivider(item) && !isSectionHeader(item) && item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild) {
             autoExpanded[item.name] = true;
@@ -314,7 +338,7 @@ export function Layout() {
       
       // Find item to get child count (from filtered list so it's permission-safe)
       const itemDef = filteredNavigation.find(i => i.name === name);
-      const childCount = itemDef && !isDivider(itemDef) ? itemDef.children?.length ?? 0 : 0;
+      const childCount = itemDef && !isDivider(itemDef) && !isSectionHeader(itemDef) ? itemDef.children?.length ?? 0 : 0;
       const message = nextValue
         ? `${name} section expanded. ${childCount} item${childCount === 1 ? '' : 's'}.`
         : `${name} section collapsed.`;
@@ -353,7 +377,7 @@ export function Layout() {
     
     // Auto-expand groups containing current route
     for (const item of filteredNavigation) {
-      if (!isDivider(item) && item.children) {
+      if (!isDivider(item) && !isSectionHeader(item) && item.children) {
         const hasActiveChild = item.children.some(c => path.startsWith(c.href));
         // Only auto-expand if user hasn't explicitly set it
         if (hasActiveChild && expanded[item.name] === undefined) {
@@ -553,6 +577,17 @@ export function Layout() {
               {/* Navigation - identical to desktop */}
               <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
                 {filteredNavigation.map((item, index) => {
+                  // Handle section headers
+                  if (isSectionHeader(item)) {
+                    return (
+                      <div key={`section-${item.name}`} className={index === 0 ? 'pt-0' : 'pt-4'}>
+                        <span className="px-3 text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">
+                          {item.name}
+                        </span>
+                      </div>
+                    );
+                  }
+
                   // Handle dividers
                   if (isDivider(item)) {
                     return (
@@ -635,6 +670,24 @@ export function Layout() {
           <div className={`flex flex-col ${navbarCollapsed ? 'w-14' : 'w-56'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
             <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
               {filteredNavigation.map((item, index) => {
+                // Handle section headers
+                if (isSectionHeader(item)) {
+                  if (navbarCollapsed) {
+                    return (
+                      <div key={`section-${item.name}`} className={index === 0 ? '' : 'my-1.5'}>
+                        {index > 0 && <div className="border-t border-pf-border"></div>}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={`section-${item.name}`} className={index === 0 ? 'pt-0' : 'pt-4'}>
+                      <span className="px-3 text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">
+                        {item.name}
+                      </span>
+                    </div>
+                  );
+                }
+
                 if (isDivider(item)) {
                   return (
                     <div key={`divider-${item.name || index}`} className="my-1.5">

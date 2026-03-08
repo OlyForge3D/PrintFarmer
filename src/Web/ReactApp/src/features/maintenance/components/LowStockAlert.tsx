@@ -23,7 +23,7 @@ export function LowStockAlert({ maxItems = 5, onViewAll }: LowStockAlertProps) {
 
   if (isLoading) {
     return (
-      <div className="h-32 bg-pf-border/50 rounded-lg animate-pulse" />
+      <div className="pf-skeleton pf-animate-skeleton h-32 rounded-lg" />
     );
   }
 

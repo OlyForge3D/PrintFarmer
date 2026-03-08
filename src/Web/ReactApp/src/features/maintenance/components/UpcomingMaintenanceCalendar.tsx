@@ -181,12 +181,12 @@ export function UpcomingMaintenanceCalendar({
     return (
       <div className={`bg-pf-panel border border-pf-border rounded-xl overflow-hidden ${className}`}>
         <div className="p-4 border-b border-pf-border">
-          <div className="h-6 bg-pf-border rounded-sm w-40 animate-pulse" />
+          <div className="pf-skeleton pf-animate-skeleton h-6 w-40 rounded-sm" />
         </div>
         <div className="p-4">
           <div className="grid grid-cols-7 gap-0">
             {Array.from({ length: 35 }).map((_, i) => (
-              <div key={i} className="h-12 sm:h-16 bg-pf-border/30 animate-pulse border-b border-r border-pf-border" />
+              <div key={i} className="h-12 sm:h-16 pf-skeleton pf-animate-skeleton border-b border-r border-pf-border" />
             ))}
           </div>
         </div>

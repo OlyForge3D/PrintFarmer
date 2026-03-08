@@ -62,7 +62,7 @@ export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
       <div className="space-y-3">
         {Array.from({ length: 3 }).map((_, i) => (
           <Card key={i}>
-            <Card.Body className="h-16 animate-pulse bg-pf-bg-1 rounded" />
+            <Card.Body className="h-16 pf-animate-skeleton pf-skeleton rounded" />
           </Card>
         ))}
       </div>

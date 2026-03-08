@@ -174,7 +174,7 @@ export function MaintenanceStatusGrid({
         {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
           <div 
             key={i} 
-            className="bg-pf-bg-1 border border-pf-border rounded-xl p-4 animate-pulse"
+            className="pf-skeleton pf-animate-skeleton border border-pf-border rounded-xl p-4"
           >
             <div className="flex items-start gap-3 mb-3">
               <div className="w-9 h-9 bg-pf-border rounded-lg" />

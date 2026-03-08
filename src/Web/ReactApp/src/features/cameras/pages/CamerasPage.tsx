@@ -94,7 +94,7 @@ export function CamerasPage() {
           {/* Loading state */}
           {loading ? (
             <div className="text-center py-12">
-              <div className="animate-pulse text-pf-text-secondary">Loading cameras...</div>
+              <div className="pf-animate-skeleton text-pf-text-secondary">Loading cameras...</div>
             </div>
           ) : cameras.length === 0 ? (
             <div className="text-center py-12">
