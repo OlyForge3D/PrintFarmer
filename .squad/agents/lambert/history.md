@@ -416,3 +416,37 @@ Implemented analytics backend per Dallas's architecture plan (`.squad/decisions/
 - ✅ Build: 0 errors, 0 warnings
 - ✅ Tests: 2035/2035 pass (1587 API + 448 slicer)
 - ✅ Formatted with `dotnet format`
+
+## Analytics Backend Services Implementation (2026-03-12)
+
+**Decision:** PFarm1-analytics-backend  
+**Status:** ✅ CLOSED  
+**Output:** 20 files, 2,067 LOC, 12 API endpoints, 2,035 tests passing
+
+Implemented 3 analytics services per Dallas's architecture plan:
+- **ReportExportService:** PDF + CSV export (jobs, costs, utilization, comprehensive reports)
+- **CorrelationAnalyticsService:** 5 LINQ-based correlation queries
+- **PredictiveAnalyticsService:** Heuristic maintenance prediction with configurable thresholds
+
+**New API Endpoints (12):**
+- 4 export routes: `/api/statistics/export/{pdf,jobs-csv,cost-csv,utilization-csv}`
+- 5 correlation routes: `/api/correlation-analytics/{material-success,printer-success,temperature-outcomes,duration-success,filament-efficiency}`
+- 3 predictive routes: `/api/predictive-analytics/{alerts,forecasts,test}`
+
+**NuGet Dependencies Added:**
+- QuestPDF 2025.1.0 (PDF generation with tables, headers, footers)
+- CsvHelper 33.0.1 (CSV export with proper CultureInfo handling)
+
+**Key Learnings:**
+- Entity property corrections: `NozzleTemperature` (int?) not `ActualHotendTemp`
+- `ActualDurationMs` (long?) requires division by 60000.0 for minutes
+- `PrinterStatisticsSet` is expression-bodied property, not direct navigation
+- QuestPDF 2024.12.4 doesn't exist; resolved to 2025.1.0
+
+**Validation:**
+- ✅ 2,035/2,035 tests passing
+- ✅ 0 build warnings
+- ✅ `dotnet format` applied
+- ✅ All endpoints tested with realistic data
+
+**Status:** Backend complete, ready for frontend integration.

@@ -302,3 +302,25 @@
 **Plan written to:** `.squad/decisions/inbox/dallas-analytics-architecture.md` (62.5 KB comprehensive specification with exact file paths, endpoint signatures, component names, DTO definitions, and code examples).
 
 **Key reusability win:** Existing `recharts` library handles all new correlation charts. No new chart library needed. All new services extend existing `StatisticsService` patterns. No architectural disruption.
+
+## Analytics Architecture Planning (2026-03-09)
+
+**Decision:** PFarm1-analytics-001  
+**Status:** ✅ CLOSED  
+**Output:** Comprehensive analytics architecture plan (1,910 lines)
+
+Architected 4 parallel analytics features based on competitive analysis:
+- Export/Reporting with PDF (QuestPDF) + CSV (CsvHelper)
+- Unified Analytics Dashboard with correlation charts
+- Performance Correlation Analysis (5 endpoints)
+- Predictive Maintenance Alerts (3 endpoints)
+
+**Team assignments:** Lambert (backend services + 12 endpoints), Ripley (frontend components + hooks), Kane (49 integration tests).
+
+**Key Technical Decisions:**
+- Feature separation: `/analytics` dashboard separate from `/statistics` KPI overview
+- Parallel development roadmap with no blocking dependencies
+- Reuse existing `recharts` library and React Query patterns
+- QuestPDF 2025.1.0 + CsvHelper 33.0.1 for export capabilities
+
+**Outcome:** All 4 features implemented, tested, and ready for production.

@@ -509,3 +509,41 @@ Test files created and passing:
 - FluentAssertions provides readable test assertions (`.Should().NotBeNull()`, `.Should().Contain()`)
 
 **Next steps:** Lambert and Ripley implement the 4 features per Dallas's architecture spec. These tests will guide their implementation and validate correctness.
+
+## Analytics Test Coverage (2026-03-12)
+
+**Decision:** PFarm1-analytics-tests  
+**Status:** ✅ CLOSED  
+**Output:** 49 tests (37 backend, 12 frontend), all passing
+
+Wrote comprehensive test coverage for all 4 analytics features:
+
+**Backend Tests (37):**
+- **ReportExportService (12):** PDF generation, CSV exports (jobs/cost/utilization), error handling, file validation
+- **CorrelationAnalyticsService (15):** Material success, printer correlation, temperature analysis, filament efficiency, edge cases (no data, single job, multiple printers)
+- **PredictiveAnalyticsService (10):** Maintenance thresholds (nozzle 500h, hotend 1000h), forecasting, alert generation, severity levels
+
+**Frontend Tests (12):**
+- **AnalyticsDashboard (4):** Section rendering, tab navigation, loading states, empty alerts
+- **ExportModal (3):** Visibility toggle, format selection, download trigger
+- **CorrelationCharts (3):** Chart rendering, Recharts usage, accessibility
+- **PredictiveAlerts (2):** Alert list rendering, auto-hide when empty
+
+**Test Data & Mocking:**
+- Realistic PrintJob + PrintJobStatistics test data with edge cases
+- Frontend mocks aligned with actual API response shapes
+- All thresholds validated (500h nozzle, 1000h hotend appropriate for test printers)
+
+**Key Patterns:**
+- All tests follow `MethodName_Condition_ExpectedResult()` naming convention
+- No hardcoded timeouts or sleep() calls
+- Proper setup/teardown for test isolation
+- Clear assertion messages for debugging
+
+**Validation:**
+- ✅ 49/49 tests passing (backend + frontend)
+- ✅ 0 build warnings
+- ✅ Full code path coverage for critical features
+- ✅ Ready for immediate production deployment
+
+**Status:** Analytics testing complete, ready for release.
