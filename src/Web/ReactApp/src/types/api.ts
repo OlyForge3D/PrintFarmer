@@ -2959,6 +2959,30 @@ export interface AutoPrintStatus {
   queuedJobCount: number;
 }
 
+export interface AutoPrintNextJob {
+  id: string;
+  name: string;
+  estimatedFilamentUsageG?: number;
+  requiredMaterialType?: string;
+  estimatedPrintTime?: string;
+}
+
+export interface FilamentCheckResult {
+  sufficient: boolean;
+  remainingWeightG?: number;
+  requiredWeightG?: number;
+  loadedMaterial?: string;
+  requiredMaterial?: string;
+  materialMismatch: boolean;
+  message?: string;
+}
+
+export interface AutoPrintReadyResult {
+  status: AutoPrintStatus;
+  nextJob?: AutoPrintNextJob;
+  filamentCheck?: FilamentCheckResult;
+}
+
 // ── Printer Groups ──────────────────────────────────────────────
 
 /**

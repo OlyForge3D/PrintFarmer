@@ -115,7 +115,7 @@ public class DispatchScorerPrinterGroupTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-Group1",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = $"http://printer-{Guid.NewGuid():N}.local",
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -130,7 +130,7 @@ public class DispatchScorerPrinterGroupTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-Group2",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = $"http://printer-{Guid.NewGuid():N}.local",
                 Backend = (int)PrinterBackend.PrusaLink,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -268,7 +268,7 @@ public class DispatchScorerPrinterGroupTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-InGroup",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = $"http://printer-{Guid.NewGuid():N}.local",
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -283,7 +283,7 @@ public class DispatchScorerPrinterGroupTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-NoGroup",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = $"http://printer-{Guid.NewGuid():N}.local",
                 Backend = (int)PrinterBackend.PrusaLink,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -421,7 +421,7 @@ public class DispatchScorerPrinterGroupTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-Correct-Group",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = $"http://printer-{Guid.NewGuid():N}.local",
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
@@ -562,7 +562,7 @@ public class DispatchScorerPrinterGroupTests : IAsyncLifetime
             {
                 Id = Guid.NewGuid(),
                 Name = "Printer-Wrong-Group",
-                ServerUrl = $"http://192.168.1.{new Random().Next(1, 254)}",
+                ServerUrl = $"http://printer-{Guid.NewGuid():N}.local",
                 Backend = (int)PrinterBackend.Moonraker,
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,

@@ -21,6 +21,7 @@ import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesMo
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { useAutoPrintStatus, useSetAutoPrintEnabled } from '@/features/printers/hooks/useAutoPrint';
+import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { toast } from 'sonner';
 import {
   canCancel,
@@ -301,6 +302,17 @@ export function CollapsedPrinterCard({
           aria-label={`Toggle auto-print for ${printer.name}`}
         />
       </div>
+
+      {/* Bed clear confirmation banner */}
+      {autoPrintStatus && (
+        <div className="mb-2">
+          <BedClearBanner
+            printerId={printer.id}
+            printerName={printer.name}
+            autoPrintStatus={autoPrintStatus}
+          />
+        </div>
+      )}
 
       {/* Progress bar for active prints */}
       {(() => {

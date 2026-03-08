@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import type { AutoPrintStatus } from '@/types/api';
+import type { AutoPrintStatus, AutoPrintReadyResult } from '@/types/api';
 
 const KEYS = {
   all: ['autoprint'] as const,
@@ -69,6 +69,48 @@ export function useSetAllAutoPrintEnabled() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.all });
+    },
+  });
+}
+
+export function useConfirmBedClear() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (printerId: string) => {
+      const res = await apiClient.post(`/autoprint/${printerId}/ready`);
+      return res.data as AutoPrintReadyResult;
+    },
+    onSuccess: (_data, printerId) => {
+      qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
+      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
+    },
+  });
+}
+
+export function useSkipNextJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (printerId: string) => {
+      const res = await apiClient.post(`/autoprint/${printerId}/skip`);
+      return res.data;
+    },
+    onSuccess: (_data, printerId) => {
+      qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
+      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
+    },
+  });
+}
+
+export function useCancelAutoPrint() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (printerId: string) => {
+      const res = await apiClient.post(`/autoprint/${printerId}/cancel`);
+      return res.data;
+    },
+    onSuccess: (_data, printerId) => {
+      qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
+      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
     },
   });
 }
