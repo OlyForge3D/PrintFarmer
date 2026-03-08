@@ -105,3 +105,13 @@
 - **Lesson: NEVER apply `re.sub(r'  +', ' ', content)` to entire file content** — it destroys indentation. First pass had this bug, corrupted 472 files. Caught and reverted immediately. Fixed script to only modify class token strings, not whitespace.
 - **Lesson: Two-pass approach works well for large sweeps** — Pass 1 handles common patterns (628 matches), Pass 2 handles edge cases (75 matches with uncommon shades like `bg-red-950/30`, `text-emerald-300/80`, `from-purple-500 to-pink-500`)
 - **Validation:** 1,233/1,233 tests pass, 0 lint errors, bead PFarm1-xsg closed
+
+### Batch 3 — Navigation Headers & Loading State Consistency (2026-03-08)
+- **Beads:** PFarm1-egw (Nav sidebar headers), PFarm1-42p (Loading state consistency)
+- **Deliverables:**
+  - Layout.tsx: Added section headers ("Dashboard", "Printers", "Management", "Admin") with semantic grouping
+  - ChartSkeleton.tsx: New component for unified chart loading animations
+  - Loader/Skeleton standardization: ~25 files refactored from `animate-pulse` to pf-skeleton + pf-animate-skeleton design tokens
+- **Files changed:** 30
+- **Validation:** All tests pass, design tokens applied consistently, both beads closed
+- **Branch:** `feature/nav-headers-and-loading-states`

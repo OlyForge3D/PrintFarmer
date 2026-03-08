@@ -414,3 +414,13 @@ export const serviceName = {
 - **Test coverage:** 10 tests added for StatisticsPage PageTemplate validation (structure, formatted values, filter buttons)
 - **Validation:** 1,233/1,233 tests pass, full regression guard in place
 - **Migration path:** Clear pattern established for ~30 additional empty state migrations in future sprints
+
+### Batch 3 — DetailedPrinterCard Decomposition (2026-03-08)
+- **Beads:** PFarm1-4tc (god component refactoring), PFarm1-qhu (status color extraction)
+- **Deliverables:**
+  - DetailedPrinterCard.tsx: Decomposed into 5 focused section components (StatusSection, DetailsSection, ControlsSection, MotionSection, ConfigurationSection)
+  - Shared utility: `getStatusIndicatorColor()` extracted to `src/utils/printerStatusColors.ts`
+  - Handles all printer states: online, offline, printing, error, idle
+- **Files changed:** 12
+- **Validation:** All tests pass, no lint errors, both beads closed
+- **Branch:** `feature/printer-card-decomposition`
