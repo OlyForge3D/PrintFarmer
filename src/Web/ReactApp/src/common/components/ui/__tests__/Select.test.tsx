@@ -111,4 +111,60 @@ describe('Select', () => {
     expect(screen.getByText('A')).toBeInTheDocument();
     expect(screen.getByText('B')).toBeInTheDocument();
   });
+
+  it('should render a chevron dropdown icon', () => {
+    const { container } = render(
+      <Select>
+        <option value="a">A</option>
+      </Select>
+    );
+
+    const svg = container.querySelector('svg');
+    expect(svg).toBeInTheDocument();
+    expect(svg?.getAttribute('class')).toContain('pointer-events-none');
+  });
+
+  it('should style chevron with tertiary color by default', () => {
+    const { container } = render(
+      <Select>
+        <option value="a">A</option>
+      </Select>
+    );
+
+    const svg = container.querySelector('svg');
+    expect(svg?.getAttribute('class')).toContain('text-pf-text-tertiary');
+    expect(svg?.getAttribute('class')).not.toContain('text-pf-error');
+  });
+
+  it('should style chevron with error color when invalid', () => {
+    const { container } = render(
+      <Select invalid>
+        <option value="a">A</option>
+      </Select>
+    );
+
+    const svg = container.querySelector('svg');
+    expect(svg?.getAttribute('class')).toContain('text-pf-error');
+  });
+
+  it('should apply opacity to chevron when disabled', () => {
+    const { container } = render(
+      <Select disabled>
+        <option value="a">A</option>
+      </Select>
+    );
+
+    const svg = container.querySelector('svg');
+    expect(svg?.getAttribute('class')).toContain('opacity-50');
+  });
+
+  it('should apply containerClassName to wrapper div', () => {
+    const { container } = render(
+      <Select containerClassName="max-w-xs">
+        <option value="a">A</option>
+      </Select>
+    );
+
+    expect(container.firstElementChild?.className).toContain('max-w-xs');
+  });
 });

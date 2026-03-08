@@ -381,3 +381,13 @@ export const serviceName = {
 **Validation**: ✅ Build passes (7.02s, 0 errors), ✅ Lint passes (0 errors after --fix), ✅ TypeScript compiles (0 errors)
 
 **User Experience**: Admin users can now create groups, assign printers to groups, view group details with assigned printers, and manage groups through full CRUD operations. The feature provides clean organization for printer farms with many printers.
+
+### 2026-07-22 — Select Component Chevron Icon Fix (PFarm1-dhz)
+
+**Problem:** The `Select` component had `appearance-none` removing the native browser dropdown arrow and `pr-7` reserving space for a custom chevron, but no chevron was actually rendered — making selects look identical to text inputs.
+
+**Fix:** Added `ChevronDownIcon` from `@/common/components/icons/MdiIcons`, positioned absolutely inside the existing relative wrapper. The icon is `pointer-events-none` so clicks pass through. It uses `text-pf-text-tertiary` normally, `text-pf-error` when `invalid`, and `opacity-50` when `disabled`. Empty `ariaLabel` keeps it decorative.
+
+**Tests:** Added 5 new tests to `Select.test.tsx` (now 14 total): chevron rendering, default color, error color, disabled opacity, containerClassName. All passing.
+
+**Lesson:** SVG `className` in jsdom is an `SVGAnimatedString`, not a regular string — use `getAttribute('class')` in tests instead of `.className`.

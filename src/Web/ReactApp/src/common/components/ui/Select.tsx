@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
 import clsx from 'clsx';
+import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
 
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   invalid?: boolean;
@@ -20,6 +21,14 @@ export const Select: React.FC<SelectProps> = ({ invalid, className, containerCla
       >
         {children}
       </select>
+      <ChevronDownIcon
+        className={clsx(
+          'pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4',
+          invalid ? 'text-pf-error' : 'text-pf-text-tertiary',
+          rest.disabled && 'opacity-50'
+        )}
+        ariaLabel=""
+      />
     </div>
   );
 };
