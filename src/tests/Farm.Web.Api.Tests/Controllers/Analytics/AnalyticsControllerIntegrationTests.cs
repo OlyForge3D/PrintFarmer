@@ -10,9 +10,11 @@ namespace Farm.Web.Api.Tests.Controllers.Analytics;
 public class AnalyticsControllerIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebApplicationFactory _factory;
 
     public AnalyticsControllerIntegrationTests(CustomWebApplicationFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -127,6 +129,7 @@ public class AnalyticsControllerIntegrationTests : IClassFixture<CustomWebApplic
     public async Task PredictJobFailure_Returns200WithValidPrediction()
     {
         // Arrange
+        var authClient = await _factory.CreateAuthenticatedClientAsync();
         var request = new PredictionRequest
         {
             PrinterId = Guid.NewGuid(),
@@ -135,7 +138,7 @@ public class AnalyticsControllerIntegrationTests : IClassFixture<CustomWebApplic
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/api/predictive-analytics/predict-job-failure", request);
+        var response = await authClient.PostAsJsonAsync("/api/predictive-analytics/predict-job-failure", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
