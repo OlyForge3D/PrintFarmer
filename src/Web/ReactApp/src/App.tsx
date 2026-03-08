@@ -49,6 +49,7 @@ import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMain
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
+import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDashboardPage';
 import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -177,6 +178,7 @@ function AuthenticatedAppRoutes() {
         <Route path="nfc-devices" element={<NfcDevicesPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="statistics" element={<StatisticsPage />} />
+        <Route path="analytics" element={<AnalyticsDashboardPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="locations/dashboard" element={<LocationDashboardPage />} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />

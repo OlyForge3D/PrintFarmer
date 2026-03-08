@@ -131,6 +131,11 @@ const navigation: NavigationElement[] = [
     icon: ChartIcon,
   },
   {
+    name: 'Analytics',
+    href: '/analytics',
+    icon: TrendingUpIcon,
+  },
+  {
     name: 'API Keys',
     href: '/profile/api-keys',
     icon: KeyIcon

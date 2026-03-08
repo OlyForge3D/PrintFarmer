@@ -1,0 +1,113 @@
+BRETT'S COMPETITIVE ANALYSIS — EXECUTIVE SUMMARY
+
+Analysis Complete ✅
+
+KEY FINDINGS
+============
+
+PrintFarmer's Unique Market Position
+
+PrintFarmer is the ONLY platform at the intersection of:
+✅ Self-hosted (no cloud lock-in)
+✅ Multi-backend support (6+ printer types)
+✅ Subscription-free (no recurring costs)
+✅ Intelligent auto-dispatch (9-factor routing)
+✅ Production-grade stability
+
+No competitor matches all 5. This is a defensible niche.
+
+Market Reality Check: Top 3 Gaps
+
+1. AI Print Failure Detection ⚠️ CRITICAL
+   - Every commercial competitor has it
+   - Users cite as #1 reason for platform selection
+   - Workaround: external Obico integration (friction point)
+
+2. Business Analytics ⚠️ HIGH
+   - Farms need cost-per-print, ROI tracking, profitability
+   - All commercial platforms offer this
+   - Without it, PrintFarmer remains a "monitoring tool"
+
+3. Mobile App ⚠️ MEDIUM
+   - Most competitors have native apps
+   - Nice-to-have for remote operators
+
+Financial Impact (50-printer farm, 1 year)
+Platform              Annual Cost      PrintFarmer Saves
+SimplyPrint ($40/mo)  $24,000         $24,000
+3DPrinterOS ($19/mo)  $11,400         $11,400
+PrintFarmer           $0              baseline
+
+For 200-printer farm: $96,000+/year in savings.
+
+3-PHASE ROADMAP
+===============
+
+Phase 1: Quick Wins (1–2 sprints) ⚡
+Goal: Unblock AI detection + establish analytics foundation
+- Obico Integration (LOW effort) — Users opt-in via API key
+- Basic Analytics Dashboard (MEDIUM effort) — Cost-per-print, KPIs
+- PWA + Mobile Notifications (LOW effort) — Mobile web support
+
+Phase 2: Core Features (2–4 sprints) 💪
+Goal: Enterprise-grade feature parity
+- Self-Hosted AI Detection (HIGH effort) — Optional YOLO model
+- Advanced Analytics (MEDIUM effort) — Profitability, trends, exports
+- Troubleshooting System (MEDIUM effort) — Error mapping, diagnostics
+
+Phase 3: Market Differentiation (4–8 sprints) 🚀
+Goal: Features no competitor offers
+- Predictive Queue Management — Auto-queue, thermal mgmt
+- Bambu Lab Backend Support — Tap fastest-growing printer segment
+- Native Mobile App (Conditional) — If demand justifies
+
+RESOURCE & TIMELINE
+===================
+Phase | Developers        | Effort      | Timeline        | Cost
+1     | Lambert + Ripley  | MEDIUM      | 1–2 sprints     | ~$6k
+2     | + ML engineer     | HIGH        | 2–4 sprints     | ~$25–35k
+3     | + Mobile engineer | VERY HIGH   | 4–8 sprints     | $60–100k+
+
+DELIVERABLES
+============
+1. docs/COMPETITIVE_ANALYSIS.md (20KB)
+   - Feature comparison matrix (10 competitors)
+   - Gap analysis, win/loss strategy, market positioning
+
+2. .squad/decisions/inbox/brett-roadmap-ai-analytics.md (14KB)
+   - Actionable 3-phase roadmap
+   - Resource requirements, success metrics, risk mitigation
+
+3. .squad/agents/brett/history.md (Updated)
+   - Market insights, phase recommendations, references
+
+NEXT STEPS
+==========
+For Dallas (Lead):
+  - Review 3-phase roadmap
+  - Confirm resource availability
+  - Decide: Obico integration (fast) or self-hosted AI?
+
+For Product:
+  - Validate demand with farm operators
+  - Assess Bambu partnership potential
+  - Estimate TAM for self-hosted farms
+
+For Engineering:
+  - Create Phase 1 tickets if approved
+  - Assess ML expertise needs
+  - Plan database schema for analytics
+
+BOTTOM LINE
+===========
+PrintFarmer has clear path to market leadership:
+- Today: Niche tool for technical teams (defensible)
+- Phase 1: Cost-conscious farms see it as SimplyPrint alternative
+- Phase 2: Viable enterprise competitor with self-hosted advantage
+- Phase 3: Market-leading automation platform, no subscription lock-in
+
+The 3-phase roadmap is about market shift: "maker tool" → "business tool" → "market leader"
+
+Analysis by: Brett (Researcher)
+Commit: 748fe4ee
+Date: March 2026

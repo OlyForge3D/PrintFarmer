@@ -3533,6 +3533,32 @@ export class ApiClient {
     const response = await this.client.get('/monitoring/metrics/summary');
     return response.data;
   }
+
+  // ── Analytics Exports ─────────────────────────────────────────────────
+
+  async exportPdfReport(days?: number): Promise<Blob> {
+    const params = days ? `?days=${days}` : '';
+    const response = await this.client.get(`/statistics/export/pdf${params}`, { responseType: 'blob' });
+    return response.data;
+  }
+
+  async exportJobHistoryCsv(days?: number): Promise<Blob> {
+    const params = days ? `?days=${days}` : '';
+    const response = await this.client.get(`/statistics/export/jobs-csv${params}`, { responseType: 'blob' });
+    return response.data;
+  }
+
+  async exportCostCsv(days?: number): Promise<Blob> {
+    const params = days ? `?days=${days}` : '';
+    const response = await this.client.get(`/statistics/export/cost-csv${params}`, { responseType: 'blob' });
+    return response.data;
+  }
+
+  async exportUtilizationCsv(days?: number): Promise<Blob> {
+    const params = days ? `?days=${days}` : '';
+    const response = await this.client.get(`/statistics/export/utilization-csv${params}`, { responseType: 'blob' });
+    return response.data;
+  }
 }
 
 // Export singleton instance
