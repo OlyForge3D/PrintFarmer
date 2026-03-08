@@ -64,10 +64,13 @@ const TemperatureControlSection = ({
 };
 
 const MovementControlSection = ({ 
+  backendCapabilities
 }: { 
   printer: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
 }) => {
+  // Suppress unused variable warning
+  void backendCapabilities;
   return (
     <div data-testid="movement-control-section">
       <div data-testid="x-axis-control">X-Axis Controls</div>
