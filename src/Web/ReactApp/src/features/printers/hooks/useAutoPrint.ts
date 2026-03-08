@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import type { AutoPrintStatus } from '@/types/api';
+import type { AutoPrintStatus, AutoPrintReadyResult } from '@/types/api';
 
 const KEYS = {
   all: ['autoprint'] as const,
@@ -78,7 +78,7 @@ export function useConfirmBedClear() {
   return useMutation({
     mutationFn: async (printerId: string) => {
       const res = await apiClient.post(`/autoprint/${printerId}/ready`);
-      return res.data;
+      return res.data as AutoPrintReadyResult;
     },
     onSuccess: (_data, printerId) => {
       qc.invalidateQueries({ queryKey: KEYS.status(printerId) });

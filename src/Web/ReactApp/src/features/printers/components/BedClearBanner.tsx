@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { useConfirmBedClear, useSkipNextJob, useCancelAutoPrint } from '@/features/printers/hooks/useAutoPrint';
+import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import type { AutoPrintStatus } from '@/types/api';
 
@@ -22,8 +23,37 @@ export function BedClearBanner({ printerId, printerName, autoPrintStatus }: BedC
 
   const handleConfirm = async () => {
     try {
-      await confirmBedClear.mutateAsync(printerId);
-      toast.success(`Bed clear confirmed for ${printerName}`);
+      const result = await confirmBedClear.mutateAsync(printerId);
+
+      if (!result.nextJob) {
+        toast.success(`Bed clear confirmed for ${printerName} — no jobs queued`);
+        return;
+      }
+
+      if (result.filamentCheck?.materialMismatch) {
+        toast.warning(
+          `Material mismatch: loaded ${result.filamentCheck.loadedMaterial ?? 'unknown'}, ` +
+          `job requires ${result.filamentCheck.requiredMaterial ?? 'unknown'}. Job not dispatched.`,
+          { duration: 8000 },
+        );
+        return;
+      }
+
+      if (result.filamentCheck && !result.filamentCheck.sufficient) {
+        toast.warning(
+          result.filamentCheck.message ?? 'Insufficient filament. Job not dispatched.',
+          { duration: 8000 },
+        );
+        return;
+      }
+
+      // Filament check passed — dispatch the job
+      try {
+        await apiClient.dispatchPrintQueueJob(result.nextJob.id);
+        toast.success(`Dispatching "${result.nextJob.name}" to ${printerName}`);
+      } catch {
+        toast.error(`Bed cleared but failed to dispatch "${result.nextJob.name}"`);
+      }
     } catch {
       toast.error('Failed to confirm bed clear');
     }

@@ -8,6 +8,7 @@ import type { AutoPrintStatus } from '@/types/api';
 vi.mock('@/services/api', () => ({
   apiClient: {
     post: vi.fn().mockResolvedValue({ data: {} }),
+    dispatchPrintQueueJob: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -16,6 +17,7 @@ vi.mock('sonner', () => ({
     success: vi.fn(),
     info: vi.fn(),
     error: vi.fn(),
+    warning: vi.fn(),
   },
 }));
 
@@ -57,6 +59,39 @@ const baseStatus: AutoPrintStatus = {
   autoPrintEnabled: true,
   state: 'PendingReady',
   queuedJobCount: 2,
+};
+
+const readyResultWithJob = {
+  status: { printerId: 'printer-1', autoPrintEnabled: true, state: 'Ready', queuedJobCount: 1 },
+  nextJob: { id: 'job-1', name: 'benchy.gcode', estimatedFilamentUsageG: 10 },
+  filamentCheck: { sufficient: true, materialMismatch: false },
+};
+
+const readyResultNoJob = {
+  status: { printerId: 'printer-1', autoPrintEnabled: true, state: 'None', queuedJobCount: 0 },
+  nextJob: null,
+  filamentCheck: null,
+};
+
+const readyResultMaterialMismatch = {
+  status: { printerId: 'printer-1', autoPrintEnabled: true, state: 'Ready', queuedJobCount: 1 },
+  nextJob: { id: 'job-2', name: 'part.gcode' },
+  filamentCheck: {
+    sufficient: true,
+    materialMismatch: true,
+    loadedMaterial: 'PLA',
+    requiredMaterial: 'PETG',
+  },
+};
+
+const readyResultInsufficientFilament = {
+  status: { printerId: 'printer-1', autoPrintEnabled: true, state: 'Ready', queuedJobCount: 1 },
+  nextJob: { id: 'job-3', name: 'big-part.gcode' },
+  filamentCheck: {
+    sufficient: false,
+    materialMismatch: false,
+    message: 'Only 50g remaining, job requires 200g',
+  },
 };
 
 describe('BedClearBanner', () => {
@@ -101,8 +136,9 @@ describe('BedClearBanner', () => {
     expect(screen.getByText(/1 job queued/)).toBeInTheDocument();
   });
 
-  it('calls confirm endpoint when Confirm button is clicked', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: {} });
+  it('confirms and dispatches job when filament check passes', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultWithJob });
+    vi.mocked(apiClient.dispatchPrintQueueJob).mockResolvedValueOnce({});
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -112,8 +148,56 @@ describe('BedClearBanner', () => {
       expect(apiClient.post).toHaveBeenCalledWith('/autoprint/printer-1/ready');
     });
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('Bed clear confirmed for MK4');
+      expect(apiClient.dispatchPrintQueueJob).toHaveBeenCalledWith('job-1');
     });
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Dispatching "benchy.gcode" to MK4');
+    });
+  });
+
+  it('shows success without dispatch when no jobs queued', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultNoJob });
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Bed clear confirmed for MK4 — no jobs queued');
+    });
+    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
+  });
+
+  it('warns on material mismatch without dispatching', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultMaterialMismatch });
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        expect.stringContaining('Material mismatch'),
+        expect.objectContaining({ duration: 8000 }),
+      );
+    });
+    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
+  });
+
+  it('warns on insufficient filament without dispatching', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultInsufficientFilament });
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        'Only 50g remaining, job requires 200g',
+        expect.objectContaining({ duration: 8000 }),
+      );
+    });
+    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
   });
 
   it('calls skip endpoint when Skip button is clicked', async () => {
