@@ -36,7 +36,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 type: "nvarchar(20)",
                 maxLength: 20,
                 nullable: false,
-                defaultValue: "");
+                defaultValue: string.Empty);
 
             migrationBuilder.AddColumn<DateTimeOffset>(
                 name: "UpdatedDate",
@@ -58,7 +58,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 type: "nvarchar(20)",
                 maxLength: 20,
                 nullable: false,
-                defaultValue: "");
+                defaultValue: string.Empty);
 
             migrationBuilder.AddColumn<DateTimeOffset>(
                 name: "DispatchedAt",
@@ -93,7 +93,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 type: "nvarchar(20)",
                 maxLength: 20,
                 nullable: false,
-                defaultValue: "");
+                defaultValue: string.Empty);
 
             migrationBuilder.AddColumn<DateTimeOffset>(
                 name: "UpdatedDate",

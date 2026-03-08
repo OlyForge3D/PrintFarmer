@@ -26,7 +26,9 @@ public class SlicerDbContextDesignTimeFactory : IDesignTimeDbContextFactory<Slic
         var builder = new DbContextOptionsBuilder<SlicerDbContext>();
 
         // Default connection string for design-time migration generation only.
+#pragma warning disable S2068 // Design-time only, not a production credential
         const string connectionString = "Host=localhost;Database=printfarmer_slicer;Username=postgres;Password=postgres";
+#pragma warning restore S2068
         _ = builder.UseNpgsql(connectionString, x =>
             x.MigrationsAssembly("Farm.Slicer.Migrations.PostgreSQL"));
 
