@@ -19,6 +19,7 @@ import {
   DashboardIcon 
 } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { TasksWidget } from '@/features/tasks';
 import { ActiveJobsWidget } from './ActiveJobsWidget';
 import { RecentPrintsWidget } from './RecentPrintsWidget';
@@ -112,10 +113,8 @@ export const PrinterDashboard: React.FC = () => {
 
       {/* Loading State */}
       {isLoading ? (
-        <div role="status" aria-label="Printers loading">
-          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-48" />
-          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-56" />
-          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-40" />
+        <div role="status" aria-label="Printers loading" aria-busy="true">
+          <Skeleton lines={3} height="1.5rem" aria-label="Loading printers" />
         </div>
       ) : error ? (
         /* Error State */

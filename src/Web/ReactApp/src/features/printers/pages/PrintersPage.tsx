@@ -262,10 +262,10 @@ export function PrintersPage() {
     return (
       <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
         <div className="mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
-          <div className="h-8 w-48 bg-pf-bg-1 rounded-sm mb-6 animate-pulse" />
+          <div className="pf-skeleton pf-animate-skeleton h-8 w-48 rounded-sm mb-6" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="h-24 bg-pf-bg-1 rounded-xl animate-pulse" />
+              <div key={i} className="pf-skeleton pf-animate-skeleton h-24 rounded-xl" />
             ))}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">

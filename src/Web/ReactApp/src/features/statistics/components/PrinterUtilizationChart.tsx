@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
+import { ChartSkeleton } from '@/common/components/skeletons/ChartSkeleton';
 import type { PrinterUtilization } from '../hooks/useStatistics';
 
 interface Props {
@@ -21,7 +22,7 @@ interface Props {
 export const PrinterUtilizationChart: React.FC<Props> = ({ data, isLoading, error }) => (
   <Card title="Printer Utilization" className="h-96">
     {isLoading ? (
-      <div className="flex h-full items-center justify-center">Loading...</div>
+      <ChartSkeleton />
     ) : error ? (
       <div className="text-pf-error-text">Error loading utilization data</div>
     ) : data.length === 0 ? (

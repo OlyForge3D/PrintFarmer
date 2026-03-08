@@ -8,6 +8,7 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
+import { ChartSkeleton } from '@/common/components/skeletons/ChartSkeleton';
 import type { FilamentByMaterial } from '../hooks/useStatistics';
 
 const COLORS = ['#4F8AFA', '#34D399', '#F87171', '#FBBF24', '#A78BFA', '#F472B6', '#60A5FA', '#FB923C'];
@@ -21,7 +22,7 @@ interface Props {
 export const FilamentByMaterialChart: React.FC<Props> = ({ data, isLoading, error }) => (
   <Card title="Filament Usage by Material" className="h-96">
     {isLoading ? (
-      <div className="flex h-full items-center justify-center">Loading...</div>
+      <ChartSkeleton />
     ) : error ? (
       <div className="text-pf-error-text">Error loading filament data</div>
     ) : data.length === 0 ? (

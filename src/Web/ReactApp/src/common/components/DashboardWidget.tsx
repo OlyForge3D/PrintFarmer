@@ -156,9 +156,9 @@ export function DashboardWidget({
       {!isCollapsed && (
         <div id={contentId} className="p-3">
           {isLoading ? (
-            <div className="space-y-2">
+            <div className="space-y-2" aria-busy="true">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-12 bg-pf-border/50 rounded-lg animate-pulse" />
+                <div key={i} className="pf-skeleton pf-animate-skeleton h-12 rounded-lg" />
               ))}
             </div>
           ) : error ? (

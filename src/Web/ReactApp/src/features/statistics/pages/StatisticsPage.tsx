@@ -130,7 +130,7 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, loading, color }) => (
  <Card className="p-4">
  <p className="text-sm text-pf-text-secondary">{label}</p>
  {loading ? (
- <div className="mt-1 h-8 w-20 animate-pulse rounded bg-pf-hover" />
+ <div className="mt-1" aria-busy="true"><div className="pf-skeleton pf-animate-skeleton h-8 w-20 rounded" /></div>
  ) : (
  <p className={`mt-1 text-2xl font-bold ${color ?? 'text-pf-text'}`}>{value}</p>
  )}

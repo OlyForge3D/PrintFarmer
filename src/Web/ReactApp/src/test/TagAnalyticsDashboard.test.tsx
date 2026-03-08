@@ -173,8 +173,8 @@ describe('TagAnalyticsDashboard', () => {
 
       const { container } = renderWithQueryClient(<TagAnalyticsDashboard />);
 
-      // Check for animate-pulse elements
-      const skeletons = container.querySelectorAll('.animate-pulse');
+      // Check for skeleton elements (pf-animate-skeleton or pf-skeleton classes)
+      const skeletons = container.querySelectorAll('.pf-animate-skeleton, .pf-skeleton');
       expect(skeletons.length).toBeGreaterThan(0);
     });
 
@@ -188,7 +188,7 @@ describe('TagAnalyticsDashboard', () => {
 
       const { container } = renderWithQueryClient(<TagAnalyticsDashboard />);
 
-      const skeletonCards = container.querySelectorAll('.animate-pulse');
+      const skeletonCards = container.querySelectorAll('.pf-animate-skeleton, .pf-skeleton');
       expect(skeletonCards.length).toBeGreaterThanOrEqual(4); // At least stat cards + chart skeleton
     });
   });

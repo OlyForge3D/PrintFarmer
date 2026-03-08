@@ -267,10 +267,10 @@ export function MaintenanceTimeline({
       <div className={`space-y-4 ${className}`}>
         {Array.from({ length: 3 }).map((_, groupIdx) => (
           <div key={groupIdx}>
-            <div className="h-5 w-24 bg-pf-border rounded-sm animate-pulse mb-2" />
+            <div className="h-5 w-24 pf-skeleton pf-animate-skeleton rounded-sm mb-2" />
             <div className="space-y-2">
               {Array.from({ length: 2 }).map((_, taskIdx) => (
-                <div key={taskIdx} className="h-20 bg-pf-border/50 rounded-lg animate-pulse" />
+                <div key={taskIdx} className="h-20 pf-skeleton pf-animate-skeleton rounded-lg" />
               ))}
             </div>
           </div>
