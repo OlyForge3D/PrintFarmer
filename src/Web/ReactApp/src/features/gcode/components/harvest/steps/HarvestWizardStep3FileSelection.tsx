@@ -103,7 +103,7 @@ export function HarvestWizardStep3FileSelection({
 
       {files.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-pf-surface border border-pf-border rounded-lg">
+          <div className="flex items-center justify-between p-3 bg-pf-bg-1 border border-pf-border rounded-lg">
             <label htmlFor="selectAll" className="flex items-center gap-3 cursor-pointer">
               <Checkbox
                 id="selectAll"
@@ -121,7 +121,7 @@ export function HarvestWizardStep3FileSelection({
             {files.map(file => (
               <label
                 key={file.id}
-                className="flex items-start gap-3 p-3 hover:bg-pf-hover rounded-sm cursor-pointer transition-colors"
+                className="flex items-start gap-3 p-3 hover:bg-pf-bg-2 rounded-sm cursor-pointer transition-colors"
               >
                 <Checkbox
                   checked={selectedFileIds.has(file.id)}

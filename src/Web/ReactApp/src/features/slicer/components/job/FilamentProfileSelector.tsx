@@ -38,7 +38,7 @@ export const FilamentProfileSelector: React.FC<FilamentProfileSelectorProps> = (
 
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 ${className ?? ''}`}>
-      <label className="block text-sm font-semibold text-pf-text mb-2">Filament Profile</label>
+      <label className="block text-sm font-semibold text-pf-text-primary mb-2">Filament Profile</label>
       {hasSlicerProfiles ? (
         <Select
           value={selectedFilamentProfileId}

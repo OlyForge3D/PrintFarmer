@@ -25,7 +25,7 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
 }) => {
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 ${className ?? ''}`}>
-      <label className="block text-sm font-semibold text-pf-text mb-2">Slicer</label>
+      <label className="block text-sm font-semibold text-pf-text-primary mb-2">Slicer</label>
       <Select
         value={selectedSlicerId}
         onChange={e => onSlicerChange(Number(e.target.value))}

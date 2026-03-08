@@ -114,7 +114,7 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
   }));
 
   return (
-    <div className={`bg-pf-surface rounded-lg border border-pf-border ${className}`}>
+    <div className={`bg-pf-bg-1 rounded-lg border border-pf-border ${className}`}>
       {/* View Mode Tabs */}
       <div className="flex border-b border-pf-border">
         {viewModes.map((mode) => (

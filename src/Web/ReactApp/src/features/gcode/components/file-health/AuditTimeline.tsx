@@ -50,13 +50,13 @@ export function AuditTimeline({ audits, getAuditTypeLabel, isLoading }: AuditTim
       <Card.Body>
         <div className="space-y-4">
           {audits.map((audit) => (
-            <div key={audit.auditId} className="border border-pf-border rounded-lg p-4 hover:bg-pf-hover transition-colors">
+            <div key={audit.auditId} className="border border-pf-border rounded-lg p-4 hover:bg-pf-bg-2 transition-colors">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   {/* Audit header */}
                   <div className="flex items-center gap-3 mb-2">
                     <div className="shrink-0 w-2 h-2 rounded-full bg-pf-accent" />
-                    <span className="font-medium text-pf-text">{getAuditTypeLabel(audit.auditType)}</span>
+                    <span className="font-medium text-pf-text-primary">{getAuditTypeLabel(audit.auditType)}</span>
                     <Badge variant={audit.hasIssues ? 'error' : 'success'}>
                       {audit.hasIssues ? 'Issues Found' : 'No Issues'}
                     </Badge>
@@ -66,12 +66,12 @@ export function AuditTimeline({ audits, getAuditTypeLabel, isLoading }: AuditTim
                   <p className="text-sm text-pf-text-secondary mb-3">{formatDate(audit.auditDate)}</p>
 
                   {/* Summary message */}
-                  <p className="text-sm text-pf-text mb-3">{audit.summaryMessage}</p>
+                  <p className="text-sm text-pf-text-primary mb-3">{audit.summaryMessage}</p>
 
                   {/* Statistics */}
                   <div className="grid grid-cols-5 gap-2 text-xs">
                     <div>
-                      <div className="text-pf-text font-semibold">{audit.filesChecked}</div>
+                      <div className="text-pf-text-primary font-semibold">{audit.filesChecked}</div>
                       <div className="text-pf-text-secondary">Checked</div>
                     </div>
                     <div>

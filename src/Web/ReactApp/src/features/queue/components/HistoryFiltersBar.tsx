@@ -132,7 +132,7 @@ export default function HistoryFiltersBar({
                 onClick={() => handleQuickDateRange(range.days)}
                 variant="ghost"
                 size="sm"
-                className="px-2 py-1 text-xs bg-pf-bg-2 text-pf-text-secondary hover:bg-pf-bg-3 hover:text-pf-text-primary"
+                className="px-2 py-1 text-xs bg-pf-bg-2 text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary"
               >
                 {range.label}
               </Button>

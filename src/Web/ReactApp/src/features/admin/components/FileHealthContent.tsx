@@ -92,7 +92,7 @@ export function FileHealthContent() {
             <Card className="lg:col-span-2">
               <Card.Body>
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-semibold text-pf-text">Overall Health</h2>
+                  <h2 className="text-xl font-semibold text-pf-text-primary">Overall Health</h2>
                   <Badge
                     variant={
                       statusInfo.status === 'healthy'

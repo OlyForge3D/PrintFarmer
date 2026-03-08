@@ -31,7 +31,7 @@ export const StatisticsPage: React.FC = () => {
   return (
     <div className="space-y-6 p-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-pf-text">Print Statistics</h1>
+        <h1 className="text-2xl font-bold text-pf-text-primary">Print Statistics</h1>
         <div className="flex gap-2" role="group" aria-label="Time period filter">
           {PERIOD_OPTIONS.map((opt) => (
             <Button
@@ -40,8 +40,8 @@ export const StatisticsPage: React.FC = () => {
               onClick={() => setDays(opt.value)}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 days === opt.value
-                  ? 'bg-pf-primary text-white'
-                  : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
+                  ? 'bg-pf-accent-bg text-white'
+                  : 'bg-pf-bg-1 text-pf-text-secondary hover:bg-pf-bg-2'
               }`}
               aria-pressed={days === opt.value}
             >
@@ -124,9 +124,9 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, loading, color }) => (
   <Card className="p-4">
     <p className="text-sm text-pf-text-secondary">{label}</p>
     {loading ? (
-      <div className="mt-1 h-8 w-20 animate-pulse rounded bg-pf-hover" />
+      <div className="mt-1 h-8 w-20 animate-pulse rounded bg-pf-bg-2" />
     ) : (
-      <p className={`mt-1 text-2xl font-bold ${color ?? 'text-pf-text'}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-bold ${color ?? 'text-pf-text-primary'}`}>{value}</p>
     )}
   </Card>
 );

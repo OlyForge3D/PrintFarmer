@@ -344,3 +344,18 @@ Test files created and passing:
 - **Mock paths must match import perspective** — when PrinterGroupDetail imports `./PrinterAssignment`, the test file (in `__tests__/`) must mock `../components/PrinterAssignment` (relative to the test file's location), not `./PrinterAssignment`.
 - **React `iconLeft` prop warning** — passing `iconLeft` through spread to `<button>` triggers React DOM warnings. This is cosmetic and doesn't affect test behavior, but the mock Button components should destructure and discard custom props.
 - **Full suite integrity verified** — 1263/1263 React tests pass after adding printer groups coverage. Lint passes clean.
+
+### Sprint: UI Fix Validation Tests (2026-03-10)
+
+**39 tests across 3 files — 32 passing, 7 waiting for fixes**
+
+| File | Tests | Pass | Fail | Coverage |
+|------|-------|------|------|----------|
+| Select.test.tsx | 13 | 13 | 0 | Chevron icon, pointer-events-none, invalid state, pf-* tokens, no gray/slate |
+| StatisticsPage.test.tsx | 12 | 12 | 0 | Ghost token validation, pf-* tokens on heading/KPIs/buttons, rendering, interactions |
+| SlicerConfigModal.test.tsx | 14 | 7 | 7 | Modal open/close, content rendering ✅; dark theme token assertions ❌ (waiting for PFarm1-5o5) |
+
+**Status:**
+- **PFarm1-dhz (Select chevron):** ✅ Fix already landed — all 13 tests pass
+- **PFarm1-u5h (Ghost tokens):** ✅ StatisticsPage already uses pf-* tokens — all 12 tests pass
+- **PFarm1-5o5 (SlicerConfigModal dark theme):** ❌ 7 tests correctly failing — component still uses hardcoded gray-*, border-gray-300, bg-gray-200, focus:ring-blue-500. Tests will pass once fix lands.

@@ -109,7 +109,7 @@ const TreeItem: React.FC<{
           currentPath === node.path ? 'bg-pf-accent-bg border-l-2 border-pf-accent text-white font-semibold' : ''
         } ${
           isDragOver 
-            ? 'bg-pf-primary/15 border-l-4 border-pf-primary' 
+            ? 'bg-pf-accent-bg/15 border-l-4 border-pf-primary' 
             : ''
         }`}
         style={{ paddingLeft: `${isRoot ? 8 : level * 16 + 8}px` }}
@@ -160,7 +160,7 @@ const TreeItem: React.FC<{
         )}
 
         <span
-          className="flex-1 text-sm text-pf-text truncate"
+          className="flex-1 text-sm text-pf-text-primary truncate"
           title={node.name}
         >
           {node.name}

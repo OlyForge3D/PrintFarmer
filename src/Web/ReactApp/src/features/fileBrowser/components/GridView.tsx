@@ -70,7 +70,7 @@ export const GridView = ({
                   key={file.id}
                   className={`rounded-lg border overflow-hidden transition-all focus-within:ring-2 focus-within:ring-pf-primary group ${
                     isSelected 
-                      ? 'border-pf-primary bg-pf-primary/5 shadow-md' 
+                      ? 'border-pf-primary bg-pf-accent-bg/5 shadow-md' 
                       : 'border-pf-border bg-pf-bg-0 hover:shadow-md hover:border-pf-primary/50'
                   }`}
                   role="group"
@@ -104,7 +104,7 @@ export const GridView = ({
                   <div className="p-3 flex flex-col gap-3 bg-pf-bg-0">
                     {/* File Name */}
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-pf-text line-clamp-2 wrap-break-word">
+                      <h3 className="text-sm font-semibold text-pf-text-primary line-clamp-2 wrap-break-word">
                         {file.fileName}
                       </h3>
                     </div>
@@ -114,11 +114,11 @@ export const GridView = ({
                       {/* Common properties */}
                       <div className="flex justify-between items-center gap-2">
                         <span className="text-pf-text-secondary">Type:</span>
-                        <span className="text-pf-text font-medium">{fileExtension}</span>
+                        <span className="text-pf-text-primary font-medium">{fileExtension}</span>
                       </div>
                       <div className="flex justify-between items-center gap-2">
                         <span className="text-pf-text-secondary">Size:</span>
-                        <span className="text-pf-text font-medium">{formatBytes(file.fileSize)}</span>
+                        <span className="text-pf-text-primary font-medium">{formatBytes(file.fileSize)}</span>
                       </div>
                       
                       {/* Extended metadata from parent */}

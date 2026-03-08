@@ -443,8 +443,8 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreat
                           const comp = componentMap.get(tc.maintenanceComponentId);
                           const isLow = comp ? comp.inStock < comp.minimumStock : false;
                           return (
-                            <tr key={tc.id} className="hover:bg-pf-bg-3/50 transition-colors">
-                              <td className="px-3 py-2 font-medium text-pf-text">
+                            <tr key={tc.id} className="hover:bg-pf-bg-2/50 transition-colors">
+                              <td className="px-3 py-2 font-medium text-pf-text-primary">
                                 {tc.componentName ?? comp?.name ?? 'Unknown'}
                               </td>
                               <td className="px-3 py-2">
@@ -747,11 +747,11 @@ export function TaskCatalogTab() {
           </h3>
           <div className="divide-y divide-pf-border rounded-lg border border-pf-border bg-pf-bg-2">
             {catTasks.map(task => (
-              <div key={task.id} className="flex items-start gap-3 p-3 hover:bg-pf-bg-3 transition-colors">
+              <div key={task.id} className="flex items-start gap-3 p-3 hover:bg-pf-bg-2 transition-colors">
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-pf-text truncate">{task.taskName}</span>
+                    <span className="font-medium text-pf-text-primary truncate">{task.taskName}</span>
                     <Badge variant={priorityVariant(task.priority)} className="text-[10px] shrink-0">
                       {priorityLabel(task.priority)}
                     </Badge>

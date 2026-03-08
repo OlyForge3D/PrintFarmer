@@ -185,9 +185,9 @@ export const ImportOfficialProfilesPage: React.FC = () => {
 
                         {selectedPrinter && (
                             <div className="mt-4 p-3 bg-pf-background rounded-sm text-sm space-y-1">
-                                <p className="text-pf-text-muted">Printer: <span className="font-medium text-pf-text">{selectedPrinter.name}</span></p>
+                                <p className="text-pf-text-muted">Printer: <span className="font-medium text-pf-text-primary">{selectedPrinter.name}</span></p>
                                 {selectedPrinter.modelName && (
-                                    <p className="text-pf-text-muted">Model: <span className="font-medium text-pf-text">{selectedPrinter.modelName}</span></p>
+                                    <p className="text-pf-text-muted">Model: <span className="font-medium text-pf-text-primary">{selectedPrinter.modelName}</span></p>
                                 )}
                             </div>
                         )}
@@ -272,7 +272,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                         <div className="space-y-4">
                             {groupedProfiles.map(([group, profiles]) => (
                                 <div key={group} className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm">
-                                    <div className="card-header bg-pf-hover p-3">
+                                    <div className="card-header bg-pf-bg-2 p-3">
                                         <h4 className="font-semibold text-sm">{group}</h4>
                                     </div>
                                     <div className="card-body p-3">

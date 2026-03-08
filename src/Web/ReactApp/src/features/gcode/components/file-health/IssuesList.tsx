@@ -88,7 +88,7 @@ export function IssuesList({ data, isLoading }: IssuesListProps) {
               className={`px-4 py-2 font-medium text-sm transition-colors relative ${
                 selectedTab === tab.id
                   ? `${tab.color} border-b-2 border-pf-accent`
-                  : 'text-pf-text-secondary hover:text-pf-text'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary'
               }`}
             >
               {tab.label}
@@ -108,7 +108,7 @@ export function IssuesList({ data, isLoading }: IssuesListProps) {
           ) : (
             <div className="space-y-3">
               {activeTab.items.map((item, idx) => (
-                <div key={idx} className="flex items-start gap-3 p-2 hover:bg-pf-hover rounded-sm transition-colors">
+                <div key={idx} className="flex items-start gap-3 p-2 hover:bg-pf-bg-2 rounded-sm transition-colors">
                   <div className={`shrink-0 w-2 h-2 rounded-full mt-1.5 ${activeTab.color}`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">

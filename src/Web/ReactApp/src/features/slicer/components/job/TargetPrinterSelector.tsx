@@ -22,11 +22,11 @@ export const TargetPrinterSelector: React.FC<TargetPrinterSelectorProps> = ({
 }) => {
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 ${className ?? ''}`}>
-      <label className="block text-sm font-semibold text-pf-text mb-2">Target Printer (Optional)</label>
+      <label className="block text-sm font-semibold text-pf-text-primary mb-2">Target Printer (Optional)</label>
       {selectedPrinter ? (
         <div className="space-y-2">
           <div className="p-3 bg-pf-bg-0 rounded-sm border border-pf-border">
-            <p className="font-medium text-pf-text">{selectedPrinter.name}</p>
+            <p className="font-medium text-pf-text-primary">{selectedPrinter.name}</p>
             {selectedPrinter.modelName && (
               <p className="text-sm text-pf-text-muted">
                 {selectedPrinter.manufacturerName && `${selectedPrinter.manufacturerName} • `}

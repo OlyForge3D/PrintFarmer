@@ -92,7 +92,7 @@ export function PrinterSelectorModal({
                     placeholder="Search printers..."
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-pf-bg-1 border border-pf-border rounded-lg text-pf-text placeholder-pf-text-secondary focus:outline-hidden focus:ring-2 focus:ring-pf-accent"
+                    className="w-full pl-10 pr-4 py-2 bg-pf-bg-1 border border-pf-border rounded-lg text-pf-text-primary placeholder-pf-text-secondary focus:outline-hidden focus:ring-2 focus:ring-pf-accent"
                 />
             </div>
         </div>
@@ -144,7 +144,7 @@ export function PrinterSelectorModal({
 
                                 {/* Info */}
                                 <div className="p-4">
-                                    <h3 className="font-semibold text-pf-text text-lg truncate text-left">
+                                    <h3 className="font-semibold text-pf-text-primary text-lg truncate text-left">
                                         {printer.name}
                                     </h3>
 

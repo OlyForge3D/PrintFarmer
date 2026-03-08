@@ -50,7 +50,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3 ${className ?? ''}`}>
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-semibold text-pf-text">
+        <label className="block text-sm font-semibold text-pf-text-primary">
           {useModelPicker ? 'Select Model from Library' : 'Model File URL'}
         </label>
         <Button

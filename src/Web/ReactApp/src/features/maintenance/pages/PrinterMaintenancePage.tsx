@@ -292,7 +292,7 @@ export function PrinterMaintenancePage() {
                           <div className="flex-1">
                             <span className="font-medium text-pf-text-primary">{log.taskName}</span>
                             {log.component && (
-                              <span className="ml-2 text-xs px-2 py-0.5 bg-pf-primary/20 text-pf-primary rounded-sm">
+                              <span className="ml-2 text-xs px-2 py-0.5 bg-pf-accent-bg/20 text-pf-primary rounded-sm">
                                 {log.component}
                               </span>
                             )}

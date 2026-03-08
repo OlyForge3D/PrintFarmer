@@ -703,7 +703,7 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* SLICER SELECTION - Shows name and version */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <label className="block text-sm font-semibold text-pf-text mb-2">Slicer</label>
+            <label className="block text-sm font-semibold text-pf-text-primary mb-2">Slicer</label>
             <Select
               value={selectedSlicerId}
               onChange={e => setSelectedSlicerId(Number(e.target.value))}
@@ -735,7 +735,7 @@ export const NewSliceJobPage: React.FC = () => {
           {/* MACHINE PROFILE SELECTION - Filtered by selected printer */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <label className="block text-sm font-semibold text-pf-text">
+              <label className="block text-sm font-semibold text-pf-text-primary">
                 Machine Profile
                 {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
               </label>
@@ -810,7 +810,7 @@ export const NewSliceJobPage: React.FC = () => {
           {/* FILAMENT PROFILE - two-step selection: material type then profile */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <label className="block text-sm font-semibold text-pf-text">Filament Profile</label>
+              <label className="block text-sm font-semibold text-pf-text-primary">Filament Profile</label>
               {selectedFilamentProfileId && (
                 <Button
                   type="button"
@@ -903,7 +903,7 @@ export const NewSliceJobPage: React.FC = () => {
           {/* PROCESS PROFILE - Custom profiles first, then system presets grouped by quality */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-semibold text-pf-text">Process Profile</label>
+              <label className="block text-sm font-semibold text-pf-text-primary">Process Profile</label>
             </div>
             {(availableProcessProfiles.length > 0 || customProcessProfiles.length > 0) ? (
               <Select
@@ -954,7 +954,7 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* MODEL SELECTION - Inline, not collapsible */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
-            <label className="block text-sm font-semibold text-pf-text">Model</label>
+            <label className="block text-sm font-semibold text-pf-text-primary">Model</label>
 
             <FormField
               label="Use Model Picker"
@@ -1126,7 +1126,7 @@ export const NewSliceJobPage: React.FC = () => {
         <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-screen">
           <div className="card bg-pf-panel border border-pf-border flex-1 overflow-hidden flex flex-col">
             <div className="card-header shrink-0">
-              <h3 className="font-semibold text-pf-text">
+              <h3 className="font-semibold text-pf-text-primary">
                 {modelFileName ? `Preview: ${modelFileName}` : 'Model Preview'}
               </h3>
             </div>

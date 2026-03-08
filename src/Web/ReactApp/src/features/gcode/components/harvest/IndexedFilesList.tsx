@@ -402,7 +402,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   }
   if (!files.length) {
     return (
-      <div className="flex items-center gap-2 text-pf-muted bg-pf-surface rounded-sm px-3 py-2">
+      <div className="flex items-center gap-2 text-pf-muted bg-pf-bg-1 rounded-sm px-3 py-2">
         <svg className="w-5 h-5 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
         Discovering files... Files will appear here as they are found.
       </div>
@@ -421,7 +421,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   return (
     <div className="flex flex-col h-full">
       {!hideHeader && (
-        <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-surface z-20">Indexed Files</h4>
+        <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-bg-1 z-20">Indexed Files</h4>
       )}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="min-w-full text-sm">
@@ -459,7 +459,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                         <img
                           src={file.thumbnailUrl}
                           alt={file.fileName + ' thumbnail'}
-                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-sm shadow-sm border border-pf-border bg-pf-surface object-cover"
+                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-sm shadow-sm border border-pf-border bg-pf-bg-1 object-cover"
                           loading="lazy"
                         />
                       )}
@@ -521,7 +521,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
           </tbody>
         </table>
       </div>
-      <div className="px-4 py-3 border-t border-pf-border flex items-center justify-between gap-4 bg-pf-surface">
+      <div className="px-4 py-3 border-t border-pf-border flex items-center justify-between gap-4 bg-pf-bg-1">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <label htmlFor="pageSize" className="text-sm text-pf-text-secondary">

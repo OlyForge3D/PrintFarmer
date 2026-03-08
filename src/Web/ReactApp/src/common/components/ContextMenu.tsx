@@ -108,7 +108,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
               variant={actionItem.variant === 'danger' ? 'danger' : 'subtle'}
               size="sm"
               iconLeft={actionItem.icon && <actionItem.icon className="w-4 h-4" />}
-              className="w-full justify-start px-4 py-2.5 text-sm rounded-none hover:bg-pf-bg-3"
+              className="w-full justify-start px-4 py-2.5 text-sm rounded-none hover:bg-pf-bg-2"
               role="menuitem"
               type="button"
             >

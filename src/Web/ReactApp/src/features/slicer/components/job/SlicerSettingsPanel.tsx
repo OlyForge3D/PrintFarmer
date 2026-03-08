@@ -42,7 +42,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-4 ${className ?? ''}`}>
-      <h3 className="text-sm font-semibold text-pf-text">Print Settings</h3>
+      <h3 className="text-sm font-semibold text-pf-text-primary">Print Settings</h3>
       
       {/* Layer Height */}
       <div>
@@ -81,7 +81,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
           checked={settings.supportEnabled}
           onChange={(e) => updateSetting('supportEnabled', e.target.checked)}
         />
-        <label htmlFor="support-enabled" className="text-sm text-pf-text">
+        <label htmlFor="support-enabled" className="text-sm text-pf-text-primary">
           Enable Supports
         </label>
       </div>

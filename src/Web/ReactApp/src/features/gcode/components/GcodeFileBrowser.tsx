@@ -326,7 +326,7 @@ export const GcodeFileBrowser = ({
           {(gcodeMeta.requiredMaterial || gcodeMeta.extractedMaterial) && (
             <div className="flex justify-between items-center gap-2">
               <span className="text-pf-text-secondary">Material:</span>
-              <span className="text-pf-text font-medium line-clamp-1">
+              <span className="text-pf-text-primary font-medium line-clamp-1">
                 {gcodeMeta.requiredMaterial || gcodeMeta.extractedMaterial}
               </span>
             </div>
@@ -334,13 +334,13 @@ export const GcodeFileBrowser = ({
           {gcodeMeta.extractedNozzleDiameter && (
             <div className="flex justify-between items-center gap-2">
               <span className="text-pf-text-secondary">Nozzle:</span>
-              <span className="text-pf-text font-medium">{gcodeMeta.extractedNozzleDiameter}mm</span>
+              <span className="text-pf-text-primary font-medium">{gcodeMeta.extractedNozzleDiameter}mm</span>
             </div>
           )}
           {gcodeMeta.extractedPrinterModelName && (
             <div className="flex justify-between items-center gap-2">
               <span className="text-pf-text-secondary">Printer:</span>
-              <span className="text-pf-text font-medium line-clamp-1">{gcodeMeta.extractedPrinterModelName}</span>
+              <span className="text-pf-text-primary font-medium line-clamp-1">{gcodeMeta.extractedPrinterModelName}</span>
             </div>
           )}
         </>

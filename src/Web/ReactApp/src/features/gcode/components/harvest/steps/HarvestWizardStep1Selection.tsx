@@ -321,7 +321,7 @@ export function HarvestWizardStep1Selection({
                 ? 'border-pf-warning bg-pf-warning-bg cursor-not-allowed opacity-60'
                 : selectedPrinterId === printer.id
                 ? 'border-pf-accent bg-pf-accent-bg'
-                : 'border-pf-border hover:border-pf-accent hover:bg-pf-hover'
+                : 'border-pf-border hover:border-pf-accent hover:bg-pf-bg-2'
             }`}
             title={hasActiveHarvest ? 'This printer has an active harvest in progress' : undefined}
           >

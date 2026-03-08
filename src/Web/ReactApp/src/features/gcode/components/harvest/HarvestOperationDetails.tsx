@@ -282,7 +282,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
           You can retry or skip failed files, or import selected files to the library. This list is available for review even after completion or cancellation.
         </div>
       </div>
-      <div className="rounded-sm border border-pf-border bg-pf-surface overflow-hidden flex-1 min-h-0">
+      <div className="rounded-sm border border-pf-border bg-pf-bg-1 overflow-hidden flex-1 min-h-0">
         <IndexedFilesList operationId={operation.id} onFilesImported={onFilesImported} />
       </div>
     </div>

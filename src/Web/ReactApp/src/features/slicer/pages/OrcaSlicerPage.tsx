@@ -315,7 +315,7 @@ export const OrcaSlicerPage: React.FC = () => {
           `}
         >
           <div className="p-4 border-b border-pf-border flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-pf-text">Settings & Profiles</h2>
+            <h2 className="text-lg font-semibold text-pf-text-primary">Settings & Profiles</h2>
             <Button 
               variant="subtle"
               onClick={() => setShowSettingsPanel(false)}
@@ -330,7 +330,7 @@ export const OrcaSlicerPage: React.FC = () => {
           <div className="p-4 space-y-4">
             {/* Slicer Selection */}
             <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
-              <label className="block text-sm font-semibold text-pf-text mb-2">Slicer Engine</label>
+              <label className="block text-sm font-semibold text-pf-text-primary mb-2">Slicer Engine</label>
               <Select
                 value={selectedSlicerId}
                 onChange={e => setSelectedSlicerId(Number(e.target.value))}
@@ -344,11 +344,11 @@ export const OrcaSlicerPage: React.FC = () => {
 
             {/* Printer Selection */}
             <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
-              <label className="block text-sm font-semibold text-pf-text mb-2">Printer</label>
+              <label className="block text-sm font-semibold text-pf-text-primary mb-2">Printer</label>
               {selectedPrinter ? (
                 <div className="space-y-2">
                   <div className="p-3 bg-pf-bg-0 rounded-sm border border-pf-border">
-                    <p className="font-medium text-pf-text">{selectedPrinter.name}</p>
+                    <p className="font-medium text-pf-text-primary">{selectedPrinter.name}</p>
                     {selectedPrinter.modelName && (
                       <p className="text-sm text-pf-text-muted">
                         {selectedPrinter.manufacturerName && `${selectedPrinter.manufacturerName} • `}
@@ -381,7 +381,7 @@ export const OrcaSlicerPage: React.FC = () => {
 
             {/* Filament Selection */}
             <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
-              <label className="block text-sm font-semibold text-pf-text mb-2">Filament</label>
+              <label className="block text-sm font-semibold text-pf-text-primary mb-2">Filament</label>
               <Select
                 value={selectedFilamentMaterial}
                 onChange={e => setSelectedFilamentMaterial(e.target.value as MaterialType)}
@@ -398,7 +398,7 @@ export const OrcaSlicerPage: React.FC = () => {
 
             {/* Process Profile */}
             <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
-              <label className="block text-sm font-semibold text-pf-text mb-2">Process Profile</label>
+              <label className="block text-sm font-semibold text-pf-text-primary mb-2">Process Profile</label>
               {hierarchyProfiles ? (
                 <ProfileSelector
                   hierarchyData={hierarchyProfiles}
@@ -423,7 +423,7 @@ export const OrcaSlicerPage: React.FC = () => {
 
             {/* Priority */}
             <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
-              <label className="block text-sm font-semibold text-pf-text mb-2">Priority</label>
+              <label className="block text-sm font-semibold text-pf-text-primary mb-2">Priority</label>
               <Select value={priority} onChange={e => setPriority(Number(e.target.value))}>
                 <option value={0}>Low</option>
                 <option value={1}>Normal</option>

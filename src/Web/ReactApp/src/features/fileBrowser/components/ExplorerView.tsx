@@ -190,8 +190,8 @@ const FolderTreeItem = ({
     <li className="relative">
       <div
         className={`flex items-center gap-2 rounded px-2 py-1 text-sm transition-colors ${
-          isDragOver ? 'bg-pf-primary/20 border border-pf-primary' : ''
-        } ${isCurrent ? 'bg-pf-primary text-white' : !isDragOver ? 'hover:bg-pf-bg-2 text-pf-text' : ''}`}
+          isDragOver ? 'bg-pf-accent-bg/20 border border-pf-primary' : ''
+        } ${isCurrent ? 'bg-pf-accent-bg text-white' : !isDragOver ? 'hover:bg-pf-bg-2 text-pf-text-primary' : ''}`}
         style={{ paddingLeft: depth * 12 + 8 }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -236,7 +236,7 @@ const FolderTreeItem = ({
             size="sm"
             onClick={handleCreateFolder}
             disabled={isBusy}
-            className="w-full px-3 py-1.5 text-sm text-left text-pf-text-primary hover:bg-pf-bg-3 justify-start"
+            className="w-full px-3 py-1.5 text-sm text-left text-pf-text-primary hover:bg-pf-bg-2 justify-start"
             iconLeft={<PlusIcon className="w-4 h-4" />}
           >
             New Folder
@@ -247,7 +247,7 @@ const FolderTreeItem = ({
             size="sm"
             onClick={handleDeleteFolder}
             disabled={isBusy || node.path === '/'}
-            className="w-full px-3 py-1.5 text-sm text-left text-pf-error hover:bg-pf-bg-3 justify-start"
+            className="w-full px-3 py-1.5 text-sm text-left text-pf-error hover:bg-pf-bg-2 justify-start"
             iconLeft={<DeleteIcon className="w-4 h-4" />}
           >
             Delete Folder
@@ -416,7 +416,7 @@ export const ExplorerView = ({
               type="button"
               variant="subtle"
               size="sm"
-              className="p-0 h-auto font-semibold text-pf-text-secondary hover:text-pf-text"
+              className="p-0 h-auto font-semibold text-pf-text-secondary hover:text-pf-text-primary"
               onClick={() => onNavigate('/')}
             >
               root
@@ -431,7 +431,7 @@ export const ExplorerView = ({
                     type="button"
                     variant="subtle"
                     size="sm"
-                    className={`p-0 h-auto ${isLast ? 'font-semibold text-pf-text' : 'text-pf-text-secondary hover:text-pf-text'}`}
+                    className={`p-0 h-auto ${isLast ? 'font-semibold text-pf-text-primary' : 'text-pf-text-secondary hover:text-pf-text-primary'}`}
                     onClick={() => onNavigate(path)}
                   >
                     {segment}
@@ -520,7 +520,7 @@ export const ExplorerView = ({
                     draggable={isDraggable}
                     onDragStart={handleDragStart}
                     className={`border-b border-pf-border hover:bg-pf-bg-2 transition-colors ${
-                      isSelected ? 'bg-pf-primary/5' : ''
+                      isSelected ? 'bg-pf-accent-bg/5' : ''
                     } ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   >
                     <td className="px-3 py-2 w-10">
@@ -533,7 +533,7 @@ export const ExplorerView = ({
                     {columns.map((column) => (
                       <td
                         key={`${file.id}-${column.key}`}
-                        className={`px-3 py-2 text-pf-text ${column.align === 'right' ? 'text-right' : ''}`}
+                        className={`px-3 py-2 text-pf-text-primary ${column.align === 'right' ? 'text-right' : ''}`}
                       >
                         {column.render
                           ? column.render(file)

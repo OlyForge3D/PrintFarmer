@@ -163,7 +163,7 @@ export function HarvestWizardStep4Progress({
 
   return (
     <div className="space-y-6">
-      <div className="bg-pf-surface border border-pf-border rounded-lg p-4">
+      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
         <div className="space-y-3">
           {/* Progress bar */}
           <div>
@@ -233,7 +233,7 @@ export function HarvestWizardStep4Progress({
             return (
               <div
                 key={file.fileId}
-                className="flex flex-col gap-2 p-3 rounded-sm border border-pf-border bg-pf-surface"
+                className="flex flex-col gap-2 p-3 rounded-sm border border-pf-border bg-pf-bg-1"
               >
                 {/* File name and status */}
                 <div className="flex items-center gap-3">

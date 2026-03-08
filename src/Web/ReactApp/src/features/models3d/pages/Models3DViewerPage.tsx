@@ -125,7 +125,7 @@ export const Models3DViewerPage: React.FC = () => {
       <div className="space-y-6">
         {/* Upload Section */}
         <div className="bg-pf-panel border border-pf-border rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-pf-text mb-4">Upload Model</h2>
+          <h2 className="text-lg font-semibold text-pf-text-primary mb-4">Upload Model</h2>
 
           {uploadError && (
             <Alert type="error" title="Upload Error" onClose={() => setUploadError(null)}>
@@ -146,7 +146,7 @@ export const Models3DViewerPage: React.FC = () => {
             className="border-2 border-dashed border-pf-border rounded-lg p-8 text-center hover:border-pf-accent transition-colors cursor-pointer bg-pf-bg-0/50"
           >
             <UploadIcon className="w-12 h-12 mx-auto mb-3 text-pf-text-muted" />
-            <p className="text-pf-text font-medium mb-2">Drag and drop your STL file here</p>
+            <p className="text-pf-text-primary font-medium mb-2">Drag and drop your STL file here</p>
             <p className="text-sm text-pf-text-muted mb-4">or click to browse</p>
 
             {/* Hidden file input triggered by container click */}
@@ -172,7 +172,7 @@ export const Models3DViewerPage: React.FC = () => {
 
         {/* Models Grid */}
         <div className="bg-pf-panel border border-pf-border rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-pf-text mb-4">Your Models</h2>
+          <h2 className="text-lg font-semibold text-pf-text-primary mb-4">Your Models</h2>
 
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
@@ -205,7 +205,7 @@ export const Models3DViewerPage: React.FC = () => {
 
                   {/* Model Info */}
                   <div className="space-y-2 mb-4">
-                    <h3 className="font-semibold text-pf-text truncate" title={model.fileName}>
+                    <h3 className="font-semibold text-pf-text-primary truncate" title={model.fileName}>
                       {model.fileName}
                     </h3>
                     <p className="text-xs text-pf-text-muted">

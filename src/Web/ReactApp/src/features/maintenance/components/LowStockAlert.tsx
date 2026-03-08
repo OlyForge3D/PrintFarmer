@@ -60,7 +60,7 @@ export function LowStockAlert({ maxItems = 5, onViewAll }: LowStockAlertProps) {
             <div key={part.id} className="flex items-center gap-3 px-4 py-2.5">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-pf-text truncate">{part.name}</span>
+                  <span className="text-sm font-medium text-pf-text-primary truncate">{part.name}</span>
                   <Badge variant="default" className="text-[10px]">{part.category}</Badge>
                 </div>
                 <p className="text-xs text-amber-400 mt-0.5">

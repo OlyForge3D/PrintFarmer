@@ -158,7 +158,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           className={`font-semibold transition-colors ${
             isModified 
               ? 'text-orange-400' 
-              : 'text-pf-text'
+              : 'text-pf-text-primary'
           }`}
         >
           {label}
@@ -248,7 +248,7 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
         
         {/* Current value indicator below thumb */}
         <div 
-          className="absolute top-6 transform -translate-x-1/2 text-sm font-bold text-pf-text"
+          className="absolute top-6 transform -translate-x-1/2 text-sm font-bold text-pf-text-primary"
           style={{ left: `${percentage}%` }}
         >
           {value}{unit}
@@ -291,7 +291,7 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className="w-full px-4 py-3 bg-pf-panel border border-pf-border rounded-lg
-                   text-pf-text appearance-none cursor-pointer
+                   text-pf-text-primary appearance-none cursor-pointer
                    hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
       >
@@ -357,7 +357,7 @@ const RadioControl: React.FC<RadioSettingProps & { id: string }> = ({
               )}
             </div>
           </div>
-          <span className="text-pf-text">{opt.label}</span>
+          <span className="text-pf-text-primary">{opt.label}</span>
         </label>
       ))}
     </div>
@@ -422,7 +422,7 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
         step={step}
         disabled={disabled}
         className="flex-1 px-4 py-2 bg-pf-panel border border-pf-border rounded-lg
-                   text-pf-text text-right
+                   text-pf-text-primary text-right
                    hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
       />
@@ -483,7 +483,7 @@ const ColorInputControl: React.FC<ColorInputSettingProps & { id: string }> = ({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className="flex-1 px-3 py-2 bg-pf-panel border border-pf-border rounded-lg
-                   text-pf-text font-mono text-sm uppercase
+                   text-pf-text-primary font-mono text-sm uppercase
                    hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
         placeholder="#000000"
@@ -575,7 +575,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
               step={props.step ?? 0.01}
               disabled={disabled}
               className="w-20 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border rounded
-                         text-pf-text focus:border-pf-accent-2 focus:outline-hidden
+                         text-pf-text-primary focus:border-pf-accent-2 focus:outline-hidden
                          disabled:opacity-50 disabled:cursor-not-allowed"
             />
             {props.unit && (
@@ -594,7 +594,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
             onChange={(e) => props.onChange(e.target.value)}
             disabled={disabled}
             className="w-32 px-2 py-1 text-sm bg-pf-panel border border-pf-border rounded
-                       text-pf-text cursor-pointer focus:border-pf-accent-2 focus:outline-hidden
+                       text-pf-text-primary cursor-pointer focus:border-pf-accent-2 focus:outline-hidden
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {props.options.map((opt) => (
@@ -623,7 +623,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
             placeholder={props.placeholder}
             disabled={disabled}
             className="w-32 px-2 py-1 text-sm bg-pf-panel border border-pf-border rounded
-                       text-pf-text focus:border-pf-accent-2 focus:outline-hidden
+                       text-pf-text-primary focus:border-pf-accent-2 focus:outline-hidden
                        disabled:opacity-50 disabled:cursor-not-allowed"
           />
         );
@@ -656,7 +656,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
           className={`text-sm transition-colors ${
             isModified 
               ? 'text-orange-400 font-medium' 
-              : 'text-pf-text'
+              : 'text-pf-text-primary'
           }`}
           title={tooltip}
         >
@@ -683,7 +683,7 @@ export const SettingSection: React.FC<SettingSectionProps> = ({ icon, title, chi
   <div className="mb-4">
     <div className="flex items-center gap-2 mb-2 pb-1 border-b border-pf-border/50">
       {icon && <span className="text-pf-accent-2">{icon}</span>}
-      <h4 className="text-sm font-semibold text-pf-text">{title}</h4>
+      <h4 className="text-sm font-semibold text-pf-text-primary">{title}</h4>
     </div>
     <div className="space-y-0.5 pl-1">
       {children}

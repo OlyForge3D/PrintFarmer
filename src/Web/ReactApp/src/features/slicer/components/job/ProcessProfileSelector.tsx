@@ -34,7 +34,7 @@ export const ProcessProfileSelector: React.FC<ProcessProfileSelectorProps> = ({
 
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 ${className ?? ''}`}>
-      <label className="block text-sm font-semibold text-pf-text mb-2">Process Profile</label>
+      <label className="block text-sm font-semibold text-pf-text-primary mb-2">Process Profile</label>
       {hasFilteredProfiles ? (
         <Select
           value={selectedProcessPresetId}

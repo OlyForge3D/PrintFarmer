@@ -79,7 +79,7 @@ export function AddManufacturerModal({
       <div className="space-y-4 p-4">
         {/* Manufacturer Name - Required */}
         <div>
-          <label htmlFor="mfg-name" className="block text-sm font-medium text-pf-text mb-1">
+          <label htmlFor="mfg-name" className="block text-sm font-medium text-pf-text-primary mb-1">
             Manufacturer Name <span className="text-red-500">*</span>
           </label>
           <Input
@@ -96,7 +96,7 @@ export function AddManufacturerModal({
 
         {/* Website URL - Optional */}
         <div>
-          <label htmlFor="mfg-url" className="block text-sm font-medium text-pf-text mb-1">
+          <label htmlFor="mfg-url" className="block text-sm font-medium text-pf-text-primary mb-1">
             Website URL <span className="text-xs text-pf-text-secondary">(optional)</span>
           </label>
           <Input
@@ -113,7 +113,7 @@ export function AddManufacturerModal({
 
         {/* Description - Optional */}
         <div>
-          <label htmlFor="mfg-desc" className="block text-sm font-medium text-pf-text mb-1">
+          <label htmlFor="mfg-desc" className="block text-sm font-medium text-pf-text-primary mb-1">
             Description <span className="text-xs text-pf-text-secondary">(optional)</span>
           </label>
           <Textarea

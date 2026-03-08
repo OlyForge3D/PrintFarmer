@@ -43,7 +43,7 @@ export const PrinterProfileSelector: React.FC<PrinterProfileSelectorProps> = ({
 }) => {
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3 ${className ?? ''}`}>
-      <label className="block text-sm font-semibold text-pf-text">Printer Profile</label>
+      <label className="block text-sm font-semibold text-pf-text-primary">Printer Profile</label>
       
       {/* Manufacturer Selection */}
       <div>

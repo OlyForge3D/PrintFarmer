@@ -29,7 +29,7 @@ const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, on
       w-10 h-10 flex items-center justify-center rounded-lg transition-colors p-0
       ${active 
         ? 'bg-pf-accent text-white shadow-lg' 
-        : 'bg-pf-bg-2 text-pf-text-secondary hover:bg-pf-bg-3 hover:text-pf-text'
+        : 'bg-pf-bg-2 text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
       }
       border border-pf-border hover:border-pf-accent
     `}

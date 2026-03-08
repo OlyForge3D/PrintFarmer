@@ -75,7 +75,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
             onClick={() => onWorkerSelect && onWorkerSelect(worker.id)}
             className={`
               border rounded p-3 cursor-pointer transition-all
-              ${isSelected ? 'border-pf-primary bg-pf-primary/5 ring-2 ring-pf-primary/20' : 'border-pf-border hover:border-pf-primary/50'}
+              ${isSelected ? 'border-pf-primary bg-pf-accent-bg/5 ring-2 ring-pf-primary/20' : 'border-pf-border hover:border-pf-primary/50'}
               ${!available && highlightAvailable ? 'opacity-60' : ''}
               ${onWorkerSelect ? 'hover:bg-pf-panel-hover' : ''}
             `}
@@ -111,7 +111,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
 
                   {showCapabilities && Array.isArray(worker.capabilities) && worker.capabilities.length > 0 && (
                     <div className="mt-2">
-                      <strong className="text-pf-text">Capabilities:</strong>{' '}
+                      <strong className="text-pf-text-primary">Capabilities:</strong>{' '}
                       <div className="flex flex-wrap gap-1 mt-1">
                         {worker.capabilities.map(cap => (
                           <span
@@ -146,7 +146,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
 
               {isSelected && (
                 <div className="ml-2">
-                  <div className="w-5 h-5 bg-pf-primary rounded-full flex items-center justify-center">
+                  <div className="w-5 h-5 bg-pf-accent-bg rounded-full flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
                       <path
                         fillRule="evenodd"

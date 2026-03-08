@@ -66,3 +66,20 @@
 - `src/Web/ReactApp/src/features/slicer/components/SlicerConfigModal.tsx` — Light-only hardcoded
 - `src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx` — 1,037-line God component
 - `src/Web/ReactApp/src/common/components/ui/Select.tsx` — Missing chevron icon
+
+### Ghost Token Sweep & SlicerConfigModal Fix (2026-03-10)
+- **Ghost tokens eliminated**: All 5 ghost token families purged across 47 files:
+  - `text-pf-text` (no suffix) → `text-pf-text-primary` — ~70 instances across 40+ files (slicer, statistics, fileBrowser, gcode, catalog, auth, maintenance, models3d, printers)
+  - `bg-pf-primary` → `bg-pf-accent-bg` — 11 instances (ExplorerView, WorkerSelector, StatisticsPage, Slider, TreeView, GridView, MaintenancePage)
+  - `bg-pf-surface` (no suffix) → `bg-pf-bg-1` — 20+ instances (slicer settings editors, gcode harvest, Slider, ColorPicker)
+  - `bg-pf-hover` → `bg-pf-bg-2` — 7 instances (ImportOfficialProfilesPage, HarvestWizard steps, AuditTimeline, IssuesList, StatisticsPage)
+  - `hover:bg-pf-bg-3` → `hover:bg-pf-bg-2` — 13 instances (SetupWizard, ModelViewer3D, SlicerLeftTools, HistoryFiltersBar, ContextMenu, ExplorerView, FileUpload, TaskCatalogTab)
+- **SlicerConfigModal** fully migrated from hardcoded light-theme colors to `pf-*` design tokens:
+  - All `bg-gray-*`, `text-gray-*`, `border-gray-*` replaced with semantic tokens
+  - `bg-blue-*` progress bar replaced with `bg-pf-accent`
+  - `bg-green-500`/`bg-red-500` status dots replaced with `bg-pf-success`/`bg-pf-error`
+  - Raw `<select>` → `Select`, `<input type="number/range">` → `Input`, `<input type="radio">` → `Radio`, `<input type="checkbox">` → `Checkbox`
+  - Removed `eslint-disable local/pf-no-raw-html-controls` pragma
+- **Lint**: 0 errors, 0 warnings after changes
+- **Tests**: 1,311/1,311 passing (all 118 test files green)
+- **Lesson**: `sed` with `find -name '*.tsx' -o -name '*.ts'` is safe for bulk token renames — 47 files fixed in seconds vs. manual editing

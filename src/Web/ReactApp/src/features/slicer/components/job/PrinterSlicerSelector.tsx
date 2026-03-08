@@ -84,16 +84,16 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
 
   return (
     <div className={className ?? ''}>
-      <label className="block text-sm font-semibold text-pf-text mb-2">
+      <label className="block text-sm font-semibold text-pf-text-primary mb-2">
         Printer
       </label>
       
       {isLoading ? (
-        <div className="p-3 bg-pf-surface rounded-lg text-pf-text-muted">
+        <div className="p-3 bg-pf-bg-1 rounded-lg text-pf-text-muted">
           Loading printers...
         </div>
       ) : printers.length === 0 ? (
-        <div className="text-sm text-pf-text-muted p-2 bg-pf-surface rounded-sm">
+        <div className="text-sm text-pf-text-muted p-2 bg-pf-bg-1 rounded-sm">
           No printers configured. <a href="/printers" className="text-pf-primary hover:underline">Add a printer</a> to get started.
         </div>
       ) : (
@@ -121,7 +121,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                 {/* Printer info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-pf-text truncate">
+                    <span className="font-medium text-pf-text-primary truncate">
                       {selectedPrinter.name}
                     </span>
                     {selectedPrinter.isOnline !== undefined && (

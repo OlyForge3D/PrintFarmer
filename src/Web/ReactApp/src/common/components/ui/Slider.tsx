@@ -57,7 +57,7 @@ export const Slider: React.FC<SliderProps> = ({
       aria-labelledby={ariaLabelledby}
       className={clsx(
         'w-full h-2 rounded-lg appearance-none cursor-pointer',
-        'bg-pf-surface',
+        'bg-pf-bg-1',
         'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:ring-offset-2 focus:ring-offset-pf-bg-0',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         // Custom thumb styling
@@ -65,7 +65,7 @@ export const Slider: React.FC<SliderProps> = ({
         '[&::-webkit-slider-thumb]:w-4',
         '[&::-webkit-slider-thumb]:h-4',
         '[&::-webkit-slider-thumb]:rounded-full',
-        '[&::-webkit-slider-thumb]:bg-pf-primary',
+        '[&::-webkit-slider-thumb]:bg-pf-accent-bg',
         '[&::-webkit-slider-thumb]:cursor-pointer',
         '[&::-webkit-slider-thumb]:transition-transform',
         '[&::-webkit-slider-thumb]:hover:scale-110',
@@ -74,7 +74,7 @@ export const Slider: React.FC<SliderProps> = ({
         '[&::-moz-range-thumb]:w-4',
         '[&::-moz-range-thumb]:h-4',
         '[&::-moz-range-thumb]:rounded-full',
-        '[&::-moz-range-thumb]:bg-pf-primary',
+        '[&::-moz-range-thumb]:bg-pf-accent-bg',
         '[&::-moz-range-thumb]:border-0',
         '[&::-moz-range-thumb]:cursor-pointer',
         // Track styling

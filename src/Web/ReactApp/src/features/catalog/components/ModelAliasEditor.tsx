@@ -190,7 +190,7 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
                       alias.isNew ? 'bg-green-500/10 border border-green-500/30' : 'bg-pf-bg-secondary'
                     }`}
                   >
-                    <span className="text-sm text-pf-text">
+                    <span className="text-sm text-pf-text-primary">
                       {alias.slicerModelName}
                       {alias.isNew && <span className="ml-2 text-xs text-green-500">(new)</span>}
                     </span>
@@ -220,7 +220,7 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
 
       {/* Add New Alias */}
       <div className="border-t border-pf-border pt-4">
-        <div className="text-sm font-medium text-pf-text mb-2">Add New Alias</div>
+        <div className="text-sm font-medium text-pf-text-primary mb-2">Add New Alias</div>
         <div className="flex gap-2">
           <Select
             value={newSlicerType}

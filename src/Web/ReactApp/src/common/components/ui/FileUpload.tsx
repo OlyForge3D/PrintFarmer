@@ -157,7 +157,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
         px-4 py-2 rounded-lg font-medium
         bg-pf-bg-2 text-pf-text-primary
         border border-pf-border
-        hover:bg-pf-bg-3 active:bg-pf-bg-1
+        hover:bg-pf-bg-2 active:bg-pf-bg-1
         focus:outline-hidden focus:ring-2 focus:ring-pf-accent
         disabled:opacity-50 disabled:cursor-not-allowed
         transition-colors duration-150
