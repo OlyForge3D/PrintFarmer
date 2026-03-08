@@ -364,6 +364,154 @@ Full design document: `.squad/decisions/inbox/dallas-location-hierarchy-design.m
 
 ---
 
+### 18. Design System Documentation (Complete Reference)
+
+**Author:** Ash (Documentation Specialist)  
+**Date:** 2026-03-08  
+**Status:** ✅ COMPLETED — Comprehensive design system reference delivered
+
+**Deliverable:** `docs/DESIGN_SYSTEM.md` — 7,500+ word reference guide
+
+**Content Coverage:**
+- **40+ React Components** with complete prop interfaces (Button, Input, Select, FormField, Card, Badge, Spinner, DataTable, Tabs, Alert, Toggle, FileUpload, Modal, PageTemplate, Icons)
+- **70+ CSS Custom Properties** documented with usage (color tokens, state tokens, contrast ratios)
+- **3 Theme Variants** (GitHub Dark, PrintFarmer Dark, Light) with dynamic switching mechanism
+- **WCAG 2.2 Level AA Compliance** documented (4.5:1 contrast, keyboard navigation, screen reader support)
+- **25+ Complete Code Examples** showing real-world usage patterns
+- **Best Practices & Troubleshooting** guide
+
+**Three-Layer Design System Architecture:**
+```
+CSS Variables (--pf-*) 
+  ↓
+Tailwind Utilities (bg-pf-*, text-pf-*)
+  ↓
+React Components (Button, Input, etc.)
+```
+
+**Theme Architecture:**
+- Dynamic switching via `data-theme` attribute (no rebuild required)
+- Fallback system for unsupported browsers
+- CSS variable override mechanism for custom themes
+
+**Key Sections:**
+1. Component Reference (Button variants, form controls, data presentation, modals)
+2. Design Token System (color, state, contrast tokens)
+3. Theme Architecture (switching, customization)
+4. Accessibility Integration (WCAG guidelines, keyboard patterns, screen reader support)
+5. Best Practices (Do's/Don'ts, form validation, troubleshooting)
+
+**Impact on Workflow:**
+- Developers: No more guessing component props; color consistency; accessibility guidance
+- New Features: Reference design system before creating components; follow three-layer pattern
+- Code Review: Link to DESIGN_SYSTEM.md for consistency; catch accessibility issues via documented criteria
+
+**Related Updates:**
+- `README.md` — Added design system link
+- `.squad/agents/ash/history.md` — Architecture insights and learnings
+
+**Quality Metrics:**
+| Metric | Value |
+|--------|-------|
+| Content Length | 7,500+ words |
+| Code Examples | 25+ |
+| Components Documented | 40/40 |
+| CSS Variables | 70+ |
+| Themes | 3 (with full specs) |
+| WCAG Compliance | Level AA verified |
+
+---
+
+### 19. AI Failure Detection & Business Analytics Roadmap (3-Phase Strategic Plan)
+
+**Author:** Brett (Researcher)  
+**Date:** 2026-03-08  
+**Status:** PROPOSED — Awaiting team review and prioritization
+
+**Problem Statement:**
+PrintFarmer lacks two competitive features preventing mainstream adoption:
+1. **AI Print Failure Detection** — Every commercial competitor has it; #1 user complaint
+2. **Business Analytics** — Farms need cost tracking, ROI justification, profitability insights
+
+**Market Impact:**
+- Current position: Niche tool for technical teams
+- With roadmap: Viable enterprise alternative to SimplyPrint/3DPrinterOS
+- Estimated market expansion: 10x (makers/developers → farms/enterprises)
+
+**Competitive Analysis:**
+10 competitors analyzed (SimplyPrint, 3DPrinterOS, Obico, Octoeverywhere, Creality Cloud, etc.). PrintFarmer's unique position: only self-hosted, multi-backend, subscription-free.
+
+**Phase 1: Quick Wins (1-2 sprints, LOW effort, HIGH impact)**
+
+| Feature | Effort | Impact | Owner | Timeline |
+|---------|--------|--------|-------|----------|
+| Obico Integration | LOW | HIGH | Lambert + Ripley | 3 days |
+| Basic Analytics | MEDIUM | HIGH | Lambert + Ripley | 5 days |
+| PWA + Notifications | LOW | MEDIUM | Ripley | 2-3 days |
+| **TOTAL** | **MEDIUM** | **HIGH** | | **1-2 sprints** |
+
+**1.1 Obico Integration** (3 days)
+- Optional third-party AI failure detection
+- API webhook integration for camera events
+- Non-breaking, optional feature
+- No cloud lock-in (Obico is also self-hosted)
+
+**1.2 Basic Analytics Dashboard** (5 days)
+- Cost-per-print tracking
+- Fleet KPI dashboard (success rate, utilization, uptime)
+- New `PrinterCostConfig` table
+- Converts PrintFarmer from monitoring tool to business tool
+
+**1.3 PWA Offline Support + Mobile Notifications** (2-3 days)
+- Mobile app installation (one-tap)
+- Cached dashboard for offline viewing
+- Push notifications for critical events
+
+**Phase 2: Core Features (2-4 sprints, MEDIUM effort, HIGH impact)**
+- Self-hosted AI failure detection (YOLO-based, no cloud dependency)
+- Enterprise-grade analytics (advanced reporting, scheduled reports, custom dashboards)
+- Print troubleshooting system (automated diagnostics, failure pattern analysis)
+
+**Phase 3: Enterprise Features (4+ sprints, HIGH effort, VERY HIGH impact)**
+- Predictive maintenance (failure prediction, component lifecycle tracking)
+- Advanced cost analytics (electricity consumption, material waste, labor allocation)
+- Integration ecosystem (slicing service integrations, ERP connectors, subscription APIs)
+
+**Key Strategic Decisions:**
+
+**Obico Integration (vs. Self-Hosted AI)**
+- Rationale: Phase 1 quick win unblocks users without major rebuild
+- Benefits: No cloud lock-in, users can skip, optional feature
+- Follow-up: Phase 2 adds self-hosted option for enterprises
+
+**Analytics Foundation**
+- Rationale: Converts monitoring tool to business tool
+- Data Source: Existing `PrintJobHistory` + new `PrinterCostConfig` table
+- Justification: Enables farm operators to justify budgets and ROI
+
+**PWA Over Native Apps**
+- Rationale: Mobile without iOS/Android overhead
+- Benefits: Service worker caching, offline support, push notifications
+- Cost: LOW effort, immediate mobile availability
+
+**Competitive Advantages (Post-Roadmap):**
+- Self-hosted, multi-backend, subscription-free (still unique)
+- AI failure detection (with Phase 1, parity with competitors)
+- Business analytics (Phase 1 differentiator over Obico)
+- Location hierarchy with arbitrary depth + user-defined types (unique)
+
+**Next Steps:**
+1. Team review and prioritization decision
+2. Resource planning and sprint assignment
+3. Optional Phase 1 prototype (Obico integration proof-of-concept)
+4. Decision gate before Phase 2
+
+**Files:**
+- `docs/COMPETITIVE_ANALYSIS.md` — Full market analysis (10 competitors)
+- `.squad/decisions/inbox/brett-roadmap-ai-analytics.md` — Complete roadmap details
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

@@ -107,3 +107,18 @@
 - Uses .NET 10.0.* with rollForward strategy
 - Frontend: React 19, Vite, TanStack React Query, Tailwind CSS v4
 - 51 comprehensive markdown docs exist in docs/ directory
+
+### Orchestration & Decision Integration (2026-03-08)
+
+**Status:** ✅ Orchestration logs created, decisions merged into squad decisions.md
+
+**Work Completed:**
+- Created `.squad/orchestration-log/2026-03-08T02-03-11Z-ash.md` documenting design system documentation task completion
+- Merged Ash's design system decision from inbox into main decisions.md (Decision #18)
+- Updated squad decision governance with design system as Decision #18
+
+**Impact on Team:**
+- Design system documentation now discoverable in squad decisions for future reference
+- Architecture decisions (three-layer design system, WCAG compliance, dynamic theming) synthesized and centralized
+- Team standard established: design system documentation is architectural decision, not just content update
+
