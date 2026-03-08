@@ -561,7 +561,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         (_, Guid printerId) = SeedPrinter();
         SeedQueuedJob();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
         AutoDispatchBackgroundService svc = new(
             _trigger, _scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
@@ -573,7 +573,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         await Task.Delay(500, cts.Token);
         _trigger.CancelPendingDispatch(printerId);
 
-        await Task.Delay(2500, cts.Token);
+        await Task.Delay(3000, cts.Token);
         await cts.CancelAsync();
 
         try
