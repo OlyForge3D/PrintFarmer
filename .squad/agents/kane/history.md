@@ -33,3 +33,10 @@
 - EmptyState already existed; tests complement existing `__tests__/EmptyState.test.tsx`
 
 **Status:** All 27 tests passing. Full React suite: 1233/1233 green. Zero regressions.
+
+### Batch 2 Consolidation (2026-03-11)
+- **Beads tracked:** PFarm1-xsg (token sweep), PFarm1-y4b (EmptyState), PFarm1-3mn (StatisticsPage)
+- **Test strategy:** Regression guards (token-compliance.test.tsx) proactively scan for color pattern violations in critical components
+- **Validation coverage:** Tests cover both rendered output (accessibility, structure) and source code patterns (design token enforcement)
+- **Future scale:** token-compliance.test.tsx pattern scalable to additional components as codebase grows
+- **Lessons:** Parameterized tests with `describe.each` highly efficient for scanning multiple files with same pattern checks
