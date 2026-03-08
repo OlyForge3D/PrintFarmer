@@ -110,15 +110,6 @@ public static class SpoolmanJsonParser
 
         // In-use/active detection
         bool? inUse = TryGetBool(el, "in_use", "is_active", "active", "selected");
-        if (!inUse.HasValue)
-        {
-            // Some schemas use archived=false to indicate active
-            bool? archived = TryGetBool(el, "archived");
-            if (archived.HasValue)
-            {
-                inUse = !archived.Value;
-            }
-        }
 
         // Extended numeric fields (weight/length)
         double? initialWeight = TryGetDoubleNullable(el, "initial_weight", "initial_weight_g", "initial_weight_grams");
