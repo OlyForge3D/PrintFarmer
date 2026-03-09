@@ -22,6 +22,9 @@ export interface JobDetailsSectionProps {
     filamentName?: string;
     filamentVendor?: string;
     filamentColor?: string;
+    // Multi-copy support
+    copies?: number;
+    completedCopies?: number;
   };
   isEditing: boolean;
   onFieldChange: (field: keyof JobDetailsSectionProps['jobDetails'], value: string | number | undefined) => void;
@@ -58,6 +61,30 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
       }
     },
     [validatePriority, onFieldChange]
+  );
+
+  const handleCopiesChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = parseInt(e.target.value, 10);
+      if (isNaN(value)) return;
+      const minCopies = jobDetails.completedCopies ?? 0;
+      if (value < Math.max(1, minCopies)) {
+        setErrors((prev) => ({
+          ...prev,
+          copies: minCopies > 1
+            ? `Copies must be at least ${minCopies} (already completed)`
+            : 'Copies must be at least 1',
+        }));
+        return;
+      }
+      setErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors.copies;
+        return newErrors;
+      });
+      onFieldChange('copies', value);
+    },
+    [onFieldChange, jobDetails.completedCopies]
   );
 
   const handleNameChange = useCallback(
@@ -215,6 +242,33 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
             )}
           </div>
 
+          <div className="space-y-1.5">
+            <label htmlFor="job-copies" className="block text-sm font-medium text-pf-text-secondary">
+              Copies
+              {(jobDetails.completedCopies ?? 0) > 0 && (
+                <span className="ml-1 text-xs text-pf-text-muted">
+                  ({jobDetails.completedCopies} completed)
+                </span>
+              )}
+            </label>
+            <input
+              id="job-copies"
+              type="number"
+              min={Math.max(1, jobDetails.completedCopies ?? 0)}
+              value={jobDetails.copies ?? 1}
+              onChange={handleCopiesChange}
+              placeholder="Number of copies"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
+              aria-invalid={!!errors.copies}
+              aria-describedby={errors.copies ? 'copies-error' : undefined}
+            />
+            {errors.copies && (
+              <span id="copies-error" className="text-xs text-pf-error" role="alert">
+                {errors.copies}
+              </span>
+            )}
+          </div>
+
 
         </fieldset>
       </div>
@@ -279,9 +333,19 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
             )}
           </dd>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-center py-2">
+        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
           <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Nozzle Diameter</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{nozzleDiameter ? `${nozzleDiameter}mm` : <span className="text-pf-text-muted italic">Not specified</span>}</dd>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center py-2">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Copies</dt>
+          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">
+            {(jobDetails.copies ?? 1) > 1 ? (
+              <span className="font-medium">{jobDetails.completedCopies ?? 0} / {jobDetails.copies}</span>
+            ) : (
+              <span>1</span>
+            )}
+          </dd>
         </div>
       </dl>
     </div>

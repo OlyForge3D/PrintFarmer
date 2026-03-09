@@ -103,6 +103,9 @@ export interface JobDetails {
   actualCost?: number;
   // Thumbnail
   thumbnailUrl?: string;
+  // Multi-copy
+  copies?: number;
+  completedCopies?: number;
 }
 
 
