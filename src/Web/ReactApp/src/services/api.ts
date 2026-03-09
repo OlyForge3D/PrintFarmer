@@ -829,7 +829,9 @@ export class ApiClient {
       if (err && typeof err === 'object' && 'response' in err) {
         const axiosErr = err as { response?: { status?: number } };
         if (axiosErr.response?.status === 404) {
-          throw new Error('Spoolman is not available for this printer. Only Moonraker-based printers with Spoolman configured are supported.', { cause: err });
+          // Backend doesn't support per-printer Spoolman — fall back to central inventory
+          const result = await this.getSpools({ limit: 500 });
+          return result.items;
         }
       }
       throw err;
