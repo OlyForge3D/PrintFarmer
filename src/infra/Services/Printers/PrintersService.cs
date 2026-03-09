@@ -63,6 +63,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="statusCache">Cache reader for SignalR-updated status</param>
 /// <param name="locationService">Service for location management</param>
 /// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
+/// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -76,7 +77,8 @@ public class PrintersService(
     IPrinterStatusClientFactory statusClientFactory,
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
     Farm.Infrastructure.Services.Locations.ILocationService locationService,
-    Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector) : IPrintersService
+    Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
+    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
@@ -90,6 +92,7 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _statusCache = statusCache ?? throw new ArgumentNullException(nameof(statusCache));
     private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
+    private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
 
     /// <summary>
     /// Gets the appropriate backend client for a printer based on its backend type.
@@ -446,28 +449,24 @@ public class PrintersService(
 #pragma warning disable CS8603
     private async Task<PrinterDto> GetStatusDtoInternalAsync(Printer p, CancellationToken ct)
     {
+        PrinterDto dto;
         try
         {
-            // Delegate to the appropriate backend status client
-            // Each backend client is responsible for:
-            // - Retrieving typed status from its backend
-            // - Handling circuit breaker and timeouts
-            // - Building the complete PrinterDto
-            // - Backend-specific integrations (e.g., Moonraker spoolman)
             IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
-            return await statusClient.GetPrinterDtoAsync(p, ct);
+            dto = await statusClient.GetPrinterDtoAsync(p, ct);
         }
         catch (ArgumentException)
         {
-            // Unsupported backend type
             _logger.LogWarning("Unsupported printer backend {PBackend} for printer {PId}", p.Backend, p.Id);
-            return CreateOfflinePrinterDto(p);
+            dto = CreateOfflinePrinterDto(p);
         }
         catch (Exception ex)
         {
             _logger.LogWarning("Failed to get DTO for printer {PId}: {Message}", p.Id, ex.Message);
-            return CreateOfflinePrinterDto(p);
+            dto = CreateOfflinePrinterDto(p);
         }
+
+        return await EnrichWithDbSpoolInfoAsync(dto, p, ct);
     }
 #pragma warning restore CS8603
 
@@ -539,14 +538,16 @@ public class PrintersService(
         try
         {
             IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
-            return await statusClient.GetPrinterDtoAsync(p, ct);
+            PrinterDto dto = await statusClient.GetPrinterDtoAsync(p, ct);
+            return await EnrichWithDbSpoolInfoAsync(dto, p, ct);
         }
         catch (Exception ex)
         {
             // Log and return an offline/fallback DTO so that write operations (assign/unassign)
             // don't surface transient backend errors as 500 to the client.
             _logger.LogWarning(ex, "Failed to retrieve status for printer {PId}", p.Id);
-            return CreateOfflinePrinterDto(p);
+            PrinterDto offline = CreateOfflinePrinterDto(p);
+            return await EnrichWithDbSpoolInfoAsync(offline, p, ct);
         }
     }
 
@@ -1263,6 +1264,49 @@ public class PrintersService(
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description));
+    }
+
+    /// <summary>
+    /// Enriches a printer DTO with spool info from the DB when the backend didn't provide it.
+    /// The database is the source of truth for spool assignments — backends may fail to sync.
+    /// </summary>
+    private async Task<PrinterDto> EnrichWithDbSpoolInfoAsync(PrinterDto dto, Printer printer, CancellationToken ct)
+    {
+        if (dto.SpoolInfo?.HasActiveSpool == true)
+        {
+            return dto; // Backend already provided spool info
+        }
+
+        if (printer.CurrentSpoolId is not { } spoolId)
+        {
+            return dto; // No spool assigned in DB either
+        }
+
+        try
+        {
+            SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+            if (spool is null)
+            {
+                return dto;
+            }
+
+            var spoolInfo = new PrinterSpoolInfoDto(
+                HasActiveSpool: true,
+                ActiveSpoolId: spoolId,
+                SpoolName: spool.FilamentName,
+                Material: spool.Material,
+                ColorHex: spool.ColorHex != null ? (spool.ColorHex.StartsWith('#') ? spool.ColorHex : $"#{spool.ColorHex}") : null,
+                FilamentName: spool.FilamentName,
+                Vendor: spool.Vendor,
+                RemainingWeightG: spool.RemainingWeightG);
+
+            return dto with { SpoolInfo = spoolInfo };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to enrich printer {PId} with DB spool info for spool {SpoolId}", printer.Id, spoolId);
+            return dto;
+        }
     }
 
     /// <summary>
