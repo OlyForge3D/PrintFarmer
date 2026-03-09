@@ -2755,6 +2755,15 @@ export class ApiClient {
   }
 
   /**
+   * Gets material names that have at least one non-empty spool in inventory.
+   * Used by the spool picker to show only selectable materials.
+   */
+  async getAvailableMaterials(): Promise<string[]> {
+    const response = await this.client.get('/spoolman/materials/available');
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  /**
    * Bulk-update multiple filaments in Spoolman.
    * Only non-null fields are applied.
    */
