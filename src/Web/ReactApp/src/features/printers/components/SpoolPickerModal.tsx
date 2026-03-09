@@ -1,17 +1,17 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, startTransition } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, startTransition } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
-import { RefreshIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
+import { RefreshIcon, SearchIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
+import { SpoolIcon } from '@/common/components/icons/SpoolIcon';
 import { apiClient } from '@/services/api';
 import type { SpoolmanSpool } from '@/types/api';
+import clsx from 'clsx';
 
 interface SpoolPickerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelect: (spoolId: number, spool: SpoolmanSpool) => void;
-  /** Printer ID — spools are fetched through this printer's backend proxy */
   printerId: string;
-  /** Currently active spool ID (to highlight it) */
   activeSpoolId?: number;
 }
 
@@ -26,20 +26,35 @@ function formatDate(dateStr: string | null | undefined): string {
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Yesterday';
-  return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: 'numeric' });
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function formatWeight(spool: SpoolmanSpool): string {
+function formatWeight(spool: SpoolmanSpool): { remaining: string; percentage: number | null } {
   const remaining = spool.remainingWeightG;
   const initial = spool.initialWeightG;
-  if (remaining == null) return '—';
-  const initStr = initial != null ? ` / ${Math.round(initial / 1000)}kg` : '';
-  return `${Math.round(remaining)}g${initStr}`;
+  if (remaining == null) return { remaining: '—', percentage: null };
+  const pct = initial != null && initial > 0 ? Math.round((remaining / initial) * 100) : null;
+  return { remaining: `${Math.round(remaining)}g`, percentage: pct };
+}
+
+function getWeightColor(pct: number | null): string {
+  if (pct === null) return 'text-pf-text-tertiary';
+  if (pct > 50) return 'text-emerald-400';
+  if (pct > 20) return 'text-amber-400';
+  return 'text-red-400';
+}
+
+function getWeightBarColor(pct: number | null): string {
+  if (pct === null) return 'bg-pf-text-tertiary/20';
+  if (pct > 50) return 'bg-emerald-500';
+  if (pct > 20) return 'bg-amber-500';
+  return 'bg-red-500';
 }
 
 /**
  * Modal for selecting a spool from the Spoolman inventory.
- * Shows a searchable, sortable list of available spools.
+ * Shows a searchable, sortable list of available spools with rich visual cards.
  */
 export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeSpoolId }: SpoolPickerModalProps) {
   const [spools, setSpools] = useState<SpoolmanSpool[]>([]);
@@ -49,6 +64,7 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
   const [sortField, setSortField] = useState<SortField>('lastUsed');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const requestIdRef = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const loadSpools = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -56,25 +72,16 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
     setError(null);
     try {
       const data = await apiClient.getPrinterSpools(printerId);
-
-      if (requestId !== requestIdRef.current) {
-        return;
-      }
-
+      if (requestId !== requestIdRef.current) return;
       startTransition(() => {
         setSpools(Array.isArray(data) ? data : []);
       });
     } catch (err) {
-      if (requestId !== requestIdRef.current) {
-        return;
-      }
-
+      if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load spools');
       setSpools([]);
     } finally {
-      if (requestId === requestIdRef.current) {
-        setLoading(false);
-      }
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [printerId]);
 
@@ -82,13 +89,13 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
     if (isOpen) {
       void loadSpools();
       setSearch('');
+      setTimeout(() => searchInputRef.current?.focus(), 100);
     }
   }, [isOpen, loadSpools]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     const list = spools.filter(s => {
-      // Exclude archived and empty spools
       if (s.archived) return false;
       if (!q) return true;
       const searchable = [
@@ -132,9 +139,16 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
   };
 
   const sortIndicator = (field: SortField) => {
-    if (sortField !== field) return null;
+    if (sortField !== field) return '';
     return sortDir === 'asc' ? ' ↑' : ' ↓';
   };
+
+  const sortOptions: { field: SortField; label: string }[] = [
+    { field: 'lastUsed', label: 'Recent' },
+    { field: 'name', label: 'Name' },
+    { field: 'material', label: 'Material' },
+    { field: 'weight', label: 'Weight' },
+  ];
 
   return (
     <Modal
@@ -144,20 +158,21 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
       size="lg"
       closeOnBackdrop
       closeOnEscape
-      titleIcon={<span className="text-pf-text-secondary text-lg">⊙</span>}
+      titleIcon={<SpoolIcon size={22} fillColor="#6366f1" />}
     >
-      {/* Search + Refresh row */}
+      {/* Search + Sort + Refresh toolbar */}
       <div className="flex items-center gap-2 mb-4">
-        <div className="relative flex-1 max-w-xs">
+        <div className="relative flex-1">
           <input
+            ref={searchInputRef}
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search"
-            className="w-full bg-pf-bg-0 border border-pf-border rounded-md px-3 py-1.5 pr-8 text-sm text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:border-pf-accent"
+            placeholder="Search by name, vendor, material..."
+            className="w-full bg-pf-bg-0 border border-pf-border rounded-lg px-3 py-2 pl-9 text-sm text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition-all"
             aria-label="Search spools"
           />
-          <SearchIcon className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-pf-text-tertiary pointer-events-none" />
+          <SearchIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-pf-text-tertiary pointer-events-none" />
         </div>
         <Button
           variant="subtle"
@@ -165,93 +180,156 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
           onClick={loadSpools}
           disabled={loading}
           aria-label="Refresh spool list"
+          className="shrink-0"
         >
-          <RefreshIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshIcon className={clsx('w-4 h-4', loading && 'animate-spin')} />
         </Button>
+      </div>
+
+      {/* Sort pills */}
+      <div className="flex items-center gap-1.5 mb-3">
+        <span className="text-[10px] uppercase tracking-widest text-pf-text-tertiary mr-1">Sort</span>
+        {sortOptions.map(opt => (
+          <Button
+            key={opt.field}
+            variant="unstyled"
+            onClick={() => handleSort(opt.field)}
+            className={clsx(
+              'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+              sortField === opt.field
+                ? 'bg-pf-accent/15 text-pf-accent border border-pf-accent/30'
+                : 'text-pf-text-tertiary hover:text-pf-text-secondary hover:bg-pf-bg-2 border border-transparent'
+            )}
+          >
+            {opt.label}{sortIndicator(opt.field)}
+          </Button>
+        ))}
       </div>
 
       {error && (
-        <div className="text-pf-error text-sm mb-3">{error}</div>
+        <div className="text-pf-error text-sm mb-3 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+          {error}
+        </div>
       )}
 
-      {/* Table header */}
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-2 pb-2 text-xs text-pf-text-secondary border-b border-pf-border">
-        <Button variant="unstyled" onClick={() => handleSort('name')} className="text-left hover:text-pf-text-primary cursor-pointer">
-          Filament{sortIndicator('name')}
-        </Button>
-        <Button variant="unstyled" onClick={() => handleSort('material')} className="text-center hover:text-pf-text-primary cursor-pointer w-16">
-          Material{sortIndicator('material')}
-        </Button>
-        <Button variant="unstyled" onClick={() => handleSort('lastUsed')} className="text-center hover:text-pf-text-primary cursor-pointer w-24">
-          Last Used{sortIndicator('lastUsed')}
-        </Button>
-        <Button variant="unstyled" onClick={() => handleSort('weight')} className="text-right hover:text-pf-text-primary cursor-pointer w-20">
-          Weight{sortIndicator('weight')}
-        </Button>
-      </div>
-
       {/* Spool list */}
-      <div className="max-h-[50vh] overflow-y-auto">
+      <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1 space-y-1.5">
         {loading && spools.length === 0 && (
-          <div className="text-center py-8 text-pf-text-tertiary text-sm">Loading spools...</div>
+          <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <RefreshIcon className="w-6 h-6 text-pf-text-tertiary animate-spin" />
+            <span className="text-sm text-pf-text-tertiary">Loading spools...</span>
+          </div>
         )}
         {!loading && filtered.length === 0 && (
-          <div className="text-center py-8 text-pf-text-tertiary text-sm">
-            {search ? 'No spools match your search' : 'No spools available'}
+          <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <SpoolIcon size={48} className="opacity-20" />
+            <span className="text-sm text-pf-text-tertiary">
+              {search ? 'No spools match your search' : 'No spools available'}
+            </span>
           </div>
         )}
         {filtered.map(spool => {
           const isActive = spool.id === activeSpoolId;
           const displayName = spool.filamentName ?? spool.name ?? 'Unknown';
           const spoolNumber = `#${String(spool.id).padStart(3, '0')}`;
+          const weight = formatWeight(spool);
 
           return (
             <Button
               key={spool.id}
               variant="unstyled"
               onClick={() => onSelect(spool.id, spool)}
-              className={`w-full grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center px-2 py-2.5 text-left transition-colors cursor-pointer ${
+              className={clsx(
+                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all group',
                 isActive
-                  ? 'bg-pf-accent/20 border-l-2 border-pf-accent'
-                  : 'hover:bg-pf-bg-2 border-l-2 border-transparent'
-              }`}
+                  ? 'bg-pf-accent/10 ring-1 ring-pf-accent/40'
+                  : 'hover:bg-pf-bg-2/80 ring-1 ring-transparent hover:ring-pf-border'
+              )}
               aria-label={`Select spool ${spoolNumber} ${displayName}`}
             >
-              {/* Filament info */}
-              <div className="flex items-center gap-2.5 min-w-0">
-                {/* Color swatch */}
-                <div
-                  className="w-8 h-8 rounded-full border border-pf-border shrink-0"
-                  style={{ backgroundColor: spool.colorHex ?? '#555' }}
-                />
-                <div className="min-w-0">
-                  <div className="text-[10px] text-pf-text-tertiary">
-                    {spoolNumber}{spool.vendor ? ` | ${spool.vendor}` : ''}
+              {/* Spool icon with filament color */}
+              <div className="relative shrink-0">
+                <SpoolIcon size={40} fillColor={spool.colorHex ?? undefined} />
+                {isActive && (
+                  <div className="absolute -top-1 -right-1 w-4.5 h-4.5 bg-pf-accent rounded-full flex items-center justify-center ring-2 ring-pf-bg-1">
+                    <CheckIcon className="w-3 h-3 text-white" />
                   </div>
-                  <div className="text-sm font-medium text-pf-text-primary truncate">
+                )}
+              </div>
+
+              {/* Info block */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-medium text-pf-text-primary truncate">
                     {displayName}
-                  </div>
+                  </span>
+                  {spool.material && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-pf-text-tertiary bg-pf-bg-2 px-1.5 py-0.5 rounded shrink-0">
+                      {spool.material}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[10px] text-pf-text-tertiary">
+                    {spoolNumber}
+                  </span>
+                  {spool.vendor && (
+                    <>
+                      <span className="text-pf-text-tertiary/30 text-[10px]">·</span>
+                      <span className="text-[10px] text-pf-text-tertiary truncate">
+                        {spool.vendor}
+                      </span>
+                    </>
+                  )}
+                  {spool.lastUsedAt && (
+                    <>
+                      <span className="text-pf-text-tertiary/30 text-[10px]">·</span>
+                      <span className="text-[10px] text-pf-text-tertiary">
+                        {formatDate(spool.lastUsedAt)}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Material */}
-              <div className="text-xs text-pf-text-secondary w-16 text-center">
-                {spool.material ?? '—'}
-              </div>
-
-              {/* Last used */}
-              <div className="text-xs text-pf-text-secondary w-24 text-center">
-                {formatDate(spool.lastUsedAt)}
-              </div>
-
-              {/* Weight */}
-              <div className="text-xs text-pf-text-primary font-medium w-20 text-right">
-                {formatWeight(spool)}
+              {/* Weight indicator */}
+              <div className="shrink-0 flex flex-col items-end gap-1 min-w-[60px]">
+                <span className={clsx('text-xs font-semibold tabular-nums', getWeightColor(weight.percentage))}>
+                  {weight.remaining}
+                </span>
+                {weight.percentage !== null && (
+                  <div className="w-12 h-1 rounded-full bg-pf-bg-2 overflow-hidden">
+                    <div
+                      className={clsx('h-full rounded-full transition-all', getWeightBarColor(weight.percentage))}
+                      style={{ width: `${Math.max(2, weight.percentage)}%` }}
+                    />
+                  </div>
+                )}
               </div>
             </Button>
           );
         })}
       </div>
+
+      {/* Footer summary */}
+      {!loading && filtered.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-pf-border/50 flex items-center justify-between">
+          <span className="text-[10px] text-pf-text-tertiary uppercase tracking-wider">
+            {filtered.length} spool{filtered.length !== 1 ? 's' : ''}
+            {search && ` matching "${search}"`}
+          </span>
+          {activeSpoolId && (
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => onSelect(0, {} as SpoolmanSpool)}
+              className="text-xs"
+            >
+              Eject current spool
+            </Button>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }
