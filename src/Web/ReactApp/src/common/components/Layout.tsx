@@ -151,6 +151,12 @@ const navigation: NavigationElement[] = [
   // — Admin —
   { name: 'Admin', isSectionHeader: true, requiredRole: 'farm_admin' },
   {
+    name: 'Printer Groups',
+    href: '/printer-groups',
+    icon: PrinterIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
     name: 'Locations',
     href: '/locations',
     icon: LocationIcon,

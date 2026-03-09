@@ -106,11 +106,13 @@ bool slicerEnabled = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") !
 var arch = RuntimeInformation.ProcessArchitecture;
 bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
 bool modelFilesEnabled = builder.Configuration.GetValue("Platform:ModelFilesEnabled", true);
+bool thumbnailEnabled = builder.Configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
 
 if (isArm)
 {
     var modelFilesExplicit = builder.Configuration.GetSection("Platform:ModelFilesEnabled").Value;
     var slicerExplicit = builder.Configuration.GetSection("Slicer:Enabled").Value;
+    var thumbnailExplicit = builder.Configuration.GetSection("Platform:ThumbnailGenerationEnabled").Value;
 
     if (modelFilesExplicit is null)
     {
@@ -121,6 +123,11 @@ if (isArm)
     {
         slicerEnabled = false;
     }
+
+    if (thumbnailExplicit is null)
+    {
+        thumbnailEnabled = false;
+    }
 }
 else
 {
@@ -129,6 +136,12 @@ else
     slicerEnabled = slicerEnabled && slicerConfigEnabled;
     modelFilesEnabled = builder.Configuration.GetValue("Platform:ModelFilesEnabled", true);
 }
+
+// Write resolved capability values back to configuration so downstream consumers
+// (e.g. SystemCapabilitiesController) read the single source of truth.
+builder.Configuration["Slicer:Enabled"] = slicerEnabled.ToString();
+builder.Configuration["Platform:ModelFilesEnabled"] = modelFilesEnabled.ToString();
+builder.Configuration["Platform:ThumbnailGenerationEnabled"] = thumbnailEnabled.ToString();
 
 // When slicer is disabled, cross-module consumers use = null default parameter values.
 // .NET DI's ActivatorUtilities skips unregistered services that have default values.
