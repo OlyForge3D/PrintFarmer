@@ -711,6 +711,59 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
     private sealed record MaterialPageFetchResult(List<SpoolmanMaterialDto> Items, bool Success, int AttemptedPages, HttpStatusCode? LastStatusCode);
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> GetAvailableMaterialsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug("Spoolman not configured – returning empty available materials list");
+            return [];
+        }
+
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
+
+        // Try the native endpoint first (OlyForge3D/Spoolman fork feature)
+        try
+        {
+            string nativeUrl = $"{baseUrl}/api/v1/spool/materials/available";
+            using HttpResponseMessage response = await http.GetAsync(nativeUrl, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                List<string>? materials = await response.Content.ReadFromJsonAsync<List<string>>(ct);
+                if (materials is not null)
+                {
+                    logger.LogDebug("Retrieved {Count} available materials from native Spoolman endpoint", materials.Count);
+                    return materials.AsReadOnly();
+                }
+            }
+
+            if (response.StatusCode is not HttpStatusCode.NotFound)
+            {
+                logger.LogWarning("Spoolman native materials/available returned {StatusCode}, falling back to aggregation", response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Native Spoolman materials/available endpoint not available, falling back to aggregation");
+        }
+
+        // Fallback: fetch all spools and aggregate client-side
+        SpoolmanPagedResult<SpoolmanSpoolDto> result = await ListSpoolsAsync(
+            new SpoolmanSpoolQueryParams { Limit = 500 }, ct);
+
+        return result.Items
+            .Where(s => s.Archived is not true
+                && !string.IsNullOrWhiteSpace(s.Material)
+                && (s.RemainingWeightG is null || s.RemainingWeightG > 0))
+            .Select(s => s.Material)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
+    }
+
     private async Task<MaterialPageFetchResult> FetchAllMaterialPagesAsync(string initialUrl, CancellationToken ct)
     {
         List<SpoolmanMaterialDto> collected = new();

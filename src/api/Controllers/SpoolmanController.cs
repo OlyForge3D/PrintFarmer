@@ -485,17 +485,7 @@ public class SpoolmanController(
     [ProducesResponseType(typeof(IEnumerable<string>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<string>>> GetAvailableMaterialsAsync(CancellationToken ct)
     {
-        SpoolmanPagedResult<SpoolmanSpoolDto> result = await spoolman.ListSpoolsAsync(
-            new SpoolmanSpoolQueryParams { Limit = 500 }, ct);
-
-        IEnumerable<string> materials = result.Items
-            .Where(s => s.Archived is not true
-                && !string.IsNullOrWhiteSpace(s.Material)
-                && (s.RemainingWeightG is null || s.RemainingWeightG > 0))
-            .Select(s => s.Material)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(m => m, StringComparer.OrdinalIgnoreCase);
-
+        IReadOnlyList<string> materials = await spoolman.GetAvailableMaterialsAsync(ct);
         return Ok(materials);
     }
 

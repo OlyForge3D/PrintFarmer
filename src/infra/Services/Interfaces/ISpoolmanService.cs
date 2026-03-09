@@ -168,4 +168,11 @@ public interface ISpoolmanService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>True if the update succeeded, false otherwise.</returns>
     Task<bool> ConsumeFilamentAsync(int spoolId, double usedWeightGrams, CancellationToken ct);
+
+    /// <summary>
+    /// Gets material names that have at least one non-archived spool with remaining filament.
+    /// Tries the native Spoolman endpoint first (/api/v1/spool/materials/available),
+    /// falling back to client-side aggregation if the endpoint is not available.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetAvailableMaterialsAsync(CancellationToken ct);
 }
