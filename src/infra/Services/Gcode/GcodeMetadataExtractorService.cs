@@ -34,8 +34,9 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                 // This ensures we capture all thumbnail formats (QOI + PNG) which can appear deep in the file
                 List<string> metadataLines = new List<string>();
 
-                // Add first 200 lines
-                int firstLinesCount = Math.Min(200, allLines.Length);
+                // Add first 500 lines — OrcaSlicer embeds large base64 thumbnails in the header
+                // which can push metadata comments like printer_model past line 200
+                int firstLinesCount = Math.Min(500, allLines.Length);
                 metadataLines.AddRange(allLines.Take(firstLinesCount));
                 _logger.LogInformation("ExtractMetadataAsync: Added {Count} lines from start", firstLinesCount.ToString());
 
@@ -545,15 +546,33 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         // Cura: "; machine_name = Prusa CORE One"
         // PrusaSlicer: "; printer_model = COREONEL"
         // Note: Avoid matching patterns like "printer_model=~/(COREONEL|.../ " which are conditions
+        // Note: Skip lines like "; machine_start_gcode = ...;printer_model:[printer_model]\n..."
+        //       which embed template placeholders that produce false matches
         foreach (string line in lines)
         {
+            // Skip gcode template definitions — they contain embedded slicer variable placeholders
+            // like ;printer_model:[printer_model] that are not actual model values
+            if (line.Contains("_gcode =", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("_gcode=", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             // Match comment syntax: ; followed by optional whitespace, then the field name
             // Only match if the value after = doesn't start with ~/ (regex pattern)
             Match match = Regex.Match(line, @";\s*printer_model\s*[:=]\s*(?!~\/)([^;]+)", RegexOptions.IgnoreCase);
             if (match.Success)
             {
                 string model = match.Groups[1].Value.Trim();
-                metadata.PrinterModel = model.Trim(';', ' ', '"');
+                model = model.Trim(';', ' ', '"');
+
+                // Skip slicer template placeholders like [printer_model]
+                if (model.StartsWith('[') && model.EndsWith(']'))
+                {
+                    continue;
+                }
+
+                metadata.PrinterModel = model;
                 _logger.LogInformation("ExtractPrinterModel: Found {Model}", metadata.PrinterModel);
                 break;
             }
