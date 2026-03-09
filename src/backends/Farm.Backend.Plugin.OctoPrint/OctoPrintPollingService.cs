@@ -366,6 +366,19 @@ public sealed class OctoPrintPollingService(
                             await CheckAndSyncJobCompletionAsync(printerId, previousState, statusData.State, ct);
                         }
 
+                        // Resolve spool info from DB assignment
+                        PrinterSpoolInfoDto? spoolInfo = null;
+                        try
+                        {
+                            using IServiceScope spoolScope = _scopeFactory.CreateScope();
+                            ManagedSpoolProviderHelper spoolProvider = spoolScope.ServiceProvider.GetRequiredService<ManagedSpoolProviderHelper>();
+                            spoolInfo = await spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
+                        }
+                        catch (Exception spoolEx)
+                        {
+                            _logger.LogDebug(spoolEx, "OctoPrint {PrinterId}: Failed to resolve spool info", printerId);
+                        }
+
                         // Create cache update (PrinterStatusDto - no HomedAxes)
                         var cacheUpdate = new PrinterStatusDto(
                             Id: printerId,
@@ -383,7 +396,7 @@ public sealed class OctoPrintPollingService(
                             BedTemp: statusData.BedTemp,
                             HotendTarget: statusData.HotendTarget,
                             BedTarget: statusData.BedTarget,
-                            SpoolInfo: null);
+                            SpoolInfo: spoolInfo);
 
                         // Update cache before broadcasting to clients
                         _statusCacheWriter.UpdateStatus(cacheUpdate);
@@ -405,7 +418,7 @@ public sealed class OctoPrintPollingService(
                             HotendTarget: statusData.HotendTarget,
                             BedTarget: statusData.BedTarget,
                             HomedAxes: null,
-                            SpoolInfo: null);
+                            SpoolInfo: spoolInfo);
 
                         await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
                     }

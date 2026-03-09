@@ -190,6 +190,7 @@ public sealed class PrusaLinkPollingService(
                     // (scoped services cannot be injected directly into singletons)
                     using IServiceScope scope = _scopeFactory.CreateScope();
                     IPrusaLinkClient prusaLinkClient = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
+                    ManagedSpoolProviderHelper spoolProvider = scope.ServiceProvider.GetRequiredService<ManagedSpoolProviderHelper>();
 
                     // Use the Credential property populated by the repository layer
                     PrusaCompositeStatus status = await prusaLinkClient.GetCompositeStatusAsync(
@@ -229,6 +230,9 @@ public sealed class PrusaLinkPollingService(
                         await CheckAndSyncJobCompletionAsync(printerId, previousState, status.State!, ct);
                     }
 
+                    // Resolve spool info from DB assignment
+                    PrinterSpoolInfoDto? spoolInfo = await spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
+
                     // Broadcast update via SignalR using PrinterStatusDto
                     var update = new PrinterStatusDto(
                         Id: printerId,
@@ -246,7 +250,7 @@ public sealed class PrusaLinkPollingService(
                         BedTemp: status.BedTemp,
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
-                        SpoolInfo: null);
+                        SpoolInfo: spoolInfo);
 
                     // Update cache before broadcasting to clients
                     _statusCacheWriter.UpdateStatus(update);

@@ -2510,6 +2510,12 @@ public class PrintersService(
                 }
             }
 
+            // Broadcast spool change to connected clients immediately
+            PrinterSpoolInfoDto? spoolInfo = spoolId.HasValue
+                ? await BuildDbSpoolInfoAsync(p, ct).ConfigureAwait(false)
+                : null;
+            await _broadcaster.BroadcastSpoolChangeAsync(id, spoolInfo, ct).ConfigureAwait(false);
+
             return new CommandResult(true, spoolId.HasValue ? $"Active spool set to {spoolId}" : "Active spool cleared");
         }
         catch (Exception ex)

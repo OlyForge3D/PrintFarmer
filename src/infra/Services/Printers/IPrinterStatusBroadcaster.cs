@@ -1,4 +1,5 @@
-﻿using System.Threading;
+﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -12,7 +13,11 @@ public interface IPrinterStatusBroadcaster
     /// <summary>
     /// Broadcasts a printer import progress update to all connected clients.
     /// </summary>
-    /// <param name="result">The import progress result containing status and details</param>
-    /// <param name="cancellationToken">Cancellation token</param>
     Task BroadcastPrinterImportProgressAsync(object result, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcasts a spool assignment change for a printer to all connected clients.
+    /// Updates the status cache and pushes a printerupdated SignalR event.
+    /// </summary>
+    Task BroadcastSpoolChangeAsync(Guid printerId, PrinterSpoolInfoDto? spoolInfo, CancellationToken cancellationToken = default);
 }
