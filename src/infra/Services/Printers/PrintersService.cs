@@ -1285,7 +1285,7 @@ public class PrintersService(
             SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
             if (spool is null)
             {
-                return null;
+                return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: spoolId);
             }
 
             return new PrinterSpoolInfoDto(
@@ -1301,7 +1301,7 @@ public class PrintersService(
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to build spool info for printer {PId}, spool {SpoolId}", printer.Id, spoolId);
-            return null;
+            return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: spoolId);
         }
     }
 

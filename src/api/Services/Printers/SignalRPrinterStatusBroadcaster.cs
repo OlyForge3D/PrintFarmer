@@ -14,11 +14,9 @@ namespace Farm.Web.Api.Services.Printers;
 /// </summary>
 public class SignalRPrinterStatusBroadcaster(
     IHubContext<PrinterHub> hubContext,
-    IPrinterStatusCacheReader statusCacheReader,
     IPrinterStatusCacheWriter statusCacheWriter) : Farm.Infrastructure.Services.Printers.IPrinterStatusBroadcaster
 {
     private readonly IHubContext<PrinterHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-    private readonly IPrinterStatusCacheReader _statusCacheReader = statusCacheReader ?? throw new ArgumentNullException(nameof(statusCacheReader));
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter ?? throw new ArgumentNullException(nameof(statusCacheWriter));
 
     /// <inheritdoc />
@@ -30,13 +28,8 @@ public class SignalRPrinterStatusBroadcaster(
     /// <inheritdoc />
     public async Task BroadcastSpoolChangeAsync(Guid printerId, PrinterSpoolInfoDto? spoolInfo, CancellationToken cancellationToken = default)
     {
-        // Update the cached status with the new spool info
-        PrinterStatusDto? existing = _statusCacheReader.GetStatus(printerId);
-        PrinterStatusDto updated = (existing ?? new PrinterStatusDto(Id: printerId, IsOnline: false, State: "Unknown"))
-            with
-        { SpoolInfo = spoolInfo };
-
-        _statusCacheWriter.UpdateStatus(updated);
+        // Atomically update only the SpoolInfo field in the cache
+        PrinterStatusDto updated = _statusCacheWriter.UpdateSpoolInfo(printerId, spoolInfo);
 
         // Push the updated status to all connected clients
         await _hubContext.Clients.All.SendAsync("printerupdated", updated, cancellationToken);
