@@ -51,18 +51,8 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
 
                 _logger.LogInformation("ExtractMetadataAsync: Processing {LineCount} lines total from {TotalLines} total", metadataLines.Count.ToString(), allLines.Length.ToString());
 
-                // Extract all metadata from the combined set
-                ExtractSlicerInfo(metadataLines, metadata);
-                ExtractMaterial(metadataLines, metadata);
-                ExtractNozzleDiameter(metadataLines, metadata);
-                ExtractLayerHeight(metadataLines, metadata);
-                ExtractPrintTime(metadataLines, metadata);
-                ExtractFilamentInfo(metadataLines, metadata);
-                ExtractTemperatures(metadataLines, metadata);
-                ExtractPrinterModel(metadataLines, metadata);
-                ExtractPrintSettingsId(metadataLines, metadata);
-                ExtractInfill(metadataLines, metadata);
-                ExtractPerimeters(metadataLines, metadata);
+                // Single-pass extraction of all key-value metadata properties
+                ExtractAllProperties(metadataLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: About to extract thumbnail");
                 ExtractThumbnail(allLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: Thumbnail extraction complete, ThumbnailData={HasData}", metadata.ThumbnailData != null ? $"{metadata.ThumbnailData.Length} bytes" : "null");
@@ -79,268 +69,279 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         });
     }
 
-    private void ExtractSlicerInfo(List<string> lines, GcodeMetadataExtracted metadata)
+    // Pre-compiled regex patterns for efficient single-pass extraction
+    private static readonly Regex SlicerGeneratedByPattern = new(@"(?:PrusaSlicer|OrcaSlicer|Cura|SuperSlicer)\s+([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex CuraVersionPattern = new(@"Cura_Version:(.+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex MaterialPattern = new(@";\s*(?:filament_type|MATERIAL|material)\s*[:=]\s*([^;]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex NozzleDiameterPattern = new(@";\s*nozzle_diameter\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex LayerHeightPattern = new(@";\s*layer_height\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex PrintTimeHoursPattern = new(@"(\d+)h\s+(\d+)m\s+(\d+)s", RegexOptions.Compiled);
+    private static readonly Regex PrintTimeMinutesPattern = new(@"(\d+)m\s+(\d+)s", RegexOptions.Compiled);
+    private static readonly Regex PrintTimeSecondsPattern = new(@"(?:TIME|Time):\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FilamentLengthPattern = new(@";\s*filament_length\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FilamentLengthConfigPattern = new(@";\s*filament used \[mm\]\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FilamentWeightPattern = new(@";\s*(?:filament_g|filament_weight)\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FilamentWeightConfigPattern = new(@";\s*filament used \[g\]\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BedTempPattern = new(@";\s*first_layer_bed_temperature\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex NozzleTempPattern = new(@";\s*first_layer_temperature\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex PrinterModelPattern = new(@"; ?(?:printer_model|machine_name)\s*[:=]\s*(?!~\/)([^;]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex PrintSettingsPattern = new(@";\s*print_settings_id\s*[:=]\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SparseInfillPattern = new(@";\s*sparse_infill_density\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FillDensityPattern = new(@";\s*fill_density\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WallLoopsPattern = new(@";\s*wall_loops\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex PerimetersPattern = new(@";\s*perimeters\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex TrailingEscapePattern = new(@"(\\[nrt])+$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Single-pass extraction of all key-value metadata from G-code comment lines.
+    /// Replaces 11 separate Extract* methods that each iterated the full line set.
+    /// </summary>
+    private void ExtractAllProperties(List<string> lines, GcodeMetadataExtracted metadata)
     {
-        // PrusaSlicer: "; generated by PrusaSlicer 2.5.0 on 2024-01-15 at 14:32:15 UTC"
-        string? slicerLine = lines.FirstOrDefault(l => l.Contains("generated by", StringComparison.OrdinalIgnoreCase));
-        if (slicerLine != null)
-        {
-            // PrusaSlicer pattern: "; generated by PrusaSlicer X.Y.Z"
-            Match match = Regex.Match(slicerLine, @"(?:PrusaSlicer|OrcaSlicer|Cura|SuperSlicer)\s+([\d.]+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                metadata.SlicerName = match.Groups[0].Value.Split()[0]; // Get first word (slicer name)
-                metadata.SlicerVersion = match.Groups[1].Value;
-                _logger.LogInformation("ExtractSlicerInfo: Found {SlicerName} {Version}", metadata.SlicerName, metadata.SlicerVersion);
-            }
-        }
+        // Print time uses priority: normal mode (3) > TIME: seconds (2) > generic estimated (1)
+        int printTimePriority = 0;
 
-        // Cura: "; Cura_Version:4.10.0"
-        string? curaLine = lines.FirstOrDefault(l => l.Contains("Cura_Version", StringComparison.OrdinalIgnoreCase));
-        if (curaLine != null)
-        {
-            Match match = Regex.Match(curaLine, @"Cura_Version:(.+)$", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                metadata.SlicerName = "Cura";
-                metadata.SlicerVersion = match.Groups[1].Value.Trim();
-                _logger.LogInformation("ExtractSlicerInfo: Found Cura {Version}", metadata.SlicerVersion);
-            }
-        }
-    }
-
-    private void ExtractMaterial(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // PrusaSlicer: "; filament_type = PLA" or "; MATERIAL = PLA"
-        // Explicitly match comment syntax to avoid matching in other contexts
         foreach (string line in lines)
         {
-            Match match = Regex.Match(line, @";\s*(?:filament_type|MATERIAL|material)\s*[:=]\s*([^;]+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                string material = match.Groups[1].Value.Trim();
-                metadata.Material = material.Trim(';', ' ', '"');
-                _logger.LogInformation("ExtractMaterial: Found {Material}", metadata.Material);
-                break; // Take first match
-            }
-        }
-    }
-
-    private void ExtractNozzleDiameter(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // PrusaSlicer: "; nozzle_diameter = 0.4"
-        // OrcaSlicer: "; nozzle_diameter = 0.6"
-        // Explicitly match comment syntax
-        foreach (string line in lines)
-        {
-            Match match = Regex.Match(line, @";\s*nozzle_diameter\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-            if (match.Success && double.TryParse(match.Groups[1].Value, out double diameter))
-            {
-                metadata.NozzleDiameter = diameter;
-                _logger.LogInformation("ExtractNozzleDiameter: Found {Diameter}mm", diameter.ToString("F1"));
-                break; // Take first match
-            }
-        }
-    }
-
-    private void ExtractLayerHeight(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // PrusaSlicer: "; layer_height = 0.2"
-        // OrcaSlicer: "; layer_height = 0.2"
-        // Explicitly match comment syntax to avoid matching other properties like first_layer_height
-        foreach (string line in lines)
-        {
-            Match match = Regex.Match(line, @";\s*layer_height\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-            if (match.Success && double.TryParse(match.Groups[1].Value, out double height))
-            {
-                metadata.LayerHeight = height;
-                _logger.LogInformation("ExtractLayerHeight: Found {Height}mm", height.ToString("F2"));
-                break; // Take first match
-            }
-        }
-    }
-
-    private void ExtractPrintTime(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // Multiple formats:
-        // PrusaSlicer/OrcaSlicer: "; estimated printing time (normal mode) = 1h 23m 45s" or "26m 5s"
-        // Generic: "; TIME: 5025" (seconds)
-        // Cura: "; Time: 123456" (seconds)
-        // Priority: normal mode > generic/TIME > other modes
-
-        // First pass: Look specifically for "normal mode"
-        foreach (string line in lines)
-        {
-            if (line.Contains("estimated printing time (normal mode)", StringComparison.OrdinalIgnoreCase))
-            {
-                // Try hours format: "1h 23m 45s"
-                Match hoursMatch = Regex.Match(line, @"(\d+)h\s+(\d+)m\s+(\d+)s");
-                if (hoursMatch.Success)
-                {
-                    int hours = int.Parse(hoursMatch.Groups[1].Value);
-                    int minutes = int.Parse(hoursMatch.Groups[2].Value);
-                    int seconds = int.Parse(hoursMatch.Groups[3].Value);
-                    metadata.EstimatedPrintTimeMinutes = (hours * 60) + minutes + (seconds / 60.0);
-                    _logger.LogInformation("ExtractPrintTime: Found {Minutes}min (normal mode)", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
-                    return;
-                }
-
-                // Try minutes-only format: "26m 5s"
-                Match minMatch = Regex.Match(line, @"(\d+)m\s+(\d+)s");
-                if (minMatch.Success)
-                {
-                    int minutes = int.Parse(minMatch.Groups[1].Value);
-                    int seconds = int.Parse(minMatch.Groups[2].Value);
-                    metadata.EstimatedPrintTimeMinutes = minutes + (seconds / 60.0);
-                    _logger.LogInformation("ExtractPrintTime: Found {Minutes}min (normal mode)", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
-                    return;
-                }
-            }
-        }
-
-        // Second pass: Try generic TIME formats
-        foreach (string line in lines)
-        {
-            if (line.Contains("TIME:", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("; Time:", StringComparison.OrdinalIgnoreCase))
-            {
-                Match secondsMatch = Regex.Match(line, @"(?:TIME|Time):\s*(\d+)", RegexOptions.IgnoreCase);
-                if (secondsMatch.Success && int.TryParse(secondsMatch.Groups[1].Value, out int seconds))
-                {
-                    metadata.EstimatedPrintTimeMinutes = seconds / 60.0;
-                    _logger.LogInformation("ExtractPrintTime: Found {Minutes}min (TIME format)", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
-                    return;
-                }
-            }
-        }
-
-        // Third pass: Fall back to any "estimated printing time" (excluding remaining/first layer)
-        foreach (string line in lines)
-        {
-            if (line.Contains("remaining", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("first layer", StringComparison.OrdinalIgnoreCase))
+            // Fast skip for non-comment lines (most G-code is G/M commands)
+            if (string.IsNullOrEmpty(line) || !line.StartsWith(';'))
             {
                 continue;
             }
 
-            if (line.Contains("estimated printing time", StringComparison.OrdinalIgnoreCase))
+            bool isGcodeTemplateLine = line.Contains("_gcode =", StringComparison.OrdinalIgnoreCase) ||
+                                      line.Contains("_gcode=", StringComparison.OrdinalIgnoreCase);
+
+            // --- Slicer Info ---
+            if (metadata.SlicerName == null)
             {
-                // Try hours format
-                Match hoursMatch = Regex.Match(line, @"(\d+)h\s+(\d+)m\s+(\d+)s");
-                if (hoursMatch.Success)
+                if (line.Contains("generated by", StringComparison.OrdinalIgnoreCase))
                 {
-                    int hours = int.Parse(hoursMatch.Groups[1].Value);
-                    int minutes = int.Parse(hoursMatch.Groups[2].Value);
-                    int seconds = int.Parse(hoursMatch.Groups[3].Value);
-                    metadata.EstimatedPrintTimeMinutes = (hours * 60) + minutes + (seconds / 60.0);
-                    _logger.LogInformation("ExtractPrintTime: Found {Minutes}min", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
-                    return;
+                    Match match = SlicerGeneratedByPattern.Match(line);
+                    if (match.Success)
+                    {
+                        metadata.SlicerName = match.Groups[0].Value.Split()[0];
+                        metadata.SlicerVersion = match.Groups[1].Value;
+                    }
                 }
 
-                // Try minutes-only format
-                Match minMatch = Regex.Match(line, @"(\d+)m\s+(\d+)s");
-                if (minMatch.Success)
+                if (metadata.SlicerName == null && line.Contains("Cura_Version", StringComparison.OrdinalIgnoreCase))
                 {
-                    int minutes = int.Parse(minMatch.Groups[1].Value);
-                    int seconds = int.Parse(minMatch.Groups[2].Value);
-                    metadata.EstimatedPrintTimeMinutes = minutes + (seconds / 60.0);
-                    _logger.LogInformation("ExtractPrintTime: Found {Minutes}min", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
-                    return;
+                    Match match = CuraVersionPattern.Match(line);
+                    if (match.Success)
+                    {
+                        metadata.SlicerName = "Cura";
+                        metadata.SlicerVersion = match.Groups[1].Value.Trim();
+                    }
                 }
             }
-        }
-    }
 
-    private void ExtractFilamentInfo(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // PrusaSlicer: "; filament_mm3 = 123.45" (mm³) or "; filament_length = 12345" (mm)
-        // Cura: "; Filament used: 12.34m" or similar
-        // CONFIG_BLOCK: "; filament used [mm] = 3538.91" and "; filament used [g] = 10.55"
-
-        // Try standard format first - explicit comment syntax
-        string? filamentLengthLine = lines.FirstOrDefault(l => l.Contains("filament_length", StringComparison.OrdinalIgnoreCase));
-        if (filamentLengthLine != null)
-        {
-            Match match = Regex.Match(filamentLengthLine, @";\s*filament_length\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-            if (match.Success && double.TryParse(match.Groups[1].Value, out double length))
+            // --- Material ---
+            if (metadata.Material == null)
             {
-                metadata.FilamentLengthMm = length;
-                _logger.LogInformation("ExtractFilamentInfo: Found {Length}mm of filament", length.ToString("F0"));
+                Match match = MaterialPattern.Match(line);
+                if (match.Success)
+                {
+                    metadata.Material = match.Groups[1].Value.Trim().Trim(';', ' ', '"');
+                }
             }
-        }
 
-        // Also try CONFIG_BLOCK format: "; filament used [mm] = 3538.91" - explicit comment syntax
-        if (metadata.FilamentLengthMm == null)
-        {
-            string? configFilamentLengthLine = lines.FirstOrDefault(l => l.Contains("filament used [mm]", StringComparison.OrdinalIgnoreCase));
-            if (configFilamentLengthLine != null)
+            // --- Nozzle Diameter ---
+            if (metadata.NozzleDiameter == null)
             {
-                Match match = Regex.Match(configFilamentLengthLine, @";\s*filament used \[mm\]\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
+                Match match = NozzleDiameterPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double diameter))
+                {
+                    metadata.NozzleDiameter = diameter;
+                }
+            }
+
+            // --- Layer Height ---
+            if (metadata.LayerHeight == null)
+            {
+                Match match = LayerHeightPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double height))
+                {
+                    metadata.LayerHeight = height;
+                }
+            }
+
+            // --- Print Time (priority-based: normal mode > TIME: > generic) ---
+            if (printTimePriority < 3 && line.Contains("estimated printing time (normal mode)", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TryParsePrintTime(line, out double minutes))
+                {
+                    metadata.EstimatedPrintTimeMinutes = minutes;
+                    printTimePriority = 3;
+                }
+            }
+            else if (printTimePriority < 2 &&
+                     (line.Contains("TIME:", StringComparison.OrdinalIgnoreCase) ||
+                      line.Contains("; Time:", StringComparison.OrdinalIgnoreCase)))
+            {
+                Match match = PrintTimeSecondsPattern.Match(line);
+                if (match.Success && int.TryParse(match.Groups[1].Value, out int seconds))
+                {
+                    metadata.EstimatedPrintTimeMinutes = seconds / 60.0;
+                    printTimePriority = 2;
+                }
+            }
+            else if (printTimePriority < 1 &&
+                     line.Contains("estimated printing time", StringComparison.OrdinalIgnoreCase) &&
+                     !line.Contains("remaining", StringComparison.OrdinalIgnoreCase) &&
+                     !line.Contains("first layer", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TryParsePrintTime(line, out double minutes))
+                {
+                    metadata.EstimatedPrintTimeMinutes = minutes;
+                    printTimePriority = 1;
+                }
+            }
+
+            // --- Filament Length ---
+            if (metadata.FilamentLengthMm == null)
+            {
+                Match match = FilamentLengthPattern.Match(line);
                 if (match.Success && double.TryParse(match.Groups[1].Value, out double length))
                 {
                     metadata.FilamentLengthMm = length;
-                    _logger.LogInformation("ExtractFilamentInfo: Found {Length}mm of filament from CONFIG_BLOCK", length.ToString("F0"));
+                }
+                else
+                {
+                    match = FilamentLengthConfigPattern.Match(line);
+                    if (match.Success && double.TryParse(match.Groups[1].Value, out length))
+                    {
+                        metadata.FilamentLengthMm = length;
+                    }
                 }
             }
-        }
 
-        // Try standard format first - explicit comment syntax
-        string? filamentWeightLine = lines.FirstOrDefault(l =>
-            (l.Contains("filament_g", StringComparison.OrdinalIgnoreCase) ||
-             l.Contains("filament_weight", StringComparison.OrdinalIgnoreCase)) &&
-            !l.Contains("mm3", StringComparison.OrdinalIgnoreCase) &&
-            !l.Contains("[", StringComparison.OrdinalIgnoreCase));
-
-        if (filamentWeightLine != null)
-        {
-            Match match = Regex.Match(filamentWeightLine, @";\s*(?:filament_g|filament_weight)\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-            if (match.Success && double.TryParse(match.Groups[1].Value, out double weight))
+            // --- Filament Weight ---
+            if (metadata.FilamentWeightGrams == null &&
+                !line.Contains("mm3", StringComparison.OrdinalIgnoreCase))
             {
-                metadata.FilamentWeightGrams = weight;
-                _logger.LogInformation("ExtractFilamentInfo: Found {Weight}g of filament", weight.ToString("F1"));
-            }
-        }
-
-        // Also try CONFIG_BLOCK format: "; filament used [g] = 10.55" - explicit comment syntax
-        if (metadata.FilamentWeightGrams == null)
-        {
-            string? configFilamentWeightLine = lines.FirstOrDefault(l => l.Contains("filament used [g]", StringComparison.OrdinalIgnoreCase));
-            if (configFilamentWeightLine != null)
-            {
-                Match match = Regex.Match(configFilamentWeightLine, @";\s*filament used \[g\]\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-                if (match.Success && double.TryParse(match.Groups[1].Value, out double weight))
+                Match match = FilamentWeightPattern.Match(line);
+                if (match.Success && !line.Contains("[", StringComparison.OrdinalIgnoreCase) &&
+                    double.TryParse(match.Groups[1].Value, out double weight))
                 {
                     metadata.FilamentWeightGrams = weight;
-                    _logger.LogInformation("ExtractFilamentInfo: Found {Weight}g of filament from CONFIG_BLOCK", weight.ToString("F1"));
+                }
+                else
+                {
+                    match = FilamentWeightConfigPattern.Match(line);
+                    if (match.Success && double.TryParse(match.Groups[1].Value, out weight))
+                    {
+                        metadata.FilamentWeightGrams = weight;
+                    }
+                }
+            }
+
+            // --- Temperatures (always overwrite — takes last match from config block) ---
+            Match bedMatch = BedTempPattern.Match(line);
+            if (bedMatch.Success && double.TryParse(bedMatch.Groups[1].Value, out double bedTemp))
+            {
+                metadata.BedTemperature = bedTemp;
+            }
+
+            Match nozzleTempMatch = NozzleTempPattern.Match(line);
+            if (nozzleTempMatch.Success && double.TryParse(nozzleTempMatch.Groups[1].Value, out double nozzleTemp))
+            {
+                metadata.PrintTemperature = nozzleTemp;
+            }
+
+            // --- Printer Model (tightened regex: ; followed by optional single space) ---
+            if (metadata.PrinterModel == null && !isGcodeTemplateLine)
+            {
+                Match match = PrinterModelPattern.Match(line);
+                if (match.Success)
+                {
+                    string model = match.Groups[1].Value.Trim().Trim(';', ' ', '"');
+                    model = TrailingEscapePattern.Replace(model, string.Empty).Trim();
+
+                    if (!string.IsNullOrWhiteSpace(model) &&
+                        !Regex.IsMatch(model, @"^\[.+\]$") &&
+                        !Regex.IsMatch(model, @"^\{.+\}$"))
+                    {
+                        metadata.PrinterModel = model;
+                    }
+                }
+            }
+
+            // --- Print Settings ID ---
+            if (metadata.PrintSettingsId == null)
+            {
+                Match match = PrintSettingsPattern.Match(line);
+                if (match.Success)
+                {
+                    metadata.PrintSettingsId = match.Groups[1].Value.Trim().Trim(';', ' ', '"');
+                }
+            }
+
+            // --- Infill (sparse_infill_density > fill_density, excluding skeleton/skin) ---
+            if (metadata.InfillPercentage == null)
+            {
+                Match match = SparseInfillPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double infill))
+                {
+                    metadata.InfillPercentage = infill;
+                }
+                else if (!line.Contains("skeleton", StringComparison.OrdinalIgnoreCase) &&
+                         !line.Contains("skin", StringComparison.OrdinalIgnoreCase))
+                {
+                    match = FillDensityPattern.Match(line);
+                    if (match.Success && double.TryParse(match.Groups[1].Value, out infill))
+                    {
+                        metadata.InfillPercentage = infill;
+                    }
+                }
+            }
+
+            // --- Perimeters / Wall Loops ---
+            if (metadata.Perimeters == null)
+            {
+                Match match = WallLoopsPattern.Match(line);
+                if (match.Success && int.TryParse(match.Groups[1].Value, out int wallLoops))
+                {
+                    metadata.Perimeters = wallLoops;
+                }
+                else
+                {
+                    match = PerimetersPattern.Match(line);
+                    if (match.Success && int.TryParse(match.Groups[1].Value, out int perimeters))
+                    {
+                        metadata.Perimeters = perimeters;
+                    }
                 }
             }
         }
     }
 
-    private void ExtractTemperatures(List<string> lines, GcodeMetadataExtracted metadata)
+    /// <summary>
+    /// Parse print time from "Xh Ym Zs" or "Ym Zs" format.
+    /// </summary>
+    private static bool TryParsePrintTime(string line, out double minutes)
     {
-        // Extract first layer temperatures
-        // OrcaSlicer: "; first_layer_bed_temperature = 55" and "; first_layer_temperature = 220"
-        // PrusaSlicer: "; first_layer_bed_temperature = 110" and "; first_layer_temperature = 260"
-        // Explicitly match comment syntax
-        foreach (string line in lines)
+        minutes = 0;
+        Match hoursMatch = PrintTimeHoursPattern.Match(line);
+        if (hoursMatch.Success)
         {
-            // Bed temperature - explicit comment syntax
-            Match bedMatch = Regex.Match(line, @";\s*first_layer_bed_temperature\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-            if (bedMatch.Success && double.TryParse(bedMatch.Groups[1].Value, out double bedTemp))
-            {
-                metadata.BedTemperature = bedTemp;
-                _logger.LogInformation("ExtractTemperatures: Found bed temperature {Temp}°C", bedTemp.ToString("F0"));
-            }
-
-            // Nozzle/hotend temperature - explicit comment syntax
-            Match nozzleMatch = Regex.Match(line, @";\s*first_layer_temperature\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-            if (nozzleMatch.Success && double.TryParse(nozzleMatch.Groups[1].Value, out double nozzleTemp))
-            {
-                metadata.PrintTemperature = nozzleTemp;
-                _logger.LogInformation("ExtractTemperatures: Found nozzle temperature {Temp}°C", nozzleTemp.ToString("F0"));
-            }
+            int h = int.Parse(hoursMatch.Groups[1].Value);
+            int m = int.Parse(hoursMatch.Groups[2].Value);
+            int s = int.Parse(hoursMatch.Groups[3].Value);
+            minutes = (h * 60) + m + (s / 60.0);
+            return true;
         }
+
+        Match minMatch = PrintTimeMinutesPattern.Match(line);
+        if (minMatch.Success)
+        {
+            int m = int.Parse(minMatch.Groups[1].Value);
+            int s = int.Parse(minMatch.Groups[2].Value);
+            minutes = m + (s / 60.0);
+            return true;
+        }
+
+        return false;
     }
 
     private void ExtractThumbnail(string[] allLines, GcodeMetadataExtracted metadata)
@@ -537,133 +538,6 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         catch
         {
             return false;
-        }
-    }
-
-    private void ExtractPrinterModel(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // OrcaSlicer: "; printer_model = Phrozen Arco"
-        // Cura: "; machine_name = Prusa CORE One"
-        // PrusaSlicer: "; printer_model = COREONEL"
-        // Note: Avoid matching patterns like "printer_model=~/(COREONEL|.../ " which are conditions
-        // Note: Skip lines like "; machine_start_gcode = ...;printer_model:[printer_model]\n..."
-        //       which embed template placeholders that produce false matches
-        foreach (string line in lines)
-        {
-            // Skip gcode template definitions — they contain embedded slicer variable placeholders
-            // like ;printer_model:[printer_model] that are not actual model values
-            if (line.Contains("_gcode =", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("_gcode=", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            // Match comment syntax: ; followed by optional whitespace, then the field name
-            // Only match if the value after = doesn't start with ~/ (regex pattern)
-            Match match = Regex.Match(line, @";\s*printer_model\s*[:=]\s*(?!~\/)([^;]+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                string model = match.Groups[1].Value.Trim();
-                model = model.Trim(';', ' ', '"');
-
-                // Skip slicer template placeholders like [printer_model]
-                if (model.StartsWith('[') && model.EndsWith(']'))
-                {
-                    continue;
-                }
-
-                metadata.PrinterModel = model;
-                _logger.LogInformation("ExtractPrinterModel: Found {Model}", metadata.PrinterModel);
-                break;
-            }
-        }
-    }
-
-    private void ExtractPrintSettingsId(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // OrcaSlicer: "; print_settings_id = Standard"
-        // This identifies which slicer Process profile was used
-        foreach (string line in lines)
-        {
-            Match match = Regex.Match(line, @"print_settings_id\s*[:=]\s*(.+)$", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                string settingsId = match.Groups[1].Value.Trim();
-                metadata.PrintSettingsId = settingsId.Trim(';', ' ', '"');
-                _logger.LogInformation("ExtractPrintSettingsId: Found {SettingsId}", metadata.PrintSettingsId);
-                break;
-            }
-        }
-    }
-
-    private void ExtractInfill(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // PrusaSlicer: "; fill_density = 15"
-        // OrcaSlicer: "; sparse_infill_density = 15%" (represents the main infill, not skeleton or skin)
-        foreach (string line in lines)
-        {
-            // First try to match sparse_infill_density (OrcaSlicer's main infill)
-            Match match = Regex.Match(line, @";\s*sparse_infill_density\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-            if (match.Success && double.TryParse(match.Groups[1].Value, out double infill))
-            {
-                metadata.InfillPercentage = infill;
-                _logger.LogInformation("ExtractInfill: Found sparse_infill_density {Infill}%", infill.ToString("F1"));
-                break;
-            }
-
-            // Fall back to fill_density (PrusaSlicer)
-            match = Regex.Match(line, @"^(?!.*(?:skeleton|skin)).*fill_density\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase);
-            if (match.Success && double.TryParse(match.Groups[1].Value, out infill))
-            {
-                metadata.InfillPercentage = infill;
-                _logger.LogInformation("ExtractInfill: Found fill_density {Infill}%", infill.ToString("F1"));
-                break;
-            }
-        }
-    }
-
-    private void ExtractPerimeters(List<string> lines, GcodeMetadataExtracted metadata)
-    {
-        // PrusaSlicer: "; perimeters = 2"
-        // OrcaSlicer: "; wall_loops = 2"
-        // CRITICAL: Must avoid matching compound names like "avoid_crossing_perimeters"!
-        _logger.LogInformation("ExtractPerimeters: Searching through {LinesCount} lines for perimeters/wall_loops", lines.Count);
-
-        foreach (string line in lines)
-        {
-            // Try wall_loops first (unambiguous)
-            Match match = Regex.Match(line, @";\s*wall_loops\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                _logger.LogInformation("ExtractPerimeters: Matched wall_loops - Group[1]='{Value}'", match.Groups[1].Value);
-
-                if (int.TryParse(match.Groups[1].Value, out int wallLoops))
-                {
-                    metadata.Perimeters = wallLoops;
-                    _logger.LogInformation("ExtractPerimeters: Parsed wall_loops='{WallLoops}'. metadata.Perimeters={MetadataPerimeters}", wallLoops, metadata.Perimeters);
-                    break;
-                }
-            }
-
-            // For perimeters: Use negative lookbehind (?<!...) to ensure NOT preceded by letter or underscore
-            // This prevents matching within compound words like "avoid_crossing_perimeters"
-            match = Regex.Match(line, @";\s*perimeters\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                _logger.LogInformation("ExtractPerimeters: Matched perimeters - Group[1]='{Value}'", match.Groups[1].Value);
-
-                if (int.TryParse(match.Groups[1].Value, out int perimeters))
-                {
-                    metadata.Perimeters = perimeters;
-                    _logger.LogInformation("ExtractPerimeters: Parsed perimeters='{Perimeters}'. metadata.Perimeters={MetadataPerimeters}", perimeters, metadata.Perimeters);
-                    break;
-                }
-            }
-        }
-
-        if (metadata.Perimeters == null)
-        {
-            _logger.LogInformation("ExtractPerimeters: No perimeters/wall_loops found in {LinesCount} lines", lines.Count);
         }
     }
 }
