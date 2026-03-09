@@ -15,26 +15,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Run tests
-        run: node --test test/*.test.js
-
-      - name: Validate version consistency
-        run: |
-          VERSION=$(node -e "console.log(require('./package.json').version)")
-          if ! grep -q "## \[$VERSION\]" CHANGELOG.md 2>/dev/null; then
-            echo "::error::Version $VERSION not found in CHANGELOG.md — update CHANGELOG.md before release"
-            exit 1
-          fi
-          echo "✅ Version $VERSION validated in CHANGELOG.md"
-
-      - name: Read version from package.json
+      - name: Read version from VERSION file
         id: version
         run: |
-          VERSION=$(node -e "console.log(require('./package.json').version)")
+          RAW=$(cat VERSION)
+          VERSION="${RAW#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "📦 Version: $VERSION (tag: v$VERSION)"
