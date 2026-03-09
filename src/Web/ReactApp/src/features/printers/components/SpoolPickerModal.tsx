@@ -89,7 +89,7 @@ function FilterDropdown({ label, options, value, onChange }: FilterDropdownProps
  * Modal for selecting a spool from the Spoolman inventory.
  * Shows a searchable, sortable list of available spools with rich visual cards.
  */
-export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeSpoolId }: SpoolPickerModalProps) {
+export function SpoolPickerModal({ isOpen, onClose, onSelect, activeSpoolId }: SpoolPickerModalProps) {
   const [spools, setSpools] = useState<SpoolmanSpool[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,10 +107,12 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
     setLoading(true);
     setError(null);
     try {
-      const data = await apiClient.getPrinterSpools(printerId);
+      // Always use central Spoolman inventory — non-Moonraker printers
+      // don't have pass-through APIs, and we track spool assignments in our DB
+      const result = await apiClient.getSpools({ limit: 500 });
       if (requestId !== requestIdRef.current) return;
       startTransition(() => {
-        setSpools(Array.isArray(data) ? data : []);
+        setSpools(Array.isArray(result.items) ? result.items : []);
       });
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
@@ -119,7 +121,7 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [printerId]);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
