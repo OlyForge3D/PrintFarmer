@@ -222,31 +222,33 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
       <div className="border-t border-pf-border pt-4">
         <div className="text-sm font-medium text-pf-text-primary mb-2">Add New Alias</div>
         <div className="flex gap-2">
-          <Select
-            value={newSlicerType}
-            onChange={e => setNewSlicerType(e.target.value as SlicerType)}
-            disabled={saving}
-            className="w-40"
-          >
-            {SLICER_TYPES.map(slicer => (
-              <option key={slicer.value} value={slicer.value}>
-                {slicer.label}
-              </option>
-            ))}
-          </Select>
-          <Input
-            value={newAliasName}
-            onChange={e => setNewAliasName(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                handleAddAlias();
-              }
-            }}
-            placeholder="Model name in slicer..."
-            disabled={saving}
-            className="flex-1"
-          />
+          <div className="w-40 shrink-0">
+            <Select
+              value={newSlicerType}
+              onChange={e => setNewSlicerType(e.target.value as SlicerType)}
+              disabled={saving}
+            >
+              {SLICER_TYPES.map(slicer => (
+                <option key={slicer.value} value={slicer.value}>
+                  {slicer.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex-1 min-w-0">
+            <Input
+              value={newAliasName}
+              onChange={e => setNewAliasName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddAlias();
+                }
+              }}
+              placeholder="Model name in slicer..."
+              disabled={saving}
+            />
+          </div>
           <Button
             onClick={handleAddAlias}
             disabled={saving || !newAliasName.trim()}
