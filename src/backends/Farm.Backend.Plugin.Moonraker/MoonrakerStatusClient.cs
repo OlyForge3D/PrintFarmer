@@ -14,12 +14,14 @@ namespace Farm.Backend.Plugin.Moonraker
     /// <summary>
     /// Printer status client for Moonraker backend (Klipper 3D printer firmware).
     /// Implements IPrinterStatusClient for Moonraker-specific status retrieval.
+    /// Also implements IManagedSpoolProvider as fallback when native Spoolman query returns no data.
     /// This status client is provided by the Moonraker backend plugin.
     /// </summary>
-    public class MoonrakerStatusClient : IPrinterStatusClient
+    public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
     {
         private readonly IMoonrakerClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
+        private readonly ManagedSpoolProviderHelper _spoolProvider;
         private readonly ILogger<MoonrakerStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.Moonraker;
@@ -27,14 +29,17 @@ namespace Farm.Backend.Plugin.Moonraker
         public MoonrakerStatusClient(
             IMoonrakerClient client,
             ICircuitBreakerService circuitBreaker,
+            ManagedSpoolProviderHelper spoolProvider,
             ILogger<MoonrakerStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);
+            ArgumentNullException.ThrowIfNull(spoolProvider);
             ArgumentNullException.ThrowIfNull(logger);
 
             _client = client;
             _circuitBreaker = circuitBreaker;
+            _spoolProvider = spoolProvider;
             _logger = logger;
         }
 
@@ -97,8 +102,9 @@ namespace Farm.Backend.Plugin.Moonraker
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
 
-                // Get Spoolman integration info for Moonraker
+                // Get Spoolman integration info — try native Moonraker first, fall back to DB
                 PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
+                spoolInfo ??= await GetManagedSpoolInfoAsync(printer, ct);
 
                 _logger.LogInformation("[Moonraker] DTO created for {PrinterName}: IsOnline={StatusIsOnline}, State={StatusState}", printer.Name, status.IsOnline, status.State);
 
@@ -241,5 +247,8 @@ namespace Farm.Backend.Plugin.Moonraker
                 CameraSnapshotUrl: null,
                 SpoolInfo: null);
         }
+
+        public Task<PrinterSpoolInfoDto?> GetManagedSpoolInfoAsync(Printer printer, CancellationToken ct)
+            => _spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
     }
 }

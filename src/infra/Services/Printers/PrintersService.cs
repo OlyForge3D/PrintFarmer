@@ -466,7 +466,7 @@ public class PrintersService(
             dto = CreateOfflinePrinterDto(p);
         }
 
-        return await EnrichWithDbSpoolInfoAsync(dto, p, ct);
+        return dto;
     }
 #pragma warning restore CS8603
 
@@ -534,20 +534,18 @@ public class PrintersService(
 
         // Delegate to the appropriate backend status client
         // Each status client is responsible for retrieving typed status from its backend
-        // and building the complete PrinterDto
+        // and building the complete PrinterDto (including spool info via IManagedSpoolProvider)
         try
         {
             IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
-            PrinterDto dto = await statusClient.GetPrinterDtoAsync(p, ct);
-            return await EnrichWithDbSpoolInfoAsync(dto, p, ct);
+            return await statusClient.GetPrinterDtoAsync(p, ct);
         }
         catch (Exception ex)
         {
             // Log and return an offline/fallback DTO so that write operations (assign/unassign)
             // don't surface transient backend errors as 500 to the client.
             _logger.LogWarning(ex, "Failed to retrieve status for printer {PId}", p.Id);
-            PrinterDto offline = CreateOfflinePrinterDto(p);
-            return await EnrichWithDbSpoolInfoAsync(offline, p, ct);
+            return CreateOfflinePrinterDto(p);
         }
     }
 
@@ -803,7 +801,7 @@ public class PrintersService(
                     HotendTarget: status.HotendTarget,
                     BedTarget: status.BedTarget,
                     HomedAxes: null, // Will be filled by PrinterStatusUpdate via SignalR
-                    SpoolInfo: status.SpoolInfo,
+                    SpoolInfo: status.SpoolInfo ?? await BuildDbSpoolInfoAsync(p, ct),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
@@ -846,7 +844,7 @@ public class PrintersService(
                     HotendTarget: null,
                     BedTarget: null,
                     HomedAxes: null,
-                    SpoolInfo: null,
+                    SpoolInfo: await BuildDbSpoolInfoAsync(p, ct),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
@@ -1270,16 +1268,16 @@ public class PrintersService(
     /// Enriches a printer DTO with spool info from the DB when the backend didn't provide it.
     /// The database is the source of truth for spool assignments — backends may fail to sync.
     /// </summary>
-    private async Task<PrinterDto> EnrichWithDbSpoolInfoAsync(PrinterDto dto, Printer printer, CancellationToken ct)
+    /// <summary>
+    /// Builds a PrinterSpoolInfoDto from the DB's CurrentSpoolId by fetching spool details from Spoolman.
+    /// Returns null if no spool is assigned or the fetch fails.
+    /// Used by GetAllCompleteDtosAsync which reads from the status cache and needs DB-based spool fallback.
+    /// </summary>
+    private async Task<PrinterSpoolInfoDto?> BuildDbSpoolInfoAsync(Printer printer, CancellationToken ct)
     {
-        if (dto.SpoolInfo?.HasActiveSpool == true)
-        {
-            return dto; // Backend already provided spool info
-        }
-
         if (printer.CurrentSpoolId is not { } spoolId)
         {
-            return dto; // No spool assigned in DB either
+            return null;
         }
 
         try
@@ -1287,10 +1285,10 @@ public class PrintersService(
             SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
             if (spool is null)
             {
-                return dto;
+                return null;
             }
 
-            var spoolInfo = new PrinterSpoolInfoDto(
+            return new PrinterSpoolInfoDto(
                 HasActiveSpool: true,
                 ActiveSpoolId: spoolId,
                 SpoolName: spool.FilamentName,
@@ -1299,13 +1297,11 @@ public class PrintersService(
                 FilamentName: spool.FilamentName,
                 Vendor: spool.Vendor,
                 RemainingWeightG: spool.RemainingWeightG);
-
-            return dto with { SpoolInfo = spoolInfo };
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to enrich printer {PId} with DB spool info for spool {SpoolId}", printer.Id, spoolId);
-            return dto;
+            _logger.LogDebug(ex, "Failed to build spool info for printer {PId}, spool {SpoolId}", printer.Id, spoolId);
+            return null;
         }
     }
 

@@ -12,11 +12,13 @@ namespace Farm.Backend.Plugin.PrusaLink
     /// <summary>
     /// Printer status client for PrusaLink backend (Prusa 3D printer firmware).
     /// Implements IPrinterStatusClient for PrusaLink-specific status retrieval.
+    /// Implements IManagedSpoolProvider for PrintFarmer-managed spool tracking (no native Spoolman).
     /// </summary>
-    public class PrusaLinkStatusClient : IPrinterStatusClient
+    public class PrusaLinkStatusClient : IPrinterStatusClient, IManagedSpoolProvider
     {
         private readonly IPrusaLinkClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
+        private readonly ManagedSpoolProviderHelper _spoolProvider;
         private readonly ILogger<PrusaLinkStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.PrusaLink;
@@ -24,14 +26,17 @@ namespace Farm.Backend.Plugin.PrusaLink
         public PrusaLinkStatusClient(
             IPrusaLinkClient client,
             ICircuitBreakerService circuitBreaker,
+            ManagedSpoolProviderHelper spoolProvider,
             ILogger<PrusaLinkStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);
+            ArgumentNullException.ThrowIfNull(spoolProvider);
             ArgumentNullException.ThrowIfNull(logger);
 
             _client = client;
             _circuitBreaker = circuitBreaker;
+            _spoolProvider = spoolProvider;
             _logger = logger;
         }
 
@@ -88,9 +93,13 @@ namespace Farm.Backend.Plugin.PrusaLink
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                     ct);
 
-                return status == null
+                PrinterSpoolInfoDto? spoolInfo = await GetManagedSpoolInfoAsync(printer, ct);
+
+                PrinterDto dto = status == null
                     ? throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}")
                     : await _client.CreatePrinterDtoAsync(printer, status, ct);
+
+                return spoolInfo is not null ? dto with { SpoolInfo = spoolInfo } : dto;
             }
             catch (Exception ex)
             {
@@ -98,6 +107,9 @@ namespace Farm.Backend.Plugin.PrusaLink
                 throw;
             }
         }
+
+        public Task<PrinterSpoolInfoDto?> GetManagedSpoolInfoAsync(Printer printer, CancellationToken ct)
+            => _spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
 
         public async Task<string?> GetCameraStreamUrlAsync(Printer printer, CancellationToken ct)
         {

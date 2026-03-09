@@ -487,6 +487,27 @@ public interface ISupportsSpoolman
 }
 
 /// <summary>
+/// Capability interface for status clients whose backends do not have native Spoolman integration.
+/// These backends rely on PrintFarmer's database (Printer.CurrentSpoolId) as the source of truth
+/// for spool assignments, with spool details fetched from the central Spoolman instance.
+/// </summary>
+/// <remarks>
+/// Moonraker has native Spoolman support and manages spool info through its own API.
+/// All other backends (PrusaLink, OctoPrint, SDCP) implement this interface to provide
+/// consistent spool tracking across the entire fleet.
+/// </remarks>
+public interface IManagedSpoolProvider
+{
+    /// <summary>
+    /// Resolves spool info from PrintFarmer's database and central Spoolman instance.
+    /// Returns null if no spool is assigned or Spoolman is unavailable.
+    /// </summary>
+    /// <param name="printer">The printer entity with CurrentSpoolId from the database</param>
+    /// <param name="ct">Cancellation token</param>
+    Task<PrinterSpoolInfoDto?> GetManagedSpoolInfoAsync(Printer printer, CancellationToken ct);
+}
+
+/// <summary>
 /// Capability interface for backends that can report actual filament usage after a print completes.
 /// Backends implement this to provide real extrusion data from history or job APIs,
 /// enabling accurate Spoolman consumption tracking.

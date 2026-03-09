@@ -499,6 +499,9 @@ public static class ServiceCollectionExtensions
             return new Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, loggerFactory.CreateLogger<Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory>());
         });
 
+        // Register the managed spool provider helper for non-Moonraker backends
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.ManagedSpoolProviderHelper>();
+
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)
         var printerStatusCache = new Farm.Infrastructure.Services.Printers.PrinterStatusCache();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(printerStatusCache);
