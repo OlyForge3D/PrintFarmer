@@ -63,6 +63,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="statusCache">Cache reader for SignalR-updated status</param>
 /// <param name="locationService">Service for location management</param>
 /// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
+/// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -76,7 +77,8 @@ public class PrintersService(
     IPrinterStatusClientFactory statusClientFactory,
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
     Farm.Infrastructure.Services.Locations.ILocationService locationService,
-    Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector) : IPrintersService
+    Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
+    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
@@ -90,6 +92,7 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _statusCache = statusCache ?? throw new ArgumentNullException(nameof(statusCache));
     private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
+    private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
 
     /// <summary>
     /// Gets the appropriate backend client for a printer based on its backend type.
@@ -446,28 +449,24 @@ public class PrintersService(
 #pragma warning disable CS8603
     private async Task<PrinterDto> GetStatusDtoInternalAsync(Printer p, CancellationToken ct)
     {
+        PrinterDto dto;
         try
         {
-            // Delegate to the appropriate backend status client
-            // Each backend client is responsible for:
-            // - Retrieving typed status from its backend
-            // - Handling circuit breaker and timeouts
-            // - Building the complete PrinterDto
-            // - Backend-specific integrations (e.g., Moonraker spoolman)
             IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
-            return await statusClient.GetPrinterDtoAsync(p, ct);
+            dto = await statusClient.GetPrinterDtoAsync(p, ct);
         }
         catch (ArgumentException)
         {
-            // Unsupported backend type
             _logger.LogWarning("Unsupported printer backend {PBackend} for printer {PId}", p.Backend, p.Id);
-            return CreateOfflinePrinterDto(p);
+            dto = CreateOfflinePrinterDto(p);
         }
         catch (Exception ex)
         {
             _logger.LogWarning("Failed to get DTO for printer {PId}: {Message}", p.Id, ex.Message);
-            return CreateOfflinePrinterDto(p);
+            dto = CreateOfflinePrinterDto(p);
         }
+
+        return dto;
     }
 #pragma warning restore CS8603
 
@@ -535,7 +534,7 @@ public class PrintersService(
 
         // Delegate to the appropriate backend status client
         // Each status client is responsible for retrieving typed status from its backend
-        // and building the complete PrinterDto
+        // and building the complete PrinterDto (including spool info via IManagedSpoolProvider)
         try
         {
             IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
@@ -802,7 +801,7 @@ public class PrintersService(
                     HotendTarget: status.HotendTarget,
                     BedTarget: status.BedTarget,
                     HomedAxes: null, // Will be filled by PrinterStatusUpdate via SignalR
-                    SpoolInfo: status.SpoolInfo,
+                    SpoolInfo: status.SpoolInfo ?? await BuildDbSpoolInfoAsync(p, ct),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
@@ -845,7 +844,7 @@ public class PrintersService(
                     HotendTarget: null,
                     BedTarget: null,
                     HomedAxes: null,
-                    SpoolInfo: null,
+                    SpoolInfo: await BuildDbSpoolInfoAsync(p, ct),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
@@ -1263,6 +1262,47 @@ public class PrintersService(
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description));
+    }
+
+    /// <summary>
+    /// Enriches a printer DTO with spool info from the DB when the backend didn't provide it.
+    /// The database is the source of truth for spool assignments — backends may fail to sync.
+    /// </summary>
+    /// <summary>
+    /// Builds a PrinterSpoolInfoDto from the DB's CurrentSpoolId by fetching spool details from Spoolman.
+    /// Returns null if no spool is assigned or the fetch fails.
+    /// Used by GetAllCompleteDtosAsync which reads from the status cache and needs DB-based spool fallback.
+    /// </summary>
+    private async Task<PrinterSpoolInfoDto?> BuildDbSpoolInfoAsync(Printer printer, CancellationToken ct)
+    {
+        if (printer.CurrentSpoolId is not { } spoolId)
+        {
+            return null;
+        }
+
+        try
+        {
+            SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+            if (spool is null)
+            {
+                return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: spoolId);
+            }
+
+            return new PrinterSpoolInfoDto(
+                HasActiveSpool: true,
+                ActiveSpoolId: spoolId,
+                SpoolName: spool.FilamentName,
+                Material: spool.Material,
+                ColorHex: spool.ColorHex != null ? (spool.ColorHex.StartsWith('#') ? spool.ColorHex : $"#{spool.ColorHex}") : null,
+                FilamentName: spool.FilamentName,
+                Vendor: spool.Vendor,
+                RemainingWeightG: spool.RemainingWeightG);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to build spool info for printer {PId}, spool {SpoolId}", printer.Id, spoolId);
+            return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: spoolId);
+        }
     }
 
     /// <summary>
@@ -2469,6 +2509,12 @@ public class PrintersService(
                         p.Name, id);
                 }
             }
+
+            // Broadcast spool change to connected clients immediately
+            PrinterSpoolInfoDto? spoolInfo = spoolId.HasValue
+                ? await BuildDbSpoolInfoAsync(p, ct).ConfigureAwait(false)
+                : null;
+            await _broadcaster.BroadcastSpoolChangeAsync(id, spoolInfo, ct).ConfigureAwait(false);
 
             return new CommandResult(true, spoolId.HasValue ? $"Active spool set to {spoolId}" : "Active spool cleared");
         }

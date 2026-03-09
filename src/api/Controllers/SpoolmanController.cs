@@ -475,6 +475,21 @@ public class SpoolmanController(
         => Ok(await spoolman.ListMaterialsAsync(ct));
 
     /// <summary>
+    /// Gets material names that have at least one non-archived spool with remaining filament.
+    /// Used by the spool picker to show only materials the user can actually select from.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Sorted list of material name strings</returns>
+    /// <response code="200">Returns distinct material names with available spools</response>
+    [HttpGet("materials/available")]
+    [ProducesResponseType(typeof(IEnumerable<string>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<string>>> GetAvailableMaterialsAsync(CancellationToken ct)
+    {
+        IReadOnlyList<string> materials = await spoolman.GetAvailableMaterialsAsync(ct);
+        return Ok(materials);
+    }
+
+    /// <summary>
     /// Performs a lightweight health probe against the configured Spoolman instance.
     /// Returns basic status information (success flag and optional message) without enumerating all spools.
     /// </summary>

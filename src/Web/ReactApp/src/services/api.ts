@@ -829,7 +829,9 @@ export class ApiClient {
       if (err && typeof err === 'object' && 'response' in err) {
         const axiosErr = err as { response?: { status?: number } };
         if (axiosErr.response?.status === 404) {
-          throw new Error('Spoolman is not available for this printer. Only Moonraker-based printers with Spoolman configured are supported.', { cause: err });
+          // Backend doesn't support per-printer Spoolman — fall back to central inventory
+          const result = await this.getSpools({ limit: 500 });
+          return result.items;
         }
       }
       throw err;
@@ -2750,6 +2752,15 @@ export class ApiClient {
     const response = await this.client.get('/spoolman/materials');
     const data = response.data;
     return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanMaterial[] || [];
+  }
+
+  /**
+   * Gets material names that have at least one non-empty spool in inventory.
+   * Used by the spool picker to show only selectable materials.
+   */
+  async getAvailableMaterials(): Promise<string[]> {
+    const response = await this.client.get('/spoolman/materials/available');
+    return Array.isArray(response.data) ? response.data : [];
   }
 
   /**

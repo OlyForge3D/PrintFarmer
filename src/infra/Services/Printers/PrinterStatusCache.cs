@@ -74,6 +74,19 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         }
     }
 
+    public PrinterStatusDto UpdateSpoolInfo(Guid printerId, PrinterSpoolInfoDto? spoolInfo)
+    {
+        lock (_lockObj)
+        {
+            _cache.TryGetValue(printerId, out PrinterStatusDto? existing);
+            PrinterStatusDto updated = (existing ?? new PrinterStatusDto(Id: printerId, IsOnline: false, State: "Unknown"))
+                with
+            { SpoolInfo = spoolInfo };
+            _cache[printerId] = updated;
+            return updated;
+        }
+    }
+
     public void ClearStatus(Guid printerId)
     {
         lock (_lockObj)

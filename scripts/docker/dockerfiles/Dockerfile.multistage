@@ -9,6 +9,12 @@
 ARG ORCASLICER_VERSION=2.3.1
 ARG BUILD_VERBOSITY=quiet
 
+# Multi-architecture support
+# BUILDPLATFORM = arch of the build host (for compile stages — faster, no emulation)
+# TARGETPLATFORM = arch of the target deployment (for runtime stages)
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+
 # Base image tags - use Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter compatibility
 # Ubuntu Noble has glibc 2.39 which is compatible with bundled Assimp libraries (built for 2.38)
 ARG SDK_TAG=10.0-noble
@@ -19,8 +25,10 @@ ARG UBUNTU_TAG=24.04
 
 ############################################################
 # Shared Build Stage - Build all .NET projects once
+# Uses BUILDPLATFORM to compile on the build host's native arch (faster, no QEMU)
+# .NET publishes framework-dependent IL output that runs on any target architecture
 ############################################################
-FROM mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
+FROM --platform=${BUILDPLATFORM:-linux/amd64} mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
 WORKDIR /
 
 # Copy root-level files and the entire src directory
@@ -157,8 +165,9 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 # Standalone slicer service with its own database and HTTP
 # clients that call back to the main API for cross-domain
 # data (printers, catalog models, manufacturers).
+# NOTE: amd64-only — depends on OrcaSlicer binaries
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-host-runtime
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-host-runtime
 WORKDIR /app
 EXPOSE 5246
 
@@ -184,8 +193,9 @@ ENTRYPOINT ["dotnet", "Farm.Slicer.Host.dll"]
 
 ############################################################
 # OrcaSlicer Binary Layer (cached layer for binary assets)
+# NOTE: OrcaSlicer only has x86_64 Linux binaries — this stage is amd64-only
 ############################################################
-FROM ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
+FROM --platform=linux/amd64 ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
 ARG ORCA_ASSET_PATH=""
 ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
@@ -327,8 +337,9 @@ RUN set -e; \
 
 ############################################################
 # Slicer Base Runtime (shared runtime for all workers)
+# NOTE: amd64-only — OrcaSlicer has no ARM64 binaries
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
 WORKDIR /app
 
 # Install OrcaSlicer runtime deps for Ubuntu 24.04 (libgl1-mesa-glx → libgl1-mesa-glx | libglx0)
@@ -411,7 +422,7 @@ ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
 ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 
-FROM node:${NODE_TAG} AS frontend-build
+FROM --platform=${BUILDPLATFORM:-linux/amd64} node:${NODE_TAG} AS frontend-build
 WORKDIR /app
 
 # Copy package files directly from ReactApp (no workspaces)

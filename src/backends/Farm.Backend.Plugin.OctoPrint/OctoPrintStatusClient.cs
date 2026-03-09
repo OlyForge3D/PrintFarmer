@@ -14,11 +14,13 @@ namespace Farm.Backend.Plugin.OctoPrint
     /// <summary>
     /// Printer status client for OctoPrint backend (Klipper/GCODE printer control).
     /// Implements IPrinterStatusClient for OctoPrint-specific status retrieval.
+    /// Implements IManagedSpoolProvider for PrintFarmer-managed spool tracking (no native Spoolman).
     /// </summary>
-    public class OctoPrintStatusClient : IPrinterStatusClient
+    public class OctoPrintStatusClient : IPrinterStatusClient, IManagedSpoolProvider
     {
         private readonly IOctoPrintClient _client;
         private readonly ICircuitBreakerService _circuitBreaker;
+        private readonly ManagedSpoolProviderHelper _spoolProvider;
         private readonly ILogger<OctoPrintStatusClient> _logger;
 
         public PrinterBackend SupportedBackend => PrinterBackend.OctoPrint;
@@ -26,14 +28,17 @@ namespace Farm.Backend.Plugin.OctoPrint
         public OctoPrintStatusClient(
             IOctoPrintClient client,
             ICircuitBreakerService circuitBreaker,
+            ManagedSpoolProviderHelper spoolProvider,
             ILogger<OctoPrintStatusClient> logger)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(circuitBreaker);
+            ArgumentNullException.ThrowIfNull(spoolProvider);
             ArgumentNullException.ThrowIfNull(logger);
 
             _client = client;
             _circuitBreaker = circuitBreaker;
+            _spoolProvider = spoolProvider;
             _logger = logger;
         }
 
@@ -113,6 +118,8 @@ namespace Farm.Backend.Plugin.OctoPrint
                     async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.Credential),
                     ct);
 
+                PrinterSpoolInfoDto? spoolInfo = await GetManagedSpoolInfoAsync(printer, ct);
+
                 // Build PrinterDto from typed objects
                 return printerState != null
                     ? new PrinterDto(
@@ -142,7 +149,7 @@ namespace Farm.Backend.Plugin.OctoPrint
                         OriginalServerUrl: printer.OriginalServerUrl,
                         BackendPort: printer.BackendPort,
                         FrontendPort: printer.FrontendPort,
-                        SpoolInfo: null,
+                        SpoolInfo: spoolInfo,
                         BackendUrl: printer.BackendUrl,
                         FrontendUrl: printer.FrontendUrl)
                     : throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
@@ -153,6 +160,9 @@ namespace Farm.Backend.Plugin.OctoPrint
                 throw;
             }
         }
+
+        public Task<PrinterSpoolInfoDto?> GetManagedSpoolInfoAsync(Printer printer, CancellationToken ct)
+            => _spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
 
         public async Task<string?> GetCameraStreamUrlAsync(Printer printer, CancellationToken ct)
         {

@@ -22,4 +22,13 @@ public interface IPrinterStatusCacheWriter
     /// </summary>
     /// <param name="statuses">The collection of printer status data to cache.</param>
     void UpdateStatuses(IEnumerable<PrinterStatusDto> statuses);
+
+    /// <summary>
+    /// Atomically update only the SpoolInfo field for a cached printer status.
+    /// If no cached status exists, creates a minimal entry with the spool info.
+    /// </summary>
+    /// <param name="printerId">The printer whose spool info to update.</param>
+    /// <param name="spoolInfo">The new spool info, or null to clear it.</param>
+    /// <returns>The updated status DTO (for broadcasting).</returns>
+    PrinterStatusDto UpdateSpoolInfo(Guid printerId, PrinterSpoolInfoDto? spoolInfo);
 }
