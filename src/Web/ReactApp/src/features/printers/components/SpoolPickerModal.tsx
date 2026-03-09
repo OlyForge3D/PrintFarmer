@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback, startTransition } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
-import { RefreshIcon, SearchIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
+import { Select } from '@/common/components/ui/Select';
+import { RefreshIcon, SearchIcon, CheckIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { SpoolIcon } from '@/common/components/icons/SpoolIcon';
 import { apiClient } from '@/services/api';
 import type { SpoolmanSpool } from '@/types/api';
@@ -52,6 +53,38 @@ function getWeightBarColor(pct: number | null): string {
   return 'bg-red-500';
 }
 
+interface FilterDropdownProps {
+  label: string;
+  options: string[];
+  value: string | null;
+  onChange: (value: string | null) => void;
+}
+
+function FilterDropdown({ label, options, value, onChange }: FilterDropdownProps) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] uppercase tracking-widest text-pf-text-tertiary">{label}</span>
+      <Select
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value || null)}
+        containerClassName="w-auto"
+        className={clsx(
+          'bg-pf-bg-0 rounded-md px-2 py-1 text-xs transition-all cursor-pointer',
+          value
+            ? 'border-pf-accent/40 text-pf-accent bg-pf-accent/5'
+            : 'border-pf-border text-pf-text-secondary'
+        )}
+        aria-label={`Filter by ${label}`}
+      >
+        <option value="">All</option>
+        {options.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </Select>
+    </div>
+  );
+}
+
 /**
  * Modal for selecting a spool from the Spoolman inventory.
  * Shows a searchable, sortable list of available spools with rich visual cards.
@@ -63,6 +96,9 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('lastUsed');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [materialFilter, setMaterialFilter] = useState<string | null>(null);
+  const [vendorFilter, setVendorFilter] = useState<string | null>(null);
+  const [locationFilter, setLocationFilter] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -89,14 +125,30 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
     if (isOpen) {
       void loadSpools();
       setSearch('');
+      setMaterialFilter(null);
+      setVendorFilter(null);
+      setLocationFilter(null);
       setTimeout(() => searchInputRef.current?.focus(), 100);
     }
   }, [isOpen, loadSpools]);
+
+  const availableFilters = useMemo(() => {
+    const nonArchived = spools.filter(s => !s.archived);
+    const materials = [...new Set(nonArchived.map(s => s.material).filter(Boolean))].sort();
+    const vendors = [...new Set(nonArchived.map(s => s.vendor).filter((v): v is string => !!v))].sort();
+    const locations = [...new Set(nonArchived.map(s => s.location).filter((l): l is string => !!l))].sort();
+    return { materials, vendors, locations };
+  }, [spools]);
+
+  const activeFilterCount = [materialFilter, vendorFilter, locationFilter].filter(Boolean).length;
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     const list = spools.filter(s => {
       if (s.archived) return false;
+      if (materialFilter && s.material !== materialFilter) return false;
+      if (vendorFilter && s.vendor !== vendorFilter) return false;
+      if (locationFilter && s.location !== locationFilter) return false;
       if (!q) return true;
       const searchable = [
         `#${String(s.id).padStart(3, '0')}`,
@@ -127,7 +179,7 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
     });
 
     return list;
-  }, [spools, search, sortField, sortDir]);
+  }, [spools, search, sortField, sortDir, materialFilter, vendorFilter, locationFilter]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -186,24 +238,65 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, printerId, activeS
         </Button>
       </div>
 
-      {/* Sort pills */}
-      <div className="flex items-center gap-1.5 mb-3">
-        <span className="text-[10px] uppercase tracking-widest text-pf-text-tertiary mr-1">Sort</span>
-        {sortOptions.map(opt => (
+      {/* Filters + Sort row */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+        {/* Sort pills */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-widest text-pf-text-tertiary mr-1">Sort</span>
+          {sortOptions.map(opt => (
+            <Button
+              key={opt.field}
+              variant="unstyled"
+              onClick={() => handleSort(opt.field)}
+              className={clsx(
+                'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+                sortField === opt.field
+                  ? 'bg-pf-accent/15 text-pf-accent border border-pf-accent/30'
+                  : 'text-pf-text-tertiary hover:text-pf-text-secondary hover:bg-pf-bg-2 border border-transparent'
+              )}
+            >
+              {opt.label}{sortIndicator(opt.field)}
+            </Button>
+          ))}
+        </div>
+
+        {/* Filter dropdowns */}
+        {availableFilters.materials.length > 1 && (
+          <FilterDropdown
+            label="Material"
+            options={availableFilters.materials}
+            value={materialFilter}
+            onChange={setMaterialFilter}
+          />
+        )}
+        {availableFilters.vendors.length > 1 && (
+          <FilterDropdown
+            label="Vendor"
+            options={availableFilters.vendors}
+            value={vendorFilter}
+            onChange={setVendorFilter}
+          />
+        )}
+        {availableFilters.locations.length > 1 && (
+          <FilterDropdown
+            label="Location"
+            options={availableFilters.locations}
+            value={locationFilter}
+            onChange={setLocationFilter}
+          />
+        )}
+
+        {/* Clear all filters */}
+        {activeFilterCount > 0 && (
           <Button
-            key={opt.field}
             variant="unstyled"
-            onClick={() => handleSort(opt.field)}
-            className={clsx(
-              'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
-              sortField === opt.field
-                ? 'bg-pf-accent/15 text-pf-accent border border-pf-accent/30'
-                : 'text-pf-text-tertiary hover:text-pf-text-secondary hover:bg-pf-bg-2 border border-transparent'
-            )}
+            onClick={() => { setMaterialFilter(null); setVendorFilter(null); setLocationFilter(null); }}
+            className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-pf-text-tertiary hover:text-pf-error transition-colors"
           >
-            {opt.label}{sortIndicator(opt.field)}
+            <CloseIcon className="w-3 h-3" />
+            Clear filters
           </Button>
-        ))}
+        )}
       </div>
 
       {error && (
