@@ -189,6 +189,14 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     # Generate files for review before starting
     ./install.sh --dry-run
 
+  ARM/Raspberry Pi Support:
+    On ARM64 platforms, 3D model file support (STL, OBJ, STEP, 3MF) and slicing
+    features are automatically disabled. G-code upload and all printer management
+    features work normally.
+
+    To force-enable (if you've compiled native libs yourself):
+      PFARM__Platform__ModelFilesEnabled=true PFARM__Slicer__Enabled=true ./install.sh
+
   AFTER INSTALL
     Open http://localhost:8080 (or your chosen port) in a browser.
     You'll be guided through creating your admin account.
@@ -265,6 +273,15 @@ detect_platform() {
 
 detect_platform
 dimtext "Platform: ${OS}/${ARCH} (${DISTRO})$( [[ "$IS_WSL" == "true" ]] && echo ' [WSL]' )"
+
+# ─── ARM platform capability detection ──────────────────────────────────────
+IS_ARM=false
+case "$ARCH" in
+    arm64|armv7)
+        IS_ARM=true
+        echo "⚠️  ARM platform detected ($ARCH) — 3D model and slicing features will be disabled"
+        ;;
+esac
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STATUS / UNINSTALL / UPGRADE (early exits)
@@ -648,6 +665,33 @@ ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 PFARM__NetworkDiscovery__EnableDiscovery=true
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
 ENVEOF
+fi
+
+# Append ARM platform overrides if running on ARM
+if [[ "$IS_ARM" == "true" ]]; then
+    cat >> "$INSTALL_DIR/.env" <<ARMEOF
+
+# ARM Platform — 3D model and slicing features disabled
+PFARM__Slicer__Enabled=false
+PFARM__Platform__ModelFilesEnabled=false
+PFARM__Platform__ThumbnailGenerationEnabled=false
+PFARM__Platform__Architecture=${ARCH}
+ARMEOF
+
+    # For bare-metal (non-Docker) .NET deployments, write appsettings.Platform.json
+    cat > "$INSTALL_DIR/appsettings.Platform.json" <<'PLATFORMEOF'
+{
+  "Slicer": {
+    "Enabled": false
+  },
+  "Platform": {
+    "ModelFilesEnabled": false,
+    "ThumbnailGenerationEnabled": false,
+    "Architecture": "arm64"
+  }
+}
+PLATFORMEOF
+    dimtext "Created appsettings.Platform.json for bare-metal .NET deployments"
 fi
 
 ok "Environment config"

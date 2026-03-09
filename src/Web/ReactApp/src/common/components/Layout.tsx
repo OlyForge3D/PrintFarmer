@@ -33,6 +33,8 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
+import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
@@ -48,6 +50,10 @@ interface NavigationItem {
   requiredPermission?: { resource: string; action: string };
   requiredRole?: string;
   requiresSlicer?: boolean;
+  /** Hide when platform-level slicing is disabled (ARM / Raspberry Pi) */
+  requiresSlicingCapability?: boolean;
+  /** Hide when platform-level model file support is disabled (ARM / Raspberry Pi) */
+  requiresModelFiles?: boolean;
   children?: NavigationItem[];
   isDivider?: false;
   isSectionHeader?: false;
@@ -90,7 +96,8 @@ const navigation: NavigationElement[] = [
     href: '/jobs/new',
     icon: BoxIcon,
     requiredPermission: { resource: 'models', action: 'read' },
-    requiresSlicer: true
+    requiresSlicer: true,
+    requiresSlicingCapability: true
   },
   {
     name: 'Print Queue',
@@ -144,6 +151,12 @@ const navigation: NavigationElement[] = [
   // — Admin —
   { name: 'Admin', isSectionHeader: true, requiredRole: 'farm_admin' },
   {
+    name: 'Printer Groups',
+    href: '/printer-groups',
+    icon: PrinterIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
     name: 'Locations',
     href: '/locations',
     icon: LocationIcon,
@@ -178,14 +191,16 @@ const navigation: NavigationElement[] = [
     href: '/admin/workers',
     icon: WrenchIcon,
     requiredRole: 'farm_admin',
-    requiresSlicer: true
+    requiresSlicer: true,
+    requiresSlicingCapability: true
   },
   {
     name: 'Slicer Profiles',
     href: '/admin/slicer-profiles',
     icon: SettingsIcon,
     requiredRole: 'farm_admin',
-    requiresSlicer: true
+    requiresSlicer: true,
+    requiresSlicingCapability: true
   },
   {
     name: 'System',
@@ -211,6 +226,7 @@ export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
   const { isSlicerAvailable } = useSlicer();
+  const { data: capabilities } = useSystemCapabilities();
   const { theme, setTheme } = useTheme();
   const location = useLocation();
   // Debug: log current pathname to ensure re-render on navigation
@@ -251,8 +267,16 @@ export function Layout() {
     localStorage.setItem('pf_navbar_collapsed', JSON.stringify(navbarCollapsed));
   }, [navbarCollapsed]);
 
-  // Filter navigation based on user permissions and slicer availability (stable memoization)
+  // Filter navigation based on user permissions, slicer availability, and platform capabilities (stable memoization)
   const filteredNavigation = useMemo(() => {
+    // Helper: check whether a nav item is hidden by platform capabilities.
+    // Uses `!== false` so items stay visible before the query resolves.
+    const isHiddenByCapabilities = (item: NavigationItem) => {
+      if (item.requiresSlicingCapability && capabilities?.slicingEnabled === false) return true;
+      if (item.requiresModelFiles && capabilities?.modelFilesEnabled === false) return true;
+      return false;
+    };
+
     if (!isAuthenticated) {
       // For non-authenticated users, show only public navigation (including section headers)
       return navigation.filter(item => {
@@ -261,6 +285,7 @@ export function Layout() {
           if (item.requiredRole) return false;
           return true;
         }
+        if (isHiddenByCapabilities(item)) return false;
         if (item.requiresSlicer && !isSlicerAvailable) return false;
         return !item.requiredRole && !item.requiredPermission;
       });
@@ -274,10 +299,11 @@ export function Layout() {
       }
       if (item.requiredRole && !hasRole(item.requiredRole)) return false;
       if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
+      if (isHiddenByCapabilities(item)) return false;
       if (item.requiresSlicer && !isSlicerAvailable) return false;
       return true;
     });
-  }, [isAuthenticated, hasRole, hasPermission, isSlicerAvailable]); // Include all dependencies
+  }, [isAuthenticated, hasRole, hasPermission, isSlicerAvailable, capabilities]); // Include all dependencies
 
   const handleLogout = async () => {
     await logout();
@@ -827,6 +853,7 @@ export function Layout() {
         {/* Main content area */}
         <main className="flex-1 overflow-y-auto min-h-0">
           <EmailConfirmationBanner />
+          <PlatformBanner />
           <div className="pt-2 pr-2 pl-2">
             <Outlet />
           </div>

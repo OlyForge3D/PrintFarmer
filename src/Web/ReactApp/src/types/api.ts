@@ -3035,3 +3035,16 @@ export interface UpdatePrinterGroupRequest {
   name: string;
   description?: string;
 }
+
+/**
+ * System platform capabilities — reports which features are available
+ * on the current hardware (e.g. ARM/Raspberry Pi may disable slicing).
+ */
+export interface SystemCapabilities {
+  architecture: string;
+  slicingEnabled: boolean;
+  modelFilesEnabled: boolean;
+  thumbnailGenerationEnabled: boolean;
+  gcodeUploadEnabled: boolean;
+  platformNote?: string;
+}

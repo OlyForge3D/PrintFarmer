@@ -92,6 +92,7 @@ import {
   OfdImportResult,
   ConnectionDiagnosticsResponse,
   PagedResponse,
+  SystemCapabilities,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -820,9 +821,19 @@ export class ApiClient {
    * @param printerId The printer's GUID
    */
   async getPrinterSpools(printerId: string): Promise<SpoolmanSpool[]> {
-    const response = await this.client.get(`/printers/${printerId}/spoolman/spools`);
-    const data = response.data;
-    return Array.isArray(data) ? data : [];
+    try {
+      const response = await this.client.get(`/printers/${printerId}/spoolman/spools`);
+      const data = response.data;
+      return Array.isArray(data) ? data : [];
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { status?: number } };
+        if (axiosErr.response?.status === 404) {
+          throw new Error('Spoolman is not available for this printer. Only Moonraker-based printers with Spoolman configured are supported.', { cause: err });
+        }
+      }
+      throw err;
+    }
   }
 
   // ============ Printer History API methods ============
@@ -2037,6 +2048,13 @@ export class ApiClient {
 
   async getBasicHealth(): Promise<{ status: string }> {
     const response = await this.client.get<{ status: string }>("/healthz");
+    return response.data;
+  }
+
+  // ============ System capabilities ============
+
+  async getSystemCapabilities(): Promise<SystemCapabilities> {
+    const response = await this.client.get<SystemCapabilities>('/system/capabilities');
     return response.data;
   }
 

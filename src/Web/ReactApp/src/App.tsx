@@ -12,6 +12,9 @@ import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
 import { SlicerProvider } from '@/contexts/SlicerContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
+import { Alert } from '@/common/components/ui';
+import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
 
@@ -107,6 +110,34 @@ function SlicerGate({ children }: { children: React.ReactNode }) {
   return children;
 }
 
+/**
+ * Route-level gate that blocks access to a feature when platform
+ * capabilities report it as disabled (e.g. on ARM / Raspberry Pi).
+ * While the capabilities query is loading the children render normally
+ * so there is no layout flash on x64.
+ */
+function FeatureGate({ feature, children }: { feature: 'modelFiles' | 'slicing'; children: React.ReactNode }) {
+  const { data: capabilities } = useSystemCapabilities();
+
+  const enabledKey = `${feature}Enabled` as const;
+  if (capabilities && !capabilities[enabledKey]) {
+    return (
+      <div className="p-6 max-w-3xl">
+        <Alert type="warning" title="Feature Not Available">
+          <span>
+            This feature is not available on {capabilities.architecture} platforms.
+          </span>
+          {capabilities.platformNote && (
+            <p className="mt-2 text-sm">{capabilities.platformNote}</p>
+          )}
+        </Alert>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 // Create a query client for React Query
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -186,11 +217,11 @@ function AuthenticatedAppRoutes() {
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
-          <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
+          <Route path="slicer/job-status/:id" element={<FeatureGate feature="slicing"><SlicerJobStatus /></FeatureGate>} />
           <Route path="printers" element={<PrintersPage />} />
-          <Route path="workers" element={<RouteSuspense><LazyWorkerManagementPage /></RouteSuspense>} />
+          <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
           <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<RouteSuspense><LazySlicerProfilesPage /></RouteSuspense>} />
+          <Route path="slicer-profiles" element={<FeatureGate feature="slicing"><RouteSuspense><LazySlicerProfilesPage /></RouteSuspense></FeatureGate>} />
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="webhooks" element={<WebhooksAdminPage />} />
           <Route path="data" element={<DataManagementPage />} />
@@ -198,15 +229,17 @@ function AuthenticatedAppRoutes() {
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
           <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
         </Route>
-        <Route path="jobs/new" element={<RouteSuspense><LazyNewSliceJobPage /></RouteSuspense>} />
+        <Route path="jobs/new" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route
           path="slicer"
           element={
-            <SlicerGate>
-              <RouteSuspense>
-                <LazyOrcaSlicerPage />
-              </RouteSuspense>
-            </SlicerGate>
+            <FeatureGate feature="slicing">
+              <SlicerGate>
+                <RouteSuspense>
+                  <LazyOrcaSlicerPage />
+                </RouteSuspense>
+              </SlicerGate>
+            </FeatureGate>
           }
         />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />

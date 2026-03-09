@@ -101,6 +101,48 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 // The user-facing SlicerSettings.Enabled is set dynamically when a worker registers.
 bool slicerEnabled = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 
+// Platform-aware capability checks: auto-disable native x86-only features on ARM64 (Raspberry Pi)
+// unless explicitly overridden via configuration. Affects lib3mf, AssimpNetter, and slicer integration.
+var arch = RuntimeInformation.ProcessArchitecture;
+bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
+bool modelFilesEnabled = builder.Configuration.GetValue("Platform:ModelFilesEnabled", true);
+bool thumbnailEnabled = builder.Configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
+
+if (isArm)
+{
+    var modelFilesExplicit = builder.Configuration.GetSection("Platform:ModelFilesEnabled").Value;
+    var slicerExplicit = builder.Configuration.GetSection("Slicer:Enabled").Value;
+    var thumbnailExplicit = builder.Configuration.GetSection("Platform:ThumbnailGenerationEnabled").Value;
+
+    if (modelFilesExplicit is null)
+    {
+        modelFilesEnabled = false;
+    }
+
+    if (slicerExplicit is null)
+    {
+        slicerEnabled = false;
+    }
+
+    if (thumbnailExplicit is null)
+    {
+        thumbnailEnabled = false;
+    }
+}
+else
+{
+    // On x86/x64, respect configuration flags
+    bool slicerConfigEnabled = builder.Configuration.GetValue("Slicer:Enabled", true);
+    slicerEnabled = slicerEnabled && slicerConfigEnabled;
+    modelFilesEnabled = builder.Configuration.GetValue("Platform:ModelFilesEnabled", true);
+}
+
+// Write resolved capability values back to configuration so downstream consumers
+// (e.g. SystemCapabilitiesController) read the single source of truth.
+builder.Configuration["Slicer:Enabled"] = slicerEnabled.ToString();
+builder.Configuration["Platform:ModelFilesEnabled"] = modelFilesEnabled.ToString();
+builder.Configuration["Platform:ThumbnailGenerationEnabled"] = thumbnailEnabled.ToString();
+
 // When slicer is disabled, cross-module consumers use = null default parameter values.
 // .NET DI's ActivatorUtilities skips unregistered services that have default values.
 
@@ -241,6 +283,18 @@ catch
 {
     // If capture fails, leave captured variables null and fall back to app-level resolution later.
 }
+
+// Log platform capabilities for startup diagnostics
+if (isArm && (!modelFilesEnabled || !slicerEnabled))
+{
+    app.Logger.LogWarning("ARM platform detected ({Architecture}) — 3D model files and/or slicing features disabled", arch);
+}
+
+app.Logger.LogInformation(
+    "Platform capabilities: Architecture={Architecture}, SlicingEnabled={SlicingEnabled}, ModelFilesEnabled={ModelFilesEnabled}",
+    arch,
+    slicerEnabled,
+    modelFilesEnabled);
 
 // Post-build slicer module configuration (metrics thresholds, alert subscriptions, etc.)
 if (slicerEnabled)
