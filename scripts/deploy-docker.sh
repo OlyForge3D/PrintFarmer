@@ -126,13 +126,16 @@ IMAGES_DIR="./docker-images"
 # - Most Docker images are x86_64 (better compatibility)
 # - Cross-building to arm64 can cause compatibility issues with some tools
 # - This provides a consistent experience across different Mac hardware
+# Use --native-arch to build for the host's native architecture instead
 SYSTEM_UNAME="$(uname -s 2>/dev/null || echo 'unknown')"
 SYSTEM_ARCH="$(uname -m 2>/dev/null || echo 'unknown')"
+USE_NATIVE_ARCH=false
 
 # Determine Docker build platform
 DOCKER_BUILD_PLATFORM=""
 if [[ "$SYSTEM_UNAME" == "Darwin" ]]; then
     # macOS detected: force linux/amd64 (x86_64) for better compatibility
+    # unless --native-arch is specified
     case "$SYSTEM_ARCH" in
         arm64|aarch64)
             # Apple Silicon: explicitly set x86_64 for maximum compatibility
@@ -148,8 +151,18 @@ if [[ "$SYSTEM_UNAME" == "Darwin" ]]; then
             print_warning "Unknown macOS architecture: $SYSTEM_ARCH (will use Docker defaults)"
             ;;
     esac
+elif [[ "$SYSTEM_UNAME" == "Linux" ]]; then
+    # Linux: use native architecture
+    case "$SYSTEM_ARCH" in
+        arm64|aarch64)
+            DOCKER_BUILD_PLATFORM="linux/arm64"
+            print_info "Linux ARM64 detected: Docker builds will target arm64"
+            ;;
+        x86_64|amd64)
+            DOCKER_BUILD_PLATFORM="linux/amd64"
+            ;;
+    esac
 fi
-# On Linux or other systems, leave DOCKER_BUILD_PLATFORM empty to use system defaults
 
 # ─── ARM platform capability detection ──────────────────────────────────────
 # On ARM (Linux, not macOS Rosetta), disable slicing/model features that lack native binaries
@@ -2255,6 +2268,9 @@ OPTIONS:
         --verbose-build     Shorthand for --build-verbosity detailed
         --cleanup-generated Remove generated Docker files after deployment (default keeps them)
         --keep-generated    Preserve generated files (default; retained for compatibility)
+    --native-arch           Build for the host's native architecture instead of forcing amd64.
+                            Use on Raspberry Pi or when building ARM images on Apple Silicon.
+    --platform PLATFORM     Explicitly set the Docker build platform (e.g., linux/arm64).
 
 SMART IMAGE CACHING - Automatic offline support:
     * Downloaded images are automatically cached for offline use
@@ -6610,6 +6626,25 @@ while [ $# -gt 0 ]; do
             # Accepted for backwards compatibility, ignored
             shift
             ;;
+        --native-arch)
+            # Build for the host's native architecture instead of forcing amd64
+            # Useful on Raspberry Pi (arm64) or when building ARM images on Apple Silicon
+            USE_NATIVE_ARCH=true
+            shift
+            ;;
+        --platform)
+            # Explicitly set the Docker build platform (e.g., linux/arm64, linux/amd64)
+            if [ -n "${2:-}" ]; then
+                DOCKER_BUILD_PLATFORM="$2"
+                shift 2
+            else
+                echo "Missing value for --platform" >&2; exit 2
+            fi
+            ;;
+        --platform=*)
+            DOCKER_BUILD_PLATFORM="${1#--platform=}"
+            shift
+            ;;
         --include-monitoring)
             # Legacy flag - monitoring now on by default
             CLI_INCLUDE_MONITORING=true
@@ -6834,6 +6869,16 @@ while [ $# -gt 0 ]; do
 done
 
 set -- "${_ARGS_KEEP[@]:-}"
+
+# Apply --native-arch override after argument parsing
+# This overrides the macOS Apple Silicon amd64 default
+if [ "$USE_NATIVE_ARCH" = "true" ]; then
+    case "$SYSTEM_ARCH" in
+        arm64|aarch64) DOCKER_BUILD_PLATFORM="linux/arm64" ;;
+        x86_64|amd64)  DOCKER_BUILD_PLATFORM="linux/amd64" ;;
+    esac
+    print_info "Using native architecture: $DOCKER_BUILD_PLATFORM (--native-arch)"
+fi
 
 postgres_readiness_check() {
     local pg_user="${POSTGRES_USER:-postgres}"

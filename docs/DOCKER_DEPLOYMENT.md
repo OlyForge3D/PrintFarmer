@@ -1070,6 +1070,73 @@ Trigger flows (password reset / email confirmation) and observe structured log o
 
 See the generated `env.mailjet.example` file at repo root for a ready-to-copy reference.
 
+## Raspberry Pi / ARM64 Deployment
+
+PrintFarmer supports deployment on ARM64 platforms including Raspberry Pi 4 and Pi 5.
+
+### Supported Hardware
+
+| Device | RAM | Status |
+|--------|-----|--------|
+| Raspberry Pi 5 | 4GB+ | ✅ Recommended |
+| Raspberry Pi 4 | 4GB+ | ✅ Supported |
+| Raspberry Pi 4 | 2GB | ⚠️ May work with reduced performance |
+| Other ARM64 SBCs | 4GB+ | ✅ Should work (untested) |
+
+### What Works on ARM64
+
+- ✅ **API server** — Full functionality including all printer backends (Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge)
+- ✅ **React frontend** — Full UI served via Nginx
+- ✅ **Printer discovery** — Network scanning and auto-detection
+- ✅ **Database** — SQLite (default) and PostgreSQL
+- ✅ **SignalR** — Real-time printer status updates
+- ✅ **Spoolman integration** — Filament tracking
+- ✅ **G-code file management** — Upload, storage, and printing
+
+### What's Disabled on ARM64
+
+- ❌ **OrcaSlicer worker** — No ARM64 binary available from upstream
+- ❌ **Slicer Host** — Depends on OrcaSlicer
+- ❌ **3D model file processing** — Requires x86-only native libraries (lib3mf, AssimpNetter)
+- ❌ **STL/3MF thumbnail generation** — Requires native rendering libraries
+
+The compose generator automatically detects ARM architecture and excludes slicing services. No manual configuration needed.
+
+### Deploying on Raspberry Pi
+
+```bash
+# Standard deployment — ARM is auto-detected
+./scripts/deploy-docker.sh --non-interactive
+
+# Or with explicit native architecture flag
+./scripts/deploy-docker.sh --non-interactive --native-arch
+```
+
+The deploy script detects `aarch64` and automatically:
+- Sets `DOCKER_BUILD_PLATFORM=linux/arm64`
+- Skips OrcaSlicer AppImage download
+- Excludes slicer services from docker-compose
+
+### Pulling Pre-Built ARM64 Images
+
+If using pre-built images from GHCR (instead of building locally):
+
+```bash
+# Multi-arch manifests resolve automatically — same tags for both architectures
+docker pull ghcr.io/olyforge3d/printfarmer-api:latest
+docker pull ghcr.io/olyforge3d/printfarmer-frontend:latest
+docker pull ghcr.io/olyforge3d/printfarmer-printer-discovery:latest
+```
+
+Docker automatically pulls the ARM64 variant when running on an ARM64 host.
+
+### Performance Notes
+
+- **First startup** may take 30-60 seconds for database initialization
+- **Memory usage**: API typically uses 200-400MB; plan for 1GB+ total with database and frontend
+- **Swap**: Enable at least 1GB swap on 4GB Pi devices for headroom
+- Consider using an **SSD** instead of SD card for database storage and improved I/O performance
+
 ## Next Steps
 
 - **Local Development:** See [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) for development setup
