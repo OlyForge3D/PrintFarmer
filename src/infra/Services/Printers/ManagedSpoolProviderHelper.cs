@@ -41,7 +41,8 @@ public class ManagedSpoolProviderHelper(ISpoolmanService spoolmanService, ILogge
                 ColorHex: spool.ColorHex != null ? (spool.ColorHex.StartsWith('#') ? spool.ColorHex : $"#{spool.ColorHex}") : null,
                 FilamentName: spool.FilamentName,
                 Vendor: spool.Vendor,
-                RemainingWeightG: spool.RemainingWeightG);
+                RemainingWeightG: spool.RemainingWeightG,
+                InitialWeightG: spool.InitialWeightG);
         }
         catch (Exception ex)
         {

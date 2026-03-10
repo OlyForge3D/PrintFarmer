@@ -19,4 +19,5 @@ public record PrinterSpoolInfoDto(
     string? FilamentName = null,
     string? Vendor = null,
     double? RemainingWeightG = null,
+    double? InitialWeightG = null,
     bool? SpoolInUse = null);

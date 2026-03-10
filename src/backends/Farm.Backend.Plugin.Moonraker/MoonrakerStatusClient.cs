@@ -145,8 +145,9 @@ namespace Farm.Backend.Plugin.Moonraker
                     using JsonDocument doc = JsonDocument.Parse(spoolDetailsJson);
                     JsonElement root = doc.RootElement;
 
-                    // remaining_weight is at root level
+                    // remaining_weight and initial weight are at root level
                     double? remainingWeight = root.TryGetProperty("remaining_weight", out JsonElement weightEl) && weightEl.ValueKind == JsonValueKind.Number ? weightEl.GetDouble() : (double?)null;
+                    double? initialWeight = root.TryGetProperty("initial_weight", out JsonElement initWeightEl) && initWeightEl.ValueKind == JsonValueKind.Number ? initWeightEl.GetDouble() : (double?)null;
 
                     // material, color, vendor, and filament name are nested under .filament
                     string? material = null;
@@ -172,7 +173,8 @@ namespace Farm.Backend.Plugin.Moonraker
                         ColorHex: colorHex != null ? $"#{colorHex}" : null,
                         FilamentName: filamentName,
                         Vendor: vendor,
-                        RemainingWeightG: remainingWeight);
+                        RemainingWeightG: remainingWeight,
+                        InitialWeightG: initialWeight);
                 }
                 catch (Exception ex)
                 {

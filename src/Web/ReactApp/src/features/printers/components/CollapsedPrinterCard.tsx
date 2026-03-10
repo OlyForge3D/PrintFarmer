@@ -210,28 +210,55 @@ export function CollapsedPrinterCard({
             );
           })()}
 
-          {/* Filament info */}
-          {printer.spoolInfo?.hasActiveSpool && (
-            <div className="flex items-center gap-2 mt-2 px-1 text-xs text-pf-text-secondary">
-              {printer.spoolInfo.colorHex && (
-                <span
-                  className="inline-block w-3 h-3 rounded-full border border-white/20 shrink-0"
-                  style={{ backgroundColor: printer.spoolInfo.colorHex }}
-                  aria-label={`Filament color: ${printer.spoolInfo.colorHex}`}
-                />
+          {/* Camera view — centered, between progress bar and footer */}
+          {showCamera && (
+            <div className="mt-2 w-full flex flex-col bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
+              {hasCameraUrls && cameraSnapshotUrl && cameraStreamUrl && (
+                <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1/50">
+                  <Button
+                    type="button"
+                    onClick={() => setCameraMode('snapshot')}
+                    title="Snapshot"
+                    aria-label="Snapshot"
+                    variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
+                    size="sm"
+                    className="flex-1"
+                    iconCenter={<ImageIcon className="h-4 w-4" />}
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => setCameraMode('stream')}
+                    title="Stream"
+                    aria-label="Stream"
+                    variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
+                    size="sm"
+                    className="flex-1"
+                    iconCenter={<VideoIcon className="h-4 w-4" />}
+                  />
+                </div>
               )}
-              <span className="truncate">
-                {printer.spoolInfo.material ?? 'Unknown'}
-              </span>
-              {printer.spoolInfo.remainingWeightG != null && (
-                <span className="shrink-0 text-pf-text-tertiary">
-                  {printer.spoolInfo.remainingWeightG >= 1000
-                    ? `${(printer.spoolInfo.remainingWeightG / 1000).toFixed(1)}kg`
-                    : `${Math.round(printer.spoolInfo.remainingWeightG)}g`}
-                </span>
-              )}
+              <div className="w-full aspect-video bg-pf-bg-0 flex items-center justify-center overflow-hidden">
+                {hasCameraUrls ? (
+                  (cameraMode === 'snapshot' && cameraSnapshotUrl) || (!cameraStreamUrl && cameraSnapshotUrl) ? (
+                    <img src={cameraSnapshotUrl} alt="webcam snapshot" className="w-full h-full object-cover" />
+                  ) : (cameraMode === 'stream' && cameraStreamUrl) || (!cameraSnapshotUrl && cameraStreamUrl) ? (
+                    <img src={cameraStreamUrl} alt="webcam stream" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-center text-pf-text-secondary p-4">
+                      <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">Camera mode not available</p>
+                    </div>
+                  )
+                ) : (
+                  <div className="text-center text-pf-text-secondary p-4 w-full">
+                    <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No camera configured</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
+
         </div>
 
         {/* Right: action buttons column */}
@@ -239,7 +266,6 @@ export function CollapsedPrinterCard({
           className="flex flex-col items-center gap-0.5 ml-2 mt-2"
           role="toolbar"
           aria-label="Printer actions"
-          ref={menuRef}
         >
           <Button
             type="button"
@@ -262,21 +288,88 @@ export function CollapsedPrinterCard({
             title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera available' : 'No camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
-          <div className="relative">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowMenu(v => !v)}
-              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-              title="More options"
-              aria-label="More options"
-              aria-haspopup="true"
-              aria-expanded={showMenu}
-              iconCenter={<MoreVerticalIcon className="h-4 w-4" />}
-            />
-            {showMenu && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] bg-pf-bg-1 border border-white/10 rounded-lg shadow-xl py-1 text-sm">
+        </div>
+      </div>
+
+      {/* Bottom row: filament info + ellipsis menu */}
+      <div className="flex items-center px-3 pb-3 border-t border-white/5 pt-2" ref={menuRef}>
+        <div className="flex items-center gap-2 flex-1 min-w-0 text-xs text-pf-text-secondary">
+          {printer.spoolInfo?.hasActiveSpool ? (
+            <>
+              {(() => {
+                const color = printer.spoolInfo.colorHex ?? '#888';
+                const remaining = printer.spoolInfo.remainingWeightG;
+                const initial = printer.spoolInfo.initialWeightG;
+                const percent = (remaining != null && initial != null && initial > 0)
+                  ? Math.max(0, Math.min(100, (remaining / initial) * 100))
+                  : null;
+                const r = 8;
+                const circumference = 2 * Math.PI * r;
+                const offset = percent != null ? circumference * (1 - percent / 100) : 0;
+                const ringTooltip = [
+                  printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Unknown',
+                  printer.spoolInfo.vendor,
+                  percent != null ? `${Math.round(percent)}% remaining` : null,
+                ].filter(Boolean).join(' · ');
+                return (
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 20 20"
+                    className="shrink-0"
+                    aria-label={percent != null ? `Filament ${Math.round(percent)}% remaining` : `Filament color: ${color}`}
+                  >
+                    <title>{ringTooltip}</title>
+                    <circle cx="10" cy="10" r={r} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="2.5" />
+                    <circle
+                      cx="10"
+                      cy="10"
+                      r={r}
+                      fill="none"
+                      stroke="rgba(255,255,255,0.6)"
+                      strokeWidth="2.5"
+                      strokeDasharray={circumference}
+                      strokeDashoffset={offset}
+                      strokeLinecap="round"
+                      transform="rotate(-90 10 10)"
+                    />
+                    <circle cx="10" cy="10" r="4" fill={color} />
+                  </svg>
+                );
+              })()}
+              <span className="truncate">
+                {printer.spoolInfo.material ?? 'Unknown'}
+              </span>
+              {printer.spoolInfo.remainingWeightG != null && (
+                <span
+                  className="shrink-0 text-pf-text-tertiary cursor-default"
+                  title={`${printer.spoolInfo.remainingWeightG >= 1000 ? `${(printer.spoolInfo.remainingWeightG / 1000).toFixed(2)}kg` : `${Math.round(printer.spoolInfo.remainingWeightG)}g`} remaining${printer.spoolInfo.initialWeightG ? ` of ${printer.spoolInfo.initialWeightG >= 1000 ? `${(printer.spoolInfo.initialWeightG / 1000).toFixed(1)}kg` : `${Math.round(printer.spoolInfo.initialWeightG)}g`}` : ''}`}
+                >
+                  {printer.spoolInfo.remainingWeightG >= 1000
+                    ? `${(printer.spoolInfo.remainingWeightG / 1000).toFixed(1)}kg`
+                    : `${Math.round(printer.spoolInfo.remainingWeightG)}g`}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="italic text-pf-text-tertiary">No spool loaded</span>
+          )}
+        </div>
+        <div className="relative shrink-0 ml-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowMenu(v => !v)}
+            className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+            title="More options"
+            aria-label="More options"
+            aria-haspopup="true"
+            aria-expanded={showMenu}
+            iconCenter={<MoreVerticalIcon className="h-4 w-4" />}
+          />
+          {showMenu && (
+            <div className="absolute right-0 bottom-full mb-1 z-50 min-w-[180px] bg-pf-bg-1 border border-white/10 rounded-lg shadow-xl py-1 text-sm">
                 <Button
                   type="button"
                   variant="ghost"
@@ -337,88 +430,6 @@ export function CollapsedPrinterCard({
             )}
           </div>
         </div>
-      </div>
-
-      {showCamera && (
-        <div className="mt-4 w-52 flex flex-col bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
-          {/* Camera mode toggle - show if both snapshot and stream are available */}
-          {hasCameraUrls && cameraSnapshotUrl && cameraStreamUrl && (
-            <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1/50">
-              <Button
-                type="button"
-                onClick={() => setCameraMode('snapshot')}
-                title="Snapshot"
-                aria-label="Snapshot"
-                variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
-                size="sm"
-                className="flex-1"
-                iconCenter={<ImageIcon className="h-4 w-4" />}
-              >
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setCameraMode('stream')}
-                title="Stream"
-                aria-label="Stream"
-                variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
-                size="sm"
-                className="flex-1"
-                iconCenter={<VideoIcon className="h-4 w-4" />}
-              >
-              </Button>
-            </div>
-          )}
-          
-          {/* Camera display */}
-          <div className="w-full aspect-video bg-pf-bg-0 flex items-center justify-center overflow-hidden">
-            {hasCameraUrls ? (
-              cameraMode === 'snapshot' && cameraSnapshotUrl ? (
-                <img 
-                  src={cameraSnapshotUrl}
-                  alt="webcam snapshot"
-                  className="w-full h-full object-cover"
-                  onError={() => {}}
-                  onLoad={() => {}}
-                />
-              ) : cameraMode === 'stream' && cameraStreamUrl ? (
-                <img 
-                  src={cameraStreamUrl}
-                  alt="webcam stream"
-                  className="w-full h-full object-cover"
-                  onError={() => {}}
-                  onLoad={() => {}}
-                />
-              ) : cameraSnapshotUrl ? (
-                <img 
-                  src={cameraSnapshotUrl}
-                  alt="webcam snapshot"
-                  className="w-full h-full object-cover"
-                  onError={() => {}}
-                  onLoad={() => {}}
-                />
-              ) : cameraStreamUrl ? (
-                <img 
-                  src={cameraStreamUrl}
-                  alt="webcam stream"
-                  className="w-full h-full object-cover"
-                  onError={() => {}}
-                  onLoad={() => {}}
-                />
-              ) : (
-                <div className="text-center text-pf-text-secondary p-4">
-                  <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">Camera mode not available</p>
-                </div>
-              )
-            ) : (
-              <div className="text-center text-pf-text-secondary p-4 w-full">
-                <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No camera configured</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* History Modal */}
       <PrinterHistoryModal

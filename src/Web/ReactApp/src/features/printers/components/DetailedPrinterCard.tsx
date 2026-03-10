@@ -7,7 +7,6 @@ import type { Printer, TempTargets, MoveRequest, PrinterBackendCapabilitiesDto }
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
-import { PrinterStatusHeader } from '@/features/printers/components/PrinterStatusHeader';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
@@ -43,6 +42,7 @@ import {
   canUseManualMove,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
+import { getStatusHeaderStyle } from '@/features/printers/utils/statusColors';
 import {
   getPresetTargets,
   getExtrudeMinTemp,
@@ -137,6 +137,12 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
 
   const homedAxesRaw = printer.homedAxes;
+
+  const headerStyle = getStatusHeaderStyle({ state, isOnline, isPrinting, isPaused, isShutdown });
+
+  const toCamelCase = (str: string): string => {
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  };
 
   // Camera URL handling
   const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
@@ -392,20 +398,22 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
   return (
     <div className="relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full min-w-[26rem]">
-      {/* Header */}
-      <div className="mb-4">
-        <PrinterStatusHeader
-          name={printer.name}
-          modelName={printer.modelName}
-          state={state}
-          isOnline={isOnline}
-          isPrinting={isPrinting}
-          isPaused={isPaused}
-          isShutdown={isShutdown}
-        />
+      {/* Colored header — background tinted by printer state */}
+      <div style={headerStyle} className="px-3 pt-3 pb-2 rounded-t-xl -mx-3 -mt-3">
+        <div className="flex items-center gap-2">
+          <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
+            {printer.name}
+          </div>
+          <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
+            <span className="text-pf-text-primary font-medium">
+              {isOnline ? toCamelCase(state) : 'Offline'}
+            </span>
+          </div>
+        </div>
+      </div>
 
-        {/* Subtle separator above actions (match collapsed card) */}
-        <div className="h-px w-full bg-pf-bg-0/10 mb-2" aria-hidden />
+      {/* Header actions */}
+      <div className="mb-4 mt-3">
 
         {/* Action buttons row */}
         <div className="flex w-full items-center justify-between gap-2" role="toolbar" aria-label="Printer actions">

@@ -414,6 +414,7 @@ export interface PrinterSpoolInfo {
   filamentName?: string;
   vendor?: string;
   remainingWeightG?: number;
+  initialWeightG?: number;
   spoolInUse?: boolean;
   // Legacy properties (may still be used)
   id?: number;
