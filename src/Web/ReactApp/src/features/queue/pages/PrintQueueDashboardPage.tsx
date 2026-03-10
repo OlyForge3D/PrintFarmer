@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
@@ -13,7 +13,6 @@ import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
 import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
-import { useAllAutoPrintStatuses, useSetAllAutoPrintEnabled } from "@/features/printers/hooks/useAutoPrint";
 import { apiClient } from "@/services/api";
 import { printerSignalRService } from "@/services/printer-signalr";
 import type { DispatchUploadProgressDto } from "@/types/api";
@@ -26,22 +25,51 @@ import type {
 const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
 const VALID_TABS = ['print-queue', 'history'] as const;
 
-function AutoDispatchGlobalToggle() {
-  const { data: statuses, isError } = useAllAutoPrintStatuses();
-  const setAllEnabled = useSetAllAutoPrintEnabled();
+const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
 
-  const totalPrinters = statuses?.length ?? 0;
-  const enabledCount = statuses?.filter(s => s.autoPrintEnabled).length ?? 0;
-  const allEnabled = totalPrinters > 0 && enabledCount === totalPrinters;
-  const isIndeterminate = enabledCount > 0 && enabledCount < totalPrinters;
+interface DispatchSettingsResponse {
+  autoDispatchEnabled: boolean;
+  autoDispatchMode: string;
+  idleThresholdSeconds: number;
+  minimumScoreThreshold: number;
+  maxConcurrentDispatches: number;
+  loadBalancingStrategy: string;
+  updatedAt: string;
+}
+
+function AutoDispatchGlobalToggle() {
+  const queryClient = useQueryClient();
+
+  const { data: settings, isError } = useQuery<DispatchSettingsResponse>({
+    queryKey: DISPATCH_SETTINGS_KEY,
+    queryFn: async () => {
+      const res = await apiClient.get<DispatchSettingsResponse>('/dispatch-settings');
+      return res.data;
+    },
+    staleTime: 30_000,
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      if (!settings) return;
+      const res = await apiClient.put<DispatchSettingsResponse>('/dispatch-settings', {
+        ...settings,
+        autoDispatchEnabled: enabled,
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: DISPATCH_SETTINGS_KEY });
+    },
+  });
+
+  const isEnabled = settings?.autoDispatchEnabled ?? false;
 
   const handleToggle = async () => {
-    const newEnabled = !allEnabled;
+    const newEnabled = !isEnabled;
     try {
-      await setAllEnabled.mutateAsync(newEnabled);
-      toast.success(newEnabled
-        ? `Auto-dispatch enabled for all ${totalPrinters} printers`
-        : 'Auto-dispatch disabled for all printers');
+      await toggleMutation.mutateAsync(newEnabled);
+      toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
     } catch {
       toast.error('Failed to update auto-dispatch');
     }
@@ -62,25 +90,18 @@ function AutoDispatchGlobalToggle() {
     );
   }
 
-  if (totalPrinters === 0) return null;
-
   return (
     <div className="flex items-center gap-2 shrink-0">
       <Toggle
-        checked={allEnabled}
+        checked={isEnabled}
         onChange={handleToggle}
-        disabled={setAllEnabled.isPending}
+        disabled={toggleMutation.isPending || !settings}
         size="sm"
-        aria-label="Toggle auto-dispatch for all printers"
+        aria-label="Toggle system auto-dispatch"
       />
-      <div className="flex flex-col">
-        <span className="text-xs font-medium text-pf-text-primary">
-          Auto-dispatch{isIndeterminate && ' (partial)'}
-        </span>
-        <span className="text-xs text-pf-text-secondary">
-          {enabledCount}/{totalPrinters} printers
-        </span>
-      </div>
+      <span className="text-xs font-medium text-pf-text-primary">
+        Auto-dispatch
+      </span>
     </div>
   );
 }
