@@ -172,7 +172,8 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     }
 
     /// <summary>
-    /// Checks if two normalized model names match (exact or substring match).
+    /// Checks if two normalized model names match using exact match only.
+    /// Substring matching caused false positives (e.g., "Qidi X-Plus 4" matching unrelated models).
     /// </summary>
     private static bool IsModelMatch(string search, string candidate)
     {
@@ -181,7 +182,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             return false;
         }
 
-        return search == candidate || search.Contains(candidate) || candidate.Contains(search);
+        return string.Equals(search, candidate, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

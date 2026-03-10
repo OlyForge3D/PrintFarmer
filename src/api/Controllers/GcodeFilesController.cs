@@ -640,6 +640,7 @@ public class GcodeFilesController(
     /// </summary>
     /// <param name="id">GCode file ID</param>
     /// <returns>GCode file</returns>
+    [AllowAnonymous]
     [HttpGet("file/{id:guid}")]
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
