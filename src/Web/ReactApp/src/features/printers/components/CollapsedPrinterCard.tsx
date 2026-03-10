@@ -3,11 +3,6 @@ import { PanelRightOpen } from 'lucide-react';
 import {
   HistoryIcon,
   FileIcon,
-  RefreshIcon,
-  PauseIcon, 
-  PlayIcon, 
-  EmergencyStopIcon, 
-  XCircleIcon,
   EditIcon,
   CameraIcon,
   ExternalLinkIcon,
@@ -17,7 +12,6 @@ import {
   TagIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button, Toggle } from '@/common/components/ui';
-import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
@@ -26,11 +20,8 @@ import { useAutoPrintStatus, useSetAutoPrintEnabled } from '@/features/printers/
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { toast } from 'sonner';
 import {
-  canCancel,
-  canEmergencyStop,
   canOpenFiles,
   canOpenHistory,
-  canPauseOrResume,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
 import { getStatusHeaderStyle } from '@/features/printers/utils/statusColors';
@@ -57,7 +48,6 @@ export function CollapsedPrinterCard({
   const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [controlActionPending, setControlActionPending] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showTagModal, setShowTagModal] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
@@ -112,9 +102,6 @@ export function CollapsedPrinterCard({
     supportsHistory: printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint,
   });
 
-  const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
-  const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
-  const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
   // Check if printer has camera URLs - just verify if URLs have values from database
@@ -128,70 +115,21 @@ export function CollapsedPrinterCard({
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
-  const handleControlAction = async (action: 'pause' | 'resume' | 'cancel' | 'stop' | 'firmware-restart') => {
-    if (controlActionPending) {
-      return;
-    }
-
-    setControlActionPending(true);
-    try {
-      if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { printerActions?: boolean } }).PrintFarmerDebug?.printerActions) {
-        console.log(`Performing ${action} on printer ${printer.id}`);
-      }
-
-      switch (action) {
-        case 'pause':
-          await apiClient.pausePrint(printer.id);
-          break;
-        case 'resume':
-          await apiClient.resumePrint(printer.id);
-          break;
-        case 'cancel':
-          await apiClient.cancelPrint(printer.id);
-          break;
-        case 'stop':
-          await apiClient.emergencyStop(printer.id);
-          break;
-        case 'firmware-restart':
-          await apiClient.firmwareRestart(printer.id);
-          break;
-        default: {
-          const exhaustiveCheck: never = action;
-          return exhaustiveCheck;
-        }
-      }
-    } catch (error) {
-      console.error(`Error performing ${action}:`, error);
-    } finally {
-      setControlActionPending(false);
-    }
-  };
-
   return (
-    <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full overflow-hidden">
+    <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
       {/* Colored header — background tinted by printer state */}
-      <div style={headerStyle} className="px-3 pt-3 pb-2">
-        {/* Top row: Name + Status Pill (no dot) */}
-        <div className="flex justify-between items-center gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
-              {printer.name}
-            </div>
-            {(printer.modelName) && (
-              <div className="text-pf-text-secondary text-xs truncate">
-                {`${printer.modelName || ''}`.trim()}
-              </div>
-            )}
+      <div style={headerStyle} className="px-3 pt-3 pb-2 rounded-t-xl">
+        {/* Top row: Name + Status Pill */}
+        <div className="flex items-center gap-2">
+          <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
+            {printer.name}
           </div>
-
-          {/* Status chip — no dot, label only */}
-          <div className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-black/20 border border-white/15">
+          <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
             <span className="text-pf-text-primary font-medium">
               {isOnline ? toCamelCase(state) : 'Offline'}
             </span>
           </div>
         </div>
-
         {/* Tags row */}
         {printerTags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
@@ -207,18 +145,94 @@ export function CollapsedPrinterCard({
         )}
       </div>
 
-      {/* Card body */}
-      <div className="px-3 pb-3">
-        {/* Subtle separator */}
-        <div className="h-px w-full bg-pf-bg-0/10 mb-2 mt-2" aria-hidden />
+      {/* Card body — content left, action buttons right */}
+      <div className="flex px-3 pb-3">
+        {/* Left: content area */}
+        <div className="flex-1 min-w-0">
+          {/* Auto-print toggle */}
+          <div className="flex items-center justify-between mb-2 mt-2 px-1">
+            <span className="text-xs text-pf-text-secondary">Auto-print</span>
+            <Toggle
+              checked={autoPrintStatus?.autoPrintEnabled ?? false}
+              onChange={handleAutoPrintToggle}
+              disabled={setAutoPrintEnabled.isPending}
+              size="sm"
+              aria-label={`Toggle auto-print for ${printer.name}`}
+            />
+          </div>
 
-        {/* Action buttons row */}
+          {/* Bed clear confirmation banner */}
+          {autoPrintStatus && (
+            <div className="mb-2">
+              <BedClearBanner
+                printerId={printer.id}
+                printerName={printer.name}
+                autoPrintStatus={autoPrintStatus}
+              />
+            </div>
+          )}
+
+          {/* Progress bar — always visible */}
+          {(() => {
+            const progress = printer.progress ?? 0;
+            const isActive = isOnline && (isPrinting || isPaused) && progress > 0;
+            return (
+              <div className="mt-2">
+                <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
+                  <span className="truncate flex-1">{isActive ? (printer.jobName || 'Printing...') : <span className="italic text-pf-text-tertiary">No active print</span>}</span>
+                  {isActive && <span className="font-semibold ml-2">{Math.round(progress)}%</span>}
+                </div>
+                <div
+                  className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden"
+                  role="progressbar"
+                  aria-label="Print progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={isActive ? Math.round(Math.max(0, Math.min(100, progress))) : 0}
+                >
+                  <div
+                    ref={collapsedProgressRef}
+                    className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${isActive ? Math.max(0, Math.min(100, progress)) : 0}%` }}
+                  >
+                    <span className="sr-only">Print progress: {isActive ? Math.round(Math.max(0, Math.min(100, progress))) : 0}%</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Filament info */}
+          {printer.spoolInfo?.hasActiveSpool && (
+            <div className="flex items-center gap-2 mt-2 px-1 text-xs text-pf-text-secondary">
+              {printer.spoolInfo.colorHex && (
+                <span
+                  className="inline-block w-3 h-3 rounded-full border border-white/20 shrink-0"
+                  style={{ backgroundColor: printer.spoolInfo.colorHex }}
+                  aria-label={`Filament color: ${printer.spoolInfo.colorHex}`}
+                />
+              )}
+              <span className="truncate">
+                {printer.spoolInfo.material ?? 'Unknown'}
+              </span>
+              {printer.spoolInfo.remainingWeightG != null && (
+                <span className="shrink-0 text-pf-text-tertiary">
+                  {printer.spoolInfo.remainingWeightG >= 1000
+                    ? `${(printer.spoolInfo.remainingWeightG / 1000).toFixed(1)}kg`
+                    : `${Math.round(printer.spoolInfo.remainingWeightG)}g`}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right: action buttons column */}
         <div
-          className="flex w-full items-center justify-between mb-2"
+          className="flex flex-col items-center gap-0.5 ml-2 mt-2"
           role="toolbar"
           aria-label="Printer actions"
+          ref={menuRef}
         >
-          {/* Details/Sidebar button */}
           <Button
             type="button"
             variant="ghost"
@@ -229,8 +243,6 @@ export function CollapsedPrinterCard({
             aria-label="Open details sidebar"
             iconCenter={<PanelRightOpen className="h-4 w-4" />}
           />
-
-          {/* Camera button */}
           <Button
             type="button"
             variant="ghost"
@@ -242,9 +254,7 @@ export function CollapsedPrinterCard({
             title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera available' : 'No camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
-
-          {/* Ellipsis / overflow menu */}
-          <div className="relative" ref={menuRef}>
+          <div className="relative">
             <Button
               type="button"
               variant="ghost"
@@ -258,16 +268,16 @@ export function CollapsedPrinterCard({
               iconCenter={<MoreVerticalIcon className="h-4 w-4" />}
             />
             {showMenu && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] bg-pf-bg-1 border border-white/10 rounded-lg shadow-xl py-1 text-sm">
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] bg-pf-bg-1 border border-white/10 rounded-lg shadow-xl py-1 text-sm">
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="flex w-full items-center gap-2 px-3 py-2 justify-start rounded-none h-auto text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
+                  className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
                   onClick={() => { setShowFiles(true); setShowMenu(false); }}
                   disabled={!canOpenFilesNow}
+                  iconLeft={<FileIcon className="h-4 w-4 shrink-0" />}
                 >
-                  <FileIcon className="h-4 w-4 shrink-0" />
                   View Files
                 </Button>
                 {support.supportsHistory && (
@@ -275,11 +285,11 @@ export function CollapsedPrinterCard({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="flex w-full items-center gap-2 px-3 py-2 justify-start rounded-none h-auto text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
+                    className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
                     onClick={() => { setShowHistory(true); setShowMenu(false); }}
                     disabled={!canOpenHistoryNow}
+                    iconLeft={<HistoryIcon className="h-4 w-4 shrink-0" />}
                   >
-                    <HistoryIcon className="h-4 w-4 shrink-0" />
                     History
                   </Button>
                 )}
@@ -298,10 +308,10 @@ export function CollapsedPrinterCard({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="flex w-full items-center gap-2 px-3 py-2 justify-start rounded-none h-auto text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
+                  className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
                   onClick={() => { onEdit?.(printer); setShowMenu(false); }}
+                  iconLeft={<EditIcon className="h-4 w-4 shrink-0" />}
                 >
-                  <EditIcon className="h-4 w-4 shrink-0" />
                   Edit Printer
                 </Button>
                 <div className="h-px bg-white/10 my-1" />
@@ -309,97 +319,17 @@ export function CollapsedPrinterCard({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="flex w-full items-center gap-2 px-3 py-2 justify-start rounded-none h-auto text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
+                  className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
                   onClick={() => { setShowTagModal(true); setShowMenu(false); }}
+                  iconLeft={<TagIcon className="h-4 w-4 shrink-0" />}
                 >
-                  <TagIcon className="h-4 w-4 shrink-0" />
                   Manage Tags
                 </Button>
               </div>
             )}
           </div>
         </div>
-
-        {/* Control buttons */}
-        <div className="flex items-center gap-1 mb-2">
-          <ControlPadButton
-            disabled={controlActionPending || !canPauseOrResumeNow}
-            onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
-            title={isPaused ? 'Resume' : 'Pause'}
-            padSize="small"
-          >
-            {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
-          </ControlPadButton>
-          <ControlPadButton
-            disabled={controlActionPending || !canCancelNow}
-            onClick={() => handleControlAction('cancel')}
-            title="Cancel"
-            padSize="small"
-          >
-            <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
-          </ControlPadButton>
-          <ControlPadButton
-            variant={isShutdown ? 'secondary' : 'danger'}
-            disabled={controlActionPending || !canEmergencyStopNow}
-            onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
-            title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-            padSize="small"
-          >
-            {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
-          </ControlPadButton>
-        </div>
-
-      {/* Auto-print toggle */}
-      <div className="flex items-center justify-between mb-2 px-1">
-        <span className="text-xs text-pf-text-secondary">Auto-print</span>
-        <Toggle
-          checked={autoPrintStatus?.autoPrintEnabled ?? false}
-          onChange={handleAutoPrintToggle}
-          disabled={setAutoPrintEnabled.isPending}
-          size="sm"
-          aria-label={`Toggle auto-print for ${printer.name}`}
-        />
       </div>
-
-      {/* Bed clear confirmation banner */}
-      {autoPrintStatus && (
-        <div className="mb-2">
-          <BedClearBanner
-            printerId={printer.id}
-            printerName={printer.name}
-            autoPrintStatus={autoPrintStatus}
-          />
-        </div>
-      )}
-
-      {/* Progress bar for active prints */}
-      {(() => {
-        const progress = printer.progress ?? 0;
-        return isOnline && (isPrinting || isPaused) && progress > 0 && (
-          <div className="mt-3">
-            <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-              <span className="truncate flex-1">{printer.jobName || 'Printing...'}</span>
-              <span className="font-semibold ml-2">{Math.round(progress)}%</span>
-            </div>
-            <div
-              className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden"
-              role="progressbar"
-              aria-label="Print progress"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(Math.max(0, Math.min(100, progress)))}
-            >
-              <div
-                ref={collapsedProgressRef}
-                className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
-                style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-              >
-                <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, progress)))}%</span>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {showCamera && (
         <div className="mt-4 w-52 flex flex-col bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
@@ -507,7 +437,6 @@ export function CollapsedPrinterCard({
           void queryClient.invalidateQueries({ queryKey: ['printer-tags', printer.id] });
         }}
       />
-    </div>
       {/* end card body */}
     </div>
   );

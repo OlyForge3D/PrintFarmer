@@ -71,7 +71,7 @@ export function PrinterGroupsPage() {
   // If a group is selected, show detail view
   if (selectedGroupId) {
     return (
-      <PageTemplate title="Printer Groups" icon={<PrinterIcon />}>
+      <PageTemplate title="Printer Groups" icon={PrinterIcon}>
         <PrinterGroupDetail
           groupId={selectedGroupId}
           onBack={handleBack}
@@ -97,7 +97,7 @@ export function PrinterGroupsPage() {
     <PageTemplate
       title="Printer Groups"
       subtitle="Organize printers into groups for easier management"
-      icon={<PrinterIcon />}
+      icon={PrinterIcon}
       actions={
         <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
           Create Group

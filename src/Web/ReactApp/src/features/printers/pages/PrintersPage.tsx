@@ -379,7 +379,7 @@ export function PrintersPage() {
                   <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
                 </div>
               ) : viewMode === 'collapsed' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,14rem)] gap-4 transition-opacity duration-200 min-w-0">
+                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,18rem)] gap-4 transition-opacity duration-200 min-w-0">
                   {userPrinters.map((printer) => (
                     <CollapsedPrinterCard
                       key={printer.id}

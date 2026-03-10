@@ -41,11 +41,11 @@ export function getStatusIndicatorColor(options: StatusColorOptions): string {
  */
 export function getStatusHeaderStyle(options: StatusColorOptions): React.CSSProperties {
   const { isOnline, isPrinting, isPaused, isShutdown } = options;
-  if (!isOnline) return { background: 'rgba(156,163,175,0.06)' };   // --pf-disabled #9ca3af @ 6%
-  if (isPrinting) return { background: 'rgba(4,120,87,0.35)' };     // --pf-success-bg #047857 @ 35%
-  if (isPaused) return { background: 'rgba(217,119,6,0.30)' };      // --pf-warning #d97706 @ 30%
-  if (isShutdown) return { background: 'rgba(220,38,38,0.25)' };    // --pf-error #dc2626 @ 25%
-  return { background: 'rgba(4,120,87,0.10)' };                     // idle — subtle accent
+  if (!isOnline) return { background: 'rgba(100,116,139,0.15)' };     // slate-500 @ 15% — offline
+  if (isPrinting) return { background: 'rgba(34,197,94,0.30)' };      // green-500 — vibrant green for printing
+  if (isPaused) return { background: 'rgba(245,158,11,0.30)' };       // amber-500 — warm amber for paused
+  if (isShutdown) return { background: 'rgba(239,68,68,0.30)' };      // red-500 — error/shutdown
+  return { background: 'rgba(59,130,246,0.25)' };                     // blue-500 — blue for idle
 }
 
 /**
