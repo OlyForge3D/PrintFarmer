@@ -2,15 +2,13 @@ import { Button, Select, Spinner } from "@/common/components/ui";
 import { useState, useRef, useCallback } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import type { DispatchUploadProgressDto } from "@/types/api";
-import { Download, GripVertical, Tractor } from "lucide-react";
+import { Download, GripVertical, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen } from "lucide-react";
+import clsx from "clsx";
 
-/**
- * Formats a duration in seconds to a human-readable string (e.g., "2h 30m" or "45m")
- */
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  
+
   if (hours > 0) {
     return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
   }
@@ -28,6 +26,16 @@ function formatDateTime(iso?: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function DetailChip({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-pf-text-secondary" title={label}>
+      <span className="text-pf-text-tertiary shrink-0">{icon}</span>
+      <span className="text-pf-text-tertiary">{label}:</span>
+      <span className="text-pf-text-secondary">{children}</span>
+    </span>
+  );
 }
 
 export interface QueueJobsTableProps {
@@ -65,30 +73,29 @@ export function QueueJobsTable({
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const dragCounter = useRef(0);
 
-  const handleDragStart = useCallback((e: React.DragEvent<HTMLTableRowElement>, index: number) => {
+  const handleDragStart = useCallback((e: React.DragEvent<HTMLDivElement>, index: number) => {
     setDragIndex(index);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", String(index));
-    // Make the dragged row semi-transparent
     requestAnimationFrame(() => {
       (e.target as HTMLElement).style.opacity = "0.4";
     });
   }, []);
 
-  const handleDragEnd = useCallback((e: React.DragEvent<HTMLTableRowElement>) => {
+  const handleDragEnd = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     (e.target as HTMLElement).style.opacity = "1";
     setDragIndex(null);
     setDropIndex(null);
     dragCounter.current = 0;
   }, []);
 
-  const handleDragEnter = useCallback((e: React.DragEvent<HTMLTableRowElement>, index: number) => {
+  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>, index: number) => {
     e.preventDefault();
     dragCounter.current++;
     setDropIndex(index);
   }, []);
 
-  const handleDragLeave = useCallback((e: React.DragEvent<HTMLTableRowElement>) => {
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     dragCounter.current--;
     if (dragCounter.current === 0) {
@@ -96,12 +103,12 @@ export function QueueJobsTable({
     }
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent<HTMLTableRowElement>) => {
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent<HTMLTableRowElement>, targetIndex: number) => {
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>, targetIndex: number) => {
     e.preventDefault();
     dragCounter.current = 0;
     setDropIndex(null);
@@ -111,7 +118,6 @@ export function QueueJobsTable({
       return;
     }
 
-    // Build the reordered list and compute new positions
     const reordered = [...jobs];
     const [moved] = reordered.splice(dragIndex, 1);
     reordered.splice(targetIndex, 0, moved);
@@ -181,283 +187,305 @@ export function QueueJobsTable({
   }
 
   return (
-    <div className="overflow-x-auto border border-pf-border rounded-lg bg-pf-bg-1">
-      <table className="w-full text-sm whitespace-nowrap">
-        <thead>
-          <tr className="border-b border-pf-border bg-pf-bg-2">
-            <th className="w-10 px-2 py-3" aria-label="Reorder">
-              <span className="sr-only">Drag to reorder</span>
-            </th>
-            <th className="w-14 min-w-14 px-2 py-3" aria-label="Thumbnail">
-              <span className="sr-only">Thumbnail</span>
-            </th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Time</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">File</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Project</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Printer</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Model</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Material</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Filament</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Est. Time</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Cost</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Copies</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Source</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Status</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Priority</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {jobs.map((jobWrapper, index) => {
-            const job = jobWrapper.job;
-            const jobId = job.id;
-            const fileName = jobWrapper.gcodeFile?.name || jobWrapper.gcodeFile?.fileName || job.name || "Unknown File";
-            const printerName = jobWrapper.assignedPrinter?.name || "Unknown Printer";
-            const model = jobWrapper.assignedPrinter?.modelName || "Unknown Model";
-            const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "-";
-            const status = job.status || "Unknown";
-            const priority = job.priority || 0;
-            const projectName = job.projectName;
-            
-            // Get estimated time from job or gcode file metadata
-            const estimatedTimeSeconds = job.estimatedPrintTimeSeconds || jobWrapper.gcodeFile?.estimatedPrintTimeSeconds;
-            const estimatedTimeDisplay = estimatedTimeSeconds 
-              ? formatDuration(estimatedTimeSeconds)
-              : "-";
-            
-            // Get filament usage from job or gcode file metadata (convert grams to display)
-            const filamentGrams = job.estimatedFilamentUsageGrams || jobWrapper.gcodeFile?.estimatedFilamentUsageGrams;
-            const filamentDisplay = job.filamentName
-              ? (
-                <span className="inline-flex items-center gap-1.5" title={`${job.filamentVendor ? job.filamentVendor + ' — ' : ''}${job.filamentName}`}>
-                  {job.filamentColor && (
-                    <span
-                      className="inline-block w-3 h-3 rounded-full border border-pf-border shrink-0"
-                      style={{ backgroundColor: job.filamentColor }}
-                      aria-hidden="true"
-                    />
-                  )}
-                  <span>{job.filamentName}</span>
-                </span>
-              )
-              : filamentGrams 
-                ? `${filamentGrams.toFixed(1)}g`
-                : "-";
+    <div className="border border-pf-border rounded-lg bg-pf-bg-1 overflow-hidden" role="list" aria-label="Print job queue">
+      {/* Header */}
+      <div className="grid grid-cols-[40px_56px_1fr_auto_auto_auto_auto_auto] items-center gap-x-2 px-2 py-2.5 bg-pf-bg-2 border-b border-pf-border text-xs font-medium text-pf-text-primary">
+        <span className="sr-only">Reorder</span>
+        <span className="sr-only">Thumbnail</span>
+        <span className="px-2">File</span>
+        <span className="px-2 w-20 text-center">Status</span>
+        <span className="px-2 w-32">Printer</span>
+        <span className="px-2 w-16 text-center">Copies</span>
+        <span className="px-2 w-28">Priority</span>
+        <span className="px-2 min-w-[180px]">Actions</span>
+      </div>
 
-            const timeDisplay = formatDateTime(job.actualStartTimeUtc ?? job.queuedAtUtc);
-            const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl;
-            const estimatedCost = job.estimatedCost;
-            const dispatchProgress = dispatchUploadProgressByJobId?.[jobId];
-            const dispatchProgressText = (() => {
-              if (!dispatchProgress || dispatchProgress.isCompleted) {
-                if (dispatchProgress?.isFailed) return "Failed";
-                return "Starting...";
+      {/* Job rows */}
+      {jobs.map((jobWrapper, index) => {
+        const job = jobWrapper.job;
+        const jobId = job.id;
+        const fileName = jobWrapper.gcodeFile?.name || jobWrapper.gcodeFile?.fileName || job.name || "Unknown File";
+        const printerName = jobWrapper.assignedPrinter?.name || "Unknown Printer";
+        const model = jobWrapper.assignedPrinter?.modelName || "";
+        const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "";
+        const status = job.status || "Unknown";
+        const priority = job.priority || 0;
+        const projectName = job.projectName;
+
+        const estimatedTimeSeconds = job.estimatedPrintTimeSeconds || jobWrapper.gcodeFile?.estimatedPrintTimeSeconds;
+        const estimatedTimeDisplay = estimatedTimeSeconds
+          ? formatDuration(estimatedTimeSeconds)
+          : "";
+
+        const filamentGrams = job.estimatedFilamentUsageGrams || jobWrapper.gcodeFile?.estimatedFilamentUsageGrams;
+        const filamentDisplay = job.filamentName
+          ? (
+            <span className="inline-flex items-center gap-1" title={`${job.filamentVendor ? job.filamentVendor + ' — ' : ''}${job.filamentName}`}>
+              {job.filamentColor && (
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full border border-pf-border shrink-0"
+                  style={{ backgroundColor: job.filamentColor }}
+                  aria-hidden="true"
+                />
+              )}
+              <span>{job.filamentName}</span>
+            </span>
+          )
+          : filamentGrams
+            ? `${filamentGrams.toFixed(1)}g`
+            : "";
+
+        const timeDisplay = formatDateTime(job.actualStartTimeUtc ?? job.queuedAtUtc);
+        const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl;
+        const estimatedCost = job.estimatedCost;
+        const dispatchProgress = dispatchUploadProgressByJobId?.[jobId];
+        const dispatchProgressText = (() => {
+          if (!dispatchProgress || dispatchProgress.isCompleted) {
+            if (dispatchProgress?.isFailed) return "Failed";
+            return "Starting...";
+          }
+          const stage = dispatchProgress.stage;
+          if (stage === "StartingPrint") return "Starting print...";
+          if (stage === "Processing") return "Processing...";
+          return `Uploading ${dispatchProgress.percentage}%...`;
+        })();
+
+        const isDragTarget = dropIndex === index && dragIndex !== index;
+        const isLastJob = index === jobs.length - 1;
+
+        return (
+          <div
+            key={jobId}
+            role="listitem"
+            aria-label={`Print job: ${fileName}`}
+            draggable
+            onDragStart={(e) => handleDragStart(e, index)}
+            onDragEnd={handleDragEnd}
+            onDragEnter={(e) => handleDragEnter(e, index)}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={(e) => handleDrop(e, index)}
+            className={clsx(
+              "transition-colors cursor-pointer hover:bg-pf-bg-2/50",
+              !isLastJob && "border-b border-pf-border",
+              isDragTarget && "border-t-2 border-t-pf-accent",
+            )}
+            onClick={() => onEdit?.(jobId)}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onEdit?.(jobId);
               }
-              const stage = dispatchProgress.stage;
-              if (stage === "StartingPrint") return "Starting print...";
-              if (stage === "Processing") return "Processing...";
-              return `Uploading ${dispatchProgress.percentage}%...`;
-            })();
-
-            const isDragTarget = dropIndex === index && dragIndex !== index;
-
-            return (
-              <tr
-                key={jobId}
-                draggable
-                onDragStart={(e) => handleDragStart(e, index)}
-                onDragEnd={handleDragEnd}
-                onDragEnter={(e) => handleDragEnter(e, index)}
-                onDragLeave={handleDragLeave}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, index)}
-                className={`border-b border-pf-border hover:bg-pf-bg-2 transition-colors cursor-pointer ${
-                  isDragTarget ? "border-t-2 border-t-pf-accent" : ""
-                }`}
-                onClick={() => onEdit?.(jobId)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onEdit?.(jobId);
-                  }
-                }}
+            }}
+          >
+            {/* Row 1 — Primary: drag, thumbnail, file name, status, printer, copies, priority, actions */}
+            <div className="grid grid-cols-[40px_56px_1fr_auto_auto_auto_auto_auto] items-center gap-x-2 px-2 pt-2.5 pb-1 text-sm">
+              {/* Drag handle */}
+              <div
+                className="flex items-center justify-center cursor-grab active:cursor-grabbing text-pf-text-tertiary hover:text-pf-text-secondary"
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Drag to reorder"
               >
-                <td
-                  className="w-10 px-2 py-3 cursor-grab active:cursor-grabbing text-pf-text-tertiary hover:text-pf-text-secondary"
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label="Drag to reorder"
-                >
-                  <GripVertical className="h-4 w-4" aria-hidden="true" />
-                </td>
-                <td className="w-14 min-w-14 px-2 py-3">
-                  {thumbnailUrl ? (
-                    <img
-                      src={thumbnailUrl}
-                      alt=""
-                      className="w-10 h-10 min-w-10 rounded object-cover bg-pf-bg-2"
-                    />
-                  ) : (
-                    <div className="w-10 h-10 min-w-10 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary text-xs">
-                      —
-                    </div>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{timeDisplay}</td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <div className="font-medium text-pf-text-primary">{fileName}</div>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  {projectName ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-accent/10 text-pf-accent border border-pf-accent/20">
-                      {projectName}
-                    </span>
-                  ) : (
-                    <span className="text-pf-text-tertiary">-</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{printerName}</td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{model}</td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{material}</td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{filamentDisplay}</td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{estimatedTimeDisplay}</td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">
-                  {estimatedCost != null ? `$${estimatedCost.toFixed(2)}` : "-"}
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  {(job.copies ?? 1) > 1 ? (
-                    <span className="text-pf-text-primary font-medium">
-                      {job.completedCopies ?? 0} / {job.copies}
-                    </span>
-                  ) : (
-                    <span className="text-pf-text-tertiary">1</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  {job.wasSeededFromHistory ? (
-                    <span
-                      role="img"
-                      aria-label="Imported"
-                      title="Imported"
-                      className="inline-flex items-center justify-center w-7 h-6 rounded text-xs font-medium bg-pf-bg-2 text-pf-text-secondary border border-pf-border"
-                    >
-                      <Download aria-hidden="true" className="h-4 w-4" />
-                    </span>
-                  ) : (
-                    <span
-                      role="img"
-                      aria-label="PrintFarmer"
-                      title="PrintFarmer"
-                      className="inline-flex items-center justify-center w-7 h-6 rounded text-xs font-medium bg-pf-bg-1 text-pf-text-tertiary border border-pf-border"
-                    >
-                      <Tractor aria-hidden="true" className="h-4 w-4" />
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <span
-                    className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                      status
-                    )}`}
-                  >
-                    {status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                  <Select
-                    value={priority}
-                    onChange={(e) =>
-                      onPriority?.(jobId, parseInt(e.target.value))
-                    }
-                    className="text-xs w-28"
-                  >
-                    <option value="0">Normal</option>
-                    <option value="1">High</option>
-                    <option value="2">Urgent</option>
-                    <option value="-1">Low</option>
-                  </Select>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex gap-2">
-                    {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && (
-                      <Button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDispatch?.(jobId);
-                        }}
-                        variant="primary"
-                        size="sm"
-                        disabled={dispatchingJobId === jobId}
-                      >
-                        {dispatchingJobId === jobId ? (
-                          <span className="flex items-center gap-1">
-                            <Spinner size="sm" />
-                            {dispatchProgressText}
-                          </span>
-                        ) : (
-                          "Start Print"
-                        )}
-                      </Button>
-                    )}
-                    {status === "Printing" && (
-                      <Button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPause?.(jobId);
-                        }}
-                        variant="subtle"
-                        size="sm"
-                      >
-                        Pause
-                      </Button>
-                    )}
-                    {status === "Paused" && (
-                      <Button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onResume?.(jobId);
-                        }}
-                        variant="subtle"
-                        size="sm"
-                      >
-                        Resume
-                      </Button>
-                    )}
-                    {(status === "Printing" || status === "Starting" || status === "Paused") && (
-                      <Button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAbortPrint?.(jobId);
-                        }}
-                        variant="subtle"
-                        size="sm"
-                        title="Abort current print attempt, keep job in queue"
-                      >
-                        Abort Print
-                      </Button>
-                    )}
-                    {status !== "Completed" && status !== "Cancelled" && (
-                      <Button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCancel?.(jobId);
-                        }}
-                        variant="danger"
-                        size="sm"
-                        disabled={cancelingJobId === jobId}
-                        title="Cancel job and remove from queue"
-                      >
-                        Cancel Job
-                      </Button>
-                    )}
+                <GripVertical className="h-4 w-4" aria-hidden="true" />
+              </div>
+
+              {/* Thumbnail */}
+              <div className="flex items-center justify-center">
+                {thumbnailUrl ? (
+                  <img
+                    src={thumbnailUrl}
+                    alt=""
+                    className="w-10 h-10 min-w-10 rounded object-cover bg-pf-bg-2"
+                  />
+                ) : (
+                  <div className="w-10 h-10 min-w-10 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary text-xs">
+                    —
                   </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                )}
+              </div>
+
+              {/* File name */}
+              <div className="px-2 min-w-0">
+                <div className="font-medium text-pf-text-primary truncate" title={fileName}>
+                  {fileName}
+                </div>
+              </div>
+
+              {/* Status badge */}
+              <div className="px-2 w-20 flex justify-center">
+                <span
+                  className={clsx(
+                    "inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap",
+                    getStatusColor(status),
+                  )}
+                >
+                  {status}
+                </span>
+              </div>
+
+              {/* Printer */}
+              <div className="px-2 w-32 text-pf-text-secondary truncate" title={printerName}>
+                {printerName}
+              </div>
+
+              {/* Copies */}
+              <div className="px-2 w-16 text-center whitespace-nowrap">
+                {(job.copies ?? 1) > 1 ? (
+                  <span className="text-pf-text-primary font-medium text-xs">
+                    {job.completedCopies ?? 0}/{job.copies}
+                  </span>
+                ) : (
+                  <span className="text-pf-text-tertiary text-xs">1</span>
+                )}
+              </div>
+
+              {/* Priority */}
+              <div className="px-2 w-28" onClick={(e) => e.stopPropagation()}>
+                <Select
+                  value={priority}
+                  onChange={(e) => onPriority?.(jobId, parseInt(e.target.value))}
+                  className="text-xs w-full"
+                  aria-label="Job priority"
+                >
+                  <option value="0">Normal</option>
+                  <option value="1">High</option>
+                  <option value="2">Urgent</option>
+                  <option value="-1">Low</option>
+                </Select>
+              </div>
+
+              {/* Actions */}
+              <div className="px-2 min-w-[180px]" onClick={(e) => e.stopPropagation()}>
+                <div className="flex gap-1.5 flex-wrap">
+                  {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && (
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDispatch?.(jobId);
+                      }}
+                      variant="primary"
+                      size="sm"
+                      disabled={dispatchingJobId === jobId}
+                    >
+                      {dispatchingJobId === jobId ? (
+                        <span className="flex items-center gap-1">
+                          <Spinner size="sm" />
+                          {dispatchProgressText}
+                        </span>
+                      ) : (
+                        "Start Print"
+                      )}
+                    </Button>
+                  )}
+                  {status === "Printing" && (
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onPause?.(jobId);
+                      }}
+                      variant="subtle"
+                      size="sm"
+                    >
+                      Pause
+                    </Button>
+                  )}
+                  {status === "Paused" && (
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onResume?.(jobId);
+                      }}
+                      variant="subtle"
+                      size="sm"
+                    >
+                      Resume
+                    </Button>
+                  )}
+                  {(status === "Printing" || status === "Starting" || status === "Paused") && (
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAbortPrint?.(jobId);
+                      }}
+                      variant="subtle"
+                      size="sm"
+                      title="Abort current print attempt, keep job in queue"
+                    >
+                      Abort
+                    </Button>
+                  )}
+                  {status !== "Completed" && status !== "Cancelled" && (
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCancel?.(jobId);
+                      }}
+                      variant="danger"
+                      size="sm"
+                      disabled={cancelingJobId === jobId}
+                      title="Cancel job and remove from queue"
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Row 2 — Secondary: detail chips with supplementary info */}
+            <div className="flex items-center gap-x-4 gap-y-1 flex-wrap pl-[104px] pr-4 pb-2.5 pt-0.5">
+              {projectName && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-pf-accent/10 text-pf-accent border border-pf-accent/20">
+                  <FolderOpen className="h-3 w-3" aria-hidden="true" />
+                  {projectName}
+                </span>
+              )}
+              {model && (
+                <DetailChip icon={<Box className="h-3 w-3" />} label="Model">
+                  {model}
+                </DetailChip>
+              )}
+              {material && (
+                <DetailChip icon={<Layers className="h-3 w-3" />} label="Material">
+                  {material}
+                </DetailChip>
+              )}
+              {filamentDisplay && (
+                <DetailChip icon={<Palette className="h-3 w-3" />} label="Filament">
+                  {filamentDisplay}
+                </DetailChip>
+              )}
+              {estimatedTimeDisplay && (
+                <DetailChip icon={<Timer className="h-3 w-3" />} label="Est">
+                  {estimatedTimeDisplay}
+                </DetailChip>
+              )}
+              {estimatedCost != null && (
+                <DetailChip icon={<DollarSign className="h-3 w-3" />} label="Cost">
+                  ${estimatedCost.toFixed(2)}
+                </DetailChip>
+              )}
+              {timeDisplay !== "-" && (
+                <DetailChip icon={<Clock className="h-3 w-3" />} label="Queued">
+                  {timeDisplay}
+                </DetailChip>
+              )}
+              {job.wasSeededFromHistory ? (
+                <span
+                  role="img"
+                  aria-label="Imported"
+                  title="Imported from history"
+                  className="inline-flex items-center gap-1 text-xs text-pf-text-tertiary"
+                >
+                  <Download className="h-3 w-3" aria-hidden="true" />
+                  <span>Imported</span>
+                </span>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

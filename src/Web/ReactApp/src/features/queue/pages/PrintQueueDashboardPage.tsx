@@ -26,7 +26,7 @@ import type {
 const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
 const VALID_TABS = ['print-queue', 'history'] as const;
 
-function AutoPrintGlobalToggle() {
+function AutoDispatchGlobalToggle() {
   const { data: statuses, isError } = useAllAutoPrintStatuses();
   const setAllEnabled = useSetAllAutoPrintEnabled();
 
@@ -40,10 +40,10 @@ function AutoPrintGlobalToggle() {
     try {
       await setAllEnabled.mutateAsync(newEnabled);
       toast.success(newEnabled
-        ? `Auto-print enabled for all ${totalPrinters} printers`
-        : 'Auto-print disabled for all printers');
+        ? `Auto-dispatch enabled for all ${totalPrinters} printers`
+        : 'Auto-dispatch disabled for all printers');
     } catch {
-      toast.error('Failed to update auto-print');
+      toast.error('Failed to update auto-dispatch');
     }
   };
 
@@ -55,9 +55,9 @@ function AutoPrintGlobalToggle() {
           onChange={() => {}}
           disabled
           size="sm"
-          aria-label="Auto-print unavailable"
+          aria-label="Auto-dispatch unavailable"
         />
-        <span className="text-xs text-pf-text-secondary">Auto-print unavailable</span>
+        <span className="text-xs text-pf-text-secondary">Auto-dispatch unavailable</span>
       </div>
     );
   }
@@ -71,11 +71,11 @@ function AutoPrintGlobalToggle() {
         onChange={handleToggle}
         disabled={setAllEnabled.isPending}
         size="sm"
-        aria-label="Toggle auto-print for all printers"
+        aria-label="Toggle auto-dispatch for all printers"
       />
       <div className="flex flex-col">
         <span className="text-xs font-medium text-pf-text-primary">
-          Auto-print{isIndeterminate && ' (partial)'}
+          Auto-dispatch{isIndeterminate && ' (partial)'}
         </span>
         <span className="text-xs text-pf-text-secondary">
           {enabledCount}/{totalPrinters} printers
@@ -409,7 +409,7 @@ export function PrintQueueDashboardPage() {
           {/* Tab 1: Queue */}
           <Tabs.Panel id="print-queue">
             <div className="flex flex-col h-full w-full min-h-0">
-              {/* Filters + Auto-print global toggle */}
+              {/* Filters + Auto-dispatch global toggle */}
               <div className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div className="flex-1 min-w-0">
@@ -421,7 +421,7 @@ export function PrintQueueDashboardPage() {
                       isLoading={loading || isRefreshing}
                     />
                   </div>
-                  <AutoPrintGlobalToggle />
+                  <AutoDispatchGlobalToggle />
                 </div>
               </div>
 

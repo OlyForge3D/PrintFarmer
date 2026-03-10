@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { PanelRightOpen } from 'lucide-react';
+import { PanelRightOpen, Zap } from 'lucide-react';
 import {
   HistoryIcon,
   FileIcon,
@@ -11,7 +11,7 @@ import {
   MoreVerticalIcon,
   TagIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Button, Toggle } from '@/common/components/ui';
+import { Button } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
@@ -76,17 +76,17 @@ export function CollapsedPrinterCard({
     staleTime: 5 * 60 * 1000,
   });
 
-  // Auto-print status
+  // Auto-dispatch opt-in status
   const { data: autoPrintStatus } = useAutoPrintStatus(printer.id);
   const setAutoPrintEnabled = useSetAutoPrintEnabled();
 
-  const handleAutoPrintToggle = async () => {
+  const handleAutoDispatchToggle = async () => {
     const newEnabled = !(autoPrintStatus?.autoPrintEnabled ?? false);
     try {
       await setAutoPrintEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
-      toast.success(newEnabled ? 'Auto-print enabled' : 'Auto-print disabled');
+      toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
     } catch {
-      toast.error('Failed to toggle auto-print');
+      toast.error('Failed to toggle auto-dispatch');
     }
   };
 
@@ -149,16 +149,24 @@ export function CollapsedPrinterCard({
       <div className="flex px-3 pb-3">
         {/* Left: content area */}
         <div className="flex-1 min-w-0">
-          {/* Auto-print toggle */}
+          {/* Auto-dispatch icon toggle */}
           <div className="flex items-center justify-between mb-2 mt-2 px-1">
-            <span className="text-xs text-pf-text-secondary">Auto-print</span>
-            <Toggle
-              checked={autoPrintStatus?.autoPrintEnabled ?? false}
-              onChange={handleAutoPrintToggle}
+            <span className="text-xs text-pf-text-secondary">Auto-dispatch</span>
+            <Button
+              variant="unstyled"
+              onClick={handleAutoDispatchToggle}
               disabled={setAutoPrintEnabled.isPending}
-              size="sm"
-              aria-label={`Toggle auto-print for ${printer.name}`}
-            />
+              className={`p-1 rounded transition-colors ${
+                autoPrintStatus?.autoPrintEnabled
+                  ? 'text-pf-accent bg-pf-accent-bg'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary'
+              } disabled:opacity-50`}
+              aria-label={`Toggle auto-dispatch for ${printer.name}`}
+              aria-pressed={autoPrintStatus?.autoPrintEnabled ?? false}
+              title={autoPrintStatus?.autoPrintEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
+            >
+              <Zap className="w-4 h-4" fill={autoPrintStatus?.autoPrintEnabled ? 'currentColor' : 'none'} />
+            </Button>
           </div>
 
           {/* Bed clear confirmation banner */}

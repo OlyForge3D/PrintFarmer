@@ -149,7 +149,7 @@ describe("QueueJobsTable Component", () => {
 
     render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
 
-    const cancelButtons = screen.getAllByText("Cancel Job");
+    const cancelButtons = screen.getAllByText("Cancel");
     fireEvent.click(cancelButtons[0]);
 
     expect(onCancel).toHaveBeenCalledWith("job-1");
@@ -179,7 +179,7 @@ describe("QueueJobsTable Component", () => {
 
     const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
 
-    const rows = container.querySelectorAll("tbody tr");
+    const rows = container.querySelectorAll('[role="listitem"]');
     expect(rows.length).toBe(mockJobs.length);
     rows.forEach((row) => {
       expect(row).toHaveAttribute("draggable", "true");

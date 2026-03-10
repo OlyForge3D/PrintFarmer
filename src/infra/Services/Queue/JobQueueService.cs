@@ -7,6 +7,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Queue
@@ -33,6 +34,7 @@ namespace Farm.Infrastructure.Services.Queue
         private readonly IQueueDataService _dataService;
         private readonly ILogger<JobQueueService> _logger;
         private readonly IPrintCostCalculator? _costCalculator;
+        private readonly IAutoDispatchTrigger? _dispatchTrigger;
 
         /// <summary>
         /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -41,12 +43,14 @@ namespace Farm.Infrastructure.Services.Queue
         /// <param name="dataService">Specialized data service for queue-specific queries</param>
         /// <param name="logger">Unified logging service for operation tracking and audit trails</param>
         /// <param name="costCalculator">Optional cost calculator for estimating job costs from Spoolman data</param>
+        /// <param name="dispatchTrigger">Optional dispatch trigger for notifying the auto-dispatch service</param>
         /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
         public JobQueueService(
             IQueueRepository repo,
             IQueueDataService dataService,
             ILogger<JobQueueService> logger,
-            IPrintCostCalculator? costCalculator = null)
+            IPrintCostCalculator? costCalculator = null,
+            IAutoDispatchTrigger? dispatchTrigger = null)
         {
             ArgumentNullException.ThrowIfNull(repo);
             ArgumentNullException.ThrowIfNull(dataService);
@@ -55,6 +59,7 @@ namespace Farm.Infrastructure.Services.Queue
             _dataService = dataService;
             _logger = logger;
             _costCalculator = costCalculator;
+            _dispatchTrigger = dispatchTrigger;
         }
 
         /// <summary>
@@ -250,12 +255,19 @@ namespace Farm.Infrastructure.Services.Queue
             };
 
             Guid? assignedPrinterId = effectiveRequest.AssignedPrinterId;
-            if (assignedPrinterId == null)
+            if (assignedPrinterId is null)
             {
                 assignedPrinterId = await FindBestAvailablePrinterAsync(effectiveRequest, ct);
 
-                // If no compatible printer found, job is still created but unassigned.
-                // The user will need to manually assign a printer from the queue UI.
+                if (assignedPrinterId is null)
+                {
+                    _logger.LogInformation(
+                        "No compatible printer found for job. Model={Model}, Material={Material}, Nozzle={Nozzle}",
+                        effectiveRequest.RequiredPrinterModel ?? "(any)",
+                        effectiveRequest.RequiredMaterialType ?? "(any)",
+                        effectiveRequest.RequiredNozzleDiameter?.ToString("F2") ?? "(any)");
+                    return null;
+                }
             }
 
             PrintJob job = new PrintJob
@@ -266,9 +278,7 @@ namespace Farm.Infrastructure.Services.Queue
                 AssignedPrinterId = assignedPrinterId,
                 Status = PrintJobStatus.Queued,
                 Priority = (int)request.Priority,
-                QueuePosition = assignedPrinterId.HasValue
-                    ? await _dataService.GetNextQueuePositionAsync(assignedPrinterId.Value, ct)
-                    : 0,
+                QueuePosition = await _dataService.GetNextQueuePositionAsync(assignedPrinterId.Value, ct),
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
                 EstimatedPrintTime = gcode.EstimatedPrintTimeMinutes.HasValue ? TimeSpan.FromMinutes(gcode.EstimatedPrintTimeMinutes.Value) : null,
@@ -305,15 +315,21 @@ namespace Farm.Infrastructure.Services.Queue
             await _repo.AddAsync(job, ct);
             await _repo.SaveChangesAsync(ct);
 
+            // Notify auto-dispatch that a new job was queued for this printer.
+            // This triggers immediate dispatch (skipping idle threshold) if the
+            // printer is available and auto-dispatch is enabled.
+            if (assignedPrinterId.HasValue)
+            {
+                _dispatchTrigger?.NotifyJobQueued(assignedPrinterId.Value);
+            }
+
             return new JobQueuePrintJobDto
             {
                 Id = job.Id,
                 GcodeFileId = job.GcodeFileId,
                 GcodeFileName = gcode.Name,
                 AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = assignedPrinterId.HasValue
-                    ? (await _dataService.GetAvailablePrintersAsync(ct)).Find(p => p.Id == assignedPrinterId)?.Name ?? "Unknown"
-                    : string.Empty,
+                AssignedPrinterName = (await _dataService.GetAvailablePrintersAsync(ct)).Find(p => p.Id == assignedPrinterId)?.Name ?? "Unknown",
                 Status = (PrintJobStatus?)job.Status,
                 Priority = job.Priority,
                 QueuePosition = job.QueuePosition,

@@ -443,7 +443,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
         trigger.NotifyPrinterIdle(printerId);
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(2));
-        Guid received = await trigger.ReadAsync(cts.Token);
+        Guid received = (await trigger.ReadAsync(cts.Token)).PrinterId;
 
         received.Should().Be(printerId);
     }
@@ -501,9 +501,9 @@ public class AutoDispatchConcurrencyTests : IDisposable
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(2));
 
-        Guid r1 = await trigger.ReadAsync(cts.Token);
-        Guid r2 = await trigger.ReadAsync(cts.Token);
-        Guid r3 = await trigger.ReadAsync(cts.Token);
+        Guid r1 = (await trigger.ReadAsync(cts.Token)).PrinterId;
+        Guid r2 = (await trigger.ReadAsync(cts.Token)).PrinterId;
+        Guid r3 = (await trigger.ReadAsync(cts.Token)).PrinterId;
 
         r1.Should().Be(id1);
         r2.Should().Be(id2);

@@ -38,10 +38,10 @@ public sealed class AutoDispatchBackgroundService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            Guid printerId;
+            DispatchTriggerEvent triggerEvent;
             try
             {
-                printerId = await trigger.ReadAsync(stoppingToken);
+                triggerEvent = await trigger.ReadAsync(stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -51,13 +51,13 @@ public sealed class AutoDispatchBackgroundService(
             // Fire-and-forget the dispatch cycle for this printer. Each cycle
             // runs on its own Task so multiple idle printers are handled concurrently
             // (the dispatch lock serializes only the critical DB-read+assign window).
-            _ = Task.Run(() => HandlePrinterIdleAsync(printerId, stoppingToken), stoppingToken);
+            _ = Task.Run(() => HandlePrinterIdleAsync(triggerEvent.PrinterId, triggerEvent.SkipIdleThreshold, stoppingToken), stoppingToken);
         }
 
         logger.LogInformation("[AutoDispatch] Background service stopping");
     }
 
-    private async Task HandlePrinterIdleAsync(Guid printerId, CancellationToken serviceCt)
+    private async Task HandlePrinterIdleAsync(Guid printerId, bool skipIdleThreshold, CancellationToken serviceCt)
     {
         try
         {
@@ -77,26 +77,36 @@ public sealed class AutoDispatchBackgroundService(
                 return;
             }
 
-            // Wait the idle threshold with per-printer cancellation support
-            using CancellationTokenSource linkedCts = trigger.CreateLinkedCts(printerId, serviceCt);
-            try
+            // Skip idle threshold for job-queued triggers (upload-and-print should dispatch immediately)
+            if (!skipIdleThreshold)
+            {
+                // Wait the idle threshold with per-printer cancellation support
+                using CancellationTokenSource linkedCts = trigger.CreateLinkedCts(printerId, serviceCt);
+                try
+                {
+                    logger.LogDebug(
+                        "[AutoDispatch] Printer {PrinterId} idle — waiting {Seconds}s threshold",
+                        printerId, settings.IdleThresholdSeconds);
+
+                    await Task.Delay(TimeSpan.FromSeconds(settings.IdleThresholdSeconds), linkedCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    logger.LogInformation(
+                        "[AutoDispatch] Idle wait cancelled for printer {PrinterId} (went offline or new event)",
+                        printerId);
+                    return;
+                }
+                finally
+                {
+                    trigger.ClearPending(printerId);
+                }
+            }
+            else
             {
                 logger.LogDebug(
-                    "[AutoDispatch] Printer {PrinterId} idle — waiting {Seconds}s threshold",
-                    printerId, settings.IdleThresholdSeconds);
-
-                await Task.Delay(TimeSpan.FromSeconds(settings.IdleThresholdSeconds), linkedCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                logger.LogInformation(
-                    "[AutoDispatch] Idle wait cancelled for printer {PrinterId} (went offline or new event)",
+                    "[AutoDispatch] Printer {PrinterId} — skipping idle threshold (job-queued trigger)",
                     printerId);
-                return;
-            }
-            finally
-            {
-                trigger.ClearPending(printerId);
             }
 
             // Enforce MaxConcurrentDispatches
@@ -159,10 +169,11 @@ public sealed class AutoDispatchBackgroundService(
             return;
         }
 
-        // Find unassigned queued jobs in priority order
+        // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer
         List<PrintJob> candidateJobs = await db.PrintJobs
             .AsNoTracking()
-            .Where(j => j.Status == PrintJobStatus.Queued && j.AssignedPrinterId == null)
+            .Where(j => j.Status == PrintJobStatus.Queued
+                        && (j.AssignedPrinterId == null || j.AssignedPrinterId == printerId))
             .OrderBy(j => j.Priority)
             .ThenBy(j => j.QueuePosition)
             .ThenBy(j => j.QueuedAt)
@@ -171,7 +182,7 @@ public sealed class AutoDispatchBackgroundService(
 
         if (candidateJobs.Count == 0)
         {
-            logger.LogDebug("[AutoDispatch] No unassigned queued jobs available for printer {PrinterId}", printerId);
+            logger.LogDebug("[AutoDispatch] No queued jobs available for printer {PrinterId}", printerId);
             return;
         }
 

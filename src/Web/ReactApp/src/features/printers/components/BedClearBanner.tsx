@@ -71,9 +71,9 @@ export function BedClearBanner({ printerId, printerName, autoPrintStatus }: BedC
   const handleCancel = async () => {
     try {
       await cancelAutoPrint.mutateAsync(printerId);
-      toast.info('Auto-print cancelled');
+      toast.info('Auto-dispatch cancelled');
     } catch {
-      toast.error('Failed to cancel auto-print');
+      toast.error('Failed to cancel auto-dispatch');
     }
   };
 
@@ -121,7 +121,7 @@ export function BedClearBanner({ printerId, printerName, autoPrintStatus }: BedC
           loading={cancelAutoPrint.isPending}
           disabled={isAnyPending}
           iconLeft={<CloseIcon className="h-3.5 w-3.5" />}
-          aria-label="Cancel auto-print"
+          aria-label="Cancel auto-dispatch"
         >
           Cancel
         </Button>

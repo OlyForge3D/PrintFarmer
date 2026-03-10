@@ -221,12 +221,12 @@ describe('BedClearBanner', () => {
       <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
-    fireEvent.click(screen.getByLabelText('Cancel auto-print'));
+    fireEvent.click(screen.getByLabelText('Cancel auto-dispatch'));
     await waitFor(() => {
       expect(apiClient.post).toHaveBeenCalledWith('/autoprint/printer-1/cancel');
     });
     await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith('Auto-print cancelled');
+      expect(toast.info).toHaveBeenCalledWith('Auto-dispatch cancelled');
     });
   });
 
