@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { PanelRightOpen } from 'lucide-react';
+import { PanelRightOpen, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
@@ -12,6 +12,9 @@ import { TemperatureControlSection } from '@/features/printers/components/Temper
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
+import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
+import { useAutoPrintStatus, useSetAutoPrintEnabled } from '@/features/printers/hooks/useAutoPrint';
+import { toast } from 'sonner';
 import { Button, LoadedFilamentCard } from '@/common/components/ui';
 import { 
   EditIcon, 
@@ -85,6 +88,20 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
 
   const expandedProgressRef = useRef<HTMLDivElement>(null);
+
+  // Auto-dispatch opt-in status
+  const { data: autoPrintStatus } = useAutoPrintStatus(printer.id);
+  const setAutoPrintEnabled = useSetAutoPrintEnabled();
+
+  const handleAutoDispatchToggle = async () => {
+    const newEnabled = !(autoPrintStatus?.autoPrintEnabled ?? false);
+    try {
+      await setAutoPrintEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
+      toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
+    } catch {
+      toast.error('Failed to toggle auto-dispatch');
+    }
+  };
 
   // Keep target temperature inputs in sync with the printer's actual targets via SignalR
   useEffect(() => {
@@ -449,6 +466,22 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           <div className="flex items-center gap-1">
             <Button
               type="button"
+              variant="unstyled"
+              onClick={handleAutoDispatchToggle}
+              disabled={setAutoPrintEnabled.isPending}
+              className={`h-8 w-8 p-0 rounded transition-colors ${
+                autoPrintStatus?.autoPrintEnabled
+                  ? 'text-pf-accent bg-pf-accent-bg'
+                  : 'text-pf-text-secondary hover:text-pf-text-primary'
+              } disabled:opacity-50 inline-flex items-center justify-center`}
+              aria-label={`Toggle auto-dispatch for ${printer.name}`}
+              aria-pressed={autoPrintStatus?.autoPrintEnabled ?? false}
+              title={autoPrintStatus?.autoPrintEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
+            >
+              <Zap className="h-4 w-4" fill={autoPrintStatus?.autoPrintEnabled ? 'currentColor' : 'none'} />
+            </Button>
+            <Button
+              type="button"
               variant="ghost"
               size="sm"
               onClick={() => onEdit?.(printer)}
@@ -495,6 +528,17 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           </div>
         )}
       </div>
+
+      {/* Bed clear confirmation banner */}
+      {autoPrintStatus && (
+        <div className="mb-3">
+          <BedClearBanner
+            printerId={printer.id}
+            printerName={printer.name ?? 'Printer'}
+            autoPrintStatus={autoPrintStatus}
+          />
+        </div>
+      )}
 
       {/* Progress bar for active prints */}
       {isOnline && (isPrinting || isPaused) && printer.progress !== undefined && printer.progress > 0 && (
