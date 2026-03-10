@@ -580,7 +580,7 @@ public class JobQueueServiceTests
     }
 
     [Fact]
-    public async Task AddJobToQueueAsync_WithNoAvailablePrinters_ReturnsNull()
+    public async Task AddJobToQueueAsync_WithNoAvailablePrinters_CreatesUnassignedJob()
     {
         // Arrange
         var gcodeFile = new GcodeFile { Id = Guid.NewGuid(), FileName = "test.gcode" };
@@ -595,12 +595,18 @@ public class JobQueueServiceTests
             .ReturnsAsync(gcodeFile);
         _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Printer>());
+        _mockRepo.Setup(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockRepo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         // Act
         JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
 
-        // Assert
-        result.Should().BeNull();
+        // Assert - job is created but without an assigned printer
+        result.Should().NotBeNull();
+        result!.AssignedPrinterId.Should().BeNull();
+        result.AssignedPrinterName.Should().BeEmpty();
     }
 
     [Fact]

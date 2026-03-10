@@ -28,31 +28,10 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
             {
                 string[] allLines = gcodeContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
 
-                // Include a wider range to capture all thumbnails:
-                // - First 200 lines: basic slicer info and comments
-                // - Last 2000 lines: config block with all thumbnails (PrusaSlicer embeds multiple)
-                // This ensures we capture all thumbnail formats (QOI + PNG) which can appear deep in the file
-                List<string> metadataLines = new List<string>();
-
-                // Add first 500 lines — OrcaSlicer embeds large base64 thumbnails in the header
-                // which can push metadata comments like printer_model past line 200
-                int firstLinesCount = Math.Min(500, allLines.Length);
-                metadataLines.AddRange(allLines.Take(firstLinesCount));
-                _logger.LogInformation("ExtractMetadataAsync: Added {Count} lines from start", firstLinesCount.ToString());
-
-                // Add last 2000 lines (increased from 1000 to capture all PrusaSlicer thumbnails)
-                // PrusaSlicer embeds 3 QOI thumbnails + 1 PNG thumbnail, and PNG can start at line ~1300
-                if (allLines.Length > 2000)
-                {
-                    int startIndex = allLines.Length - 2000;
-                    metadataLines.AddRange(allLines.Skip(startIndex).Take(2000));
-                    _logger.LogInformation("ExtractMetadataAsync: Added 2000 lines from end (starting at line {StartLine})", startIndex.ToString());
-                }
-
-                _logger.LogInformation("ExtractMetadataAsync: Processing {LineCount} lines total from {TotalLines} total", metadataLines.Count.ToString(), allLines.Length.ToString());
+                _logger.LogInformation("ExtractMetadataAsync: Scanning all {LineCount} lines", allLines.Length.ToString());
 
                 // Single-pass extraction of all key-value metadata properties
-                ExtractAllProperties(metadataLines, metadata);
+                ExtractAllProperties(allLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: About to extract thumbnail");
                 ExtractThumbnail(allLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: Thumbnail extraction complete, ThumbnailData={HasData}", metadata.ThumbnailData != null ? $"{metadata.ThumbnailData.Length} bytes" : "null");
@@ -96,7 +75,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
     /// Single-pass extraction of all key-value metadata from G-code comment lines.
     /// Replaces 11 separate Extract* methods that each iterated the full line set.
     /// </summary>
-    private void ExtractAllProperties(List<string> lines, GcodeMetadataExtracted metadata)
+    private void ExtractAllProperties(IReadOnlyList<string> lines, GcodeMetadataExtracted metadata)
     {
         // Print time uses priority: normal mode (3) > TIME: seconds (2) > generic estimated (1)
         int printTimePriority = 0;

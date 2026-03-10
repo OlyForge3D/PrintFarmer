@@ -927,4 +927,49 @@ G28
 
         result.PrinterModel.Should().Be("Elegoo Centauri Carbon");
     }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_QidiXPlus4RealFile_ParsesPrinterModelAndMetadata()
+    {
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory,
+            "..", "..", ".."
+        ));
+
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "orca",
+            "qidi",
+            "Cube_ASA_5m0s.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+
+        // Slicer
+        result.SlicerName.Should().Contain("OrcaSlicer");
+        result.SlicerVersion.Should().StartWith("2.3.2");
+
+        // Printer model (at line 1254 — past old 500-line window)
+        result.PrinterModel.Should().Be("Qidi X-Plus 4");
+
+        // Material and nozzle
+        result.Material.Should().Be("ASA");
+        result.NozzleDiameter.Should().Be(0.4);
+
+        // Layer height
+        result.LayerHeight.Should().Be(0.2);
+
+        // Temperatures
+        result.PrintTemperature.Should().BeOneOf(255, 260);
+        result.BedTemperature.Should().Be(100);
+
+        // Print time (header says "5m 0s")
+        result.EstimatedPrintTimeMinutes.Should().BeGreaterThan(0);
+    }
 }

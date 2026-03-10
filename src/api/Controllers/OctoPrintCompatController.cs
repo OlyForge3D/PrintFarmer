@@ -178,12 +178,24 @@ namespace Farm.Web.Api.Controllers
                     JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, HttpContext.RequestAborted);
                     if (job is null)
                     {
-                        _logger.LogWarning(
-                            "OctoPrint upload+print: No compatible printer found for model={Model}, nozzle={Nozzle}, material={Material}",
-                            enqueueReq.RequiredPrinterModel ?? "(any)",
-                            enqueueReq.RequiredNozzleDiameter?.ToString("F2") ?? "(any)",
-                            enqueueReq.RequiredMaterialType ?? "(any)");
-                        return StatusCode(500, new { message = "Failed to create print job - no compatible printer available" });
+                        _logger.LogError("OctoPrint upload+print: Failed to create print job for {FileName}", file.FileName);
+                        return StatusCode(500, new { message = "Failed to create print job" });
+                    }
+
+                    if (job.AssignedPrinterId is null)
+                    {
+                        _logger.LogInformation(
+                            "OctoPrint upload+print: Job queued but no compatible printer found. file={FileName}, jobId={JobId}, model={Model}",
+                            file.FileName, job.Id, enqueueReq.RequiredPrinterModel ?? "(any)");
+
+                        return Ok(new
+                        {
+                            file = uploadDto,
+                            jobId = job.Id,
+                            status = "Queued",
+                            assignedPrinter = (string?)null,
+                            message = "File uploaded and queued, but no compatible printer was found. Please assign a printer manually from the print queue."
+                        });
                     }
 
                     _logger.LogInformation(

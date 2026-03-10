@@ -253,10 +253,9 @@ namespace Farm.Infrastructure.Services.Queue
             if (assignedPrinterId == null)
             {
                 assignedPrinterId = await FindBestAvailablePrinterAsync(effectiveRequest, ct);
-                if (assignedPrinterId == null)
-                {
-                    return null;
-                }
+
+                // If no compatible printer found, job is still created but unassigned.
+                // The user will need to manually assign a printer from the queue UI.
             }
 
             PrintJob job = new PrintJob
@@ -267,7 +266,9 @@ namespace Farm.Infrastructure.Services.Queue
                 AssignedPrinterId = assignedPrinterId,
                 Status = PrintJobStatus.Queued,
                 Priority = (int)request.Priority,
-                QueuePosition = await _dataService.GetNextQueuePositionAsync(assignedPrinterId.Value, ct),
+                QueuePosition = assignedPrinterId.HasValue
+                    ? await _dataService.GetNextQueuePositionAsync(assignedPrinterId.Value, ct)
+                    : 0,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
                 EstimatedPrintTime = gcode.EstimatedPrintTimeMinutes.HasValue ? TimeSpan.FromMinutes(gcode.EstimatedPrintTimeMinutes.Value) : null,
@@ -310,7 +311,9 @@ namespace Farm.Infrastructure.Services.Queue
                 GcodeFileId = job.GcodeFileId,
                 GcodeFileName = gcode.Name,
                 AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = (await _dataService.GetAvailablePrintersAsync(ct)).Find(p => p.Id == job.AssignedPrinterId)?.Name ?? "Unknown",
+                AssignedPrinterName = assignedPrinterId.HasValue
+                    ? (await _dataService.GetAvailablePrintersAsync(ct)).Find(p => p.Id == assignedPrinterId)?.Name ?? "Unknown"
+                    : string.Empty,
                 Status = (PrintJobStatus?)job.Status,
                 Priority = job.Priority,
                 QueuePosition = job.QueuePosition,
