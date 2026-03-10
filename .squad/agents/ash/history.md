@@ -7,6 +7,66 @@
 
 ## Learnings
 
+### Auto-Dispatch System Documentation (2026-01-15)
+
+**Files Created:**
+- **docs/AUTO_DISPATCH.md** — Comprehensive documentation of auto-dispatch system with Mermaid diagrams (40KB, 1110 lines)
+
+**Documentation Scope:**
+- Architecture overview with component diagram showing all services and data flows
+- Three distinct concepts explained: Auto-Dispatch (job routing), Ready Gate (bed-clear safety), Auto-Print (future hardware feature)
+- Complete system component documentation: AutoDispatchTrigger, AutoDispatchBackgroundService, DispatchScorer, AutoPrintService, JobQueueService, JobDispatchService
+- Mermaid diagrams for: trigger flow (sequence), dispatch cycle (flowchart), ready gate (state machine), component architecture
+- 10-factor scoring system with weights: Material Match (100), Nozzle Diameter (100), Nozzle Hardness (80), Enclosure (80), Model Match (60), Build Volume (50), Preferred Printer (40), Queue Depth (30), Printer Group (0), Availability (0)
+- Three dispatch modes: Manual, Suggest, Auto with detailed behavior descriptions
+- Configuration options: system-level settings (singleton) and per-printer opt-in
+- Complete API endpoint reference: 11 endpoints across DispatchSettings, AutoPrint, and Dispatch controllers
+- SignalR events: jobautodispatched, dispatchsuggestion, dispatchfailed, autoprintstatechanged
+- Frontend UI components: Global toggle, per-printer Zap icon, Bed Clear Banner with three action buttons
+- Eight critical design decisions documented with rationale and alternatives rejected
+
+**Key Architecture Insights Captured:**
+- **Channel-Based Trigger System**: Uses bounded channel (capacity 64) with DropOldest policy for backpressure management. Two trigger paths: NotifyPrinterIdle (with idle threshold delay) and NotifyJobQueued (immediate, skips delay for upload-and-print).
+- **Event-Driven Background Service**: Fire-and-forget Task spawning for concurrent printer processing. SemaphoreSlim(1,1) serializes job assignment to prevent race conditions. MaxConcurrentDispatches limit prevents thundering herd.
+- **Weighted Scoring Algorithm**: Hard requirements eliminate printers (Material, Nozzle, Enclosure, Hardness when needed). Soft factors reduce score but don't eliminate. Weighted average: Σ(score × weight) / Σ(weights).
+- **Ready Gate State Machine**: None → PendingReady → Ready → (dispatch) → None. Operator must confirm bed is clear between consecutive prints. Filament pre-flight checks (material match, weight sufficiency) before dispatch.
+- **Upload-and-Print Immediate Dispatch**: Jobs queued with pre-assigned printer skip idle threshold for instant dispatch. User explicit choice bypasses delay.
+- **No Compatible Printer Handling**: File uploaded but NOT queued if no printer scores above MinimumScoreThreshold. Forces manual assignment, prevents orphaned jobs.
+- **Audit Trail**: All dispatch decisions logged to DispatchLogs with full score breakdown (JSON serialized). Enables post-mortem analysis and future ML improvements.
+- **Thread Safety**: SemaphoreSlim prevents two printers from grabbing same job. Channel provides bounded buffer with DropOldest for backpressure. Interlocked operations track in-flight dispatch count.
+
+**Documentation Quality:**
+- 40KB comprehensive guide for both developers (architecture, code paths) and operators (configuration, UI usage)
+- Four Mermaid diagrams for visual clarity: component architecture (graph), trigger flow (sequence), dispatch cycle (flowchart), ready gate (state machine)
+- Complete API reference with request/response examples for all 11 endpoints
+- Real-world scoring example with breakdown showing weighted average calculation
+- Eight design decisions documented with rationale, alternatives rejected, and future considerations
+- Frontend UI integration: Global toggle implementation, per-printer Zap icon behavior, Bed Clear Banner with action button details
+
+**Root Causes of Documentation Gap:**
+- Auto-dispatch system implemented across 12 source files with complex interactions
+- Channel-based event architecture not immediately obvious from individual file reading
+- Scoring algorithm weights scattered across DispatchScorer.cs without consolidated reference
+- Ready Gate workflow (PendingReady/Ready states) separate from main dispatch flow, needed unified explanation
+- Frontend UI integration (toggle, Zap icon, banner) spread across three React components
+- Design decisions (immediate upload-and-print, no-compatible-printer handling, SemaphoreSlim locking) implicit in code, not documented
+
+**Sources Read:**
+- AutoDispatchTrigger.cs (131 lines) — Channel trigger with SkipIdleThreshold flag
+- AutoDispatchBackgroundService.cs (329 lines) — Event-driven background service with fire-and-forget Tasks
+- DispatchScorer.cs (507 lines) — 10-factor weighted scoring with hard/soft requirements
+- DispatchModels.cs (100 lines) — Enums and data structures
+- JobDispatchService.cs (112 lines) — Orchestration and audit logging
+- DispatchDtos.cs (327 lines) — API DTOs and SignalR event payloads
+- JobQueueService.cs (partial) — NotifyJobQueued trigger after queuing
+- AutoPrintService.cs (473 lines) — Ready Gate state machine and filament checks
+- AutoPrintController.cs (153 lines) — Ready Gate API endpoints
+- DispatchController.cs (67 lines) — Dashboard queue status and history
+- DispatchSettingsController.cs (99 lines) — System-wide settings CRUD
+- PrintQueueDashboardPage.tsx (150 lines partial) — Global auto-dispatch toggle
+- CollapsedPrinterCard.tsx (100 lines partial) — Per-printer Zap icon
+- BedClearBanner.tsx (132 lines) — Bed clear confirmation UI
+
 ### Design System Documentation (2026-03-21)
 
 **Files Created:**

@@ -541,3 +541,36 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 - ✅ Full regression coverage with mocked APIs
 
 **Status:** Frontend complete, ready for backend integration.
+
+### 2026-03-12 — Queue Table Two-Row Redesign
+
+**Context**: Jeff requested a redesign of QueueJobsTable — the single flat 16-column table row was too wide and overflowed on large displays.
+
+**What Changed**:
+1. **QueueJobsTable.tsx** — Replaced `<table>` layout with div-based list using CSS Grid + flex:
+   - **Row 1 (Primary):** drag handle, thumbnail, file name, status badge, printer, copies, priority select, action buttons — all in a CSS Grid row
+   - **Row 2 (Secondary):** project tag, model, material, filament (with color swatch), est. time, cost, queued date, source — rendered as inline "detail chips" with icons
+   - Detail chips only render when data exists (no empty dashes cluttering the view)
+   - Secondary row indented to align with file name column (pl-[104px] = drag handle 40px + thumbnail 56px + gap 8px)
+   - Used `clsx` for conditional classes, `lucide-react` icons for detail chips
+   - Preserved all drag-and-drop reordering, keyboard navigation, and action button functionality
+   - Removed unused `Tractor` import (was only used for non-imported source indicator, removed in favor of showing nothing for default source)
+
+2. **QueueJobsTable.test.tsx** — Updated 2 tests for new DOM structure:
+   - Changed `tbody tr` selector to `[role="listitem"]` for draggable row detection
+   - Changed "Cancel Job" text match to "Cancel" (shortened button label to save horizontal space)
+
+**Design Decision**: Moved from `<table>` to div-based layout because CSS Grid gives precise column control without the rigidity of table cells. The two-row grouping creates natural visual hierarchy — you scan row 1 for critical info (what's printing, where, what status), then glance at row 2 for details only when needed.
+
+**Validation**: ✅ TypeScript clean (0 errors), ✅ ESLint clean (0 errors), ✅ All 7 QueueJobsTable tests passing
+
+### Button Icon Prop Convention Audit (2025-07-17)
+- Audited all ~805 `<Button>` instances across the React codebase for icon placement violations
+- Found **25 true violations** across 15 files where icons are inline children alongside text instead of using `iconLeft`/`iconRight` props
+- Most common anti-pattern: `<Button><Icon className="mr-2" />Text</Button>` — manual spacing hack that `iconLeft` handles automatically via Button's built-in `gap-2`
+- 4 instances use manual `<LoadingIcon>` conditionals instead of Button's native `loading` prop
+- Icon-only buttons (~171 instances) are acceptable — `iconCenter` or inline child both work
+- `variant="unstyled"` buttons with complex card-like layouts are exempt from this rule
+- Button component applies `inline-flex items-center gap-2` by default, making many `className="flex items-center gap-2"` additions redundant
+- Full report: `src/Web/ReactApp/BUTTON_AUDIT.md`
+- Decision filed: `.squad/decisions/inbox/ripley-button-icon-audit.md`
