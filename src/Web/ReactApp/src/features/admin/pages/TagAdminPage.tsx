@@ -686,10 +686,8 @@ export const TagAdminPage: React.FC = () => {
                             onClick={() => createTagMutation.mutate()}
                             disabled={createTagMutation.isPending || !newTagName.trim()}
                             className="flex-1"
+                            loading={createTagMutation.isPending}
                         >
-                            {createTagMutation.isPending && (
-                                <LoadingIcon className="w-4 h-4 mr-2 animate-spin" />
-                            )}
                             Create Tag
                         </Button>
                     </div>

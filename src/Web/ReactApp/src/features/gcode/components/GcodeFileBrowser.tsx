@@ -574,8 +574,8 @@ export const GcodeFileBrowser = ({
           size="sm"
           onClick={onShowTagModal}
           title={`Tag ${selection.length} selected file${selection.length > 1 ? 's' : ''}`}
+          iconLeft={<TagIcon className="h-4 w-4" />}
         >
-          <TagIcon className="h-4 w-4 mr-1" />
           Tag ({selection.length})
         </Button>
       )}
@@ -587,8 +587,8 @@ export const GcodeFileBrowser = ({
           className="text-pf-error hover:text-pf-error hover:bg-pf-error/10"
           onClick={handleBulkDeleteClick}
           title={`Delete ${selection.length} selected file${selection.length > 1 ? 's' : ''}`}
+          iconLeft={<DeleteIcon className="h-4 w-4" />}
         >
-          <DeleteIcon className="h-4 w-4 mr-1" />
           Delete ({selection.length})
         </Button>
       )}

@@ -143,8 +143,8 @@ export function ComponentReplacementHistory({
               size="sm"
               onClick={() => handleSort('date')}
               className={sortField === 'date' ? 'bg-pf-accent/10' : ''}
+              iconLeft={<SortIcon className="h-4 w-4" />}
             >
-              <SortIcon className="h-4 w-4 mr-1" />
               Date
             </Button>
             <Button

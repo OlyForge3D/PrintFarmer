@@ -78,9 +78,8 @@ export function WebhooksAdminPage() {
  title="Webhooks"
  icon={ExternalLinkIcon}
  actions={
- <Button variant="primary" onClick={() => setShowCreateModal(true)}>
- <PlusIcon className="w-4 h-4" />
- <span>Add Webhook</span>
+ <Button variant="primary" onClick={() => setShowCreateModal(true)} iconLeft={<PlusIcon className="w-4 h-4" />}>
+   Add Webhook
  </Button>
  }
  >
@@ -90,9 +89,8 @@ export function WebhooksAdminPage() {
  title="No webhooks configured"
  description="Add a webhook to receive event notifications via HTTP POST."
  action={
- <Button variant="primary" onClick={() => setShowCreateModal(true)}>
- <PlusIcon className="w-4 h-4" />
- <span>Add Webhook</span>
+ <Button variant="primary" onClick={() => setShowCreateModal(true)} iconLeft={<PlusIcon className="w-4 h-4" />}>
+   Add Webhook
  </Button>
  }
  />
@@ -156,8 +154,8 @@ export function WebhooksAdminPage() {
  <p className="text-pf-text-secondary mb-4">Are you sure you want to delete this webhook? All delivery logs will be removed.</p>
  <div className="flex justify-end gap-2">
  <Button variant="secondary" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
- <Button variant="danger" onClick={() => handleDelete(deleteConfirm)} disabled={deleteMutation.isPending}>
- {deleteMutation.isPending ? <LoadingIcon className="w-4 h-4 pf-animate-spin" /> : 'Delete'}
+ <Button variant="danger" onClick={() => handleDelete(deleteConfirm)} loading={deleteMutation.isPending}>
+   Delete
  </Button>
  </div>
  </Modal>
@@ -357,8 +355,8 @@ function WebhookFormModal({ webhook, eventTypes, onClose, onSubmit, isSubmitting
 
  <div className="flex justify-end gap-2 pt-2">
  <Button variant="secondary" type="button" onClick={onClose}>Cancel</Button>
- <Button variant="primary" type="submit" disabled={isSubmitting}>
- {isSubmitting ? <LoadingIcon className="w-4 h-4 pf-animate-spin" /> : isEdit ? 'Save' : 'Create'}
+ <Button variant="primary" type="submit" loading={isSubmitting}>
+   {isEdit ? 'Save' : 'Create'}
  </Button>
  </div>
  </form>

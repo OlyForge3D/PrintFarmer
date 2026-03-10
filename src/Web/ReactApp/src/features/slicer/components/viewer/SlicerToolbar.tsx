@@ -47,9 +47,9 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
       flex items-center justify-center p-2 rounded-md
       ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
     `}
+    iconLeft={label ? icon : undefined}
   >
-    {icon}
-    {label && <span className="ml-2 text-sm hidden xl:inline">{label}</span>}
+    {label ? <span className="text-sm hidden xl:inline">{label}</span> : icon}
   </Button>
 );
 
@@ -202,9 +202,9 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
       <Button
         variant="primary"
         onClick={onSettingsProfiles}
-        className="flex items-center gap-2 px-3 py-1.5"
+        className="px-3 py-1.5"
+        iconLeft={<SettingsProfilesIcon className="w-4 h-4" />}
       >
-        <SettingsProfilesIcon className="w-4 h-4" />
         <span className="text-sm font-medium">SETTINGS & PROFILES</span>
       </Button>
 

@@ -188,8 +188,8 @@ export function DataManagementPage() {
               disabled={loading}
               variant="secondary"
               className="w-full"
+              iconLeft={<DownloadIcon className="w-4 h-4" />}
             >
-              <DownloadIcon className="w-4 h-4 mr-2" />
               Export Catalog
             </Button>
             <Button
@@ -197,8 +197,8 @@ export function DataManagementPage() {
               disabled={loading}
               variant="secondary"
               className="w-full"
+              iconLeft={<DownloadIcon className="w-4 h-4" />}
             >
-              <DownloadIcon className="w-4 h-4 mr-2" />
               Export Printers
             </Button>
             <Button
@@ -206,8 +206,8 @@ export function DataManagementPage() {
               disabled={loading}
               variant="primary"
               className="w-full"
+              iconLeft={<DownloadIcon className="w-4 h-4" />}
             >
-              <DownloadIcon className="w-4 h-4 mr-2" />
               Export Full Backup
             </Button>
           </div>
@@ -374,8 +374,8 @@ export function DataManagementPage() {
             onClick={handleReloadSeed}
             disabled={loading}
             variant="secondary"
+            iconLeft={<RefreshIcon className="w-4 h-4" />}
           >
-            <RefreshIcon className="w-4 h-4 mr-2" />
             Reload Seed Data
           </Button>
           <div className="mt-4 text-xs text-pf-text-secondary">

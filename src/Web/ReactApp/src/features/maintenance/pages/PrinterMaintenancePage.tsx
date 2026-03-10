@@ -137,17 +137,15 @@ export function PrinterMaintenancePage() {
           <Button
             variant="ghost"
             onClick={() => navigate(-1)}
-            className="gap-2"
+            iconLeft={<ArrowLeftIcon className="h-4 w-4" />}
           >
-            <ArrowLeftIcon className="h-4 w-4" />
             Back
           </Button>
           <Button
             variant="primary"
             onClick={() => handleLogMaintenance()}
-            className="gap-2"
+            iconLeft={<PlusIcon className="h-4 w-4" />}
           >
-            <PlusIcon className="h-4 w-4" />
             Log Maintenance
           </Button>
         </div>

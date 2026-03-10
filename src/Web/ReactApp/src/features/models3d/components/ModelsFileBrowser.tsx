@@ -334,8 +334,8 @@ export const ModelsFileBrowser = ({
           variant="secondary"
           size="sm"
           title="Tag selected models"
+          iconLeft={<TagIcon className="h-4 w-4" />}
         >
-          <TagIcon className="mr-1 h-4 w-4" />
           ({selection.length})
         </Button>
       )}

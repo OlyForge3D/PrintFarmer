@@ -37,24 +37,15 @@ export const UploadProgressButton = React.forwardRef<
         onClick={onClick}
         disabled={disabled || isUploading}
         variant={error ? 'danger' : variant}
-        className="flex items-center gap-2"
-      >
-        {isUploading ? (
-          <>
+        iconLeft={
+          isUploading ? (
             <div className="w-4 h-4 border-2 border-transparent border-t-current rounded-full animate-spin" />
-            Uploading ({progress}%)...
-          </>
-        ) : error ? (
-          <>
+          ) : (
             <UploadIcon className="w-4 h-4" />
-            Upload Failed
-          </>
-        ) : (
-          <>
-            <UploadIcon className="w-4 h-4" />
-            {label}
-          </>
-        )}
+          )
+        }
+      >
+        {isUploading ? `Uploading (${progress}%)...` : error ? 'Upload Failed' : label}
       </Button>
 
       {/* Progress bar */}

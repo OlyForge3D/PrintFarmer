@@ -321,10 +321,10 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, activeSpoolId }: S
         <Button
           variant="unstyled"
           onClick={() => { setSelectedMaterial(null); setSpools([]); }}
-          className="flex items-center gap-1 text-xs text-pf-text-tertiary hover:text-pf-text-primary transition-colors"
+          className="text-xs text-pf-text-tertiary hover:text-pf-text-primary transition-colors"
           aria-label="Back to material selection"
+          iconLeft={<ChevronLeftIcon className="w-4 h-4" />}
         >
-          <ChevronLeftIcon className="w-4 h-4" />
           Back
         </Button>
         <span className="text-[10px] font-semibold uppercase tracking-wider text-pf-accent bg-pf-accent/10 px-2 py-0.5 rounded">

@@ -154,18 +154,15 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
           )}
 
           {operation.status === GcodeHarvestStatus.Running && hasPermission('gcode_harvest', 'execute') && (
-            <Button onClick={handleCancel} disabled={cancelMutation.isPending} variant="danger" className="text-sm" title="Cancel harvest operation">
-              {cancelMutation.isPending ? (
-                <span className="flex items-center">
-                  <StopIcon className="w-4 h-4 mr-1 animate-spin" />
-                  Cancelling...
-                </span>
-              ) : (
-                <span className="flex items-center">
-                  <StopIcon className="w-4 h-4 mr-1" />
-                  Cancel
-                </span>
-              )}
+            <Button
+              onClick={handleCancel}
+              disabled={cancelMutation.isPending}
+              variant="danger"
+              className="text-sm"
+              title="Cancel harvest operation"
+              iconLeft={<StopIcon className={`w-4 h-4 ${cancelMutation.isPending ? 'animate-spin' : ''}`} />}
+            >
+              {cancelMutation.isPending ? 'Cancelling...' : 'Cancel'}
             </Button>
           )}
 

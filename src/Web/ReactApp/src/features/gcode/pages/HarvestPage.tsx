@@ -192,8 +192,8 @@ export const HarvestPage: React.FC = () => {
           variant="primary"
           onClick={() => setIsWizardOpen(true)}
           disabled={printersLoading}
+          iconLeft={<PlusIcon className="w-4 h-4" />}
         >
-          <PlusIcon className="w-4 h-4 mr-2" />
           Start Harvest
         </Button>
       </div>
@@ -369,8 +369,8 @@ export const HarvestPage: React.FC = () => {
             variant="primary"
             onClick={() => setIsWizardOpen(true)}
             disabled={printersLoading}
+            iconLeft={<PlusIcon className="w-4 h-4" />}
           >
-            <PlusIcon className="w-4 h-4 mr-2" />
             Start Harvest
           </Button>
         </div>

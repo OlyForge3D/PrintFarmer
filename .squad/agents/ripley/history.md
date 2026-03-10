@@ -574,3 +574,42 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 - Button component applies `inline-flex items-center gap-2` by default, making many `className="flex items-center gap-2"` additions redundant
 - Full report: `src/Web/ReactApp/BUTTON_AUDIT.md`
 - Decision filed: `.squad/decisions/inbox/ripley-button-icon-audit.md`
+
+### 2026-03-18 — Button Icon Props Cleanup (25 violations fixed)
+
+**Status:** ✅ All button icon violations fixed, lint passing, all tests passing (1432/1444)
+
+**What Was Fixed:** Resolved 25 true violations across 15 files where Button components had inline icon children with text, when they should use the `iconLeft`/`iconRight` props instead. The audit identified 27 violations, but 2 were false positives (complex card-like layouts with `variant="unstyled"` that are acceptable).
+
+**Pattern Found:** Most common violation was `<Button><Icon className="w-4 h-4 mr-2" />Text</Button>`. The `mr-2` is a manual spacing hack that Button's `iconLeft` handles automatically via built-in `gap-2` class.
+
+**Files Modified:**
+1. Layout.tsx (3 violations) — Profile, Sign out, Sign In buttons
+2. UploadProgressButton.tsx (1) — Conditional icon states for upload/error
+3. DataManagementPage.tsx (4) — Export buttons and Reload seed data
+4. TagAdminPage.tsx (1) — Create Tag button with loading state → used `loading` prop
+5. GcodeFileBrowser.tsx (2) — Tag and Delete selection buttons
+6. HarvestPage.tsx (2) — Start Harvest buttons (duplicate pattern)
+7. HarvestOperationCard.tsx (1) — Cancel button with conditional loading icon
+8. ComponentReplacementHistory.tsx (1) — Sort by Date button
+9. PrinterMaintenancePage.tsx (2) — Back and Log Maintenance buttons
+10. ModelsFileBrowser.tsx (1) — Tag selected models button
+11. MmuControlBox.tsx (1) — Eject button
+12. SpoolPickerModal.tsx (1) — Back to materials button
+13. SlicerToolbar.tsx (2) — ToolbarButton wrapper component and Settings button
+14. NewSliceJobPage.tsx (1) — Preview 3D Model button
+15. WebhooksAdminPage.tsx (4) — Add Webhook buttons, Delete and Submit with `loading` prop
+
+**Key Changes:**
+- Converted inline icon children to `iconLeft`/`iconRight` props
+- Removed redundant `className="flex items-center gap-2"` (Button has built-in gap)
+- Removed manual `mr-2`/`mr-1` spacing on icons
+- Replaced manual loading icon patterns with Button's native `loading` prop (4 instances)
+- ToolbarButton now uses conditional `iconLeft` (icon-only when no label, icon+text when label present)
+
+**Surprises:**
+- SpoolPickerModal "Clear filters" button was already icon-only (no text) — acceptable pattern
+- Line numbers in audit report had drifted since creation — always verified actual current code before editing
+- WebhooksAdminPage had unusual single-space indentation requiring exact whitespace matching
+
+**Validation:** ✅ Lint passes (0 errors), ✅ All tests pass (1432/1444 passing, 12 skipped)

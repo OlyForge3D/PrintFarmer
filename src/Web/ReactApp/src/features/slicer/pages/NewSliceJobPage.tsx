@@ -1019,9 +1019,9 @@ export const NewSliceJobPage: React.FC = () => {
                 onClick={() => setIsSTLPreviewOpen(true)}
                 variant="secondary"
                 size="sm"
-                className="w-full flex items-center justify-center gap-2"
+                className="w-full"
+                iconLeft={<EyeIcon className="w-4 h-4" />}
               >
-                <EyeIcon className="w-4 h-4" />
                 Preview 3D Model
               </Button>
             )}

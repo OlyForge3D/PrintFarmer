@@ -435,8 +435,8 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
                 ? `Eject filament from slot ${displayGate ?? activeGate ?? '?'}`
                 : 'Eject filament out of the MMU'}
               className="flex-1"
+              iconLeft={<EjectIcon className="w-4 h-4" ariaLabel="" />}
             >
-              <EjectIcon className="w-4 h-4 mr-1" ariaLabel="" />
               Eject
             </Button>
           )}
