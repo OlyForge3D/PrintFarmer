@@ -153,17 +153,17 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
   return (
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
       {/* Camera feed */}
-      <div className="relative w-full aspect-video bg-pf-bg-2 flex items-center justify-center">
+      <div className="relative w-full aspect-video bg-pf-bg-2">
         {activeUrl && !imageError ? (
           <img
             src={activeUrl}
             alt={`${camera.name} camera feed`}
-            className="w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-cover"
             loading="lazy"
             onError={() => setImageError(true)}
           />
         ) : (
-          <div className="flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
             <span className="text-sm">{imageError ? 'Camera unavailable' : 'No feed URL'}</span>
           </div>
