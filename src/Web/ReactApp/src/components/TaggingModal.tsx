@@ -4,6 +4,7 @@ import { Button, Alert } from '@/common/components/ui';
 import { TagSelector } from './TagSelector';
 import { tagService, type TagDto as TagOption } from '@/services/tagService';
 import { Modal } from '@/common/components/modals/Modal';
+import { apiClient } from '@/services/api';
 
 interface TaggingModalProps {
   objectId: string;
@@ -31,7 +32,6 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
   // Mutation for saving tags
   const saveMutation = useMutation({
     mutationFn: async (tags: TagOption[]) => {
-      const fileType = objectType === 'Model3D' ? 'model' : 'gcode';
       const currentTags = initialTags;
       
       // Tags to remove: in current but not in selected
@@ -44,23 +44,33 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
         st => !currentTags.some(ct => ct.id === st.id)
       );
 
-      // Remove old tags
-      for (const tag of toRemove) {
-        await tagService.removeTag(objectId, tag.id, fileType as 'model' | 'gcode');
-      }
-
-      // Add new tags
-      for (const tag of toAdd) {
-        await tagService.assignTag(objectId, tag.id, fileType as 'model' | 'gcode');
+      if (objectType === 'Printer') {
+        // Use apiClient directly for Printer — tagService only handles model/gcode
+        for (const tag of toRemove) {
+          await apiClient.removeTagFromObject(objectId, tag.id, 'Printer');
+        }
+        for (const tag of toAdd) {
+          await apiClient.assignTagToObject(objectId, tag.id, 'Printer');
+        }
+      } else {
+        const fileType = objectType === 'Model3D' ? 'model' : 'gcode';
+        for (const tag of toRemove) {
+          await tagService.removeTag(objectId, tag.id, fileType as 'model' | 'gcode');
+        }
+        for (const tag of toAdd) {
+          await tagService.assignTag(objectId, tag.id, fileType as 'model' | 'gcode');
+        }
       }
     },
     onSuccess: () => {
-      // Invalidate file browser queries (both gcode and models use 'file-browser' prefix)
+      // Invalidate relevant caches
       queryClient.invalidateQueries({ queryKey: ['file-browser'] });
-      // Also invalidate tag queries that might be cached
       queryClient.invalidateQueries({ queryKey: ['gcode-tags'] });
       queryClient.invalidateQueries({ queryKey: ['model-tags'] });
       queryClient.invalidateQueries({ queryKey: ['admin-all-tags'] });
+      if (objectType === 'Printer') {
+        queryClient.invalidateQueries({ queryKey: ['printer-tags', objectId] });
+      }
       setError(null);
       onClose();
     },
