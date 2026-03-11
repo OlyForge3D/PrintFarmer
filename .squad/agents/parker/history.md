@@ -94,3 +94,33 @@
 - Monolith serves both API and SPA from single process, no reverse proxy needed
 - Image registry: `ghcr.io/{owner}/printfarmer-monolith:tag`
 
+## Deployment Profile Selection (2026-03-12)
+
+### What was built
+- Added `--profile lite|standard|full` flag to `install.sh`
+- Interactive profile menu with numbered selection (1/2/3) when no flag passed
+- ARM auto-detection defaults to `lite` in both interactive and non-interactive modes
+- Profile validation rejects invalid values with clear error message
+
+### Profile → Infrastructure mapping
+| Profile | Containers | DB Default | Compose template |
+|---------|-----------|------------|-----------------|
+| lite | 1 (monolith) | SQLite (locked) | Inline monolith |
+| standard | 3 (api + frontend + nginx) | SQLite (chooseable) | Inline microservices |
+| full | 7 (standard + pg + discovery + prometheus + grafana) | PostgreSQL (default) | Inline microservices + extras |
+
+### Key design decisions
+- `DB_EXPLICIT` flag tracks whether user passed `--db` on CLI, prevents profile from overriding explicit user choice
+- Lite profile skips nginx config generation entirely (monolith serves directly on port 5000)
+- Full profile generates `monitoring/prometheus/prometheus.yml` alongside compose file
+- `DEPLOY_PROFILE` is stored in `.env` so upgrades know the active profile
+- Interactive DB prompt is skipped for lite (locked to SQLite) and full (defaults to postgres)
+- Health check wait uses correct container name per profile (printfarmer-monolith vs printfarmer-api)
+- Backward compat: no `--profile` in non-interactive mode → standard (non-ARM) or lite (ARM)
+- All compose generation is inline in install.sh (self-contained installer — no repo clone needed)
+
+### Env vars and flags added
+- `--profile lite|standard|full` CLI flag
+- `PRINTFARMER_PROFILE` environment variable
+- `DEPLOY_PROFILE` in generated `.env` file
+

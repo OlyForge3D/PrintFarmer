@@ -10,6 +10,7 @@
 #
 # Options:
 #   --non-interactive     Skip all prompts, use sensible defaults
+#   --profile PROFILE     Deployment profile: lite, standard, or full
 #   --version TAG         Container image tag (default: latest)
 #   --port PORT           HTTP port (default: 8080)
 #   --dir DIR             Install directory (default: ./printfarmer)
@@ -26,6 +27,7 @@
 #   PRINTFARMER_DIR       Same as --dir
 #   PRINTFARMER_VERSION   Same as --version
 #   PRINTFARMER_DB        Same as --db
+#   PRINTFARMER_PROFILE   Same as --profile
 # ============================================================================
 
 set -euo pipefail
@@ -39,6 +41,8 @@ IMAGE_TAG="${PRINTFARMER_VERSION:-latest}"
 HTTP_PORT="${PRINTFARMER_PORT:-8080}"
 INSTALL_DIR="${PRINTFARMER_DIR:-./printfarmer}"
 DB_ENGINE="${PRINTFARMER_DB:-sqlite}"
+DB_EXPLICIT=false
+DEPLOY_PROFILE="${PRINTFARMER_PROFILE:-}"
 NON_INTERACTIVE=false
 SPOOLMAN_URL=""
 DRY_RUN=false
@@ -132,8 +136,10 @@ while [[ $# -gt 0 ]]; do
         --port=*)           HTTP_PORT="${1#*=}"; shift ;;
         --dir)              INSTALL_DIR="${2:?--dir requires a path}"; shift 2 ;;
         --dir=*)            INSTALL_DIR="${1#*=}"; shift ;;
-        --db)               DB_ENGINE="${2:?--db requires sqlite or postgres}"; shift 2 ;;
-        --db=*)             DB_ENGINE="${1#*=}"; shift ;;
+        --db)               DB_ENGINE="${2:?--db requires sqlite or postgres}"; DB_EXPLICIT=true; shift 2 ;;
+        --db=*)             DB_ENGINE="${1#*=}"; DB_EXPLICIT=true; shift ;;
+        --profile)          DEPLOY_PROFILE="${2:?--profile requires lite, standard, or full}"; shift 2 ;;
+        --profile=*)        DEPLOY_PROFILE="${1#*=}"; shift ;;
         --with-spoolman)    SPOOLMAN_URL="${2:?--with-spoolman requires a URL}"; shift 2 ;;
         --with-spoolman=*)  SPOOLMAN_URL="${1#*=}"; shift ;;
         --dry-run)          DRY_RUN=true; shift ;;
@@ -158,6 +164,7 @@ if [[ "$SHOW_HELP" == "true" ]]; then
 
   OPTIONS
     --non-interactive     Skip prompts, use defaults (good for automation)
+    --profile PROFILE     Deployment profile (lite, standard, full)
     --version TAG         Container image tag to pull (default: latest)
     --port PORT           HTTP port to expose (default: 8080)
     --dir DIR             Where to install (default: ./printfarmer)
@@ -169,11 +176,17 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     --status              Show running container status
     --help, -h            Show this help
 
+  DEPLOYMENT PROFILES
+    lite        Single container, SQLite, ideal for Raspberry Pi (4GB+ RAM)
+    standard    API + Frontend + Nginx proxy, SQLite or PostgreSQL (8GB+ RAM)
+    full        Standard + Monitoring + Discovery, PostgreSQL (16GB+ RAM)
+
   ENVIRONMENT VARIABLES
     PRINTFARMER_PORT      Equivalent to --port
     PRINTFARMER_DIR       Equivalent to --dir
     PRINTFARMER_VERSION   Equivalent to --version
     PRINTFARMER_DB        Equivalent to --db
+    PRINTFARMER_PROFILE   Equivalent to --profile
     NO_COLOR=1            Disable colored output
 
   EXAMPLES
@@ -182,6 +195,12 @@ if [[ "$SHOW_HELP" == "true" ]]; then
 
     # Automated install on port 9090 with PostgreSQL
     ./install.sh --non-interactive --port 9090 --db postgres
+
+    # Lightweight install for Raspberry Pi
+    ./install.sh --profile lite
+
+    # Full install with monitoring and discovery
+    ./install.sh --non-interactive --profile full
 
     # Upgrade to a specific version
     ./install.sh --upgrade --version v2.1.0
@@ -282,6 +301,82 @@ case "$ARCH" in
         echo "⚠️  ARM platform detected ($ARCH) — 3D model and slicing features will be disabled"
         ;;
 esac
+
+# ─── Deployment profile selection ───────────────────────────────────────────
+# Validate --profile if provided on CLI
+if [[ -n "$DEPLOY_PROFILE" ]]; then
+    DEPLOY_PROFILE="$(lc "$DEPLOY_PROFILE")"
+    case "$DEPLOY_PROFILE" in
+        lite|standard|full) ;;
+        *) die "Invalid profile '$DEPLOY_PROFILE'. Choose: lite, standard, full" ;;
+    esac
+fi
+
+# Resolve profile: CLI flag > interactive prompt > ARM auto-default > fallback
+if [[ -z "$DEPLOY_PROFILE" ]]; then
+    if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        # Non-interactive: ARM defaults to lite, otherwise standard (backward compat)
+        if [[ "$IS_ARM" == "true" ]]; then
+            DEPLOY_PROFILE="lite"
+            info "ARM detected — defaulting to 'lite' profile (single container, SQLite)"
+        else
+            DEPLOY_PROFILE="standard"
+        fi
+    elif [[ -t 0 ]]; then
+        # Interactive terminal: show profile menu
+        if [[ "$IS_ARM" == "true" ]]; then
+            echo ""
+            info "ARM platform detected — 'lite' profile is recommended for this hardware."
+        fi
+        echo ""
+        printf "  ${BOLD}Select deployment profile:${NC}\n"
+        printf "    ${CYAN}1${NC}) ${BOLD}Lite${NC}      — Single container, SQLite, ideal for Raspberry Pi ${DIM}(4GB+ RAM)${NC}\n"
+        printf "    ${CYAN}2${NC}) ${BOLD}Standard${NC}  — API + Frontend + Proxy, SQLite or PostgreSQL ${DIM}(8GB+ RAM)${NC}\n"
+        printf "    ${CYAN}3${NC}) ${BOLD}Full${NC}      — Standard + Monitoring + Discovery, PostgreSQL ${DIM}(16GB+ RAM)${NC}\n"
+        echo ""
+
+        local_default="2"
+        if [[ "$IS_ARM" == "true" ]]; then
+            local_default="1"
+        fi
+        read -rp "$(printf "  ${BLUE}?${NC} Profile ${DIM}[%s]${NC}: " "$local_default")" profile_choice
+        profile_choice="${profile_choice:-$local_default}"
+        case "$profile_choice" in
+            1|lite)     DEPLOY_PROFILE="lite" ;;
+            2|standard) DEPLOY_PROFILE="standard" ;;
+            3|full)     DEPLOY_PROFILE="full" ;;
+            *)          warn "Invalid choice '$profile_choice', using standard"
+                        DEPLOY_PROFILE="standard" ;;
+        esac
+    else
+        # Piped/non-terminal input without --non-interactive: ARM→lite, else standard
+        if [[ "$IS_ARM" == "true" ]]; then
+            DEPLOY_PROFILE="lite"
+            info "ARM detected — defaulting to 'lite' profile"
+        else
+            DEPLOY_PROFILE="standard"
+        fi
+    fi
+fi
+
+# Apply profile defaults
+case "$DEPLOY_PROFILE" in
+    lite)
+        # Lite forces SQLite — no database container
+        if [[ "$DB_ENGINE" != "sqlite" ]]; then
+            warn "Lite profile uses SQLite — overriding --db $DB_ENGINE"
+            DB_ENGINE="sqlite"
+        fi
+        ;;
+    full)
+        # Full defaults to PostgreSQL unless user explicitly chose sqlite
+        if [[ "$DB_EXPLICIT" != "true" ]] && [[ -z "${PRINTFARMER_DB:-}" ]]; then
+            DB_ENGINE="postgres"
+        fi
+        ;;
+esac
+
+ok "Profile: $DEPLOY_PROFILE"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STATUS / UNINSTALL / UPGRADE (early exits)
@@ -551,7 +646,15 @@ fi
 ask "Install directory"           "$INSTALL_DIR"  INSTALL_DIR
 ask "HTTP port"                   "$HTTP_PORT"    HTTP_PORT
 ask "Image version"               "$IMAGE_TAG"    IMAGE_TAG
-ask "Database (sqlite/postgres)"  "$DB_ENGINE"    DB_ENGINE
+
+# Only prompt for database if profile allows choice
+if [[ "$DEPLOY_PROFILE" == "lite" ]]; then
+    dimtext "Database: sqlite (lite profile)"
+elif [[ "$DEPLOY_PROFILE" == "full" && "$DB_EXPLICIT" != "true" ]]; then
+    dimtext "Database: postgres (full profile default)"
+else
+    ask "Database (sqlite/postgres)"  "$DB_ENGINE"    DB_ENGINE
+fi
 
 if [[ "$NON_INTERACTIVE" != "true" && -z "$SPOOLMAN_URL" ]]; then
     ask "Spoolman URL (blank=skip)" "" SPOOLMAN_URL
@@ -619,6 +722,7 @@ if [[ "$DB_ENGINE" == "postgres" ]]; then
 REGISTRY_HOST=${REGISTRY_HOST}
 IMAGE_TAG=${IMAGE_TAG}
 HTTP_PORT=${HTTP_PORT}
+DEPLOY_PROFILE=${DEPLOY_PROFILE}
 
 # Database: PostgreSQL
 DB_PROVIDER=Postgres
@@ -647,6 +751,7 @@ else
 REGISTRY_HOST=${REGISTRY_HOST}
 IMAGE_TAG=${IMAGE_TAG}
 HTTP_PORT=${HTTP_PORT}
+DEPLOY_PROFILE=${DEPLOY_PROFILE}
 
 # Database: SQLite (zero config)
 DB_PROVIDER=Sqlite
@@ -696,7 +801,8 @@ fi
 
 ok "Environment config"
 
-# ─── Generate nginx config ──────────────────────────────────────────────────
+# ─── Generate nginx config (standard/full only — lite serves directly) ──────
+if [[ "$DEPLOY_PROFILE" != "lite" ]]; then
 mkdir -p "$INSTALL_DIR/nginx"
 cat > "$INSTALL_DIR/nginx/nginx-proxy.conf" <<'NGINXEOF'
 user nginx;
@@ -794,20 +900,86 @@ http {
 }
 NGINXEOF
 ok "Nginx config"
+fi
 
 # ─── Generate docker-compose.yml ────────────────────────────────────────────
 info "Generating docker-compose.yml..."
 
-# Common services (api, frontend, nginx-proxy)
-compose_api_depends=""
-compose_database_service=""
-compose_database_volume=""
+if [[ "$DEPLOY_PROFILE" == "lite" ]]; then
+    # ── LITE: single monolith container ──────────────────────────────────────
+    cat > "$INSTALL_DIR/docker-compose.yml" <<COMPOSEEOF
+# PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
+# Profile: lite | Database: sqlite | Single container
+# Docs: https://github.com/jpapiez/PrintFarmer
 
-if [[ "$DB_ENGINE" == "postgres" ]]; then
-    compose_api_depends='    depends_on:
+name: printfarmer
+
+services:
+  # PrintFarmer Monolith (API + Frontend in one container)
+  printfarmer:
+    image: \${REGISTRY_HOST}/printfarmer-monolith:\${IMAGE_TAG}
+    container_name: printfarmer-monolith
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT:-8080}:5000"
+    environment:
+      - DEPLOYMENT_MODE=monolith
+      - ASPNETCORE_ENVIRONMENT=\${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://+:5000
+      - DB_PROVIDER=Sqlite
+      - ConnectionStrings__Default=\${ConnectionStrings__Default}
+      - Jwt__Key=\${Jwt__Key}
+      - Jwt__Issuer=\${Jwt__Issuer:-PrintFarmer}
+      - Jwt__Audience=\${Jwt__Audience:-PrintFarmer}
+      - Security__DevModeBypassAuth=\${DEVMODE_BYPASS_AUTH:-false}
+      - GCODE_STORAGE_PATH=/app/gcode
+      - MODEL_UPLOAD_PATH=/app/models
+      - DATAPROTECTION_KEYS_PATH=/app/data-protection-keys
+      - PFARM__Spoolman__BaseUrl=\${PFARM__Spoolman__BaseUrl:-}
+      - PFARM__NetworkDiscovery__EnableDiscovery=\${PFARM__NetworkDiscovery__EnableDiscovery:-true}
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+    volumes:
+      - printfarmer-app-data:/data
+      - printfarmer-model-storage:/app/models
+      - printfarmer-gcode-storage:/app/gcode
+      - printfarmer-slicer-profiles:/app/profiles
+      - printfarmer-uploads:/app/uploads
+      - printfarmer-dataprotection-keys:/app/data-protection-keys
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -sf http://localhost:5000/healthz || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
+    networks:
+      - printfarmer-network
+
+volumes:
+  printfarmer-app-data:
+  printfarmer-model-storage:
+  printfarmer-gcode-storage:
+  printfarmer-slicer-profiles:
+  printfarmer-uploads:
+  printfarmer-dataprotection-keys:
+
+networks:
+  printfarmer-network:
+    name: printfarmer-network
+    driver: bridge
+COMPOSEEOF
+
+else
+    # ── STANDARD / FULL: microservices (api + frontend + nginx-proxy) ────────
+    compose_api_depends=""
+    compose_database_service=""
+    compose_database_volume=""
+
+    if [[ "$DB_ENGINE" == "postgres" ]]; then
+        compose_api_depends='    depends_on:
       database:
         condition: service_healthy'
-    compose_database_service='
+        compose_database_service='
   # PostgreSQL database
   database:
     image: postgres:16-alpine
@@ -827,16 +999,99 @@ if [[ "$DB_ENGINE" == "postgres" ]]; then
       start_period: 15s
     networks:
       - printfarmer-network'
-    compose_database_volume='  printfarmer-database:'
-else
-    compose_api_depends=""
-    compose_database_service=""
-    compose_database_volume=""
-fi
+        compose_database_volume='  printfarmer-database:'
+    fi
 
-cat > "$INSTALL_DIR/docker-compose.yml" <<COMPOSEEOF
+    # Build monitoring + discovery services for full profile
+    compose_extra_services=""
+    compose_extra_volumes=""
+    if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+        compose_extra_services='
+  # Printer Discovery Service
+  printer-discovery:
+    image: ${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}
+    container_name: printfarmer-printer-discovery
+    restart: unless-stopped
+    entrypoint: ["dotnet", "Farm.PrinterDiscovery.dll"]
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://+:5247
+      - Discovery__ApiBaseUrl=http://api:5245
+      - EnablePeriodicDiscovery=${ENABLE_PERIODIC_DISCOVERY:-true}
+      - ScanIntervalSeconds=${SCAN_INTERVAL_SECONDS:-300}
+      - Subnets=${DISCOVERY_SUBNETS:-192.168.0.0/24}
+      - ProbeTimeoutMs=${PROBE_TIMEOUT_MS:-1000}
+      - MaxConcurrentProbes=${MAX_CONCURRENT_PROBES:-50}
+      - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
+      - Logging__LogLevel__Default=Information
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5247/api/discovery/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - printfarmer-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # Prometheus — metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: printfarmer-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=200h"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - printfarmer-prometheus-data:/prometheus
+    expose:
+      - "9090"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - printfarmer-network
+
+  # Grafana — dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: printfarmer-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - printfarmer-grafana-data:/var/lib/grafana
+    expose:
+      - "3000"
+    networks:
+      - printfarmer-network'
+        compose_extra_volumes='  printfarmer-prometheus-data:
+  printfarmer-grafana-data:'
+    fi
+
+    cat > "$INSTALL_DIR/docker-compose.yml" <<COMPOSEEOF
 # PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
-# Database: ${DB_ENGINE} | Images: \${REGISTRY_HOST}/*:\${IMAGE_TAG}
+# Profile: ${DEPLOY_PROFILE} | Database: ${DB_ENGINE} | Images: \${REGISTRY_HOST}/*:\${IMAGE_TAG}
 # Docs: https://github.com/jpapiez/PrintFarmer
 
 name: printfarmer
@@ -921,6 +1176,7 @@ ${compose_api_depends}
       retries: 3
     networks:
       - printfarmer-network
+${compose_extra_services}
 
 volumes:
 ${compose_database_volume}
@@ -929,6 +1185,7 @@ ${compose_database_volume}
   printfarmer-gcode-storage:
   printfarmer-slicer-profiles:
   printfarmer-dataprotection-keys:
+${compose_extra_volumes}
 
 networks:
   printfarmer-network:
@@ -936,7 +1193,26 @@ networks:
     driver: bridge
 COMPOSEEOF
 
+fi
+
 ok "docker-compose.yml"
+
+# ─── Generate monitoring config for full profile ────────────────────────────
+if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+    mkdir -p "$INSTALL_DIR/monitoring/prometheus"
+    cat > "$INSTALL_DIR/monitoring/prometheus/prometheus.yml" <<'PROMEOF'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'printfarmer-api'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api:5245']
+PROMEOF
+    ok "Monitoring config (prometheus.yml)"
+fi
 
 # ─── Write management helper script ─────────────────────────────────────────
 cat > "$INSTALL_DIR/printfarmer.sh" <<MGMTEOF
@@ -975,6 +1251,7 @@ printf "  ${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━�
 printf "  ${BOLD}            Installation Summary${NC}\n"
 printf "  ${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 echo ""
+printf "  ${BOLD}Profile${NC}      %s\n" "$DEPLOY_PROFILE"
 printf "  ${BOLD}Directory${NC}    %s\n" "$INSTALL_DIR"
 printf "  ${BOLD}Database${NC}     %s\n" "$DB_ENGINE"
 printf "  ${BOLD}Port${NC}         %s\n" "$HTTP_PORT"
@@ -986,7 +1263,12 @@ echo ""
 printf "  ${DIM}Files generated:${NC}\n"
 printf "    ${DIM}%s/docker-compose.yml${NC}\n" "$INSTALL_DIR"
 printf "    ${DIM}%s/.env${NC}\n" "$INSTALL_DIR"
-printf "    ${DIM}%s/nginx/nginx-proxy.conf${NC}\n" "$INSTALL_DIR"
+if [[ "$DEPLOY_PROFILE" != "lite" ]]; then
+    printf "    ${DIM}%s/nginx/nginx-proxy.conf${NC}\n" "$INSTALL_DIR"
+fi
+if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+    printf "    ${DIM}%s/monitoring/prometheus/prometheus.yml${NC}\n" "$INSTALL_DIR"
+fi
 printf "    ${DIM}%s/printfarmer.sh${NC}\n" "$INSTALL_DIR"
 echo ""
 
@@ -1027,22 +1309,33 @@ if [[ "$START" == "true" ]]; then
     INTERVAL=5
     API_READY=false
 
+    # Container name depends on profile
+    if [[ "$DEPLOY_PROFILE" == "lite" ]]; then
+        HEALTH_CONTAINER="printfarmer-monolith"
+        HEALTH_LABEL="Monolith"
+        LOGS_SERVICE="printfarmer"
+    else
+        HEALTH_CONTAINER="printfarmer-api"
+        HEALTH_LABEL="API"
+        LOGS_SERVICE="api"
+    fi
+
     while [[ $WAITED -lt $MAX_WAIT ]]; do
-        if docker inspect --format='{{.State.Health.Status}}' printfarmer-api 2>/dev/null | grep -q healthy; then
+        if docker inspect --format='{{.State.Health.Status}}' "$HEALTH_CONTAINER" 2>/dev/null | grep -q healthy; then
             API_READY=true
             break
         fi
-        local_status="$(docker inspect --format='{{.State.Health.Status}}' printfarmer-api 2>/dev/null || echo 'starting')"
-        printf "\r  ${CYAN}⠼${NC} API: %-12s (${WAITED}s / ${MAX_WAIT}s)" "$local_status"
+        local_status="$(docker inspect --format='{{.State.Health.Status}}' "$HEALTH_CONTAINER" 2>/dev/null || echo 'starting')"
+        printf "\r  ${CYAN}⠼${NC} ${HEALTH_LABEL}: %-12s (${WAITED}s / ${MAX_WAIT}s)" "$local_status"
         sleep $INTERVAL
         WAITED=$((WAITED + INTERVAL))
     done
     printf "\r\033[K"
 
     if [[ "$API_READY" == "true" ]]; then
-        ok "API healthy"
+        ok "${HEALTH_LABEL} healthy"
     else
-        warn "API still starting — it may need another minute. Check: $COMPOSE_CMD logs api"
+        warn "${HEALTH_LABEL} still starting — it may need another minute. Check: $COMPOSE_CMD logs $LOGS_SERVICE"
     fi
 
     # Final output
