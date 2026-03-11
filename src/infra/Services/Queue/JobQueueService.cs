@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.AutoPrint;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.Extensions.Logging;
@@ -35,6 +36,7 @@ namespace Farm.Infrastructure.Services.Queue
         private readonly ILogger<JobQueueService> _logger;
         private readonly IPrintCostCalculator? _costCalculator;
         private readonly IAutoDispatchTrigger? _dispatchTrigger;
+        private readonly IAutoPrintService? _autoPrintService;
 
         /// <summary>
         /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -44,13 +46,15 @@ namespace Farm.Infrastructure.Services.Queue
         /// <param name="logger">Unified logging service for operation tracking and audit trails</param>
         /// <param name="costCalculator">Optional cost calculator for estimating job costs from Spoolman data</param>
         /// <param name="dispatchTrigger">Optional dispatch trigger for notifying the auto-dispatch service</param>
+        /// <param name="autoPrintService">Optional auto-print service for triggering bed-clear gate on idle printers</param>
         /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
         public JobQueueService(
             IQueueRepository repo,
             IQueueDataService dataService,
             ILogger<JobQueueService> logger,
             IPrintCostCalculator? costCalculator = null,
-            IAutoDispatchTrigger? dispatchTrigger = null)
+            IAutoDispatchTrigger? dispatchTrigger = null,
+            IAutoPrintService? autoPrintService = null)
         {
             ArgumentNullException.ThrowIfNull(repo);
             ArgumentNullException.ThrowIfNull(dataService);
@@ -60,6 +64,7 @@ namespace Farm.Infrastructure.Services.Queue
             _logger = logger;
             _costCalculator = costCalculator;
             _dispatchTrigger = dispatchTrigger;
+            _autoPrintService = autoPrintService;
         }
 
         /// <summary>
@@ -321,6 +326,25 @@ namespace Farm.Infrastructure.Services.Queue
             if (assignedPrinterId.HasValue)
             {
                 _dispatchTrigger?.NotifyJobQueued(assignedPrinterId.Value);
+
+                // Trigger auto-print bed-clear gate if the printer is idle with
+                // auto-print enabled. This prompts the operator to confirm the bed
+                // is clear before the job is dispatched — critical for first-time
+                // uploads where no prior completion event exists to trigger PendingReady.
+                if (_autoPrintService is not null)
+                {
+                    try
+                    {
+                        await _autoPrintService.TransitionToPendingReadyAsync(assignedPrinterId.Value, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Failed to trigger auto-print PendingReady for printer {PrinterId} after job queue",
+                            assignedPrinterId.Value);
+                    }
+                }
             }
 
             return new JobQueuePrintJobDto

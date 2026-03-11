@@ -124,7 +124,8 @@ public class AutoPrintService(
     IHubContext<PrinterHub> hub,
     ILogger<AutoPrintService> logger,
     ISpoolmanService? spoolmanService = null,
-    IWebhookService? webhookService = null) : IAutoPrintService
+    IWebhookService? webhookService = null,
+    Queue.Dispatch.IAutoDispatchTrigger? dispatchTrigger = null) : IAutoPrintService
 {
     public async Task TransitionToPendingReadyAsync(Guid printerId, CancellationToken ct = default)
     {
@@ -138,6 +139,19 @@ public class AutoPrintService(
         if (!printer.AutoPrintEnabled)
         {
             logger.LogDebug("[AutoPrint] Auto-print not enabled for printer {PrinterId}, skipping", printerId);
+            return;
+        }
+
+        // Guard: don't transition if the printer is actively printing
+        bool hasActiveJob = await db.PrintJobs
+            .AnyAsync(
+                j => j.AssignedPrinterId == printerId
+                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                ct);
+
+        if (hasActiveJob)
+        {
+            logger.LogDebug("[AutoPrint] Printer {PrinterId} has an active job — skipping PendingReady transition", printerId);
             return;
         }
 
@@ -222,6 +236,9 @@ public class AutoPrintService(
         logger.LogInformation(
             "[AutoPrint] Printer {PrinterId} marked Ready. Next job: {JobName} (filament sufficient: {Sufficient})",
             printerId, nextJob.Name ?? nextJob.GcodeFile?.Name, filamentCheck.Sufficient);
+
+        // Notify auto-dispatch that this printer is ready — triggers immediate dispatch
+        dispatchTrigger?.NotifyJobQueued(printerId);
 
         return new AutoPrintReadyResult
         {

@@ -169,6 +169,16 @@ public sealed class AutoDispatchBackgroundService(
             return;
         }
 
+        // Respect the auto-print bed-clear gate: if auto-print is enabled,
+        // only dispatch when the operator has confirmed the bed is clear (Ready state).
+        if (printer.AutoPrintEnabled && printer.AutoPrintState != AutoPrintState.Ready)
+        {
+            logger.LogDebug(
+                "[AutoDispatch] Printer {PrinterId} has auto-print enabled but state is {State} — waiting for operator confirmation",
+                printerId, printer.AutoPrintState);
+            return;
+        }
+
         // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer
         List<PrintJob> candidateJobs = await db.PrintJobs
             .AsNoTracking()
@@ -272,6 +282,18 @@ public sealed class AutoDispatchBackgroundService(
             {
                 jobToUpdate.DispatchMode = (int)DispatchMode.Auto;
                 await db.SaveChangesAsync(ct);
+            }
+
+            // Reset auto-print state after successful dispatch so the gate
+            // re-engages for the next queued job after this print completes.
+            if (printer.AutoPrintEnabled)
+            {
+                Printer? printerToUpdate = await db.Printers.FindAsync([printerId], ct);
+                if (printerToUpdate is not null)
+                {
+                    printerToUpdate.AutoPrintState = AutoPrintState.None;
+                    await db.SaveChangesAsync(ct);
+                }
             }
 
             logger.LogInformation(

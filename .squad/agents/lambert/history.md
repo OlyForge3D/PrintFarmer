@@ -474,3 +474,20 @@ These systems don't coordinate — Auto-Print's PendingReady state blocks Auto-D
 ### Auto-Dispatch Bug Decision Merged to decisions.md (2026-03-11T05:47:02Z)
 
 Decision document for "Auto-Dispatch Bug — Upload & Print Does Not Auto-Start" merged from inbox to squad decisions.md. Root cause identified: AutoDispatchMode defaults to Manual and two systems conflict. Fixes pending backend and UI work.
+
+### Auto-Dispatch First-Upload Fix (2026-07-12)
+
+**Bug:** Auto-dispatch did not trigger for first-time uploads via "Upload and Print" when both system-level auto-dispatch and per-printer auto-print were enabled. The bed-clear gate (PendingReady → Ready) was only triggered by PrintJobCompletionService after a print completed — on first upload with no prior completion, the gate never fired.
+
+**Root cause:** Missing PendingReady trigger on job queue for idle auto-print printers.
+
+**Fix (4 changes across 3 files):**
+1. `AutoPrintService.TransitionToPendingReadyAsync()` — Added active-job guard (safe to call from queue context, not just after completion)
+2. `JobQueueService.AddJobToQueueAsync()` — After queueing job, triggers PendingReady on idle auto-print printers via `IAutoPrintService`
+3. `AutoDispatchBackgroundService.ExecuteDispatchCycleAsync()` — Added bed-clear gate: skips dispatch when `AutoPrintEnabled=true` and `AutoPrintState != Ready`
+4. `AutoPrintService.MarkReadyAsync()` — After operator confirms bed-clear, triggers `IAutoDispatchTrigger.NotifyJobQueued()` for immediate dispatch
+5. `AutoDispatchBackgroundService` — Resets `AutoPrintState` to `None` after successful dispatch
+
+**Key files:** `AutoPrintService.cs`, `JobQueueService.cs`, `AutoDispatchBackgroundService.cs`
+**Tests:** All 2041 tests pass (1593 API + 448 Slicer), 0 warnings
+**Architecture insight:** Auto-print (bed-clear gate) and auto-dispatch (job scoring/assignment) are two cooperating pipelines. Auto-dispatch now respects the auto-print state machine — it won't bypass bed-clear confirmation when auto-print is enabled.
