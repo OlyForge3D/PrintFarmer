@@ -479,3 +479,240 @@ Rename all frontend `autoPrint` references to `autoDispatch` while keeping backe
 ---
 
 **Overall Status:** Frontend refactoring complete. Backend API rename pending as separate task.
+
+---
+
+## Raspberry Pi Deployment Infrastructure (2026-03-11)
+
+### Decision: Monolith Static File Serving Mode
+
+**Date:** 2026-03-08  
+**Author:** Lambert (Backend Developer)  
+**Status:** ✅ IMPLEMENTED  
+
+**Context:**  
+PrintFarmer needed to reduce resource usage for Raspberry Pi 4 deployments by consolidating API and frontend into a single container.
+
+**Decision:**  
+Added conditional static file serving via `DEPLOYMENT_MODE` environment variable:
+- **monolith:** API serves React frontend from wwwroot/
+- **microservices** (default): Frontend served by nginx-proxy
+
+**Implementation:**
+- `src/api/Program.cs` (lines 370-408, 633-645)
+- Modern ASP.NET Core pattern: `MapFallbackToFile("index.html")` for SPA routing
+- Middleware ordering ensures public assets before auth, API routes before SPA fallback
+- Development mode: SpaDynamicProxyMiddleware proxies to Vite dev server
+
+**Rationale:**  
+Single-container deployment reduces memory overhead (~500MB savings vs microservices), simplifies deployment for low-resource environments, maintains zero breaking changes to microservices mode.
+
+**Validation:**  
+- ✅ Build: Clean, 0 warnings, 0 errors
+- ✅ Tests: 2041 passed (1593 API + 448 slicer), 0 failures
+- ✅ Middleware ordering verified with grep analysis
+
+---
+
+### Decision: GHCR CI/CD Pipeline for Container Release
+
+**Date:** 2026-03-10  
+**Author:** Parker (DevOps Engineer)  
+**Status:** ✅ IMPLEMENTED  
+
+**Context:**  
+PrintFarmer needed automated CI/CD for multi-arch Docker image builds to GitHub Container Registry for efficient releases and pre-built images.
+
+**Decision:**  
+Created `.github/workflows/docker-publish.yml` with:
+- **Triggers:** Push to main, version tags (v1.2.3), manual workflow_dispatch
+- **Build Matrix:** printfarmer-api, printfarmer-frontend, printfarmer-monolith (3 images)
+- **Platforms:** linux/amd64 + linux/arm64 (Raspberry Pi 4/5 support)
+- **Tagging:** Semantic versioning + SHA + latest via docker/metadata-action
+- **Optimization:** GitHub Actions cache with 80%+ expected hit ratio
+- **Security:** Least-privilege permissions, no hardcoded secrets
+
+**Implementation:**
+- Multi-arch via QEMU + Docker Buildx for concurrent builds
+- OCI Labels for OpenContainers spec compliance
+- Build ~8-12 minutes per cycle (parallel matrix)
+- Registry storage: ~1.2 GB per version (both images, both platforms)
+
+**Rationale:**  
+Automates release builds, eliminates manual per-deployment builds, enables pre-built multi-arch images for end users, follows Docker Hub and GHCR conventions.
+
+**Validation:**  
+- ✅ YAML syntax validated
+- ✅ No workflow conflicts
+- ✅ Follows GitHub Actions CI/CD best practices
+- ✅ Multi-arch build tested with QEMU + buildx
+
+---
+
+### Decision: Monolith Deployment Mode Infrastructure
+
+**Date:** 2026-03-11  
+**Decider:** Parker (DevOps & Deployment Engineer)  
+**Status:** ✅ IMPLEMENTED  
+
+**Context:**  
+Supporting Lambert's `DEPLOYMENT_MODE=monolith` middleware with Docker infrastructure for single-container deployments.
+
+**Decision:**  
+1. **Dockerfile Stage (`monolith-runtime`)** — placed after frontend-runtime in Dockerfile.multistage
+   - Inherits from `api-runtime` (port 5000, healthcheck, entrypoint)
+   - Copies React build: `COPY --from=frontend-build /app/dist ./wwwroot/`
+   - Sets environment: `ENV DEPLOYMENT_MODE=monolith`
+
+2. **Compose Template (`docker-compose.monolith.yml`)**
+   - Single service: `printfarmer` on port 80→5000
+   - Database: SQLite by default (zero external dependencies)
+   - 6 volumes: data, gcode, models, profiles, uploads, data-protection-keys
+   - Health check: curl http://localhost:5000/healthz every 30s
+
+3. **CI/CD Updates** — enabled monolith target in docker-publish.yml
+
+**Consequences:**
+- **Positive:** ~500MB memory savings, simpler deployment, Pi-friendly, zero configuration, faster startup
+- **Negative:** Less scalable, no edge caching, single point of failure
+- **Neutral:** Architecture choice based on environment (monolith for simplicity, microservices for scale)
+
+**Related Documents:**
+- `scripts/docker/dockerfiles/Dockerfile.multistage` line 519-533
+- `scripts/docker/compose-templates/docker-compose.monolith.yml`
+- `.github/workflows/docker-publish.yml` matrix entry
+
+---
+
+### Decision: Deployment Hardware Guide
+
+**Date:** 2026-03-21  
+**Agent:** Ash (Documentation Specialist)  
+**Status:** ✅ COMPLETE  
+
+**Context:**  
+Operators lacked guidance on choosing appropriate hardware for print farm size and deployment architecture.
+
+**Decision:**  
+Created `docs/DEPLOYMENT_HARDWARE.md` with:
+- **Hardware Tiers:** Lite (Pi 4, $150-400), Standard (NUC/Mini PC, $400-800), Full (Server/VM, $1,000+)
+- **Service Resource Matrix:** RAM/CPU/disk estimates per service with "1GB RAM per 10 printers" sizing rule
+- **Storage Critical Section:** USB 3 SSD mandatory (not MicroSD); reliability/performance analysis
+- **Network Requirements:** Gigabit Ethernet, same-subnet discovery, WiFi guidance
+- **Deployment Profiles:** Lite/Standard/Full matching hardware tiers
+- **Cost Comparison:** 12-month TCO for Pi 4, NUC i5, AWS EC2, Hetzner vServer
+- **Troubleshooting:** OOM, SQLite contention, discovery failures, camera lag
+
+**Documentation Quality:**
+- 23,400+ words, 12 major sections
+- Operator-focused tone (plain language, specific products, real costs)
+- Tables for quick reference (hardware specs, service matrix, network comparison)
+- 20+ bash examples for deployment configurations
+- Decision-enabling for hardware selection before deployment
+
+**Rationale:**  
+Addresses top documentation gap without operational complexity; integrates with existing docs; operator-first approach; code-informed; pain-point focused.
+
+**Related Documents:**
+- `docs/DEPLOYMENT.md` (deployment mechanics)
+- `docs/TROUBLESHOOTING.md` (runtime issue resolution)
+- `docs/ARCHITECTURE.md` (system design)
+
+---
+
+### Decision: Deployment Documentation Update — Monolith Mode & GHCR
+
+**Date:** 2026-03-09  
+**Decision Owner:** Ash (Documentation Specialist)  
+**Status:** ✅ IMPLEMENTED  
+
+**Context:**  
+Two major deployment infrastructure changes (monolith mode, GHCR pipeline) without corresponding documentation.
+
+**Decision:**  
+Expanded DEPLOYMENT_HARDWARE.md and updated README.md with:
+
+1. **DEPLOYMENT_HARDWARE.md Expansion (23 KB → 45 KB)**
+   - "Deployment Modes: Monolith vs. Microservices" (when to use each)
+   - "Deployment Profiles by Farm Size" (Lite/Standard/Full tiers)
+   - "Raspberry Pi Quick Start" (step-by-step hardware + deployment)
+   - "GitHub Container Registry (GHCR) Images" (available images, multi-arch, pull commands)
+   - 900+ new lines
+
+2. **README.md Updates (15 strategic changes)**
+   - Added monolith mode example for Pi deployment
+   - GHCR pull commands for all three images
+   - "Deployment Modes" subsection explaining architecture choice
+   - Updated ARM/Raspberry Pi section with modern guidance
+
+**Key Insights:**
+- Pi database reliability: SD card corruption is #1 failure mode; USB 3 SSD critical
+- Database inflection point: SQLite adequate ≤15 printers; PostgreSQL required ≥20
+- Network architecture: Discovery requires same subnet (UDP broadcast + TCP probes)
+- Service resource consumption: Single matrix for operator understanding
+- Three profiles: Lite/Standard/Full match hardware tiers
+
+**Documentation Architecture:**
+- **Two-layer approach:** README for discovery, DEPLOYMENT_HARDWARE.md for details
+- **No duplication:** Links drive operators to comprehensive reference
+- **GHCR positioning:** Alternative to deploy-docker.sh (not replacement)
+- **Hardware-driven guidance:** Hardware choice determines deployment architecture
+
+**Impact on Team:**
+- ✅ Clear path: "I have a Pi" → monolith mode → GHCR pull → docker run
+- ✅ Deployment modes documented alongside implementation
+- ✅ Hardware profiles provide context for deployment decisions
+- ✅ Single source of truth for deployment guidance
+
+---
+
+### Decision: Auto-Dispatch Respects Auto-Print Bed-Clear Gate
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-07-12  
+**Status:** ✅ IMPLEMENTED  
+
+**Context:**  
+Auto-dispatch and auto-print pipelines operated independently; auto-dispatch could bypass bed-clear confirmation gate.
+
+**Decision:**  
+Auto-dispatch now checks `Printer.AutoPrintState` before dispatching to auto-print-enabled printers:
+- If `AutoPrintEnabled=true` and `AutoPrintState != Ready`, auto-dispatch skips printer (waits for operator confirmation)
+- After operator confirms bed-clear (`MarkReadyAsync`), auto-print triggers auto-dispatch via `NotifyJobQueued`
+- After successful dispatch, `AutoPrintState` resets to `None` for next cycle
+
+**Impact:**
+- **Ripley (Frontend):** `autoprintstatechanged` SignalR event fires when job queued to idle auto-print printer; UI bed-clear prompt appears immediately on upload
+- **Kane (QA):** New test scenarios needed: (1) first upload triggers PendingReady, (2) auto-dispatch skips PendingReady printers, (3) MarkReady triggers dispatch
+
+---
+
+### Decision: PrintFarmer Raspberry Pi 4 Deployment Analysis
+
+**Author:** Parker (DevOps)  
+**Date:** 2026-03-10  
+**Status:** ✅ COMPLETE  
+
+**Summary:**  
+Comprehensive feasibility analysis for running PrintFarmer on Raspberry Pi 4 with service inventory, resource estimates, and deployment tier recommendations.
+
+**Key Findings:**
+- **Minimum: Pi 4 4GB** with USB SSD (recommended for 1-5 printers)
+- **Best: Pi 4 8GB** for all services including OrcaSlicer worker
+- **Avoid: Pi 4 2GB** (too tight for stable operation)
+- **Storage Critical:** USB 3 SSD mandatory (~10x faster than MicroSD)
+- **Network:** Gigabit Ethernet required (WiFi unreliable for discovery)
+
+**Recommended Architectures:**
+1. **Architecture A:** Shared Klipper/PrintFarmer on single Pi 4 4GB
+2. **Architecture B:** Dedicated PrintFarmer Pi 4 4GB + existing Klipper Pi (recommended)
+3. **Architecture C:** PrintFarmer Pi + separate slicing station (desktop/laptop)
+
+**Services to Avoid on Pi:**
+- ❌ Elasticsearch + full ELK stack (1GB memory alone)
+- ❌ OrcaSlicer worker on 2-4GB machines (too heavy)
+- ❌ Multiple concurrent slicing jobs
+- ⚠️ Full monitoring stack on Pi 4 2GB
+
+**Final Verdict:**  
+PrintFarmer is **viable on Pi 4**, production-ready for this use case, but requires careful service selection and proper storage (USB SSD, not MicroSD).

@@ -366,6 +366,44 @@ if (app.Environment.IsDevelopment())
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
 app.UseCors("Default");
 
+// Configure static file serving for monolith deployment mode
+// This must come BEFORE authentication so static files are served without auth
+// When DEPLOYMENT_MODE=monolith, the API serves the React frontend directly from wwwroot
+// When DEPLOYMENT_MODE=microservices (or unset), frontend is served by separate nginx-proxy container
+string? deploymentMode = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE")
+    ?? Environment.GetEnvironmentVariable("DEPLOYMENT_MODE");
+bool isMonolithMode = string.Equals(deploymentMode, "monolith", StringComparison.OrdinalIgnoreCase);
+
+if (isMonolithMode)
+{
+    // Monolith mode: API serves the React frontend static files
+    string staticRoot = app.Environment.WebRootPath;
+    if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
+    {
+        app.Logger.LogInformation("[Startup] Running in monolith mode — serving frontend from wwwroot/");
+
+        // Serve static files from wwwroot (JS, CSS, images, etc.)
+        // This comes before authentication so static assets are publicly accessible
+        _ = app.UseStaticFiles();
+
+        if (app.Environment.IsDevelopment())
+        {
+            // Development: proxy to Vite dev server (if available)
+            _ = app.UseMiddleware<SpaDynamicProxyMiddleware>();
+        }
+    }
+    else
+    {
+        app.Logger.LogWarning("[Startup][Monolith] wwwroot directory not found at {WebRootPath} — static file serving disabled", staticRoot);
+    }
+}
+else
+{
+    // Microservices mode (default): frontend served by separate nginx-proxy container
+    // CORS is needed because frontend and API are on different origins
+    app.Logger.LogInformation("[Startup] Running in microservices mode — frontend served externally");
+}
+
 // Rate limiting for authentication endpoints
 app.UseMiddleware<AuthenticationRateLimitMiddleware>();
 
@@ -593,43 +631,15 @@ app.MapGet("/api/debug/db-info", async (
     });
 });
 
-// Configure SPA only for monolithic deployments (not microservices)
-bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
-if (isMonolithicDeployment)
+// SPA fallback for monolith mode: serve index.html for client-side routing
+// This must come AFTER all Map* calls so API routes take priority
+// MapFallbackToFile automatically excludes /api/*, /hubs/*, health endpoints, and existing static files
+if (isMonolithMode)
 {
-    // Only enable static file / SPA pipeline if a web root actually exists (prebuilt assets). In container builds
-    // using DEPLOYMENT_MODE=monolithic we expect /wwwroot to be present; if it's missing we skip to avoid crashes.
     string staticRoot = app.Environment.WebRootPath;
     if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
     {
-        _ = app.UseStaticFiles();
-
-        if (app.Environment.IsDevelopment())
-        {
-            // Dynamic proxy middleware will handle forwarding once dev server becomes available
-            _ = app.UseMiddleware<SpaDynamicProxyMiddleware>();
-        }
-        else
-        {
-            // Production: serve pre-built SPA assets (only if root present)
-            app.UseSpa(spa =>
-            {
-                spa.Options.SourcePath = "wwwroot";
-                spa.Options.DefaultPageStaticFileOptions = new StaticFileOptions
-                {
-                    OnPrepareResponse = ctx =>
-                    {
-                        ctx.Context.Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
-                        ctx.Context.Response.Headers.Append("Pragma", "no-cache");
-                        ctx.Context.Response.Headers.Append("Expires", "0");
-                    }
-                };
-            });
-        }
-    }
-    else
-    {
-        app.Logger.LogWarning("[Startup][SPA] Skipping SPA static file pipeline: WebRootPath missing or directory not found: {WebRootPath}", staticRoot);
+        _ = app.MapFallbackToFile("index.html");
     }
 }
 

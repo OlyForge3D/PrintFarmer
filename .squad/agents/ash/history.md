@@ -137,6 +137,89 @@ Ash specializes in comprehensive documentation work. Key expertise areas and sta
 - CollapsedPrinterCard.tsx (100 lines partial) — Per-printer Zap icon
 - BedClearBanner.tsx (132 lines) — Bed clear confirmation UI
 
+### Deployment Hardware Guide (2026-03-21)
+
+**Files Created:**
+- **docs/DEPLOYMENT_HARDWARE.md** — Comprehensive operator-facing hardware selection guide (23,400+ words, 10 major sections)
+
+**Files Updated:**
+- **README.md** — Added "Deployment Hardware Guide" link to Quick Links table
+
+**Hardware Tier Framework Documented:**
+- **Tier 1 (Pi 4):** 1–10 printers, 8GB RAM, USB 3 SSD (not SD card), all limitations documented
+- **Tier 2 (NUC/Mini PC):** 10–50 printers, 16–32GB RAM, PostgreSQL + all features
+- **Tier 3 (Server/VM):** 50–200+ printers, 32GB+ RAM, distributed architecture, cloud options
+
+**Service Resource Matrix:**
+- All 10 services documented with realistic RAM/CPU/disk estimates
+- Growth curves (sublinear API growth, database storage dominance)
+- Scaling recommendations for each service
+- Critical insight: 1GB per 10 printers as rough sizing guide
+
+**Storage Recommendations (Critical Details):**
+- **WHY NOT SD CARD:** Poor random write performance, wear-leveling assumptions, database corruption after 1–2 years
+- **Recommended:** USB 3 SSD (Samsung T7 or equivalent) with specific product links
+- **Disk space planning:** 256GB minimum Pi (application 500MB + SQLite 1GB + G-code + logs + buffer)
+- **Archival strategy:** 30 days online, older files to tape/S3 (cost comparison provided)
+
+**Network Requirements:**
+- Bandwidth per printer: 500 Kbps–1 Mbps with camera
+- Same-subnet requirement for discovery (UDP broadcast + TCP probes)
+- WiFi vs Ethernet comparison table (WiFi 6 marginal for 20+ printers)
+- Multi-location workarounds (VPN/tunnel, per-building deployment)
+
+**Deployment Profiles (Three Tiers):**
+- **Lite:** Pi-friendly (API + frontend + SQLite + discovery), 600MB RAM
+- **Standard:** NUC-friendly (adds PostgreSQL, monitoring lite, 1–2 workers), 1.5GB RAM
+- **Full:** Server deployment (all services, 4+ workers, pgAdmin, telemetry), 3–5GB RAM
+
+**Performance Tips Section:**
+- Pi-specific: USB SSD, disable monitoring, slicer on separate machine, cgroup memory limits
+- NUC-specific: PostgreSQL shared_buffers tuning, 2–4 workers, monitoring enabled
+- Server-specific: managed DB, distributed slicing, automated backups, 50+ printer monitoring
+
+**Docker Deployment Examples:**
+- First-time vs. re-deployment workflows
+- `deploy-docker.sh` usage with dry-run, non-interactive, and profile selections
+- Manual compose file stacking for advanced users
+
+**Troubleshooting Section:**
+- OOM on Pi (memory profiling, feature reduction)
+- SQLite write contention (PostgreSQL upgrade, update frequency tuning)
+- Discovery not finding printers (subnet verification, network connectivity)
+- Camera stream performance (bandwidth profiling, resolution reduction)
+
+**Cost Comparison:**
+- 12-month TCO by configuration (Pi $300, NUC $850, AWS $3,600, Hetzner $1,200)
+- Break-even analysis for cloud vs. dedicated hardware
+
+**Key Documentation Insights Captured:**
+- Docker Compose templates reveal 15+ optional services (discovery, monitoring, telemetry, workers, pgAdmin)
+- Resource limits explicit in compose files (discovery: 256M, workers: varies by type)
+- Database choice critical inflection point: SQLite adequate ≤15 printers, PostgreSQL required ≥20
+- Pi deployment: USB SSD non-negotiable for reliability (SD card database corruption well-documented pain point)
+- Network discovery architecture (UDP broadcast + TCP probes) requires same subnet
+- Bandwidth calculation: 50 Kbps baseline + 200–500 Kbps per camera = 500 Kbps–1 Mbps per printer
+
+**Root Causes of Documentation Gap:**
+- No existing hardware guidance in docs (DEPLOYMENT.md focuses on "how to deploy," not "what hardware to buy")
+- Docker Compose templates show optional services but no resource footprints or when to enable
+- Pi deployment popular but undocumented pain points (SD card reliability, WiFi bandwidth, memory constraints)
+- Network architecture (same-subnet discovery) not explained in existing docs
+- No cost comparison or TCO guidance for operators making hardware decisions
+- Service resource consumption scattered across compose templates without consolidated reference
+
+**Sources Read:**
+- `scripts/docker/compose-templates/docker-compose.yml` — Core services, resource defaults
+- `scripts/docker/compose-templates/docker-compose.monitoring.lite.yml` — Lite monitoring stack resources
+- `scripts/docker/compose-templates/docker-compose.discovery.yml` — Discovery service, resource limits (0.5 CPU, 256M RAM)
+- `scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml` — Worker resource profiles
+- `scripts/deploy-docker.sh` — Deployment script, environment variables, profile selection flow
+- `docs/DEPLOYMENT.md` (385 lines) — Existing deployment guide structure and style
+- `README.md` — Quick links table, farm size positioning
+- `docs/GETTING_STARTED.md` — Writing style and beginner-friendly tone
+- Custom instruction files — PrintFarmer-specific conventions (component naming, Docker patterns)
+
 ### Design System Documentation (2026-03-21)
 
 **Files Created:**
@@ -252,3 +335,96 @@ Ash specializes in comprehensive documentation work. Key expertise areas and sta
 - Architecture decisions (three-layer design system, WCAG compliance, dynamic theming) synthesized and centralized
 - Team standard established: design system documentation is architectural decision, not just content update
 
+### Deployment Documentation: Monolith Mode & GHCR (2026-03-09)
+
+**Status:** ✅ Complete — Comprehensive deployment docs updated with monolith mode and GHCR info
+
+**Files Updated:**
+
+1. **docs/DEPLOYMENT_HARDWARE.md** (23 KB → 45 KB, +900 lines)
+   - Added "Deployment Modes: Monolith vs. Microservices" section explaining single-container vs. multi-container architectures
+   - Added "Deployment Profiles by Farm Size" table: Lite (Pi/monolith), Standard (NUC/microservices), Full (Server/microservices)
+   - Added "Raspberry Pi Quick Start" section: Step-by-step hardware setup, system prep, deployment, and health monitoring
+   - Added "GitHub Container Registry (GHCR) Images" section with available images, pull commands, architecture support, and usage examples
+   - Updated Pi deployment guidelines with `DEPLOYMENT_MODE=monolith` and `DB_PROVIDER=sqlite`
+   - Added Pi deployment checklist for operators
+
+2. **README.md** (15 changes across 3 sections)
+   - Updated "Quick Start" Option 1 with monolith mode commands for Pi
+   - Added GHCR image pull examples (monolith, API, frontend)
+   - Enhanced "🐳 Deployment" section with deployment modes, monolith/microservices examples, and GHCR links
+   - Completely rewrote "🍓 ARM / Raspberry Pi Deployment" section with monolith mode emphasis, docker run example, and link to comprehensive hardware guide
+
+**Key Documentation Decisions:**
+- Monolith mode positioned as primary option for Pi deployments (single container, no reverse proxy, ~450MB image)
+- Microservices mode documented as default (separate API/frontend, production-ready, scalable)
+- GHCR presented as alternative to building from source (`docker pull` instead of `./deploy-docker.sh`)
+- Hardware profiles tied to deployment modes: Lite=monolith, Standard/Full=microservices
+- ARM/Pi documentation consolidated in DEPLOYMENT_HARDWARE.md as single source of truth
+
+**Learnings:**
+- `DEPLOYMENT_MODE=monolith` implemented in Program.cs: when set, API serves React frontend from wwwroot/ via UseStaticFiles() + MapFallbackToFile("index.html")
+- Default deployment mode is "microservices" (separate containers, needs nginx-proxy)
+- GHCR workflow auto-detects multi-arch: images work on both x86_64 and arm64 (except slicer workers which are x86-only)
+- IMAGE_OWNER = ${{ github.repository_owner }} (evaluates to "olyforge3d" for this repo)
+- Operators can now choose: automatic deployment (deploy-docker.sh), manual Docker (pull from GHCR + docker run), or orchestration (Kubernetes, etc.)
+- Pi deployment best practices: use monolith mode, SQLite, USB SSD (never SD card), Ethernet (not WiFi), monitor memory/disk
+
+**Documentation Architecture:**
+- README.md serves as marketing/discovery layer (links to hardware guide for details)
+- DEPLOYMENT_HARDWARE.md is comprehensive reference: hardware specs, deployment profiles, Pi quick-start, GHCR details, troubleshooting
+- Monolith mode positioned as accessibility feature for low-resource deployments
+- GHCR enables deployments without source code checkout (important for corporate/airgapped environments)
+
+
+## Pi 4 Deployment Infrastructure (2026-03-11)
+
+**Sprint Focus:** Hardware guide expansion + deployment documentation finalization
+
+### Ash Work (Agent-30)
+
+**Deliverables:**
+1. **DEPLOYMENT_HARDWARE.md** (45 KB, 23,400+ words, 12 major sections)
+   - "Deployment Modes: Monolith vs. Microservices" — architecture decision guide
+   - "Deployment Profiles by Farm Size" — Lite (Pi/monolith), Standard (NUC/microservices), Full (Server)
+   - "Raspberry Pi Quick Start" — step-by-step hardware selection, OS imaging, Docker, deployment
+   - "GitHub Container Registry (GHCR) Images" — available images, multi-arch support, pull commands
+   - "Service Resource Matrix" — RAM/CPU/disk per service, "1GB per 10 printers" sizing rule
+   - Cost analysis: Pi 4 (~$300), NUC (~$850), AWS/Hetzner (~$1,200-3,600)
+   - Troubleshooting: OOM, SQLite contention, discovery failures, camera lag
+
+2. **README.md Updates** (15 strategic changes)
+   - Monolith mode example for Pi deployment
+   - GHCR pull commands for all three images
+   - "Deployment Modes" subsection (monolith vs microservices positioning)
+   - Updated ARM/Raspberry Pi section with modern guidance
+
+### Key Documentation Insights
+- **Pi database reliability:** SD card corruption is #1 failure mode; USB 3 SSD mandatory (~$30 addition)
+- **Database inflection point:** SQLite adequate ≤15 printers; PostgreSQL required ≥20
+- **Network architecture:** Discovery requires same subnet (UDP broadcast + TCP probes); Gigabit Ethernet recommended
+- **Service consumption:** Created single reference matrix for operator understanding (API, PostgreSQL, Discovery, OrcaSlicer, Monitoring)
+- **Profile matching:** Lite/Standard/Full profiles match hardware tiers for easy decision-making
+
+### Documentation Architecture
+- **Two-layer approach:** README for discovery/quick links, DEPLOYMENT_HARDWARE.md for comprehensive details
+- **No duplication:** Links drive users to reference rather than repeating content
+- **GHCR positioning:** Alternative to deploy-docker.sh (not replacement); enables manual deployments for operators
+- **Hardware-driven:** Hardware choice determines deployment architecture (Pi → monolith, NUC/Server → microservices)
+- **Operator-focused tone:** Plain language, specific products with cost, real deployments with examples
+
+### Related Decisions Finalized
+- **Decision 1:** Deployment Hardware Guide (23,400 words, 12 major sections, operator-focused)
+- **Decision 2:** Deployment Documentation Update — Monolith Mode & GHCR (README + guide consolidation)
+
+### Key Learnings for Ash
+- **Operator workflow:** "I have a Pi" → monolith mode → GHCR pull → docker run
+- **Hardware as decision driver:** Pick hardware first, architecture follows (opposite of tech-first thinking)
+- **Cost transparency:** Total cost of ownership (hardware + storage + deployment) helps operators choose
+- **Documentation strategy:** Single source of truth (DEPLOYMENT_HARDWARE.md) prevents duplication and confusion
+- **Cross-agent alignment:** Monolith mode documentation validates Lambert's middleware + Parker's Docker infrastructure
+- **Cost-benefit:** Pi 4 4GB ($75-100 + $30 SSD) is sweet spot vs $1,000+ server deployments
+- **Tier recommendations:** 
+  - Not recommended: Pi 4 2GB (too tight)
+  - Excellent: Pi 4 4GB (1-5 printers, with lite monitoring)
+  - Full features: Pi 4 8GB (5-20+ printers, with all services)

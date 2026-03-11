@@ -517,6 +517,22 @@ ENTRYPOINT []
 CMD ["nginx", "-g", "daemon off;"]
 
 ############################################################
+# Monolith Runtime Container (API + Frontend in single container)
+# For Raspberry Pi / low-resource deployments
+############################################################
+FROM api-runtime AS monolith-runtime
+
+# Copy React frontend build into wwwroot for static file serving
+COPY --from=frontend-build /app/dist ./wwwroot/
+
+# Set monolith deployment mode
+ENV DEPLOYMENT_MODE=monolith
+
+# Monolith serves both API and frontend on port 5000
+# No separate nginx needed — ASP.NET Core serves static files directly
+# Inherits: EXPOSE 5000, healthcheck, user setup, and entrypoint from api-runtime
+
+############################################################
 # Printer Discovery Service Runtime Container
 ############################################################
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime

@@ -14,6 +14,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 |------------------------|----------------|
 | **Get started quickly** | [Getting Started Guide](./docs/GETTING_STARTED.md) |
 | **Understand the system** | [Architecture Overview](./docs/ARCHITECTURE.md) |
+| **Choose hardware for your farm** | [Deployment Hardware Guide](./docs/DEPLOYMENT_HARDWARE.md) |
 | **Deploy to production** | [Deployment Guide](./docs/DEPLOYMENT.md) |
 | **Set up pgAdmin** | [pgAdmin Setup Guide](./docs/PGADMIN_SETUP.md) |
 | **Use the API** | [API Reference](./docs/API.md) |
@@ -47,6 +48,26 @@ cd PrintFarmer
 ```
 
 Open **http://localhost** in your browser.
+
+**Raspberry Pi / ARM64 deployment?** Use monolith mode with a single container:
+```bash
+export DEPLOYMENT_MODE=monolith
+export DB_PROVIDER=sqlite
+./scripts/deploy-docker.sh --non-interactive
+# Opens http://localhost:5000
+```
+
+**Or pull pre-built images from GitHub Container Registry:**
+```bash
+# Monolith (single container for Pi)
+docker pull ghcr.io/olyforge3d/printfarmer-monolith:latest
+
+# Microservices (API + frontend)
+docker pull ghcr.io/olyforge3d/printfarmer-api:latest
+docker pull ghcr.io/olyforge3d/printfarmer-frontend:latest
+```
+
+See **[Deployment Hardware Guide](./docs/DEPLOYMENT_HARDWARE.md)** for hardware recommendations and ARM/Pi setup.
 
 ### Option 2: Local Development (Recommended for Development)
 
@@ -190,11 +211,41 @@ npm run test:run
 
 ## 🐳 Deployment
 
+### Docker Deployment Modes
+
+**Monolith Mode** (single container, perfect for Raspberry Pi):
+```bash
+export DEPLOYMENT_MODE=monolith
+export DB_PROVIDER=sqlite
+./scripts/deploy-docker.sh --non-interactive
+```
+
+**Microservices Mode** (separate API + frontend containers, production-ready):
+```bash
+# Default configuration (no DEPLOYMENT_MODE needed)
+./scripts/deploy-docker.sh
+```
+
 ### Docker Compose (Single Machine)
 
 ```bash
 ./scripts/deploy-docker.sh
 ```
+
+### Pre-Built Container Images (GitHub Container Registry)
+
+All images support **x86_64** and **ARM64** architectures:
+
+```bash
+# Monolith (API + frontend in one container)
+docker pull ghcr.io/olyforge3d/printfarmer-monolith:latest
+
+# Or separate microservices
+docker pull ghcr.io/olyforge3d/printfarmer-api:latest
+docker pull ghcr.io/olyforge3d/printfarmer-frontend:latest
+```
+
+See **[Deployment Hardware Guide](./docs/DEPLOYMENT_HARDWARE.md)** for complete GHCR instructions, hardware requirements, and Pi setup.
 
 ### Kubernetes (Microservices)
 
@@ -236,22 +287,29 @@ PrintFarmer runs on ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with aut
 - ❌ Slicing (OrcaSlicer/PrusaSlicer workers)
 - ❌ 3D model thumbnail generation
 
-**Minimum specs:** Raspberry Pi 4 (4GB RAM) or better. Pi 5 recommended.
+**Recommended for Pi:** Use **monolith mode** (single container) for minimal resource usage:
 
 ```bash
-# Docker deployment (auto-detects ARM and disables unsupported features)
+# Interactive setup (auto-detects ARM)
 ./scripts/deploy-docker.sh
 
-# Bare metal deployment
-./install.sh
+# Or silent deployment with monolith mode
+export DEPLOYMENT_MODE=monolith
+export DB_PROVIDER=sqlite
+./scripts/deploy-docker.sh --non-interactive
+
+# Or use pre-built image
+docker pull ghcr.io/olyforge3d/printfarmer-monolith:latest
+docker run -d -p 5000:5000 \
+  -e DB_PROVIDER=sqlite \
+  -e DEPLOYMENT_MODE=monolith \
+  -v printfarmer-data:/app/data \
+  ghcr.io/olyforge3d/printfarmer-monolith:latest
 ```
 
-**Force-enable** (if you've compiled native libs for ARM yourself):
-```bash
-PFARM__Platform__ModelFilesEnabled=true PFARM__Slicer__Enabled=true ./install.sh
-```
+**Minimum specs:** Raspberry Pi 4 (8GB RAM) recommended. Pi 5 ideal.
 
-See **[Deployment Guide](./docs/DEPLOYMENT.md)** for detailed ARM setup.
+For complete Pi hardware recommendations, setup checklist, and troubleshooting, see **[Deployment Hardware Guide](./docs/DEPLOYMENT_HARDWARE.md)** (includes cost analysis, network configuration, and performance tuning).
 
 ## 🔒 Security
 

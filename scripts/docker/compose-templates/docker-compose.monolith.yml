@@ -1,0 +1,56 @@
+# Monolith deployment mode - single container serving both API and frontend
+# Ideal for Raspberry Pi, low-resource environments, or simple deployments
+# No separate nginx or frontend container needed
+services:
+  printfarmer:
+    image: ${PRINTFARMER_IMAGE:-ghcr.io/olyforge3d/printfarmer-monolith}:${PRINTFARMER_VERSION:-latest}
+    container_name: printfarmer
+    restart: unless-stopped
+    ports:
+      - "${PRINTFARMER_PORT:-80}:5000"
+    environment:
+      # Deployment mode - enables static file serving from wwwroot
+      - DEPLOYMENT_MODE=monolith
+      # Database configuration - SQLite by default for simplicity
+      - DB_PROVIDER=sqlite
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/farm.db
+      # ASP.NET Core settings
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+      # Storage paths
+      - GCODE_STORAGE_PATH=/app/gcode
+      - MODEL_UPLOAD_PATH=/app/models
+      - SLICER_PROFILES_PATH=/app/profiles
+    volumes:
+      # Persistent SQLite database and application data
+      - printfarmer-data:/app/data
+      # G-code files storage
+      - printfarmer-gcode:/app/gcode
+      # Uploaded 3D model files
+      - printfarmer-models:/app/models
+      # Slicer profiles
+      - printfarmer-profiles:/app/profiles
+      # Uploaded files (firmware, configs, etc.)
+      - printfarmer-uploads:/app/uploads
+      # Data protection keys for ASP.NET Core
+      - printfarmer-keys:/app/data-protection-keys
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - printfarmer
+
+networks:
+  printfarmer:
+    driver: bridge
+
+volumes:
+  printfarmer-data:
+  printfarmer-gcode:
+  printfarmer-models:
+  printfarmer-profiles:
+  printfarmer-uploads:
+  printfarmer-keys:

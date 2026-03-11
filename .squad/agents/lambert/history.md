@@ -5,9 +5,34 @@
 - **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS, xUnit, Vitest
 - **Created:** 2026-03-06
 
-## Learnings
+## Pi 4 Deployment Infrastructure (2026-03-11)
 
-<!-- Append new learnings below. Each entry is something lasting about the project. -->
+**Sprint Focus:** Monolith deployment mode + GHCR CI/CD pipeline + comprehensive hardware documentation
+
+### Lambert Work (Agent-27)
+- Implemented monolith static file serving mode via `DEPLOYMENT_MODE` environment variable
+- Added `UseStaticFiles()` + `MapFallbackToFile("index.html")` for SPA routing
+- Middleware ordering ensures public assets before auth, API routes before SPA fallback
+- Modern ASP.NET Core pattern (replaced legacy `UseSpa()`)
+- Development mode: SpaDynamicProxyMiddleware proxies to Vite dev server
+- **Validation:** Build clean, 2041 tests passing (1593 API + 448 slicer), 0 failures
+- **Impact:** ~500MB memory savings for Raspberry Pi deployments
+
+### Related Decisions Finalized
+- **Decision 1 (Lambert):** Monolith Static File Serving Mode — API serves React frontend from wwwroot/
+- **Decision 2 (Parker):** GHCR CI/CD Pipeline — automated multi-arch builds (amd64 + arm64)
+- **Decision 3 (Parker):** Monolith Dockerfile Stage — new `monolith-runtime` in Dockerfile.multistage
+- **Decision 4 (Parker):** Monolith Compose Template — docker-compose.monolith.yml with SQLite default
+- **Decision 5 (Lambert):** Auto-Dispatch Respects Bed-Clear Gate — checks AutoPrintState before dispatch
+- **Decision 6 (Parker):** Pi 4 Deployment Analysis — comprehensive feasibility study (570 lines)
+- **Decision 7 (Ash):** Hardware Guide + Documentation Update — 45KB hardware guide, updated README
+
+### Key Learnings for Lambert
+- Monolith mode positioning: accessibility feature for low-resource deployments
+- Middleware ordering critical: UseStaticFiles BEFORE auth, MapFallbackToFile AFTER route mappings
+- SPA fallback pattern: automatically excludes /api/*, /hubs/*, health endpoints
+- Development workflow: Vite proxy still works with monolith mode
+- Cross-team alignment: Monolith decision drives Parker's Docker infrastructure + Ash's documentation
 
 ### Sprint 2 Summary (2026-03-07)
 
@@ -491,3 +516,25 @@ Decision document for "Auto-Dispatch Bug — Upload & Print Does Not Auto-Start"
 **Key files:** `AutoPrintService.cs`, `JobQueueService.cs`, `AutoDispatchBackgroundService.cs`
 **Tests:** All 2041 tests pass (1593 API + 448 Slicer), 0 warnings
 **Architecture insight:** Auto-print (bed-clear gate) and auto-dispatch (job scoring/assignment) are two cooperating pipelines. Auto-dispatch now respects the auto-print state machine — it won't bypass bed-clear confirmation when auto-print is enabled.
+
+### Monolith Static File Serving Mode (2026-03-08)
+
+**Added conditional static file serving for Raspberry Pi deployments:**
+- Environment variable: `DEPLOYMENT_MODE` (`monolith` or `microservices`)
+- **Monolith mode** (DEPLOYMENT_MODE=monolith): API serves React frontend from wwwroot/
+  - `UseStaticFiles()` placed BEFORE authentication (public access to static assets)
+  - `MapFallbackToFile("index.html")` placed AFTER all route mappings for SPA client-side routing
+  - Dev mode: `SpaDynamicProxyMiddleware` proxies to Vite dev server
+  - Logging: "[Startup] Running in monolith mode — serving frontend from wwwroot/"
+- **Microservices mode** (default): Frontend served by nginx-proxy container (existing behavior)
+  - Logging: "[Startup] Running in microservices mode — frontend served externally"
+- **Middleware ordering (critical):**
+  1. UseCors (line 367)
+  2. UseStaticFiles (line 387) — before auth
+  3. UseAuthentication/UseAuthorization (lines 411-412)
+  4. MapControllers/MapHub (lines 415-418)
+  5. MapFallbackToFile (line 643) — after all routes
+- **MapFallbackToFile vs UseSpa:** Modern ASP.NET Core approach, automatically excludes /api/*, /hubs/*, health endpoints, existing static files
+- **CORS consideration:** In monolith mode, CORS may not be needed (same-origin), but kept for microservices compatibility
+- **File location:** `src/api/Program.cs` (lines 370-408, 633-645)
+- **Tests:** 2041 passed (1593 API + 448 slicer), 0 failures
