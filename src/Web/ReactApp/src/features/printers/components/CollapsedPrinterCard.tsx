@@ -17,7 +17,7 @@ import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesMo
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
-import { useAutoPrintStatus, useSetAutoPrintEnabled } from '@/features/printers/hooks/useAutoPrint';
+import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { toast } from 'sonner';
 import {
@@ -78,13 +78,13 @@ export function CollapsedPrinterCard({
   });
 
   // Auto-dispatch opt-in status
-  const { data: autoPrintStatus } = useAutoPrintStatus(printer.id);
-  const setAutoPrintEnabled = useSetAutoPrintEnabled();
+  const { data: autoDispatchStatus } = useAutoDispatchStatus(printer.id);
+  const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
 
   const handleAutoDispatchToggle = async () => {
-    const newEnabled = !(autoPrintStatus?.autoPrintEnabled ?? false);
+    const newEnabled = !(autoDispatchStatus?.autoPrintEnabled ?? false);
     try {
-      await setAutoPrintEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
+      await setAutoDispatchEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
       toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
     } catch {
       toast.error('Failed to toggle auto-dispatch');
@@ -155,27 +155,27 @@ export function CollapsedPrinterCard({
             <Button
               variant="unstyled"
               onClick={handleAutoDispatchToggle}
-              disabled={setAutoPrintEnabled.isPending}
+              disabled={setAutoDispatchEnabled.isPending}
               className={`p-1 rounded transition-colors ${
-                autoPrintStatus?.autoPrintEnabled
+                autoDispatchStatus?.autoPrintEnabled
                   ? 'text-pf-accent bg-pf-accent-bg'
                   : 'text-pf-text-secondary hover:text-pf-text-primary'
               } disabled:opacity-50`}
               aria-label={`Toggle auto-dispatch for ${printer.name}`}
-              aria-pressed={autoPrintStatus?.autoPrintEnabled ?? false}
-              title={autoPrintStatus?.autoPrintEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
+              aria-pressed={autoDispatchStatus?.autoPrintEnabled ?? false}
+              title={autoDispatchStatus?.autoPrintEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
             >
-              <Zap className="w-4 h-4" fill={autoPrintStatus?.autoPrintEnabled ? 'currentColor' : 'none'} />
+              <Zap className="w-4 h-4" fill={autoDispatchStatus?.autoPrintEnabled ? 'currentColor' : 'none'} />
             </Button>
           </div>
 
           {/* Bed clear confirmation banner */}
-          {autoPrintStatus && (
+          {autoDispatchStatus && (
             <div className="mb-2">
               <BedClearBanner
                 printerId={printer.id}
                 printerName={printer.name}
-                autoPrintStatus={autoPrintStatus}
+                autoDispatchStatus={autoDispatchStatus}
               />
             </div>
           )}

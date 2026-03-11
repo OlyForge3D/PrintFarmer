@@ -1,20 +1,20 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import type { AutoPrintStatus, AutoPrintReadyResult } from '@/types/api';
+import type { AutoDispatchStatus, AutoDispatchReadyResult } from '@/types/api';
 
 const KEYS = {
-  all: ['autoprint'] as const,
+  all: ['auto-dispatch'] as const,
   status: (printerId: string) => [...KEYS.all, 'status', printerId] as const,
-  allStatuses: ['autoprint', 'all-statuses'] as const,
+  allStatuses: ['auto-dispatch', 'all-statuses'] as const,
 };
 
-export function useAutoPrintStatus(printerId: string): UseQueryResult<AutoPrintStatus> {
+export function useAutoDispatchStatus(printerId: string): UseQueryResult<AutoDispatchStatus> {
   return useQuery({
     queryKey: KEYS.status(printerId),
-    queryFn: async (): Promise<AutoPrintStatus> => {
+    queryFn: async (): Promise<AutoDispatchStatus> => {
       const res = await apiClient.get(`/autoprint/${printerId}/status`);
-      return res.data as AutoPrintStatus;
+      return res.data as AutoDispatchStatus;
     },
     enabled: !!printerId,
     refetchInterval: 10_000,
@@ -22,12 +22,12 @@ export function useAutoPrintStatus(printerId: string): UseQueryResult<AutoPrintS
   });
 }
 
-export function useSetAutoPrintEnabled() {
+export function useSetAutoDispatchEnabled() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ printerId, enabled }: { printerId: string; enabled: boolean }) => {
       const res = await apiClient.put(`/autoprint/${printerId}/enabled`, { enabled });
-      return res.data as AutoPrintStatus;
+      return res.data as AutoDispatchStatus;
     },
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: KEYS.status(variables.printerId) });
@@ -36,9 +36,9 @@ export function useSetAutoPrintEnabled() {
   });
 }
 
-export function useAllAutoPrintStatuses() {
+export function useAllAutoDispatchStatuses() {
   const qc = useQueryClient();
-  const query = useQuery<AutoPrintStatus[]>({
+  const query = useQuery<AutoDispatchStatus[]>({
     queryKey: KEYS.allStatuses,
     queryFn: async () => {
       const res = await apiClient.get('/autoprint/status');
@@ -60,12 +60,12 @@ export function useAllAutoPrintStatuses() {
   return query;
 }
 
-export function useSetAllAutoPrintEnabled() {
+export function useSetAllAutoDispatchEnabled() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (enabled: boolean) => {
       const res = await apiClient.put('/autoprint/enabled', { enabled });
-      return res.data as AutoPrintStatus[];
+      return res.data as AutoDispatchStatus[];
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.all });
@@ -78,7 +78,7 @@ export function useConfirmBedClear() {
   return useMutation({
     mutationFn: async (printerId: string) => {
       const res = await apiClient.post(`/autoprint/${printerId}/ready`);
-      return res.data as AutoPrintReadyResult;
+      return res.data as AutoDispatchReadyResult;
     },
     onSuccess: (_data, printerId) => {
       qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
@@ -101,7 +101,7 @@ export function useSkipNextJob() {
   });
 }
 
-export function useCancelAutoPrint() {
+export function useCancelAutoDispatch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (printerId: string) => {

@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { AutoPrintStatus } from '@/types/api';
+import type { AutoDispatchStatus } from '@/types/api';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
@@ -54,7 +54,7 @@ function createWrapper() {
   );
 }
 
-const baseStatus: AutoPrintStatus = {
+const baseStatus: AutoDispatchStatus = {
   printerId: 'printer-1',
   autoPrintEnabled: true,
   state: 'PendingReady',
@@ -101,7 +101,7 @@ describe('BedClearBanner', () => {
 
   it('renders when state is PendingReady', () => {
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('BedClearBanner', () => {
   it('renders nothing when state is None', () => {
     const status = { ...baseStatus, state: 'None' as const };
     const { container } = render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={status} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={status} />,
       { wrapper: createWrapper() },
     );
     expect(container.firstChild).toBeNull();
@@ -121,7 +121,7 @@ describe('BedClearBanner', () => {
   it('renders nothing when state is Ready', () => {
     const status = { ...baseStatus, state: 'Ready' as const };
     const { container } = render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={status} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={status} />,
       { wrapper: createWrapper() },
     );
     expect(container.firstChild).toBeNull();
@@ -130,7 +130,7 @@ describe('BedClearBanner', () => {
   it('shows singular "job" when queuedJobCount is 1', () => {
     const status = { ...baseStatus, queuedJobCount: 1 };
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={status} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={status} />,
       { wrapper: createWrapper() },
     );
     expect(screen.getByText(/1 job queued/)).toBeInTheDocument();
@@ -140,7 +140,7 @@ describe('BedClearBanner', () => {
     vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultWithJob });
     vi.mocked(apiClient.dispatchPrintQueueJob).mockResolvedValueOnce({});
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
@@ -158,7 +158,7 @@ describe('BedClearBanner', () => {
   it('shows success without dispatch when no jobs queued', async () => {
     vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultNoJob });
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
@@ -171,7 +171,7 @@ describe('BedClearBanner', () => {
   it('warns on material mismatch without dispatching', async () => {
     vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultMaterialMismatch });
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
@@ -187,7 +187,7 @@ describe('BedClearBanner', () => {
   it('warns on insufficient filament without dispatching', async () => {
     vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultInsufficientFilament });
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
@@ -203,7 +203,7 @@ describe('BedClearBanner', () => {
   it('calls skip endpoint when Skip button is clicked', async () => {
     vi.mocked(apiClient.post).mockResolvedValueOnce({ data: {} });
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Skip next queued job'));
@@ -218,7 +218,7 @@ describe('BedClearBanner', () => {
   it('calls cancel endpoint when Cancel button is clicked', async () => {
     vi.mocked(apiClient.post).mockResolvedValueOnce({ data: {} });
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Cancel auto-dispatch'));
@@ -233,7 +233,7 @@ describe('BedClearBanner', () => {
   it('shows error toast on confirm failure', async () => {
     vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('Network error'));
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
@@ -244,7 +244,7 @@ describe('BedClearBanner', () => {
 
   it('has correct ARIA attributes', () => {
     render(
-      <BedClearBanner printerId="printer-1" printerName="MK4" autoPrintStatus={baseStatus} />,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     const alert = screen.getByRole('alert');

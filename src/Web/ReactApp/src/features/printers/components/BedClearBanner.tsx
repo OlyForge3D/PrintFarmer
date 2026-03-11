@@ -1,25 +1,25 @@
 import React from 'react';
 import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
-import { useConfirmBedClear, useSkipNextJob, useCancelAutoPrint } from '@/features/printers/hooks/useAutoPrint';
+import { useConfirmBedClear, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
-import type { AutoPrintStatus } from '@/types/api';
+import type { AutoDispatchStatus } from '@/types/api';
 
 interface BedClearBannerProps {
   printerId: string;
   printerName: string;
-  autoPrintStatus: AutoPrintStatus;
+  autoDispatchStatus: AutoDispatchStatus;
 }
 
-export function BedClearBanner({ printerId, printerName, autoPrintStatus }: BedClearBannerProps) {
+export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: BedClearBannerProps) {
   const confirmBedClear = useConfirmBedClear();
   const skipNextJob = useSkipNextJob();
-  const cancelAutoPrint = useCancelAutoPrint();
+  const cancelAutoDispatch = useCancelAutoDispatch();
 
-  if (autoPrintStatus.state !== 'PendingReady') return null;
+  if (autoDispatchStatus.state !== 'PendingReady') return null;
 
-  const isAnyPending = confirmBedClear.isPending || skipNextJob.isPending || cancelAutoPrint.isPending;
+  const isAnyPending = confirmBedClear.isPending || skipNextJob.isPending || cancelAutoDispatch.isPending;
 
   const handleConfirm = async () => {
     try {
@@ -70,7 +70,7 @@ export function BedClearBanner({ printerId, printerName, autoPrintStatus }: BedC
 
   const handleCancel = async () => {
     try {
-      await cancelAutoPrint.mutateAsync(printerId);
+      await cancelAutoDispatch.mutateAsync(printerId);
       toast.info('Auto-dispatch cancelled');
     } catch {
       toast.error('Failed to cancel auto-dispatch');
@@ -85,9 +85,9 @@ export function BedClearBanner({ printerId, printerName, autoPrintStatus }: BedC
     >
       <p className="text-xs font-medium text-pf-warning mb-2">
         Print complete — confirm bed is clear
-        {autoPrintStatus.queuedJobCount > 0 && (
+        {autoDispatchStatus.queuedJobCount > 0 && (
           <span className="text-pf-text-secondary font-normal">
-            {' '}({autoPrintStatus.queuedJobCount} job{autoPrintStatus.queuedJobCount !== 1 ? 's' : ''} queued)
+            {' '}({autoDispatchStatus.queuedJobCount} job{autoDispatchStatus.queuedJobCount !== 1 ? 's' : ''} queued)
           </span>
         )}
       </p>
@@ -118,7 +118,7 @@ export function BedClearBanner({ printerId, printerName, autoPrintStatus }: BedC
           variant="ghost"
           size="sm"
           onClick={handleCancel}
-          loading={cancelAutoPrint.isPending}
+          loading={cancelAutoDispatch.isPending}
           disabled={isAnyPending}
           iconLeft={<CloseIcon className="h-3.5 w-3.5" />}
           aria-label="Cancel auto-dispatch"

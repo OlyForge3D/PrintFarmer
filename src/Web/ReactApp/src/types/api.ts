@@ -2949,18 +2949,18 @@ export interface WebhookDelivery {
   createdAt: string;
 }
 
-// ── Auto-Print ──────────────────────────────────────────────
+// ── Auto-Dispatch ──────────────────────────────────────────────
 
-export type AutoPrintState = 'None' | 'PendingReady' | 'Ready';
+export type AutoDispatchState = 'None' | 'PendingReady' | 'Ready';
 
-export interface AutoPrintStatus {
+export interface AutoDispatchStatus {
   printerId: string;
   autoPrintEnabled: boolean;
-  state: AutoPrintState;
+  state: AutoDispatchState;
   queuedJobCount: number;
 }
 
-export interface AutoPrintNextJob {
+export interface AutoDispatchNextJob {
   id: string;
   name: string;
   estimatedFilamentUsageG?: number;
@@ -2978,9 +2978,9 @@ export interface FilamentCheckResult {
   message?: string;
 }
 
-export interface AutoPrintReadyResult {
-  status: AutoPrintStatus;
-  nextJob?: AutoPrintNextJob;
+export interface AutoDispatchReadyResult {
+  status: AutoDispatchStatus;
+  nextJob?: AutoDispatchNextJob;
   filamentCheck?: FilamentCheckResult;
 }
 
