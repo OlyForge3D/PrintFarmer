@@ -10,6 +10,8 @@ import {
   VideoIcon,
   MoreVerticalIcon,
   TagIcon,
+  NozzleIcon,
+  BedIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
@@ -183,7 +185,7 @@ export function CollapsedPrinterCard({
           {/* Progress bar — always visible */}
           {(() => {
             const progress = printer.progress ?? 0;
-            const isActive = isOnline && (isPrinting || isPaused) && progress > 0;
+            const isActive = isOnline && (isPrinting || isPaused);
             return (
               <div className="mt-2">
                 <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
@@ -206,6 +208,23 @@ export function CollapsedPrinterCard({
                     <span className="sr-only">Print progress: {isActive ? Math.round(Math.max(0, Math.min(100, progress))) : 0}%</span>
                   </div>
                 </div>
+                {/* Temperature readouts */}
+                {isOnline && (printer.hotendTemp != null || printer.bedTemp != null) && (
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-pf-text-secondary">
+                    {printer.hotendTemp != null && (
+                      <span className="flex items-center gap-1" title="Hotend temperature">
+                        <NozzleIcon className="w-3.5 h-3.5" isOn={(printer.hotendTemp ?? 0) > 50} />
+                        <span>{Math.round(printer.hotendTemp)}°{printer.hotendTarget ? ` / ${Math.round(printer.hotendTarget)}°` : ''}</span>
+                      </span>
+                    )}
+                    {printer.bedTemp != null && (
+                      <span className="flex items-center gap-1" title="Bed temperature">
+                        <BedIcon className="w-3.5 h-3.5" isOn={(printer.bedTemp ?? 0) > 35} />
+                        <span>{Math.round(printer.bedTemp)}°{printer.bedTarget ? ` / ${Math.round(printer.bedTarget)}°` : ''}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })()}
