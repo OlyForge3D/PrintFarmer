@@ -85,7 +85,7 @@ export function CompactPrinterCard({
   // Per-printer job queue for "X of Y" indicator
   const { data: printerQueue = [] } = useJobQueue(printer.id);
   const activeQueueJobs = printerQueue.filter(
-    (j) => j.job.status === 'Queued' || j.job.status === 'Printing' || j.job.status === 'Dispatched'
+    (j) => j.job?.status === 'Queued' || j.job?.status === 'Printing' || j.job?.status === 'Dispatched'
   );
   const queueLabel = activeQueueJobs.length > 1
     ? `1 of ${activeQueueJobs.length}`
