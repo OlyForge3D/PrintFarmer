@@ -418,7 +418,8 @@ public sealed class OctoPrintPollingService(
                             HotendTarget: statusData.HotendTarget,
                             BedTarget: statusData.BedTarget,
                             HomedAxes: null,
-                            SpoolInfo: spoolInfo);
+                            SpoolInfo: spoolInfo,
+                            FileName: PrinterStatusDto.ExtractFileName(statusData.JobName));
 
                         await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
                     }
@@ -478,7 +479,8 @@ public sealed class OctoPrintPollingService(
                             HotendTarget: null,
                             BedTarget: null,
                             HomedAxes: null,
-                            SpoolInfo: null);
+                            SpoolInfo: null,
+                            FileName: null);
 
                         await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }

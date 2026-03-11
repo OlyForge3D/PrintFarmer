@@ -565,6 +565,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             ModelName: printer.Model?.Name,
             Progress: status.Progress,
             JobName: status.JobName,
+            FileName: PrinterStatusDto.ExtractFileName(status.JobName),
             ThumbnailUrl: status.ThumbnailUrl,
             CameraStreamUrl: cameraStreamUrl,
             CameraSnapshotUrl: cameraSnapshotUrl,

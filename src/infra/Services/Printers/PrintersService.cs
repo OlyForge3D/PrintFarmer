@@ -789,6 +789,7 @@ public class PrintersService(
                     State: status.State,
                     Progress: status.Progress,
                     JobName: status.JobName,
+                    FileName: status.FileName ?? PrinterStatusDto.ExtractFileName(status.JobName),
                     ThumbnailUrl: status.ThumbnailUrl,
 
                     // Camera URL from database (correct frontend port) or fallback to status
@@ -834,6 +835,7 @@ public class PrintersService(
                     State: null,
                     Progress: null,
                     JobName: null,
+                    FileName: null,
                     ThumbnailUrl: null,
                     CameraStreamUrl: p.CameraStreamUrl, // From database
                     X: null,
@@ -1240,6 +1242,7 @@ public class PrintersService(
             ModelName: p.Model?.Name,
             Progress: null,
             JobName: null,
+            FileName: null,
             ThumbnailUrl: null,
             CameraStreamUrl: null,
             CameraSnapshotUrl: null,

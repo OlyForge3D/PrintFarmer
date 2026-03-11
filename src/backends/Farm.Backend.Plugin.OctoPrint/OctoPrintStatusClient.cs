@@ -132,6 +132,7 @@ namespace Farm.Backend.Plugin.OctoPrint
                         ModelName: printer.Model?.Name,
                         Progress: jobStatus?.Progress ?? 0,
                         JobName: jobStatus?.Filename,
+                        FileName: PrinterStatusDto.ExtractFileName(jobStatus?.Filename),
                         ThumbnailUrl: null,
                         CameraStreamUrl: null,
                         CameraSnapshotUrl: null,

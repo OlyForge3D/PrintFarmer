@@ -1113,6 +1113,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             ModelName: printer.Model?.Name,
             Progress: status.Progress,
             JobName: status.JobName,
+            FileName: PrinterStatusDto.ExtractFileName(status.JobName),
             ThumbnailUrl: status.ThumbnailUrl,
             CameraStreamUrl: cameraStreamUrl,
             CameraSnapshotUrl: cameraSnapshotUrl,

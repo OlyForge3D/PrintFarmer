@@ -196,7 +196,7 @@ export function CompactPrinterCard({
           <div className="mt-2">
             <PrintProgressBar
               progress={printer.progress}
-              jobName={printer.jobName}
+              jobName={printer.fileName ?? printer.jobName}
               isActive={isOnline && (isPrinting || isPaused)}
               progressRef={collapsedProgressRef}
               showInactiveState={true}

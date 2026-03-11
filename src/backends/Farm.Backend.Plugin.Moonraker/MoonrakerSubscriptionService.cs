@@ -2070,7 +2070,7 @@ public sealed class MoonrakerSubscriptionService(
         {
             try
             {
-                PrinterStateUpdate update = new PrinterStateUpdate(printerId, stateValue, progress, jobName);
+                PrinterStateUpdate update = new PrinterStateUpdate(printerId, stateValue, progress, jobName, PrinterStatusDto.ExtractFileName(jobName));
                 _logger.LogDebug("Emitting state update for printer {PrinterId}: State={StateValue}, Progress={Progress}, JobName={JobName}", printerId, stateValue, progress, jobName);
                 await hub!.Clients.All.SendAsync("stateupdate", update, ct);
             }
@@ -2119,7 +2119,8 @@ public sealed class MoonrakerSubscriptionService(
                 BedTarget: state.BedTarget,
                 HomedAxes: state.HomedAxes,
                 SpoolInfo: spoolInfo,
-                MmuStatus: mmuStatus);
+                MmuStatus: mmuStatus,
+                FileName: PrinterStatusDto.ExtractFileName(state.JobName));
 
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
@@ -2552,7 +2553,8 @@ public sealed class MoonrakerSubscriptionService(
                     compositeStatus.HotendTarget,
                     compositeStatus.BedTarget,
                     null, // HomedAxes - Not available in CompositeStatus
-                    spoolInfo);
+                    spoolInfo,
+                    FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName));
 
                 try
                 {
