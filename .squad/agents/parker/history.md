@@ -124,3 +124,37 @@
 - `PRINTFARMER_PROFILE` environment variable
 - `DEPLOY_PROFILE` in generated `.env` file
 
+
+## Agent-32: Deployment Profile Selection (2026-03-11, 395s)
+
+**Work:** Added flexible deployment profile system to install.sh — three tiers (lite/standard/full) for heterogeneous deployments.
+
+**Key features:**
+- `--profile lite|standard|full` CLI flag + interactive menu
+- ARM auto-detection defaults to lite on Raspberry Pi 4/5
+- Profile stored in `.env` for upgrade awareness
+- Inline compose generation (self-contained installer)
+- Backward compatible (defaults to standard on non-ARM)
+
+**Profile mapping:**
+| Profile | Containers | DB | Notes |
+|---------|-----------|-----|-------|
+| lite | 1 (monolith) | SQLite (locked) | Monolith serves on port 5000 |
+| standard | 3 (api+frontend+nginx) | SQLite (chooseable) | Microservices, port 80 |
+| full | 7 (+ postgres + discovery + monitoring) | PostgreSQL | All services, dedicated database |
+
+**Design decisions:**
+1. Lite forces SQLite (no db container, no nginx) — ideal for Pi
+2. Full defaults to PostgreSQL but respects `--db sqlite` override
+3. ARM auto-defaults to lite in both interactive and non-interactive modes
+4. Profile stored in .env to preserve on upgrades
+5. All compose templates generated inline (installer is self-contained)
+6. Backward compatible: no flag defaults to standard on non-ARM
+
+**Team impact:**
+- Lambert: DEPLOYMENT_MODE=monolith env var already wired; no API changes needed
+- Quinn: Profile is infrastructure-only; no frontend changes
+- Dallas: Full profile includes discovery + monitoring aligned with 3-tier architecture
+
+**Integration:** Builds on monolith Docker infrastructure (Agent-29) and GHCR CI/CD (Agent-28).
+
