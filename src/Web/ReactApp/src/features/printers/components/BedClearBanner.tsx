@@ -91,40 +91,40 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
           </span>
         )}
       </p>
-      <div className="flex gap-1.5">
+      <div className="flex gap-2">
         <Button
           variant="success"
           size="sm"
           onClick={handleConfirm}
           loading={confirmBedClear.isPending}
           disabled={isAnyPending}
-          iconLeft={<CheckCircleIcon className="h-3.5 w-3.5" />}
+          iconCenter={<CheckCircleIcon className="h-4 w-4" />}
           aria-label={`Confirm bed clear for ${printerName}`}
-        >
-          Confirm
-        </Button>
+          title="Confirm bed is clear"
+          className="flex-1 h-9 !p-0"
+        />
         <Button
-          variant="secondary"
+          variant="primary"
           size="sm"
           onClick={handleSkip}
           loading={skipNextJob.isPending}
           disabled={isAnyPending}
-          iconLeft={<SkipForwardIcon className="h-3.5 w-3.5" />}
+          iconCenter={<SkipForwardIcon className="h-4 w-4" />}
           aria-label="Skip next queued job"
-        >
-          Skip
-        </Button>
+          title="Skip this job"
+          className="flex-1 h-9 !p-0"
+        />
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           onClick={handleCancel}
           loading={cancelAutoDispatch.isPending}
           disabled={isAnyPending}
-          iconLeft={<CloseIcon className="h-3.5 w-3.5" />}
+          iconCenter={<CloseIcon className="h-4 w-4" />}
           aria-label="Cancel auto-dispatch"
-        >
-          Cancel
-        </Button>
+          title="Cancel auto-dispatch"
+          className="flex-1 h-9 !p-0"
+        />
       </div>
     </div>
   );

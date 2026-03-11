@@ -1,10 +1,12 @@
 import React, { useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
+import type { AutoDispatchStatus } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import { CollapsedPrinterCard } from '@/features/printers/components/CollapsedPrinterCard';
@@ -70,7 +72,17 @@ export function PrintersPage() {
   );
   
   const deletePrinterMutation = useDeletePrinter();
+  const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
+  const pendingPrinterIds = useMemo(
+    () => new Set(((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter(s => s.state === 'PendingReady').map(s => s.printerId)),
+    [allAutoDispatchStatuses]
+  );
+  const [searchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const fromUrl = searchParams.get('view');
+    if (fromUrl === 'collapsed' || fromUrl === 'detailed' || fromUrl === 'table') {
+      return fromUrl;
+    }
     const saved = localStorage.getItem('printerViewMode');
 
     // Migrate legacy value (pre-rename) to the new name.
@@ -153,8 +165,18 @@ export function PrintersPage() {
     if (backendFilter !== 'all') {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
     }
+    // Sort: attention first, then online, then offline
+    filtered.sort((a, b) => {
+      const aAttention = pendingPrinterIds.has(a.id) ? 0 : 1;
+      const bAttention = pendingPrinterIds.has(b.id) ? 0 : 1;
+      if (aAttention !== bAttention) return aAttention - bAttention;
+      const aOnline = a.isOnline ? 0 : 1;
+      const bOnline = b.isOnline ? 0 : 1;
+      if (aOnline !== bOnline) return aOnline - bOnline;
+      return (a.name ?? '').localeCompare(b.name ?? '');
+    });
     return filtered;
-  }, [optimisticPrinters, stateFilter, backendFilter]);
+  }, [optimisticPrinters, stateFilter, backendFilter, pendingPrinterIds]);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([

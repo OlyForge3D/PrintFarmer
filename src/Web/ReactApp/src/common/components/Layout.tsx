@@ -30,6 +30,7 @@ import {
   NfcIcon,
   ChartIcon,
   ExternalLinkIcon,
+  AlertIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -37,7 +38,8 @@ import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinterSignalRPanel';
 import { printerSignalRService } from '@/services/printer-signalr';
 import { BoxIcon, SpoolIcon } from 'lucide-react';
@@ -228,6 +230,12 @@ export function Layout() {
   const { isSlicerAvailable } = useSlicer();
   const { data: capabilities } = useSystemCapabilities();
   const { theme, setTheme } = useTheme();
+  const navigate = useNavigate();
+  const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
+  const pendingAttentionCount = useMemo(
+    () => (allAutoDispatchStatuses ?? []).filter(s => s.state === 'PendingReady').length,
+    [allAutoDispatchStatuses]
+  );
   const location = useLocation();
   // Debug: log current pathname to ensure re-render on navigation
   useEffect(() => {
@@ -465,6 +473,21 @@ export function Layout() {
 
           {/* Right side - Status and user */}
           <div className="flex items-center space-x-3">
+            {/* Printer attention badge */}
+            {pendingAttentionCount > 0 && (
+              <button
+                onClick={() => navigate('/printers?view=collapsed')}
+                className="relative flex items-center text-pf-warning animate-pulse hover:animate-none cursor-pointer bg-transparent border-none outline-none p-0"
+                title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention — click to view`}
+                aria-label={`${pendingAttentionCount} printers need attention`}
+              >
+                <AlertIcon className="h-4 w-4" />
+                <span className="absolute -top-1.5 -right-1.5 bg-pf-warning text-black text-[9px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center leading-none">
+                  {pendingAttentionCount}
+                </span>
+              </button>
+            )}
+
             {/* Connection status */}
             <div className="flex items-center space-x-2">
               <div 

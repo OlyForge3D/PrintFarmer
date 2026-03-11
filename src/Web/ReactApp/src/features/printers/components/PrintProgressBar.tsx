@@ -5,7 +5,7 @@ interface PrintProgressBarProps {
   progress: number | undefined;
   jobName: string | undefined | null;
   isActive: boolean;
-  progressRef?: React.RefObject<HTMLDivElement>;
+  progressRef?: React.RefObject<HTMLDivElement | null>;
   showInactiveState?: boolean;
   showTemperatures?: boolean;
   hotendTemp?: number | null;
