@@ -31,19 +31,19 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
 import type { TagDto } from '@/services/tagService';
 
-interface CollapsedPrinterCardProps {
+interface CompactPrinterCardProps {
   printer: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onExpand: () => void;
   onEdit?: (printer: Printer) => void;
 }
 
-export function CollapsedPrinterCard({
+export function CompactPrinterCard({
   printer: printerProp,
   backendCapabilities,
   onExpand,
   onEdit
-}: CollapsedPrinterCardProps) {
+}: CompactPrinterCardProps) {
   // Merge with realtime SignalR updates
   const printer = printerProp; // printerProp already includes display data
   const [showCamera, setShowCamera] = useState(false);

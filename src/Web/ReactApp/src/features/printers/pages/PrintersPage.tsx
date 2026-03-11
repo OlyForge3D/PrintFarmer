@@ -9,7 +9,7 @@ import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDis
 import type { AutoDispatchStatus } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
-import { CollapsedPrinterCard } from '@/features/printers/components/CollapsedPrinterCard';
+import { CompactPrinterCard } from '@/features/printers/components/CompactPrinterCard';
 import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
 import { PrinterTableView } from '@/features/printers/components/PrinterTableView';
 import { EditPrinterModal } from '@/features/printers/components/EditPrinterModal';
@@ -403,7 +403,7 @@ export function PrintersPage() {
               ) : viewMode === 'collapsed' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,18rem)] gap-4 transition-opacity duration-200 min-w-0">
                   {userPrinters.map((printer) => (
-                    <CollapsedPrinterCard
+                    <CompactPrinterCard
                       key={printer.id}
                       printer={printer}
                       backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}

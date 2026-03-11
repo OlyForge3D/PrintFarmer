@@ -1,5 +1,5 @@
 import React from 'react';
-import { NozzleIcon, BedIcon } from '@/common/components/icons/MdiIcons';
+import { NozzleIcon, BedIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 
 interface PrintProgressBarProps {
   progress: number | undefined;
@@ -73,20 +73,28 @@ export function PrintProgressBar({
         </div>
       </div>
       {/* Temperature readouts */}
-      {showTemperatures && isOnline && (hotendTemp != null || bedTemp != null) && (
-        <div className="flex items-center gap-3 mt-1.5 text-xs text-pf-text-secondary">
-          {hotendTemp != null && (
-            <span className="flex items-center gap-1" title="Hotend temperature">
-              <NozzleIcon className="w-3.5 h-3.5" isOn={(hotendTemp ?? 0) > 50} />
-              <span>{Math.round(hotendTemp)}°{hotendTarget ? ` / ${Math.round(hotendTarget)}°` : ''}</span>
-            </span>
-          )}
-          {bedTemp != null && (
-            <span className="flex items-center gap-1" title="Bed temperature">
-              <BedIcon className="w-3.5 h-3.5" isOn={(bedTemp ?? 0) > 35} />
-              <span>{Math.round(bedTemp)}°{bedTarget ? ` / ${Math.round(bedTarget)}°` : ''}</span>
-            </span>
-          )}
+      {showTemperatures && isOnline && (
+        <div className="grid grid-cols-2 gap-3 mt-1.5 text-xs text-pf-text-secondary">
+          <span className="flex items-center gap-1" title="Hotend temperature">
+            <NozzleIcon className={`w-3.5 h-3.5 ${hotendTemp != null ? 'text-pf-error' : ''}`} isOn={(hotendTemp ?? 0) > 50} />
+            <span>{hotendTemp != null ? `${Math.round(hotendTemp)}°` : '--°'}</span>
+            {hotendTarget != null && hotendTarget > 0 && (
+              <>
+                <ArrowRightIcon className="w-2.5 h-2.5" />
+                <span>{Math.round(hotendTarget)}°</span>
+              </>
+            )}
+          </span>
+          <span className="flex items-center gap-1" title="Bed temperature">
+            <BedIcon className={`w-3.5 h-3.5 ${bedTemp != null ? 'text-pf-accent' : ''}`} isOn={(bedTemp ?? 0) > 35} />
+            <span>{bedTemp != null ? `${Math.round(bedTemp)}°` : '--°'}</span>
+            {bedTarget != null && bedTarget > 0 && (
+              <>
+                <ArrowRightIcon className="w-2.5 h-2.5" />
+                <span>{Math.round(bedTarget)}°</span>
+              </>
+            )}
+          </span>
         </div>
       )}
     </div>
