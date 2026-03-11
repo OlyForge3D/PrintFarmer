@@ -13,6 +13,7 @@ import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
 import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
+import DispatchLogTab from "../components/DispatchLogTab";
 import { apiClient } from "@/services/api";
 import { printerSignalRService } from "@/services/printer-signalr";
 import type { DispatchUploadProgressDto } from "@/types/api";
@@ -23,7 +24,7 @@ import type {
 
 // localStorage keys for persisting user preferences
 const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
-const VALID_TABS = ['print-queue', 'history'] as const;
+const VALID_TABS = ['print-queue', 'history', 'dispatch-log'] as const;
 
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
 
@@ -424,6 +425,7 @@ export function PrintQueueDashboardPage() {
         <Tabs.List>
           <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
           <Tabs.Tab id="history">History</Tabs.Tab>
+          <Tabs.Tab id="dispatch-log">Dispatch Log</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panels>
@@ -479,6 +481,11 @@ export function PrintQueueDashboardPage() {
                 setIsJobDetailsModalOpen(true);
               }}
             />
+          </Tabs.Panel>
+
+          {/* Tab 3: Dispatch Log */}
+          <Tabs.Panel id="dispatch-log">
+            <DispatchLogTab />
           </Tabs.Panel>
         </Tabs.Panels>
       </Tabs>

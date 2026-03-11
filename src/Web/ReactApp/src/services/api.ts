@@ -93,6 +93,7 @@ import {
   ConnectionDiagnosticsResponse,
   PagedResponse,
   SystemCapabilities,
+  DispatchHistoryPageDto,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -1992,6 +1993,15 @@ export class ApiClient {
       undefined,
       { timeout: 0 }
     );
+    return response.data;
+  }
+
+  // ============ Dispatch history ============
+
+  async getDispatchHistory(page: number = 1, pageSize: number = 20): Promise<DispatchHistoryPageDto> {
+    const response = await this.client.get<DispatchHistoryPageDto>('/dispatch/history', {
+      params: { page, pageSize },
+    });
     return response.data;
   }
 

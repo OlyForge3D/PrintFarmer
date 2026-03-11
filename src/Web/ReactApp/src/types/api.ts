@@ -3049,3 +3049,24 @@ export interface SystemCapabilities {
   gcodeUploadEnabled: boolean;
   platformNote?: string;
 }
+
+// ============ Dispatch History Types ============
+
+export interface DispatchHistoryDto {
+  id: string;
+  printJobId: string;
+  jobName?: string;
+  printerId: string;
+  printerName?: string;
+  action: string; // "Suggested" | "Dispatched" | "Rejected" | "Failed"
+  score?: number;
+  reason?: string;
+  createdAtUtc: string;
+}
+
+export interface DispatchHistoryPageDto {
+  items: DispatchHistoryDto[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
