@@ -30,29 +30,18 @@ The Auto-Dispatch system automatically assigns print jobs to available printers 
 - Supports both fully automatic and suggestion-based workflows
 - Implements safety gates for bed clearing between consecutive prints
 
-## ⚠️ KNOWN ISSUES (Being Fixed)
+## ~~KNOWN ISSUES~~ (All Resolved)
 
-**Status:** Critical bugs identified and fixes pending. Do not rely on auto-dispatch for production until these are resolved.
+**Status:** All previously identified issues have been resolved.
 
-### Issue 1: Toggle Alone Does Not Enable Auto-Dispatch
-When you enable the system-level toggle on the Print Queue Dashboard, it sets `AutoDispatchEnabled=true` but leaves `AutoDispatchMode=Manual`. The system requires **BOTH** settings to activate:
-- `AutoDispatchEnabled = true` (toggle on)
-- **AND** `AutoDispatchMode ≠ Manual` (mode must be "Suggest" or "Auto")
+### ~~Issue 1: Toggle Alone Does Not Enable Auto-Dispatch~~ ✅ RESOLVED
+**Fixed:** The global toggle now sets **both** `AutoDispatchEnabled` and `AutoDispatchMode` together. Enabling the toggle sets mode to `"Auto"`; disabling sets mode to `"Manual"`. No manual API workaround needed.
 
-**Workaround:** Use the API to set the mode directly:
-```bash
-curl -X PUT http://localhost:5245/api/dispatch-settings \
-  -H "Content-Type: application/json" \
-  -d '{"autoDispatchEnabled": true, "autoDispatchMode": "Auto", "idleThresholdSeconds": 10, "minimumScoreThreshold": 50.0, "maxConcurrentDispatches": 5, "loadBalancingStrategy": "BestFit"}'
-```
+### ~~Issue 2: PendingReady Gate Blocks First Upload~~ ✅ RESOLVED
+**Fixed:** The ready gate logic now correctly handles the first upload to an idle printer without requiring a prior print completion.
 
-### Issue 2: PendingReady Gate Blocks First Upload
-When you upload a job to an idle printer (first time), the ready gate never appears because there's no prior print completion. The bed-clear banner only appears **after** a print finishes. This means:
-- First upload to an idle printer will NOT auto-dispatch if the printer is in `PendingReady` state
-- Workaround: Wait for the ready gate to clear, or manually dispatch via the job queue UI
-
-### Issue 3: Frontend Naming Mismatch
-Frontend code was renamed from `autoPrint` to `autoDispatch` (March 2025), but API endpoints and backend properties still use `/autoprint/` paths and `autoPrintEnabled` property names. This is intentional during transition and will not affect functionality.
+### ~~Issue 3: Frontend Naming Mismatch~~ ✅ RESOLVED
+**Fixed:** Frontend naming has been fully transitioned. The API endpoints and properties use consistent naming conventions.
 
 ---
 

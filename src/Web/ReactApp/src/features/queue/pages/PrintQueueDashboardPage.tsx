@@ -56,6 +56,7 @@ function AutoDispatchGlobalToggle() {
       const res = await apiClient.put<DispatchSettingsResponse>('/dispatch-settings', {
         ...settings,
         autoDispatchEnabled: enabled,
+        autoDispatchMode: enabled ? 'Auto' : 'Manual',
       });
       return res.data;
     },
