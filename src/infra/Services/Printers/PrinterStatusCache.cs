@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using Farm.Infrastructure;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -54,7 +55,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
     {
         lock (_lockObj)
         {
-            _cache[status.Id] = status;
+            _cache[status.Id] = StripJobNamePath(status);
         }
     }
 
@@ -69,7 +70,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         {
             foreach (PrinterStatusDto status in statuses)
             {
-                _cache[status.Id] = status;
+                _cache[status.Id] = StripJobNamePath(status);
             }
         }
     }
@@ -101,5 +102,19 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         {
             _cache.Clear();
         }
+    }
+
+    /// <summary>
+    /// Strip directory path prefixes from JobName (e.g. ".cache/file.gcode" → "file.gcode").
+    /// </summary>
+    private static PrinterStatusDto StripJobNamePath(PrinterStatusDto status)
+    {
+        if (string.IsNullOrEmpty(status.JobName))
+        {
+            return status;
+        }
+
+        string stripped = Path.GetFileName(status.JobName);
+        return stripped == status.JobName ? status : status with { JobName = stripped };
     }
 }

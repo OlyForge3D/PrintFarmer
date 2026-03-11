@@ -19,6 +19,7 @@ import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from
 import { apiClient } from '@/services/api';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
+import { useJobQueue } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
 import {
   canOpenFiles,
@@ -80,6 +81,17 @@ export function CollapsedPrinterCard({
   // Auto-dispatch opt-in status
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printer.id);
   const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
+
+  // Per-printer job queue for "X of Y" indicator
+  const { data: printerQueue = [] } = useJobQueue(printer.id);
+  const activeQueueJobs = printerQueue.filter(
+    (j) => j.job.status === 'Queued' || j.job.status === 'Printing' || j.job.status === 'Dispatched'
+  );
+  const queueLabel = activeQueueJobs.length > 1
+    ? `1 of ${activeQueueJobs.length}`
+    : activeQueueJobs.length === 1
+      ? '1 of 1'
+      : undefined;
 
   const handleAutoDispatchToggle = async () => {
     const newEnabled = !(autoDispatchStatus?.autoPrintEnabled ?? false);
@@ -194,6 +206,7 @@ export function CollapsedPrinterCard({
               hotendTarget={printer.hotendTarget}
               bedTarget={printer.bedTarget}
               isOnline={isOnline}
+              queueLabel={queueLabel}
             />
           </div>
 

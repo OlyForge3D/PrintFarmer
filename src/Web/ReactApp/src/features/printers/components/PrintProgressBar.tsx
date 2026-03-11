@@ -13,6 +13,8 @@ interface PrintProgressBarProps {
   hotendTarget?: number | null;
   bedTarget?: number | null;
   isOnline?: boolean;
+  /** Queue indicator shown to the right of the job name, e.g. "2 of 5" */
+  queueLabel?: string;
 }
 
 export function PrintProgressBar({
@@ -27,11 +29,12 @@ export function PrintProgressBar({
   hotendTarget,
   bedTarget,
   isOnline = true,
+  queueLabel,
 }: PrintProgressBarProps) {
   const progress = rawProgress ?? 0;
   const clampedProgress = Math.max(0, Math.min(100, progress));
 
-  // Job name display logic
+  // Job name display logic (path stripping done server-side in PrinterStatusCache)
   const jobNameDisplay = (() => {
     if (isActive) {
       return jobName || 'Printing...';
@@ -39,7 +42,6 @@ export function PrintProgressBar({
     if (showInactiveState) {
       return <span className="italic text-pf-text-tertiary">No active print</span>;
     }
-    // For DetailedPrinterCard: show non-breaking space to prevent layout shift
     return jobName || '\u00A0';
   })();
 
@@ -47,6 +49,11 @@ export function PrintProgressBar({
     <div>
       <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
         <span className="truncate flex-1">{jobNameDisplay}</span>
+        {queueLabel && (
+          <span className="shrink-0 ml-2 text-pf-text-tertiary" title="Queued jobs for this printer">
+            {queueLabel}
+          </span>
+        )}
         {isActive && <span className="font-semibold ml-2">{Math.round(progress)}%</span>}
       </div>
       <div
