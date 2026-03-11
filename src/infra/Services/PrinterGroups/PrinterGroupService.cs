@@ -112,10 +112,27 @@ public class PrinterGroupService(
             throw new KeyNotFoundException($"Printer group {groupId} not found.");
         }
 
-        Printer? printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == printerId, ct);
+        Printer? printer = await db.Printers
+            .Include(p => p.Model)
+            .FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new KeyNotFoundException($"Printer {printerId} not found.");
+        }
+
+        // Enforce homogeneous groups: all printers must share the same model
+        Printer? existingMember = await db.Printers
+            .Include(p => p.Model)
+            .Where(p => p.PrinterGroupId == groupId && p.Id != printerId)
+            .FirstOrDefaultAsync(ct);
+
+        if (existingMember is not null && existingMember.ModelId != printer.ModelId)
+        {
+            string existingModelName = existingMember.Model?.Name ?? "Unknown";
+            string newModelName = printer.Model?.Name ?? "Unknown";
+            throw new InvalidOperationException(
+                $"All printers in a group must be the same model. " +
+                $"This group contains {existingModelName} printers, but '{printer.Name}' is a {newModelName}.");
         }
 
         printer.PrinterGroupId = groupId;

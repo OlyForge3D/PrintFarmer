@@ -243,10 +243,15 @@ export class ApiClient {
           }
         }
 
+        const responseData = error.response?.data;
+        const detailMessage = typeof responseData === 'string'
+          ? responseData
+          : (responseData as { error?: string })?.error ?? undefined;
+
         const apiError: ApiError = {
           message: error.message,
           statusCode: error.response?.status || 500,
-          details: (error.response?.data as string) || undefined,
+          details: detailMessage,
         };
         return Promise.reject(apiError);
       }
@@ -931,7 +936,7 @@ export class ApiClient {
   }
 
   async assignPrinterToGroup(groupId: string, printerId: string): Promise<void> {
-    await this.client.post(`/printer-groups/${groupId}/printers/${printerId}`);
+    await this.client.put(`/printer-groups/${groupId}/printers/${printerId}`);
   }
 
   async removePrinterFromGroup(groupId: string, printerId: string): Promise<void> {

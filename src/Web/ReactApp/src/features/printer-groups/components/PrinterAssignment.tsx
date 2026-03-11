@@ -27,10 +27,17 @@ export function PrinterAssignment({ groupId, assignedPrinters }: PrinterAssignme
   // Get all printers to show available ones
   const { data: allPrinters = [] } = usePrinters();
 
-  // Filter out already assigned printers
-  const availablePrinters = allPrinters.filter(
-    (p) => !assignedPrinters.some((ap) => ap.id === p.id)
-  );
+  // Determine the group's model from assigned printers (homogeneous enforcement)
+  const groupModelId = assignedPrinters.length > 0
+    ? allPrinters.find((p) => p.id === assignedPrinters[0].id)?.modelId
+    : undefined;
+
+  // Filter: exclude already assigned, and if group has a model, only show matching printers
+  const availablePrinters = allPrinters.filter((p) => {
+    if (assignedPrinters.some((ap) => ap.id === p.id)) return false;
+    if (groupModelId && p.modelId !== groupModelId) return false;
+    return true;
+  });
 
   const assignMutation = useMutation({
     mutationFn: ({ groupId, printerId }: { groupId: string; printerId: string }) =>
@@ -82,7 +89,9 @@ export function PrinterAssignment({ groupId, assignedPrinters }: PrinterAssignme
             disabled={availablePrinters.length === 0 || assignMutation.isPending}
           >
             <option value="">
-              {availablePrinters.length === 0 ? 'No available printers' : 'Select a printer'}
+              {availablePrinters.length === 0
+                ? (groupModelId ? 'No matching printers available' : 'No available printers')
+                : 'Select a printer'}
             </option>
             {availablePrinters.map((printer) => (
               <option key={printer.id} value={printer.id}>

@@ -160,6 +160,7 @@ public class PrinterGroupsController(
     [HttpPut("{id:guid}/printers/{printerId:guid}")]
     [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddPrinterToGroupAsync(Guid id, Guid printerId, CancellationToken ct)
     {
@@ -171,6 +172,10 @@ public class PrinterGroupsController(
         catch (KeyNotFoundException ex)
         {
             return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
