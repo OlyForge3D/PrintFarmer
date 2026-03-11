@@ -12,6 +12,7 @@ import { MovementControlSection } from '@/features/printers/components/MovementC
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
+import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { useAutoPrintStatus, useSetAutoPrintEnabled } from '@/features/printers/hooks/useAutoPrint';
 import { toast } from 'sonner';
 import { Button, LoadedFilamentCard } from '@/common/components/ui';
@@ -550,23 +551,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
       {/* Progress bar — always visible to prevent layout shift */}
       <div className="mb-4">
-        <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-          <span className="truncate flex-1">{printer.jobName || '\u00A0'}</span>
-          {printer.progress !== undefined && printer.progress > 0 && (
-            <span className="font-semibold ml-2">{Math.round(printer.progress)}%</span>
-          )}
-        </div>
-        <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
-          <div
-            ref={expandedProgressRef}
-            className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
-            style={{ width: `${printer.progress !== undefined && printer.progress > 0 ? Math.max(0, Math.min(100, printer.progress)) : 0}%` }}
-          >
-            {printer.progress !== undefined && printer.progress > 0 && (
-              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, printer.progress)))}%</span>
-            )}
-          </div>
-        </div>
+        <PrintProgressBar
+          progress={printer.progress}
+          jobName={printer.jobName}
+          isActive={isOnline && (isPrinting || isPaused)}
+          progressRef={expandedProgressRef}
+          showInactiveState={false}
+          showTemperatures={false}
+        />
       </div>
 
       {/* Temps Section */}

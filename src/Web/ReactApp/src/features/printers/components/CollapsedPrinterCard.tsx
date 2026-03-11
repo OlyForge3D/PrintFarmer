@@ -10,12 +10,11 @@ import {
   VideoIcon,
   MoreVerticalIcon,
   TagIcon,
-  NozzleIcon,
-  BedIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
+import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { useAutoPrintStatus, useSetAutoPrintEnabled } from '@/features/printers/hooks/useAutoPrint';
@@ -182,51 +181,21 @@ export function CollapsedPrinterCard({
           )}
 
           {/* Progress bar — always visible */}
-          {(() => {
-            const progress = printer.progress ?? 0;
-            const isActive = isOnline && (isPrinting || isPaused);
-            return (
-              <div className="mt-2">
-                <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-                  <span className="truncate flex-1">{isActive ? (printer.jobName || 'Printing...') : <span className="italic text-pf-text-tertiary">No active print</span>}</span>
-                  {isActive && <span className="font-semibold ml-2">{Math.round(progress)}%</span>}
-                </div>
-                <div
-                  className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden"
-                  role="progressbar"
-                  aria-label="Print progress"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={isActive ? Math.round(Math.max(0, Math.min(100, progress))) : 0}
-                >
-                  <div
-                    ref={collapsedProgressRef}
-                    className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${isActive ? Math.max(0, Math.min(100, progress)) : 0}%` }}
-                  >
-                    <span className="sr-only">Print progress: {isActive ? Math.round(Math.max(0, Math.min(100, progress))) : 0}%</span>
-                  </div>
-                </div>
-                {/* Temperature readouts */}
-                {isOnline && (printer.hotendTemp != null || printer.bedTemp != null) && (
-                  <div className="flex items-center gap-3 mt-1.5 text-xs text-pf-text-secondary">
-                    {printer.hotendTemp != null && (
-                      <span className="flex items-center gap-1" title="Hotend temperature">
-                        <NozzleIcon className="w-3.5 h-3.5" isOn={(printer.hotendTemp ?? 0) > 50} />
-                        <span>{Math.round(printer.hotendTemp)}°{printer.hotendTarget ? ` / ${Math.round(printer.hotendTarget)}°` : ''}</span>
-                      </span>
-                    )}
-                    {printer.bedTemp != null && (
-                      <span className="flex items-center gap-1" title="Bed temperature">
-                        <BedIcon className="w-3.5 h-3.5" isOn={(printer.bedTemp ?? 0) > 35} />
-                        <span>{Math.round(printer.bedTemp)}°{printer.bedTarget ? ` / ${Math.round(printer.bedTarget)}°` : ''}</span>
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          <div className="mt-2">
+            <PrintProgressBar
+              progress={printer.progress}
+              jobName={printer.jobName}
+              isActive={isOnline && (isPrinting || isPaused)}
+              progressRef={collapsedProgressRef}
+              showInactiveState={true}
+              showTemperatures={true}
+              hotendTemp={printer.hotendTemp}
+              bedTemp={printer.bedTemp}
+              hotendTarget={printer.hotendTarget}
+              bedTarget={printer.bedTarget}
+              isOnline={isOnline}
+            />
+          </div>
 
           {/* Camera view — centered, between progress bar and footer */}
           {showCamera && (
