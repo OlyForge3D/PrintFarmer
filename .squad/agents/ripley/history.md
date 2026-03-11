@@ -656,3 +656,32 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 - Always preserve exact layout behavior (like `\u00A0` for layout stability) when refactoring
 - Keep outer spacing/margin with parent components rather than in shared components (better composability)
 - ARIA progressbar attributes are mandatory for accessibility (role, aria-label, aria-valuemin/max/now)
+
+### 2026-03-14 — Rename autoPrint to autoDispatch (Frontend Rebrand)
+
+**Context**: The feature formerly called "Auto-Print" was rebranded to "Auto-Dispatch" to better reflect its purpose (automatic print job dispatching). This is a frontend-only rename; backend API routes still use `/autoprint/` paths.
+
+**Files Affected**:
+- `useAutoPrint.ts` → `useAutoDispatch.ts` (git mv)
+- `api.ts`: Type renames (AutoPrintStatus → AutoDispatchStatus, AutoPrintState → AutoDispatchState, AutoPrintNextJob → AutoDispatchNextJob, AutoPrintReadyResult → AutoDispatchReadyResult)
+- `BedClearBanner.tsx`: Import path + prop name + variable renames
+- `CollapsedPrinterCard.tsx`: Import path + hook names + variable names
+- `DetailedPrinterCard.tsx`: Import path + hook names + variable names
+- `BedClearBanner.test.tsx`: Type import + test prop names
+
+**Hook Renames**:
+- `useAutoPrintStatus` → `useAutoDispatchStatus`
+- `useSetAutoPrintEnabled` → `useSetAutoDispatchEnabled`
+- `useAllAutoPrintStatuses` → `useAllAutoDispatchStatuses`
+- `useSetAllAutoPrintEnabled` → `useSetAllAutoDispatchEnabled`
+- `useCancelAutoPrint` → `useCancelAutoDispatch`
+- `useConfirmBedClear` (unchanged)
+- `useSkipNextJob` (unchanged)
+
+**Key Decision**: Property names in TypeScript interfaces (`autoPrintEnabled`) remain unchanged to match backend JSON responses. Only TYPE names and variable names changed. This avoids runtime bugs from property name mismatches.
+
+**Query Key Update**: Internal query keys changed from `['autoprint', ...]` to `['auto-dispatch', ...]` for consistency, but API endpoint paths remain `/autoprint/...` (backend rename is a separate task).
+
+**Validation**: ✅ Lint passes (0 errors), ✅ All tests pass (1432/1444 passing, 12 skipped)
+
+**Commit**: `1ded064c` - "refactor: rename autoPrint to autoDispatch in frontend"

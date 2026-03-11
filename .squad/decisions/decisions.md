@@ -429,3 +429,53 @@ DRY principle eliminates code duplication while fixing display bug. Shared compo
 **Component Extraction:** 1 new shared component, 2 cards refactored, 49 lines duplication removed, 0% display bug fixed.  
 
 **Overall Status:** All planned batches complete, ready for release.
+
+---
+
+## Frontend Refactoring
+
+### Decision 13: Rename autoPrint to autoDispatch (Frontend Only)
+
+**Date:** 2026-03-14  
+**Agent:** Ripley (Frontend Developer)  
+**Status:** ✅ CLOSED  
+**Commit:** `1ded064c`
+
+**Context:**  
+The feature formerly known as "Auto-Print" was rebranded to "Auto-Dispatch" to better reflect its purpose: automatically dispatching print jobs from the queue to available printers after bed clear confirmation.
+
+**Decision:**  
+Rename all frontend `autoPrint` references to `autoDispatch` while keeping backend API property names unchanged.
+
+**Implementation:**
+- **Hook file:** `useAutoPrint.ts` → `useAutoDispatch.ts` (git mv)
+- **Type names:** 6 renamed (AutoPrintStatus, AutoPrintState, etc.)
+- **Hook exports:** 5 renamed (useAutoDispatchStatus, useAutoDispatchControl, etc.)
+- **Components:** 3 modified (BedClearBanner, CollapsedPrinterCard, DetailedPrinterCard)
+- **Tests:** BedClearBanner.test.tsx updated
+- **API contract:** Property names unchanged (backend compatibility maintained)
+
+**Validation:**
+- ✅ TypeScript: All type references correct
+- ✅ ESLint: 0 errors, 134 warnings (pre-existing)
+- ✅ Tests: 1432/1444 passing (12 skipped baseline)
+- ✅ API contract: JSON properties still match backend JSON response
+
+**Rationale:**  
+1. **Better Naming:** "Auto-Dispatch" accurately describes feature behavior (dispatching jobs from queue)
+2. **User-Facing Consistency:** All UI text already says "auto-dispatch"
+3. **Phased Migration:** Frontend rename can happen independently from backend API rename
+4. **Type Safety:** TypeScript property names still match backend JSON to avoid runtime bugs
+
+**Trade-offs:**
+- **Pros:** Improved naming clarity, phased migration reduces risk, type safety preserved
+- **Cons:** Temporary inconsistency between frontend variable names and backend property names (mitigated by clear documentation)
+
+**Follow-up:**
+- [ ] Backend API rename (separate task): Rename `/autoprint/` routes to `/auto-dispatch/`
+- [ ] Database rename (if needed): Rename properties if backend models change
+- [ ] Update API documentation when backend rename happens
+
+---
+
+**Overall Status:** Frontend refactoring complete. Backend API rename pending as separate task.
