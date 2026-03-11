@@ -35,6 +35,47 @@
 - **Audit Trail**: All dispatch decisions logged to DispatchLogs with full score breakdown (JSON serialized). Enables post-mortem analysis and future ML improvements.
 - **Thread Safety**: SemaphoreSlim prevents two printers from grabbing same job. Channel provides bounded buffer with DropOldest for backpressure. Interlocked operations track in-flight dispatch count.
 
+### Auto-Dispatch System Documentation Updated (2026-03-11)
+
+**Files Updated:**
+- **docs/AUTO_DISPATCH.md** — Updated with critical bug notes and operator-focused configuration guide (still 1110 lines, now includes known issues section)
+
+**Updates Made:**
+- Added "KNOWN ISSUES (Being Fixed)" section documenting three critical bugs:
+  1. **Toggle Alone Does Not Enable Auto-Dispatch** — `AutoDispatchEnabled=true` but mode stays at Manual (seed default). Requires BOTH enabled + mode change. Provided API workaround.
+  2. **PendingReady Gate Blocks First Upload** — Bed-clear banner only appears after print completion, not on first upload. First-time dispatch blocked if printer stuck in PendingReady.
+  3. **Frontend Naming Mismatch** — Frontend renamed autoPrint→autoDispatch but API endpoints/backend properties unchanged. Intentional during transition, provided clarification.
+
+**Configuration Section Refactored for Operators:**
+- Restructured as "3 Independent Layers" (System Toggle, System Mode, Per-Printer Opt-In) — clearer mental model than previous layout
+- Added "How to Properly Enable Auto-Dispatch" step-by-step guide with curl examples
+- Emphasized the critical dependency: `autoDispatchMode` must be "Suggest" or "Auto" (NOT "Manual") for dispatch to work
+- Updated system settings table with warnings about `AutoDispatchMode` defaults to "Manual"
+- Added per-printer opt-in clarity: toggle ⚡ icon on individual cards OR use bulk enable
+
+**API Endpoint Documentation Improvements:**
+- Added note clarifying `/autoprint/` paths match backend `autoPrintEnabled` property, separate from frontend "autoDispatch" terminology
+- Updated PUT `/api/dispatch-settings` example to show **both** required fields for enabling auto-dispatch
+- Added validation section showing `autoDispatchMode` must be one of: Manual, Suggest, Auto
+
+**Root Cause of Previous Documentation Gap:**
+- Original AUTO_DISPATCH.md written before bugs were identified
+- Documentation assumed correct behavior (that toggle sets mode correctly)
+- No section explaining the dual-field requirement (enabled + mode) to operators
+- Backend property naming (`autoPrintEnabled` vs frontend term "autoDispatch") not clarified
+
+**Quality Improvements:**
+- Docs now reflect actual system behavior (mode guard in AutoDispatchBackgroundService)
+- Operator troubleshooting section added for "why didn't auto-dispatch work"
+- API examples show the exact JSON needed to enable auto-dispatch correctly
+- Clarified distinction between `AutoDispatchEnabled` (toggle) and `AutoDispatchMode` (behavior selection)
+
+**Frontend Naming Context Captured:**
+- Commit 1ded064c: React frontend renamed autoPrint→autoDispatch for consistency with "Auto-Dispatch" system-level terminology
+- API paths and backend properties remain `/autoprint/` and `autoPrintEnabled` — intentional backward-compatibility decision
+- Query keys changed from `['autoprint', ...]` to `['auto-dispatch', ...]` in useApi.ts
+- Decision: backend property rename requires DB migration (future effort), API paths unchanged for now
+
 **Documentation Quality:**
 - 40KB comprehensive guide for both developers (architecture, code paths) and operators (configuration, UI usage)
 - Four Mermaid diagrams for visual clarity: component architecture (graph), trigger flow (sequence), dispatch cycle (flowchart), ready gate (state machine)

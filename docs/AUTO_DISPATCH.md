@@ -30,6 +30,32 @@ The Auto-Dispatch system automatically assigns print jobs to available printers 
 - Supports both fully automatic and suggestion-based workflows
 - Implements safety gates for bed clearing between consecutive prints
 
+## ⚠️ KNOWN ISSUES (Being Fixed)
+
+**Status:** Critical bugs identified and fixes pending. Do not rely on auto-dispatch for production until these are resolved.
+
+### Issue 1: Toggle Alone Does Not Enable Auto-Dispatch
+When you enable the system-level toggle on the Print Queue Dashboard, it sets `AutoDispatchEnabled=true` but leaves `AutoDispatchMode=Manual`. The system requires **BOTH** settings to activate:
+- `AutoDispatchEnabled = true` (toggle on)
+- **AND** `AutoDispatchMode ≠ Manual` (mode must be "Suggest" or "Auto")
+
+**Workaround:** Use the API to set the mode directly:
+```bash
+curl -X PUT http://localhost:5245/api/dispatch-settings \
+  -H "Content-Type: application/json" \
+  -d '{"autoDispatchEnabled": true, "autoDispatchMode": "Auto", "idleThresholdSeconds": 10, "minimumScoreThreshold": 50.0, "maxConcurrentDispatches": 5, "loadBalancingStrategy": "BestFit"}'
+```
+
+### Issue 2: PendingReady Gate Blocks First Upload
+When you upload a job to an idle printer (first time), the ready gate never appears because there's no prior print completion. The bed-clear banner only appears **after** a print finishes. This means:
+- First upload to an idle printer will NOT auto-dispatch if the printer is in `PendingReady` state
+- Workaround: Wait for the ready gate to clear, or manually dispatch via the job queue UI
+
+### Issue 3: Frontend Naming Mismatch
+Frontend code was renamed from `autoPrint` to `autoDispatch` (March 2025), but API endpoints and backend properties still use `/autoprint/` paths and `autoPrintEnabled` property names. This is intentional during transition and will not affect functionality.
+
+---
+
 ---
 
 ## Architecture
@@ -537,9 +563,68 @@ Job "Benchy-v2.gcode" suggested for Printer MK4-02 (Score: 92.4)
 
 ## Configuration
 
-Auto-dispatch behavior is controlled by:
-1. **System-level settings** — Global configuration affecting all printers
-2. **Per-printer opt-in** — Each printer can enable/disable auto-dispatch
+Auto-dispatch operates on **3 independent layers** that must all be enabled for full automation:
+
+### Layer 1: System-Level Toggle (AutoDispatchEnabled)
+**What it does:** Master on/off for the entire auto-dispatch system.
+**How to enable:** Print Queue Dashboard → Settings icon → toggle "Auto-Dispatch" on
+
+### Layer 2: System-Level Mode (AutoDispatchMode)
+**What it does:** Decides what the system does when it finds a compatible printer.
+**Options:**
+- `Manual` — System does nothing. You manually dispatch jobs. (Default seed value)
+- `Suggest` — System scores jobs and shows suggestions on printer cards. You click to approve.
+- `Auto` — System automatically dispatches best match. Lights-out printing.
+
+**⚠️ Critical:** The toggle alone sets `enabled=true` but leaves mode at `Manual`. **You must ALSO set the mode** via API or via a backend configuration change.
+
+### Layer 3: Per-Printer Opt-In (AutoPrintEnabled)
+**What it does:** Each printer decides if it participates in auto-dispatch.
+**How to enable:** Click the Zap (⚡) icon on individual printer cards, OR use bulk toggle to enable all at once.
+
+---
+
+## How to Properly Enable Auto-Dispatch
+
+**Step 1: Set System Mode via API**
+```bash
+curl -X PUT http://localhost:5245/api/dispatch-settings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "autoDispatchEnabled": true,
+    "autoDispatchMode": "Auto",
+    "idleThresholdSeconds": 10,
+    "minimumScoreThreshold": 50.0,
+    "maxConcurrentDispatches": 5,
+    "loadBalancingStrategy": "BestFit"
+  }'
+```
+
+**Step 2: Enable Printers**
+- UI: Toggle Zap (⚡) icon on each printer card
+- OR API: `PUT /api/autoprint/{printerId}/enabled` with `{ "enabled": true }`
+- OR Bulk: Use global toggle on Print Queue Dashboard
+
+**Step 3: Verify Settings**
+```bash
+curl http://localhost:5245/api/dispatch-settings
+```
+
+Response should show:
+```json
+{
+  "autoDispatchEnabled": true,
+  "autoDispatchMode": "Auto",  // NOT "Manual"
+  "idleThresholdSeconds": 10,
+  "minimumScoreThreshold": 50.0,
+  "maxConcurrentDispatches": 5,
+  "loadBalancingStrategy": "BestFit"
+}
+```
+
+---
+
+## Configuration Reference
 
 ### System-Level Settings (Singleton Entity)
 
@@ -547,12 +632,12 @@ Stored in `DispatchSettings` table (single row):
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `AutoDispatchEnabled` | `bool` | `false` | Master on/off switch for the entire system |
-| `AutoDispatchMode` | `enum` | `Manual` | Dispatch mode: `Manual`, `Suggest`, or `Auto` |
-| `IdleThresholdSeconds` | `int` | `10` | Delay after print completion before dispatch cycle runs (seconds). Skipped for upload-and-print triggers |
-| `MinimumScoreThreshold` | `double` | `50.0` | Minimum compatibility score required (0–100). Jobs below this are not dispatched/suggested |
-| `MaxConcurrentDispatches` | `int` | `5` | Maximum number of simultaneous dispatch cycles allowed (prevents thundering herd) |
-| `LoadBalancingStrategy` | `enum` | `BestFit` | Strategy for batch dispatch: `BestFit`, `RoundRobin`, or `LeastBusy` (future feature) |
+| `AutoDispatchEnabled` | `bool` | `false` | Master on/off switch. Requires mode ≠ Manual to activate. |
+| `AutoDispatchMode` | `enum` | `Manual` | **⚠️ CRITICAL:** Mode must be "Suggest" or "Auto" for dispatch to work. Defaults to "Manual" (disabled). |
+| `IdleThresholdSeconds` | `int` | `10` | Delay after print completion before dispatch cycle runs (seconds). Skipped for upload-and-print triggers. |
+| `MinimumScoreThreshold` | `double` | `50.0` | Minimum compatibility score required (0–100). Jobs below this are not dispatched/suggested. |
+| `MaxConcurrentDispatches` | `int` | `5` | Maximum number of simultaneous dispatch cycles allowed (prevents thundering herd). |
+| `LoadBalancingStrategy` | `enum` | `BestFit` | Strategy for batch dispatch: `BestFit`, `RoundRobin`, or `LeastBusy` (future feature). |
 
 **Access:**
 - GET `/api/dispatch-settings` — Returns current settings
@@ -564,8 +649,8 @@ Each printer has two auto-dispatch properties:
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `AutoPrintEnabled` | `bool` | `false` | Whether this printer participates in auto-dispatch |
-| `AutoPrintState` | `enum` | `None` | Current ready-gate state: `None`, `PendingReady`, or `Ready` |
+| `AutoPrintEnabled` | `bool` | `false` | Whether this printer participates in auto-dispatch. Must be enabled for that printer to receive dispatched jobs. |
+| `AutoPrintState` | `enum` | `None` | Current ready-gate state: `None` (idle), `PendingReady` (awaiting bed clear), or `Ready` (cleared, ready for next job). |
 
 **How to Enable:**
 - **UI:** Toggle the Zap (⚡) icon on the printer card in the Printers Dashboard
@@ -600,7 +685,7 @@ Returns current system-wide auto-dispatch settings.
 ```
 
 #### PUT `/api/dispatch-settings`
-Updates auto-dispatch settings. Requires authentication.
+Updates auto-dispatch settings. **⚠️ Remember to set both `autoDispatchEnabled: true` AND `autoDispatchMode: "Auto"` (or "Suggest").**
 
 **Request:**
 ```json
@@ -618,10 +703,14 @@ Updates auto-dispatch settings. Requires authentication.
 - `idleThresholdSeconds` >= 0
 - `minimumScoreThreshold` between 0 and 100
 - `maxConcurrentDispatches` >= 1
+- `autoDispatchMode` must be `Manual`, `Suggest`, or `Auto`
 
 ### Auto-Print (Ready Gate)
 
+**⚠️ API Naming Note:** These endpoints use `/autoprint/` paths, which match the backend property name `autoPrintEnabled`. The frontend code was renamed from `autoPrint` to `autoDispatch` (March 2025) for consistency with the system-level "Auto-Dispatch" terminology, but the API paths remain `/autoprint/` for backward compatibility. This is intentional and does not affect functionality.
+
 #### GET `/api/autoprint/{printerId}/status`
+
 Returns auto-print status for a specific printer.
 
 **Response:**
