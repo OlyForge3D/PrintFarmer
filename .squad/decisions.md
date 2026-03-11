@@ -751,3 +751,155 @@ Redesigned as a two-row-per-job layout using div-based CSS Grid:
 - Tests updated: `[role="listitem"]` replaces `tbody tr` selectors
 - `Tractor` icon import removed (non-imported jobs show nothing instead of a tractor icon)
 - All existing props and callbacks unchanged — no parent component changes needed
+
+---
+
+# Decision: Auto-Dispatch Bug — Upload & Print Does Not Auto-Start
+
+**Author:** Lambert (Backend Developer)  
+**Date:** 2026-03-08  
+**Status:** ROOT CAUSE IDENTIFIED — fix pending
+
+## Problem
+
+User uploads a sliced file via "Upload and Print" with both system-level AutoDispatch and per-printer AutoPrintEnabled turned ON. The job sits in queue — never auto-starts.
+
+## Root Cause: AutoDispatchMode Defaults to Manual + Two Conflicting Systems
+
+There are **two independent automation systems** that can block each other:
+
+### System 1: Auto-Dispatch (Phase 2 — system-level)
+- **Config:** `DispatchSettings` singleton entity — `AutoDispatchEnabled` (bool) + `AutoDispatchMode` (Manual/Suggest/Auto)
+- **Seed defaults:** `AutoDispatchEnabled = false`, `AutoDispatchMode = Manual`
+- **Trigger:** `IAutoDispatchTrigger.NotifyJobQueued(printerId)` fires when a job enters queue
+- **Guard in `AutoDispatchBackgroundService`:**
+  ```csharp
+  if (!settings.AutoDispatchEnabled || settings.AutoDispatchMode == AutoDispatchMode.Manual)
+      return; // SILENTLY SKIPS DISPATCH
+  ```
+
+### System 2: Auto-Print / Ready Gate (original — per-printer)
+- **Config:** `Printer.AutoPrintEnabled` (per-printer toggle)
+- **Purpose:** After print *completes* → PendingReady → operator "Bed Clear" → next job dispatched
+- **NOT triggered on new job queue** — only on job completion
+
+### Root Cause #1: Mode vs Toggle Confusion
+
+The user likely enabled `AutoDispatchEnabled` (the toggle) but `AutoDispatchMode` stayed at `Manual` (the seed default). The background service requires BOTH `enabled = true` AND `mode != Manual`. With mode = Manual, it silently returns without dispatching.
+
+### Root Cause #2: PendingReady Blocks Scoring
+
+`DispatchScorer.ScoreAvailability()` eliminates printers in `AutoPrintState.PendingReady`:
+```csharp
+if (printer.AutoPrintState == AutoPrintState.PendingReady)
+    issues.Add("waiting for bed clear confirmation");
+```
+
+If Auto-Print (System 2) is enabled and the printer finished a previous job, it enters PendingReady. Even with Auto-Dispatch mode = Auto, the scorer eliminates the printer.
+
+### Dispatch Chain (verified complete)
+
+When mode = Auto and printer is not PendingReady, the chain works:
+1. `JobQueueService.AddJobToQueueAsync()` → `NotifyJobQueued(printerId)` with `SkipIdleThreshold = true`
+2. `AutoDispatchBackgroundService` → reads settings → checks mode → proceeds
+3. `ExecuteDispatchCycleAsync()` → scores candidates → `IJobDispatchService.DispatchJobAsync()`
+4. `JobDispatchService` → assigns job → delegates to `PrintJobManagementService.DispatchJobAsync()`
+5. `PrintJobManagementService` → uploads G-code to printer → starts print ✅
+
+### Frontend "Upload & Print" Flow
+
+`QueueGcodeModal.handleQueueAndStart()`:
+1. `enqueue(req)` — queues job (fires NotifyJobQueued)
+2. `dispatchPrintQueueJob(result.id)` — **manually dispatches** via `POST /api/job-queue/{id}/dispatch`
+
+This bypasses auto-dispatch entirely. If the user used this flow and it still didn't work, the manual dispatch step may be failing silently or the user isn't clicking "Start Print Now."
+
+## Recommended Fixes
+
+### Fix 1: UI — Toggle should also set mode (highest priority)
+When enabling "Auto-Dispatch," also set `autoDispatchMode: "Auto"`. The dual-field confusion is the most likely cause.
+
+### Fix 2: Backend — Simplify the guard
+If `AutoDispatchEnabled = true`, don't also require `mode != Manual`. Or make enabling auto-dispatch automatically set mode to Auto.
+
+### Fix 3: Resolve PendingReady conflict
+When Auto-Dispatch is in Auto mode and a new job is queued, either bypass the PendingReady gate or auto-clear it.
+
+### Fix 4: Better feedback
+Log at INFO (not DEBUG) when auto-dispatch skips. Emit SignalR event so UI shows why dispatch didn't happen.
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs` | Background service with mode guard |
+| `src/infra/Services/Queue/Dispatch/AutoDispatchTrigger.cs` | Channel-based trigger (NotifyJobQueued/NotifyPrinterIdle) |
+| `src/infra/Services/Queue/Dispatch/DispatchScorer.cs:245` | PendingReady elimination in ScoreAvailability |
+| `src/infra/Services/Queue/Dispatch/JobDispatchService.cs` | Orchestrates scoring + dispatch → PrintJobManagementService |
+| `src/infra/Services/AutoPrint/AutoPrintService.cs` | Ready gate (PendingReady → Ready → dispatch) |
+| `src/infra/Services/Queue/JobQueueService.cs:323` | NotifyJobQueued call site |
+| `src/infra/Services/Printers/PrintJobCompletionService.cs:235,246` | TransitionToPendingReady + NotifyPrinterIdle |
+| `src/infra/Data/Configurations/DispatchSettingsConfiguration.cs:25-26` | Seed: enabled=false, mode=Manual |
+| `src/Web/ReactApp/src/features/gcode/components/QueueGcodeModal.tsx:206-227` | Frontend handleQueueAndStart |
+
+---
+
+# Decision: Auto-Dispatch Documentation Updated with Known Issues & Configuration Guide
+
+**Author:** Ash (Documentation Specialist)  
+**Date:** 2026-03-11  
+**Status:** COMPLETE — Documentation updated, ready for operator use
+
+## Summary
+
+Updated `docs/AUTO_DISPATCH.md` to reflect actual system behavior, document three critical bugs currently being fixed, and provide clear configuration guidance for operators.
+
+## Key Changes
+
+### 1. Added "Known Issues (Being Fixed)" Section
+Documented three bugs that block auto-dispatch from working correctly:
+- **Toggle Alone Doesn't Work:** UI toggle sets `AutoDispatchEnabled=true` but mode stays at `Manual` (seed default). System requires BOTH enabled + mode change.
+- **PendingReady Gate Blocks First Upload:** Bed-clear banner only appears after print completion, preventing dispatch on first upload if printer stuck in PendingReady.
+- **Frontend Naming Mismatch:** Frontend renamed autoPrint→autoDispatch, but API paths `/autoprint/` unchanged. Intentional backward-compatibility decision.
+
+### 2. Refactored Configuration Section
+Restructured for operators, not developers:
+- **Three Independent Layers** mental model: System Toggle + System Mode + Per-Printer Opt-In
+- **Step-by-step "How to Enable Auto-Dispatch"** with curl examples
+- **Emphasized critical dependency:** `AutoDispatchMode` must be "Suggest" or "Auto" (NOT "Manual")
+- **Clear per-printer opt-in:** Toggle ⚡ icon or use bulk enable
+
+### 3. Updated API Documentation
+- Clarified `/autoprint/` paths match backend `autoPrintEnabled` property
+- Added note about frontend terminology "autoDispatch" vs API "autoprint"
+- Improved PUT `/api/dispatch-settings` examples to show both required fields
+- Added validation section for `autoDispatchMode` enum values
+
+## Root Cause of Previous Gap
+
+Original AUTO_DISPATCH.md was written before bugs were identified. It documented intended behavior, not actual behavior. Operators enabling the toggle would see nothing happen and have no explanation.
+
+## Operator Impact
+
+**Before:** Toggle auto-dispatch on → nothing happens → confusion  
+**After:** Docs explain exactly why (mode defaulted to Manual) + provide API workaround immediately
+
+## Developer Impact
+
+- Docs now match code behavior (mode guard in AutoDispatchBackgroundService)
+- Clear troubleshooting path for "why didn't auto-dispatch work"
+- Frontend naming (autoPrint→autoDispatch) explained for code reviewers
+
+## Decision
+
+**Do not change API paths or backend property names yet.** These changes would require:
+- Database migration (Printer.AutoPrintEnabled → AutoDispatchEnabled)
+- API endpoint path changes (breaking change for any integrations)
+- Test updates across integration test suite
+
+**Timing:** Backend property rename deferred to a future effort after bugs are fixed.
+
+## Files Updated
+
+- `docs/AUTO_DISPATCH.md` — Added known issues section, refactored configuration for operators, clarified API naming
+- `.squad/agents/ash/history.md` — Added learning note documenting update

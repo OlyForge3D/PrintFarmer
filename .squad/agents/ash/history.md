@@ -5,6 +5,35 @@
 - **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS, xUnit, Vitest
 - **Created:** 2026-03-06
 
+## Core Context
+
+Ash specializes in comprehensive documentation work. Key expertise areas and standing knowledge:
+
+### Documentation Specialization
+- Creates 40-100KB technical guides with Mermaid diagrams, code examples, API references
+- Strong on capturing complex system architecture (auto-dispatch, design system, location hierarchy)
+- Incorporates findings from squad decisions.md and team discussions into documentation
+- Updates README.md, ARCHITECTURE.md, API.md with complete accuracy
+
+### PrintFarmer System Knowledge
+- **Auto-Dispatch System:** Channel-based trigger (bounded 64), fire-and-forget Tasks, SemaphoreSlim locking, 9-factor weighted scorer, audit logging via DispatchLogs
+- **Design System:** 40+ React components, CSS custom properties (pf-* naming), three themes (GitHub Dark, PrintFarmer Dark, Light), WCAG 2.2 AA accessibility
+- **Location Hierarchy:** Adjacency list + materialized path, user-defined LocationTypes, printer assignment at any depth, TotalPrinterCount denormalized
+- **Test Coverage:** 1572 API tests (xUnit), 365 React tests (Vitest), 39.66% line coverage
+
+### Recent Work (March 2026)
+- Updated docs/AUTO_DISPATCH.md with known issues section and operator-focused configuration guide
+- Created docs/DESIGN_SYSTEM.md (7,500+ words, 40+ component reference, theme architecture, WCAG compliance)
+- Updated README.md, CONTRIBUTING.md, ARCHITECTURE.md, DEVELOPMENT.md with accurate tech stack and test counts
+- Merged decisions: Auto-Dispatch Documentation, Auto-Dispatch Bug Root Cause Analysis
+
+### Documentation Best Practices
+- Cross-reference team decisions (.squad/decisions.md) for architectural context
+- Include root cause analysis: why did documentation gap exist?
+- Capture actual system behavior (not intended behavior) based on code inspection
+- Provide operator-focused guidance alongside developer architecture docs
+- Use Mermaid diagrams for complex flows: sequence (trigger), flowchart (dispatch cycle), state machine (ready gate)
+
 ## Learnings
 
 ### Auto-Dispatch System Documentation (2026-01-15)

@@ -450,3 +450,27 @@ Implemented 3 analytics services per Dallas's architecture plan:
 - ✅ All endpoints tested with realistic data
 
 **Status:** Backend complete, ready for frontend integration.
+
+### Auto-Dispatch Bug Investigation (2026-03-08)
+
+**Bug:** "Upload and Print" with AutoDispatch + AutoPrintEnabled both ON → job sits in queue, never auto-starts.
+
+**Root cause identified — two issues:**
+
+1. **AutoDispatchMode defaults to Manual:** Seed data sets `AutoDispatchMode = Manual`. The `AutoDispatchBackgroundService` guard checks `!AutoDispatchEnabled || AutoDispatchMode == Manual` — so even with the toggle ON, mode=Manual silently skips dispatch. User likely enabled the toggle but never changed the mode to `Auto`.
+
+2. **PendingReady blocks scoring:** `DispatchScorer.ScoreAvailability()` eliminates printers in `AutoPrintState.PendingReady`. If Auto-Print (per-printer) is enabled and a previous print completed, the printer enters PendingReady waiting for bed-clear confirmation. Auto-Dispatch then cannot score that printer as a candidate.
+
+**Architecture insight — two independent automation systems:**
+- **Auto-Dispatch** (system-level): `DispatchSettings.AutoDispatchEnabled` + `AutoDispatchMode` → `AutoDispatchBackgroundService` via Channel trigger
+- **Auto-Print / Ready Gate** (per-printer): `Printer.AutoPrintEnabled` → `AutoPrintService` manages PendingReady → Ready → dispatch after operator bed-clear
+
+These systems don't coordinate — Auto-Print's PendingReady state blocks Auto-Dispatch's scorer.
+
+**Dispatch chain verified complete:** `NotifyJobQueued` → `AutoDispatchBackgroundService` → `DispatchScorer` → `JobDispatchService.DispatchJobAsync()` → `PrintJobManagementService.DispatchJobAsync()` → full upload + start. Chain works when mode=Auto and printer not PendingReady.
+
+**Key files:** See `.squad/decisions/inbox/lambert-auto-dispatch-bug.md` for full analysis and recommended fixes.
+
+### Auto-Dispatch Bug Decision Merged to decisions.md (2026-03-11T05:47:02Z)
+
+Decision document for "Auto-Dispatch Bug — Upload & Print Does Not Auto-Start" merged from inbox to squad decisions.md. Root cause identified: AutoDispatchMode defaults to Manual and two systems conflict. Fixes pending backend and UI work.
