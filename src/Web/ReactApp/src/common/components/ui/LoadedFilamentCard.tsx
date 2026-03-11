@@ -22,22 +22,15 @@ function formatWeight(weight?: number): string | null {
 export function LoadedFilamentCard({ spoolInfo, className }: LoadedFilamentCardProps) {
   if (!spoolInfo?.hasActiveSpool) {
     return (
-      <div className={`flex items-center gap-3 rounded-sm border border-pf-border bg-pf-bg-0/30 p-3 ${className ?? ''}`}>
+      <div className={`flex items-center gap-3 rounded-sm border border-pf-border bg-pf-bg-0/30 px-3 py-2 ${className ?? ''}`}>
         <span className="flex-1 text-xs text-pf-text-tertiary">No spool loaded</span>
-        <SpoolIcon size={56} className="shrink-0 opacity-50" />
+        <SpoolIcon size={44} className="shrink-0 opacity-50" />
       </div>
     );
   }
 
-  const topMeta: string[] = [];
-  if (spoolInfo.activeSpoolId !== undefined && spoolInfo.activeSpoolId !== null) {
-    topMeta.push(`#${spoolInfo.activeSpoolId}`);
-  }
-  if (spoolInfo.vendor) {
-    topMeta.push(spoolInfo.vendor.toUpperCase());
-  }
-
   const title = spoolInfo.spoolName || spoolInfo.filamentName || 'Loaded Filament';
+  const spoolNumber = spoolInfo.activeSpoolId != null ? `#${spoolInfo.activeSpoolId}` : null;
   const weight = formatWeight(spoolInfo.remainingWeightG);
 
   const footerParts: string[] = [];
@@ -49,28 +42,25 @@ export function LoadedFilamentCard({ spoolInfo, className }: LoadedFilamentCardP
   }
 
   return (
-    <div className={`flex items-center gap-3 rounded-sm border border-pf-border bg-pf-bg-0/30 p-3 ${className ?? ''}`}>
-      <div className="flex-1 min-w-0">
-        {topMeta.length > 0 && (
-          <div className="text-[10px] uppercase tracking-[0.18em] text-pf-text-secondary truncate">
-            {topMeta.join(' | ')}
-          </div>
-        )}
+    <div className={`flex items-center gap-3 rounded-sm border border-pf-border bg-pf-bg-0/30 px-3 py-2 ${className ?? ''}`}>
+      <div className="flex-1 min-w-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 items-baseline">
+        {/* Row 1: Name (id) */}
+        <span className="text-pf-text-primary text-base font-medium leading-tight truncate col-span-2">
+          {title}{spoolNumber && <span className="text-[10px] text-pf-text-tertiary font-normal ml-1.5">({spoolNumber})</span>}
+        </span>
 
-        <div className="text-pf-text-primary text-base font-medium leading-tight truncate mt-1">
-          {title}
-        </div>
-
-        {footerParts.length > 0 && (
-          <div className="text-pf-text-secondary text-xs truncate mt-1">
-            {footerParts.join(' | ')}
-          </div>
-        )}
+        {/* Row 2: Vendor | Material + Weight */}
+        <span className="text-[10px] text-pf-text-secondary truncate">
+          {spoolInfo.vendor ?? '—'}
+        </span>
+        <span className="text-xs text-pf-text-secondary truncate">
+          {footerParts.join(' | ') || '—'}
+        </span>
       </div>
 
       <SpoolIcon
         fillColor={spoolInfo.colorHex}
-        size={64}
+        size={44}
         className="shrink-0"
       />
     </div>

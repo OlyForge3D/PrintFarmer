@@ -19,7 +19,7 @@ export function FilamentControlSection({
   onFilamentAction,
 }: FilamentControlSectionProps) {
   return (
-    <div className="flex flex-col gap-1 mt-2">
+    <div className="flex flex-col gap-1 mt-4">
       <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
         Filament
       </div>

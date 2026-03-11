@@ -152,8 +152,7 @@ export function CollapsedPrinterCard({
         {/* Left: content area */}
         <div className="flex-1 min-w-0">
           {/* Auto-dispatch icon toggle */}
-          <div className="flex items-center justify-between mb-2 mt-2 px-1">
-            <span className="text-xs text-pf-text-secondary">Auto-dispatch</span>
+          <div className="flex items-center justify-end mb-2 mt-2 px-1">
             <Button
               variant="unstyled"
               onClick={handleAutoDispatchToggle}

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
 import type { AutoPrintStatus, AutoPrintReadyResult } from '@/types/api';
 
@@ -9,12 +9,12 @@ const KEYS = {
   allStatuses: ['autoprint', 'all-statuses'] as const,
 };
 
-export function useAutoPrintStatus(printerId: string) {
-  return useQuery<AutoPrintStatus>({
+export function useAutoPrintStatus(printerId: string): UseQueryResult<AutoPrintStatus> {
+  return useQuery({
     queryKey: KEYS.status(printerId),
-    queryFn: async () => {
+    queryFn: async (): Promise<AutoPrintStatus> => {
       const res = await apiClient.get(`/autoprint/${printerId}/status`);
-      return res.data;
+      return res.data as AutoPrintStatus;
     },
     enabled: !!printerId,
     refetchInterval: 10_000,

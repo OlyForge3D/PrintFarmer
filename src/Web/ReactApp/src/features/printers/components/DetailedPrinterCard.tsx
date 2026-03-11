@@ -548,24 +548,26 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         </div>
       )}
 
-      {/* Progress bar for active prints */}
-      {isOnline && (isPrinting || isPaused) && printer.progress !== undefined && printer.progress > 0 && (
-        <div className="mb-4">
-          <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-            <span className="truncate flex-1">{printer.jobName || 'Printing...'}</span>
+      {/* Progress bar — always visible to prevent layout shift */}
+      <div className="mb-4">
+        <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
+          <span className="truncate flex-1">{printer.jobName || '\u00A0'}</span>
+          {printer.progress !== undefined && printer.progress > 0 && (
             <span className="font-semibold ml-2">{Math.round(printer.progress)}%</span>
-          </div>
-          <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
-            <div
-              ref={expandedProgressRef}
-              className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
-              style={{ width: `${Math.max(0, Math.min(100, printer.progress))}%` }}
-            >
-              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, printer.progress))) }%</span>
-            </div>
+          )}
+        </div>
+        <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
+          <div
+            ref={expandedProgressRef}
+            className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
+            style={{ width: `${printer.progress !== undefined && printer.progress > 0 ? Math.max(0, Math.min(100, printer.progress)) : 0}%` }}
+          >
+            {printer.progress !== undefined && printer.progress > 0 && (
+              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, printer.progress)))}%</span>
+            )}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Temps Section */}
       <TemperatureControlSection
@@ -586,10 +588,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
       />
 
-      {/* Move and Control Section - Side by Side */}
+      {/* Move and Control Section */}
       <div className="mb-2">
-        <div className="flex gap-4 items-start flex-wrap">
-          {/* Movement Control */}
           <MovementControlSection
             moveX={moveX}
             moveY={moveY}
@@ -619,35 +619,32 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             onHome={handleHome}
             onDisableMotors={() => handleControlAction('disable-motors')}
             onExtrude={handleExtrude}
+            rightContent={
+              <div className="flex flex-col gap-1 items-start">
+                <PrinterActionBar
+                  isPaused={isPaused}
+                  isShutdown={isShutdown}
+                  controlActionPending={controlActionPending}
+                  canPauseOrResume={canPauseOrResumeNow}
+                  canCancel={canCancelNow}
+                  canEmergencyStop={canEmergencyStopNow}
+                  onControlAction={handleControlAction}
+                />
+                {support.supportsFilamentControl && (
+                  <FilamentControlSection
+                    filamentActionPending={filamentActionPending}
+                    canFilamentControl={canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                    canFilamentChange={canFilamentChange({ isOnline, isEnabled, support })}
+                    onFilamentAction={handleFilamentAction}
+                  />
+                )}
+              </div>
+            }
           />
-
-          {/* Right Column: Control and Filament */}
-          <div className="flex flex-col gap-2 items-start">
-            <PrinterActionBar
-              isPaused={isPaused}
-              isShutdown={isShutdown}
-              controlActionPending={controlActionPending}
-              canPauseOrResume={canPauseOrResumeNow}
-              canCancel={canCancelNow}
-              canEmergencyStop={canEmergencyStopNow}
-              onControlAction={handleControlAction}
-            />
-            
-            {/* Filament Macros - capability-based */}
-            {support.supportsFilamentControl && (
-              <FilamentControlSection
-                filamentActionPending={filamentActionPending}
-                canFilamentControl={canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                canFilamentChange={canFilamentChange({ isOnline, isEnabled, support })}
-                onFilamentAction={handleFilamentAction}
-              />
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
-      {(spoolmanReady || printer.spoolInfo || printer.currentSpoolId) && (
+      {(spoolmanReady || printer.spoolInfo) && (
       <div className="mb-2">
         <div className="flex items-center justify-between mb-1">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>
@@ -663,7 +660,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               aria-label="Change spool"
               iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
             ></Button>
-            {(printer.spoolInfo?.hasActiveSpool || printer.currentSpoolId) && (
+            {printer.spoolInfo?.hasActiveSpool && (
               <Button
                 type="button"
                 variant="ghost"
@@ -675,7 +672,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                     await apiClient.clearActiveSpool(printer.id);
                     queryClient.setQueryData<Printer[]>(['printers'], (old) =>
                       old?.map(p => p.id === printer.id
-                        ? { ...p, spoolInfo: { hasActiveSpool: false }, currentSpoolId: undefined }
+                        ? { ...p, spoolInfo: { hasActiveSpool: false } }
                         : p
                       )
                     );
@@ -693,7 +690,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             )}
           </div>
         </div>
-        <LoadedFilamentCard spoolInfo={printer.spoolInfo ?? (printer.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: printer.currentSpoolId } : undefined)} />
+        <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
       </div>
       )}
 
@@ -714,7 +711,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         isOpen={showSpoolPicker}
         onClose={() => setShowSpoolPicker(false)}
         printerId={printer.id}
-        activeSpoolId={printer.spoolInfo?.activeSpoolId ?? printer.currentSpoolId}
+        activeSpoolId={printer.spoolInfo?.activeSpoolId}
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {

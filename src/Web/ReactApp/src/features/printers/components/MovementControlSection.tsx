@@ -45,6 +45,9 @@ interface MovementControlSectionProps {
   onHome: (axes?: string) => void;
   onDisableMotors: () => void;
   onExtrude: (direction: 'extrude' | 'retract') => void;
+
+  /** Optional content rendered to the right of the extrude controls */
+  rightContent?: React.ReactNode;
 }
 
 export function MovementControlSection({
@@ -75,6 +78,7 @@ export function MovementControlSection({
   onHome,
   onDisableMotors,
   onExtrude,
+  rightContent,
 }: MovementControlSectionProps) {
   const homedAxesRaw = homedAxes;
   const isHomedStateKnown = typeof homedAxesRaw === 'string';
@@ -87,9 +91,9 @@ export function MovementControlSection({
 
   return (
     <div className="mb-2">
-      <div className="flex gap-4 items-start flex-wrap">
+      <div className="flex gap-6 items-start">
         {/* Left Column: Move */}
-        <div className="flex flex-col gap-2 items-start flex-1 min-w-48">
+        <div className="flex flex-col gap-2 items-start">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
             Move
           </div>
@@ -266,6 +270,9 @@ export function MovementControlSection({
           {/* Move distance slider */}
           <MoveDistanceSlider value={step} onChange={onStepChange} disabled={!canSetStep} />
         </div>
+
+        {/* Right content (Control/Filament) — same level as Move column */}
+        {rightContent}
       </div>
 
       {/* Manual position inputs */}
