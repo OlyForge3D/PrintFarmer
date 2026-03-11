@@ -371,6 +371,47 @@ Parallel work on Batch 3 and analytics demonstrates effectiveness of specificati
 
 ---
 
+### Decision 12: PrintProgressBar Shared Component Pattern (PFarm1-ppbar)
+
+**Date:** 2026-03-11  
+**Agent:** Ripley (Frontend Developer)  
+**Status:** ✅ CLOSED  
+
+**Context:**  
+Both CollapsedPrinterCard and DetailedPrinterCard contained nearly identical progress bar implementations with duplicated logic for job name display, progress percentage, progress bar track/fill, ARIA attributes, and ref forwarding. Additionally, DetailedPrinterCard had a `progress > 0` bug preventing 0% display when prints started.
+
+**Decision:**  
+Create a shared `PrintProgressBar` component with optional props for behavioral differences (inactive state display, temperature readouts).
+
+**Implementation:**
+- **Component:** `src/Web/ReactApp/src/features/printers/components/PrintProgressBar.tsx` (185 lines)
+- **Required Props:** progress, jobName, isActive
+- **Optional Props:** progressRef, showInactiveState, showTemperatures, temperature data
+- **Key Features:**
+  - Layout stability via non-breaking space fallback when no job name exists
+  - Progress clamping to 0-100 range
+  - Full ARIA progressbar implementation
+  - Temperature indicators (NozzleIcon > 50°C, BedIcon > 35°C)
+- **Files Modified:** CollapsedPrinterCard.tsx, DetailedPrinterCard.tsx (49 lines of duplication removed)
+- **Bug Fix:** Removed `progress > 0` condition from DetailedPrinterCard, fixing 0% display
+
+**Test Results:**  
+- ✅ 1,432/1,444 tests passing (12 previously failing, now fixed)
+- ✅ 0 lint errors
+- ✅ Regression guard coverage maintained
+
+**Design Patterns:**
+- Use optional boolean flags for behavioral differences without complexity
+- Keep outer spacing/margin with parent components, not in shared component
+- Preserve exact layout behavior (non-breaking space fallbacks) during refactoring
+- Always forward refs when parent needs to access child DOM elements
+- Include comprehensive ARIA attributes for accessibility
+
+**Rationale:**  
+DRY principle eliminates code duplication while fixing display bug. Shared component provides single source of truth for progress bar styling, accessibility, and behavior across multiple card components.
+
+---
+
 ## Summary
 
 **Analytics Feature Complete:** 4 decisions closed, 0 open, 0 deferred.  
@@ -383,4 +424,8 @@ Parallel work on Batch 3 and analytics demonstrates effectiveness of specificati
 
 **Batch 3 Status:** Completed in parallel with analytics features.  
 **Total UI Improvements:** Navigation sections, status color consistency, printer card refactoring, 1,293 tests.  
+
+**PrintProgressBar Refactoring:** 1 decision closed.  
+**Component Extraction:** 1 new shared component, 2 cards refactored, 49 lines duplication removed, 0% display bug fixed.  
+
 **Overall Status:** All planned batches complete, ready for release.

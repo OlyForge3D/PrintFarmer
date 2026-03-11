@@ -613,3 +613,46 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 - WebhooksAdminPage had unusual single-space indentation requiring exact whitespace matching
 
 **Validation:** ✅ Lint passes (0 errors), ✅ All tests pass (1432/1444 passing, 12 skipped)
+
+---
+
+## Task: Extract shared PrintProgressBar component and fix DetailedPrinterCard progress > 0 bug
+
+**Date:** 2025-01-08
+
+**Problem:**
+- CollapsedPrinterCard and DetailedPrinterCard had duplicated progress bar logic (job name display, percentage, progress bar track/fill)
+- DetailedPrinterCard had a `progress > 0` bug on line 555 — progress bar wouldn't show at 0% when a print just started
+- CollapsedPrinterCard was recently fixed to remove this bug, but DetailedPrinterCard still had it
+
+**Solution:**
+- Created new shared component: `src/Web/ReactApp/src/features/printers/components/PrintProgressBar.tsx`
+- Component unifies progress bar logic with proper ARIA attributes (`role="progressbar"`, `aria-label`, `aria-valuemin/max/now`)
+- Supports optional props for different card needs:
+  - `showInactiveState` (collapsed card shows "No active print", detailed card shows `\u00A0` for layout stability)
+  - `showTemperatures` (collapsed card shows temp readouts below progress bar)
+  - `progressRef` (both cards pass their own refs for animation)
+- Updated both CollapsedPrinterCard and DetailedPrinterCard to use the new component
+- Fixed the `progress > 0` bug by removing that condition from isActive logic
+
+**Key Implementation Details:**
+- Progress clamping logic: `Math.max(0, Math.min(100, progress))` ensures valid percentage
+- Job name fallback logic handles three cases:
+  - Active print: show job name or "Printing..."
+  - Inactive with `showInactiveState=true`: show "No active print" (italic, tertiary text)
+  - Inactive with `showInactiveState=false`: show job name or `\u00A0` (non-breaking space for layout stability)
+- Temperature readouts use `NozzleIcon` and `BedIcon` with `isOn` state (hotend > 50°C, bed > 35°C)
+- Outer margin (`mt-2` for collapsed, `mb-4` for detailed) stays with parent components, not in shared component
+
+**Files Modified:**
+- Created: `PrintProgressBar.tsx`
+- Updated: `CollapsedPrinterCard.tsx` (removed NozzleIcon/BedIcon imports, added PrintProgressBar import)
+- Updated: `DetailedPrinterCard.tsx` (added PrintProgressBar import)
+
+**Validation:** ✅ Lint passes (0 errors), ✅ All tests pass (1432/1444 passing, 12 skipped)
+
+**Patterns Learned:**
+- When extracting shared components, use optional props to handle behavioral differences between consumers
+- Always preserve exact layout behavior (like `\u00A0` for layout stability) when refactoring
+- Keep outer spacing/margin with parent components rather than in shared components (better composability)
+- ARIA progressbar attributes are mandatory for accessibility (role, aria-label, aria-valuemin/max/now)
