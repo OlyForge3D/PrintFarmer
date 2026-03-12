@@ -889,3 +889,38 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 
 - `queryClient.setQueryData` with both the list key (`['printers']`) and individual key (`['printers', id]`) is needed because components may read from either cache entry — missing one causes inconsistent UI across views
 - Using `"Starting..."` as the optimistic state string (not `"Printing"`) gives the user a visually distinct transient state that won't be confused with real printing if something goes wrong — SignalR will replace it with `"Printing"` within ~500ms
+
+---
+
+## 2026-03-12 — Optimistic UI Update: Bed-Clear Dispatch (Concurrent Sprint 1)
+
+**Session:** Dispatch Perf & State Refresh (concurrent with Lambert)  
+**Outcome:** ✅ COMPLETE & PUSHED
+
+Added React Query optimistic cache update in `BedClearBanner` for instant UX feedback on successful dispatch. Printer card immediately transitions to "Starting..." state before SignalR broadcasts authoritative Printing state (~500ms later).
+
+**Implementation:**
+- In `BedClearBanner.tsx`, after `/ready` endpoint returns success:
+  - If filament check passes AND next job exists, immediately update both `queryKeys.printers` (list) and `queryKeys.printer(id)` (individual) caches
+  - Set state → `"Starting..."`, jobName → dispatched job name, progress → 0
+- Optimistic update only triggers for success + next-job scenarios (no update for no-job, mismatch, insufficient filament)
+- Real SignalR update (~500ms) overwrites with authoritative state
+
+**Design Decisions:**
+1. Use transient `"Starting..."` state (not `"Printing"`) — visually distinct, won't confuse if rollback needed
+2. Update both cache entries — components may read from either key
+3. No cache update if next job missing — avoid false "Starting..." if dispatch failed to queue
+
+**Files Changed:**
+- `src/Web/ReactApp/src/features/printers/components/BedClearBanner.tsx` — Added `useQueryClient`, `queryKeys` imports; optimistic setQueryData calls post-dispatch
+- `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx` — Added mock for `@/common/hooks/useApi`, 2 new tests
+
+**Validation:**
+✅ Build: 0 errors  
+✅ ESLint: 0 violations  
+✅ Tests: 14/14 pass (12 existing + 2 new optimistic-update tests)
+
+**Pairing:**
+- Works with Lambert's post-dispatch state refresh service (750ms probe bridges polling gap)
+- Creates seamless UX: optimistic immediate → real update within 500ms → state refresh ensures polling mode doesn't lag
+
