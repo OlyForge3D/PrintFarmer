@@ -1,9 +1,11 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { useConfirmBedClear, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
+import { queryKeys } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
-import type { AutoDispatchStatus } from '@/types/api';
+import type { AutoDispatchStatus, Printer } from '@/types/api';
 
 interface BedClearBannerProps {
   printerId: string;
@@ -12,6 +14,7 @@ interface BedClearBannerProps {
 }
 
 export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: BedClearBannerProps) {
+  const queryClient = useQueryClient();
   const confirmBedClear = useConfirmBedClear();
   const skipNextJob = useSkipNextJob();
   const cancelAutoDispatch = useCancelAutoDispatch();
@@ -50,6 +53,19 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
       // handles dispatching the job (triggered by the /ready endpoint).
       // We don't dispatch manually here to avoid a double-dispatch race condition.
       toast.success(`Dispatching "${result.nextJob.name}" to ${printerName}`);
+
+      // Optimistic UI: immediately show "Starting..." state so the printer card
+      // reflects the dispatch without waiting for the SignalR round-trip (~500ms).
+      // The next SignalR update will overwrite with the real state.
+      const optimisticUpdate = (printer: Printer): Printer =>
+        printer.id === printerId
+          ? { ...printer, state: 'Starting...', jobName: result.nextJob!.name, progress: 0 }
+          : printer;
+
+      queryClient.setQueryData<Printer[]>(queryKeys.printers, (old) => old?.map(optimisticUpdate));
+      queryClient.setQueryData<Printer>(queryKeys.printer(printerId), (old) =>
+        old ? optimisticUpdate(old) : undefined,
+      );
     } catch {
       toast.error('Failed to confirm bed clear');
     }

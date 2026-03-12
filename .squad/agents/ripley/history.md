@@ -862,3 +862,30 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 - src/infra/Services/Queue/Dispatch/IJobDispatchService.cs
 
 **Decision Status:** Proposed (ready for team review + Lambert implementation next sprint)
+
+## 2026-03-12 — Optimistic UI Update for Bed-Clear Dispatch
+
+**Agent:** Ripley (Frontend Dev)
+**Status:** ✅ COMPLETE
+
+**Task:** After clicking "confirm bed is clear" and a job dispatches successfully, the printer card showed a delay before transitioning to "Printing" state (waiting for SignalR round-trip ~500ms). Added optimistic React Query cache update so the UI shows instant feedback.
+
+**Implementation:**
+- In `BedClearBanner.tsx`, after the `/ready` endpoint returns success with a passing filament check and a next job, immediately update both `queryKeys.printers` (list) and `queryKeys.printer(id)` (individual) caches
+- Sets printer state to `"Starting..."`, `jobName` to the dispatched job name, and `progress` to `0`
+- Only triggers when filament check passes AND a next job exists — no optimistic update for no-job, mismatch, or insufficient filament scenarios
+- The real SignalR update arrives within ~500ms and overwrites with authoritative state
+
+**Files Changed:**
+- `src/Web/ReactApp/src/features/printers/components/BedClearBanner.tsx` — Added `useQueryClient`, `queryKeys`, `Printer` imports; added optimistic `setQueryData` calls after successful dispatch path
+- `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx` — Added mock for `@/common/hooks/useApi`; added 2 new tests: optimistic cache update on dispatch, no cache update when no next job
+
+**Validation:**
+✅ Build: 0 errors
+✅ ESLint: 0 violations
+✅ Tests: 14/14 passing (12 existing + 2 new)
+
+## Learnings
+
+- `queryClient.setQueryData` with both the list key (`['printers']`) and individual key (`['printers', id]`) is needed because components may read from either cache entry — missing one causes inconsistent UI across views
+- Using `"Starting..."` as the optimistic state string (not `"Printing"`) gives the user a visually distinct transient state that won't be confused with real printing if something goes wrong — SignalR will replace it with `"Printing"` within ~500ms
