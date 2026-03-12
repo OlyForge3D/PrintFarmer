@@ -7,7 +7,6 @@ import {
   TagIcon
 } from '@heroicons/react/24/outline';
 import { 
-  CubeIcon,
   BeakerIcon,
   RectangleStackIcon
 } from '@heroicons/react/24/solid';
@@ -75,6 +74,112 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
 
         {/* Metadata */}
         <div className="text-xs text-pf-text-secondary space-y-1 mb-2 flex-1">
+          {!file.isDirectory && (
+            <>
+              {/* Label: Value properties grouped at top */}
+              <div className="space-y-1 border-t border-pf-border/50 pt-1">
+                {file.fileSize != null && file.fileSize > 0 && (
+                  <div className="flex justify-between gap-1">
+                    <span>Size:</span>
+                    <span className="font-medium text-right">{formatBytes(file.fileSize)}</span>
+                  </div>
+                )}
+                {file.uploadedAt && (
+                  <div className="flex justify-between gap-1">
+                    <span>Modified:</span>
+                    <span className="font-medium text-right">
+                      {new Date(file.uploadedAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
+                {file.extractedPrinterModel && (
+                  <div className="flex justify-between gap-1">
+                    <span>Printer:</span>
+                    <span className="font-medium text-right truncate ml-2" title={file.extractedPrinterModel}>
+                      {file.extractedPrinterModel}
+                    </span>
+                  </div>
+                )}
+                {file.extractedSlicerName && (
+                  <div className="flex justify-between gap-1">
+                    <span>Slicer:</span>
+                    <span className="font-medium text-right truncate ml-2" title={`${file.extractedSlicerName}${file.extractedSlicerVersion ? ` ${file.extractedSlicerVersion}` : ''}`}>
+                      {file.extractedSlicerName}
+                      {file.extractedSlicerVersion && ` ${file.extractedSlicerVersion}`}
+                    </span>
+                  </div>
+                )}
+                {file.extractedPrintTime != null && file.extractedPrintTime > 0 && (
+                  <div className="flex justify-between gap-1">
+                    <span>Print time:</span>
+                    <span className="font-medium text-right">
+                      {formatPrintTimeMinutes(file.extractedPrintTime)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Icon-only properties at bottom */}
+              {(file.extractedNozzleDiameter || file.extractedMaterial || file.extractedHotendTemp || file.extractedBedTemp) && (
+                <div className="space-y-1 border-t border-pf-border/50 pt-1">
+                  {/* Nozzle & Material row */}
+                  {(file.extractedNozzleDiameter || file.extractedMaterial) && (
+                    <div className="flex items-center gap-2">
+                      {file.extractedNozzleDiameter && (
+                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                          <RectangleStackIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
+                          <span className="truncate" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>
+                            {file.extractedNozzleDiameter}mm
+                          </span>
+                        </div>
+                      )}
+                      {file.extractedMaterial && (
+                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                          <BeakerIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
+                          <span className="truncate" title={`Material: ${file.extractedMaterial}`}>
+                            {file.extractedMaterial}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Hotend & Bed temp row */}
+                  {(file.extractedHotendTemp || file.extractedBedTemp) && (
+                    <div className="flex items-center gap-2">
+                      {file.extractedHotendTemp && (
+                        <div className="flex items-center gap-1 flex-1">
+                          <NozzleIcon className="w-3.5 h-3.5 text-pf-error shrink-0" isOn={false} />
+                          <span title={`Hotend: ${formatTemperature(file.extractedHotendTemp)}`}>
+                            {formatTemperature(file.extractedHotendTemp)}
+                          </span>
+                        </div>
+                      )}
+                      {file.extractedBedTemp && (
+                        <div className="flex items-center gap-1 flex-1">
+                          <BedIcon className="w-3.5 h-3.5 text-pf-accent shrink-0" isOn={false} />
+                          <span title={`Bed: ${formatTemperature(file.extractedBedTemp)}`}>
+                            {formatTemperature(file.extractedBedTemp)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Directory: just show modified date */}
+          {file.isDirectory && file.uploadedAt && (
+            <div className="flex justify-between gap-1 border-t border-pf-border/50 pt-1">
+              <span>Modified:</span>
+              <span className="font-medium text-right">
+                {new Date(file.uploadedAt).toLocaleDateString()}
+              </span>
+            </div>
+          )}
+
           {/* Tags */}
           {!file.isDirectory && file.tags && file.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1 border-t border-pf-border/50">
@@ -89,100 +194,6 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 </span>
               ))}
             </div>
-          )}
-          {/* Basic file info */}
-          {!file.isDirectory && file.fileSize && (
-            <div className="flex justify-between gap-1">
-              <span>Size:</span>
-              <span className="font-medium text-right">{formatBytes(file.fileSize)}</span>
-            </div>
-          )}
-          {file.uploadedAt && (
-            <div className="flex justify-between gap-1">
-              <span>Modified:</span>
-              <span className="font-medium text-right">
-                {new Date(file.uploadedAt).toLocaleDateString()}
-              </span>
-            </div>
-          )}
-
-          {/* Extracted metadata with icons */}
-          {!file.isDirectory && (
-            <>
-              {/* Printer Model */}
-              {file.extractedPrinterModel && (
-                <div className="flex items-center gap-1.5 pt-1 border-t border-pf-border/50">
-                  <CubeIcon className="w-3.5 h-3.5 text-pf-accent shrink-0" />
-                  <span className="truncate" title={file.extractedPrinterModel}>
-                    {file.extractedPrinterModel}
-                  </span>
-                </div>
-              )}
-
-              {/* Nozzle Size & Material on same row */}
-              {(file.extractedNozzleDiameter || file.extractedMaterial) && (
-                <div className="flex items-center gap-2">
-                  {file.extractedNozzleDiameter && (
-                    <div className="flex items-center gap-1 flex-1 min-w-0">
-                      <RectangleStackIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
-                      <span className="truncate" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>
-                        {file.extractedNozzleDiameter}mm
-                      </span>
-                    </div>
-                  )}
-                  {file.extractedMaterial && (
-                    <div className="flex items-center gap-1 flex-1 min-w-0">
-                      <BeakerIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
-                      <span className="truncate" title={`Material: ${file.extractedMaterial}`}>
-                        {file.extractedMaterial}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Temperatures on same row */}
-              {(file.extractedHotendTemp || file.extractedBedTemp) && (
-                <div className="flex items-center gap-2">
-                  {file.extractedHotendTemp && (
-                    <div className="flex items-center gap-1 flex-1">
-                      <NozzleIcon className="w-3.5 h-3.5 text-pf-error shrink-0" isOn={false} />
-                      <span title={`Hotend: ${formatTemperature(file.extractedHotendTemp)}`}>
-                        {formatTemperature(file.extractedHotendTemp)}
-                      </span>
-                    </div>
-                  )}
-                  {file.extractedBedTemp && (
-                    <div className="flex items-center gap-1 flex-1">
-                      <BedIcon className="w-3.5 h-3.5 text-pf-accent shrink-0" isOn={false} />
-                      <span title={`Bed: ${formatTemperature(file.extractedBedTemp)}`}>
-                        {formatTemperature(file.extractedBedTemp)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Slicer info */}
-              {file.extractedSlicerName && (
-                <div className="flex items-center gap-1.5 text-[11px] text-pf-text-tertiary">
-                  <span className="truncate" title={`Slicer: ${file.extractedSlicerName}${file.extractedSlicerVersion ? ` ${file.extractedSlicerVersion}` : ''}`}>
-                    {file.extractedSlicerName}
-                    {file.extractedSlicerVersion && ` ${file.extractedSlicerVersion}`}
-                  </span>
-                </div>
-              )}
-
-              {/* Print time */}
-              {file.extractedPrintTime && (
-                <div className="flex justify-between gap-1 text-[11px]">
-                  <span>Print time:</span>
-                  <span className="font-medium">
-                    {formatPrintTimeMinutes(file.extractedPrintTime)}
-                  </span>
-                </div>
-              )}
-            </>
           )}
         </div>
 
