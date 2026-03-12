@@ -29,7 +29,7 @@ export const FileBrowserToolbar = ({
   extraActions,
 }: FileBrowserToolbarProps) => {
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-center" data-tour="gcode-toolbar">
       <div className="flex-1 min-w-0">
         <label htmlFor="file-browser-search" className="sr-only">
           Search files

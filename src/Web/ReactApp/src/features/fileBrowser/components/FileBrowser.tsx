@@ -72,6 +72,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
           {isBusy ? (browser.isMutating ? 'Applying changes…' : 'Loading files…') : 'Ready'}
         </div>
 
+        <div data-tour="gcode-file-list">
         {browser.viewMode === 'grid' ? (
           <GridView
             files={browser.files}
@@ -109,6 +110,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
             isBusy={browser.isMutating}
           />
         )}
+        </div>
       </div>
     );
   }

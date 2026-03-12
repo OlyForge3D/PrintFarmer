@@ -6,6 +6,9 @@ import { SettingInputType } from '@/types/SettingInputType';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+import { usePageTour } from '@/common/hooks/usePageTour';
+import { settingsTour } from '@/features/admin/tours/settings.tour';
+import { HelpButton } from '@/common/components/HelpButton';
 import {
   fetchSettingsMetadata,
   fetchSettingsGroups,
@@ -25,6 +28,7 @@ interface NavItem {
 
 export function SettingsPage() {
   const { isSlicerAvailable } = useSlicer();
+  const { startTour } = usePageTour({ tourId: 'settings', steps: settingsTour });
   const [metadata, setMetadata] = useState<SettingMetadata[]>([]);
   const [groupMetadata, setGroupMetadata] = useState<SettingGroupMetadata[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
@@ -302,6 +306,7 @@ export function SettingsPage() {
       title="Settings"
       subtitle="Configure PrintFarmer application settings"
       icon={SettingsIcon}
+      actions={<HelpButton onClick={startTour} />}
     >
       {loading ? (
         <div className="text-center text-pf-text-secondary">Loading settings...</div>
@@ -310,7 +315,7 @@ export function SettingsPage() {
       ) : (
         <div className="flex gap-6" style={{ height: 'calc(100vh - 160px)' }}>
           {/* Sidebar Navigation - Hidden on small screens */}
-          <nav className="hidden lg:block w-56 shrink-0">
+          <nav className="hidden lg:block w-56 shrink-0" data-tour="settings-nav">
             <div className="pr-2">
               <div className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wider mb-3">
                 Sections
@@ -342,7 +347,7 @@ export function SettingsPage() {
           </nav>
 
           {/* Main Content Area */}
-          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden" data-tour="settings-content">
             <div 
               ref={scrollContainerRef}
               className="flex-1 space-y-6 overflow-y-auto scroll-smooth pr-2"
@@ -370,7 +375,7 @@ export function SettingsPage() {
               )}
             </div>
             {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
-            <div className="py-4 flex justify-end border-t border-pf-border mt-4">
+            <div className="py-4 flex justify-end border-t border-pf-border mt-4" data-tour="settings-save">
               <Button
                 type="button"
                 onClick={handleSave}

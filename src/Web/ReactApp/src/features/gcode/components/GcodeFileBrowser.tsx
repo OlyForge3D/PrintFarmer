@@ -619,6 +619,7 @@ export const GcodeFileBrowser = ({
           title="Upload G-code files"
           iconCenter={<UploadIcon className="h-4 w-4" />}
           onClick={() => setShowUploadModal(true)}
+          data-tour="gcode-upload"
         />
       )}
       {onToggleTagFilterPanel && (
@@ -629,6 +630,7 @@ export const GcodeFileBrowser = ({
           onClick={onToggleTagFilterPanel}
           title="Filter by tags"
           iconCenter={<FilterIcon className="h-4 w-4" />}
+          data-tour="gcode-filters"
         />
       )}
       {selection.length > 0 && onShowTagModal && (
