@@ -259,7 +259,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
                 HomedAxes: null,
-                SpoolInfo: null);
+                SpoolInfo: null,
+                FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
             await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
         }

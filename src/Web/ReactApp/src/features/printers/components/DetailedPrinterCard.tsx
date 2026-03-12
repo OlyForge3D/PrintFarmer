@@ -553,7 +553,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       <div className="mb-4">
         <PrintProgressBar
           progress={printer.progress}
-          jobName={printer.jobName}
+          jobName={printer.fileName ?? printer.jobName}
           isActive={isOnline && (isPrinting || isPaused)}
           progressRef={expandedProgressRef}
           showInactiveState={false}

@@ -183,8 +183,10 @@ export interface PrinterPosition {
 export interface PrinterJobInfo {
   /** Print progress 0-100 */
   progress?: number;
-  /** Name of the current job/file */
+  /** Name of the current job/file (may include path) */
   jobName?: string;
+  /** File name only, without any directory path (e.g. "file.gcode" not ".cache/file.gcode") */
+  fileName?: string;
   /** Thumbnail URL for the current job */
   thumbnailUrl?: string;
   /** Active spool/filament information */

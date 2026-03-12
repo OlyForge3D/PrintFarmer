@@ -33,6 +33,7 @@ public record CompletePrinterDto(
     string? State,
     double? Progress,
     string? JobName,
+    string? FileName,
     string? ThumbnailUrl,
     string? CameraStreamUrl,
     double? X,

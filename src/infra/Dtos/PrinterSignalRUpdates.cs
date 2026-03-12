@@ -40,7 +40,8 @@ public record PrinterStateUpdate(
     Guid PrinterId,
     string? State,
     double? Progress,
-    string? JobName);
+    string? JobName,
+    string? FileName = null);
 
 /// <summary>
 /// SignalR event payload for toolhead position and homing status updates.

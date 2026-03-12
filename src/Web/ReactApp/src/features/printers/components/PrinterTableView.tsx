@@ -270,9 +270,9 @@ export function PrinterTableView({
                     <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline, displayPrinter.state)}`}>
                       {displayPrinter.isOnline ? (displayPrinter.state || 'Unknown') : 'Offline'}
                     </div>
-                    {displayPrinter.jobName && (
+                    {(displayPrinter.fileName ?? displayPrinter.jobName) && (
                       <div className="text-xs text-pf-text-tertiary truncate max-w-32">
-                        {displayPrinter.jobName}
+                        {displayPrinter.fileName ?? displayPrinter.jobName}
                       </div>
                     )}
                   </td>

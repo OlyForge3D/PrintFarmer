@@ -559,6 +559,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             ModelName: printer.Model?.Name,
             Progress: progress,
             JobName: jobName,
+            FileName: PrinterStatusDto.ExtractFileName(jobName),
             ThumbnailUrl: null,
             CameraStreamUrl: await GetCameraStreamUrlAsync(printer.ServerUrl, credential),
             CameraSnapshotUrl: null,

@@ -275,7 +275,7 @@ public sealed class SdcpPollingService(
                     // Update cache before broadcasting to clients
                     _statusCacheWriter.UpdateStatus(update);
 
-                    await _hub.Clients.All.SendAsync("printerupdated", update, ct);
+                    await _hub.Clients.All.SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }

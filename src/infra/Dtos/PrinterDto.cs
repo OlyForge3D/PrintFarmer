@@ -45,6 +45,7 @@ public record PrinterDto(
     string? ModelName = null,
     double? Progress = null,
     string? JobName = null,
+    string? FileName = null,
     string? ThumbnailUrl = null,
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
