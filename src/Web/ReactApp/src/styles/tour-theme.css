@@ -104,10 +104,14 @@
   color: var(--pf-text-primary);
 }
 
-/* Highlight ring on the spotlighted element */
+/* Highlight ring on the spotlighted element.
+   Uses outline instead of box-shadow so the glow is never clipped
+   by ancestor overflow: hidden/auto/scroll containers. */
 .driver-active-element {
-  box-shadow: 0 0 0 4px var(--pf-accent), 0 0 20px rgba(88, 166, 255, 0.3) !important;
+  outline: 3px solid var(--pf-accent) !important;
+  outline-offset: 3px !important;
   border-radius: 8px;
+  filter: drop-shadow(0 0 10px rgba(88, 166, 255, 0.35)) !important;
 }
 
 /* Respect prefers-reduced-motion */
