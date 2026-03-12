@@ -269,18 +269,10 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
                 variant="primary" 
                 onClick={handleStartNow}
                 disabled={successState.isStarting}
+                loading={successState.isStarting}
+                iconLeft={<PrinterIcon className="w-4 h-4" />}
               >
-                {successState.isStarting ? (
-                  <span className="flex items-center gap-2">
-                    <Spinner size="sm" />
-                    Starting...
-                  </span>
-                ) : (
-                  <>
-                    <PrinterIcon className="w-4 h-4" />
-                    Start Print Now
-                  </>
-                )}
+                Start Print Now
               </Button>
             )}
             <Button variant="secondary" onClick={() => onClose(true)}>
