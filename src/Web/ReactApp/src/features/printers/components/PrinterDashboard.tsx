@@ -26,6 +26,9 @@ import { RecentPrintsWidget } from './RecentPrintsWidget';
 import { CriticalAlertsBanner } from './CriticalAlertsBanner';
 import { BackgroundServicesWidget } from '@/features/admin/components/BackgroundServicesWidget';
 import { MaintenanceAlertsWidget } from '@/features/maintenance/components/MaintenanceAlertsWidget';
+import { usePageTour } from '@/common/hooks/usePageTour';
+import { dashboardTour } from '@/features/printers/tours/dashboard.tour';
+import { HelpButton } from '@/common/components/HelpButton';
 
 interface StatsCardProps {
   title: string;
@@ -74,6 +77,7 @@ function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) 
 export const PrinterDashboard: React.FC = () => {
   const { data: printers, isLoading, error } = usePrinters();
   const displayPrinters = usePrinterDisplays(printers || []);
+  const { startTour } = usePageTour({ tourId: 'dashboard', steps: dashboardTour });
 
   const stats = React.useMemo(() => {
     const userPrinters = displayPrinters ?? [];
@@ -91,9 +95,10 @@ export const PrinterDashboard: React.FC = () => {
       title="Printer Dashboard"
       subtitle="Overview of your 3D printer farm status"
       icon={DashboardIcon}
+      actions={<HelpButton onClick={startTour} />}
     >
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+      <div data-tour="stats-cards" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
         <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircleIcon} />
         <StatsCard title="Printing" value={stats.printing} color="yellow" icon={PlayIcon} />
@@ -141,17 +146,25 @@ export const PrinterDashboard: React.FC = () => {
         /* Main Dashboard Content */
         <div className="space-y-6">
           {/* Row 1: Tasks */}
-          <TasksWidget />
+          <div data-tour="tasks-widget">
+            <TasksWidget />
+          </div>
 
           {/* Row 2: Active Jobs + Recent Prints */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ActiveJobsWidget />
-            <RecentPrintsWidget />
+            <div data-tour="active-jobs">
+              <ActiveJobsWidget />
+            </div>
+            <div data-tour="recent-prints">
+              <RecentPrintsWidget />
+            </div>
           </div>
 
           {/* Row 3: Maintenance Alerts + Background Services */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <BackgroundServicesWidget maxServices={8} />
+            <div data-tour="services-widget">
+              <BackgroundServicesWidget maxServices={8} />
+            </div>
             <MaintenanceAlertsWidget />
           </div>
         </div>
