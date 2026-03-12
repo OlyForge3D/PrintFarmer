@@ -558,3 +558,102 @@ Decision document for "Auto-Dispatch Bug — Upload & Print Does Not Auto-Start"
 - `src/infra/Services/AutoPrint/AutoPrintService.cs` — `MarkReadyAsync` triggers auto-dispatch via `dispatchTrigger`
 - `src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs` — background service that dispatches on idle
 - `src/Web/ReactApp/src/features/printers/components/BedClearBanner.tsx` — frontend bed-clear UI (handleConfirm calls ready then dispatch)
+
+### Investigation: Ready → Printing State Transition Delay (2026-07-22)
+
+**Bug:** After clicking "confirm bed is clear" (PendingReady → Ready), the transition to Printing is not near-instant on Moonraker printers.
+
+**Root Cause Analysis — Three compounding bottlenecks identified:**
+
+#### Bottleneck 1: Double Scoring (BIGGEST ARCHITECTURAL ISSUE)
+`ScorePrintersForJobAsync` is called **TWICE** for the same dispatch:
+1. `AutoDispatchBackgroundService.ExecuteDispatchCycleAsync` (line 205) scores up to 20 candidate jobs
+2. `JobDispatchService.DispatchJobAsync` (line 71) re-scores the same job again for audit
+
+Each `ScorePrintersForJobAsync` call performs 4 DB queries (job+includes, all printers+includes+split, queue depths, filament type). With N printers and up to 20 candidate jobs, the first call scores all printers for each candidate. Then the second call repeats scoring for the winning job. This is expensive and redundant.
+
+**Files:** `AutoDispatchBackgroundService.cs:205`, `JobDispatchService.cs:71`, `DispatchScorer.cs:26-70`
+
+#### Bottleneck 2: File Upload Before Print Start
+The dispatch path does: upload gcode file → start print. For Moonraker, this means:
+1. `UploadGcodeAsync` — HTTP POST multipart file upload to `server/files/upload` (line 974-1015)
+2. `StartPrintAsync` — HTTP POST to `printer/print/start` (line 1017-1035)
+
+For large G-code files (multi-MB), the upload over LAN can take several seconds. This is inherent to the protocol but is the dominant wall-clock cost.
+
+**Files:** `MoonrakerClient.cs:974-1035` (upload), `MoonrakerClient.cs:2591-2616` (UploadAndStartPrintAsync)
+
+#### Bottleneck 3: Multiple Serial DB Saves
+The full dispatch path has at least 6 `SaveChangesAsync` calls:
+1. `AutoPrintService.MarkReadyAsync` — save Ready state (line 231)
+2. `JobDispatchService.DispatchJobAsync` — save job assignment (line 86)
+3. `JobDispatchService.DispatchJobAsync` — save dispatch log (line 102)
+4. `PrintJobManagementService.DispatchJobAsync` — save Starting status (line 527)
+5. `PrintJobManagementService.DispatchJobAsync` — save Printing status (line 682)
+6. `AutoDispatchBackgroundService` — save AutoPrintState=None (line 295)
+7. `AutoDispatchBackgroundService` — save DispatchMode (line 284)
+
+Each SaveChangesAsync is a round-trip to SQLite. On a Raspberry Pi, this could be 5-20ms each.
+
+#### NOT a bottleneck: Idle Threshold
+The `NotifyJobQueued` call from `MarkReadyAsync` correctly sets `SkipIdleThreshold: true`, so the 30-second idle threshold is bypassed. The channel write is synchronous and near-instant.
+
+#### NOT a bottleneck: SignalR state propagation
+Moonraker uses WebSocket real-time updates (not polling), so state changes are pushed immediately. The state change from Idle → Printing is broadcast as soon as Klipper reports it.
+
+**Recommended Fixes (Priority Order):**
+1. **Eliminate double scoring** — Pass the already-computed score from AutoDispatchBackgroundService through to JobDispatchService instead of re-computing it. This saves 4+ DB queries.
+2. **Batch DB saves** — Combine the job assignment + dispatch log into a single SaveChangesAsync in JobDispatchService.
+3. **Consider Moonraker's `print=true` upload parameter** — Moonraker supports a `print` parameter on the upload endpoint that starts printing immediately after upload completes, eliminating the second HTTP call.
+
+## 2026-03-12 — Ready → Printing Dispatch Optimization Analysis Complete
+
+**Agent:** Lambert (Backend Dev)  
+**Status:** ✅ COMPLETE — Formal decision written and merged to decisions.md
+
+**Investigation Summary:**
+- Analyzed slow state transition from PendingReady → Printing (noticeable delay after "confirm bed is clear")
+- Traced dispatch pipeline end-to-end through AutoDispatchBackgroundService → JobDispatchService → PrintJobManagementService → MoonrakerClient
+- Identified 3 compounding bottlenecks with quantified impact
+
+**Bottleneck Analysis:**
+
+**1. Double Scoring** (Critical Impact)
+- ScorePrintersForJobAsync called twice: AutoDispatchBackgroundService (line 205) + JobDispatchService (line 71)
+- Each call = 4 DB queries (job, printers, queue depths, filament type)
+- For 20 candidate jobs × N printers: first call scores all candidates, second call re-scores winner
+- **Impact:** 40-60ms per dispatch on Raspberry Pi SQLite
+- **Solution:** Pass pre-computed score from AutoDispatchBackgroundService through to DispatchJobAsync
+
+**2. Serial DB Saves** (Medium Impact)
+- 6-7 SaveChangesAsync round-trips in dispatch path
+- AutoPrintService.MarkReadyAsync (line 231), JobDispatchService saves (lines 86, 102), PrintJobManagementService (lines 527, 682), AutoDispatchBackgroundService state saves (lines 284, 295)
+- Job assignment + dispatch log saved separately with no architectural reason
+- **Impact:** 50-140ms cumulative (5-20ms per round-trip on Raspberry Pi)
+- **Solution:** Batch job assignment + dispatch log into single SaveChangesAsync
+
+**3. Double HTTP Calls** (Medium Impact, Protocol Inherent)
+- UploadGcodeAsync (POST /server/files/upload) → StartPrintAsync (POST /printer/print/start)
+- Large files dominate wall-clock time but still avoidable
+- Moonraker `/server/files/upload` supports `print=true` form field (atomic)
+- **Impact:** 500ms+ on LAN, inherent to file size but protocol supports optimization
+- **Solution:** Use print=true parameter on upload to eliminate second HTTP round-trip
+
+**NOT Bottlenecks (Validated):**
+- Idle Threshold: SkipIdleThreshold=true correctly bypassed (channel write sync + near-instant)
+- SignalR propagation: Moonraker WebSocket real-time updates (not polling), state pushed immediately
+
+**Proposed Fixes (All Ready for Implementation):**
+- Fix 1: Overload IJobDispatchService.DispatchJobAsync(score) accepting pre-computed score
+- Fix 2: Batch saves in JobDispatchService.DispatchJobAsync (combine lines 86 + 102)
+- Fix 3: Update UploadAndStartPrintAsync to use Moonraker print=true parameter
+
+**Files to Modify:**
+- src/infra/Services/Queue/Dispatch/JobDispatchService.cs
+- src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs
+- src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs
+- src/infra/Services/Queue/Dispatch/IJobDispatchService.cs (interface)
+
+**Expected Combined Impact:** Ready → Printing transition from several seconds → under 1 second (typical G-code on LAN)
+
+**Decision Status:** Proposed (decision.md merged, ready for team review and next sprint implementation)

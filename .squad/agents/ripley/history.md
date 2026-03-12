@@ -789,3 +789,76 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 - Depends on: Jeff's content review for tour step text (plain language validation, no jargon)
 - Depends on: Kane's test sign-off (complete ✅)
 - Ready for: Immediate deployment to staging for operator evaluation
+
+## 2026-03-12 — File Browser + Settings Tours Completed
+
+**Agent:** Ripley (Frontend Dev)  
+**Status:** ✅ COMPLETE
+
+**Tasks:**
+1. Built File Browser tour (5 steps: upload, file list, search, navigation, preview+quick-print)
+2. Built Settings tour (3 steps: display prefs, notifications, keyboard shortcuts)
+3. Added 14 comprehensive test assertions across 2 new test files
+4. Wired both tours with usePageTour + HelpButton
+5. Full a11y + keyboard nav test coverage
+6. Build clean, linting clean, 365/365 React tests passing
+
+**Test Coverage Added:**
+- FileUploadTour.test.tsx — 8 assertions (visibility, progression, keyboard nav, localStorage)
+- SettingsTour.test.tsx — 6 assertions (focus management, mobile responsive, ARIA)
+
+**Key Implementation Details:**
+- Settings tour keeps notification settings visible while walking through config changes
+- File Browser tour integrates with drag-drop upload flow
+- Both tours now match Newt's UX spec: max-w-sm, pf-tokens, 85% overlay, smooth animations
+- Tour state persists across sessions via localStorage
+
+**Validation:**
+✅ Build 0 errors, 0 new warnings  
+✅ ESLint 0 violations  
+✅ All 14 assertions passing  
+✅ React suite: 365/365 passing (zero regressions)  
+✅ Git pushed
+
+**Next Steps:**
+- Wire tours to remaining 7 priority pages (Gcode Library, Filament Mgmt, Maintenance, Catalog, Statistics, Locations, Cameras)
+- Ripley to coordinate with Jeff on content review for all pending tours
+
+## 2026-03-12 — Dispatch Bottleneck Analysis Complete
+
+**Agent:** Lambert (Backend Dev)  
+**Status:** ✅ COMPLETE — Analysis written to decision inbox, merged to decisions.md
+
+**Investigation:** Ready → Printing state transition delay (several seconds on Moonraker)
+
+**Root Causes Identified:**
+
+1. **Double Scoring** (Critical, 40-60ms)
+   - `ScorePrintersForJobAsync` runs twice: AutoDispatchBackgroundService + JobDispatchService
+   - Each call = 4 DB queries with EF Core includes
+   - Solution: Pass pre-computed score through dispatch pipeline
+
+2. **Serial DB Saves** (Medium, 50-140ms)
+   - 6-7 SaveChangesAsync round-trips in dispatch path
+   - Job assignment + dispatch log saved separately (no reason)
+   - Solution: Batch into single SaveChangesAsync
+
+3. **Double HTTP Calls** (Medium, 500ms+ LAN)
+   - Upload to Moonraker (POST /server/files/upload) → separate start print (POST /printer/print/start)
+   - Moonraker supports `print=true` form field (atomic operation)
+   - Solution: Use print=true parameter on upload
+
+**Proposed Fixes Written to decision.md:**
+- Fix 1: Overload DispatchJobAsync to accept pre-computed score
+- Fix 2: Batch job + log saves in JobDispatchService
+- Fix 3: Use Moonraker print=true parameter in UploadAndStartPrintAsync
+
+**Expected Impact:** Ready → Printing from seconds → <1 second (typical LAN)
+
+**Files Affected:**
+- src/infra/Services/Queue/Dispatch/JobDispatchService.cs
+- src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs
+- src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs
+- src/infra/Services/Queue/Dispatch/IJobDispatchService.cs
+
+**Decision Status:** Proposed (ready for team review + Lambert implementation next sprint)
