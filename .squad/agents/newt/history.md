@@ -115,3 +115,16 @@
 - **Files changed:** 30
 - **Validation:** All tests pass, design tokens applied consistently, both beads closed
 - **Branch:** `feature/nav-headers-and-loading-states`
+
+### Help System UX Design (2026-03-12)
+- **Deliverable:** Comprehensive UX spec for operator help system (`.squad/decisions/inbox/newt-help-ux-design.md`)
+- **Hybrid approach:** Guided tours + contextual help + help panel (slide-over)
+- **Design decisions:**
+  - Tours: Spotlight + popover pattern, 85% overlay opacity, `pf-accent` highlight glow, dot step indicators
+  - Help panel: Slide-over from right (not sidebar nav), 320-384px width, context-aware "This Page" section
+  - Contextual help: Tooltip for 1-2 sentences, popover for 3+, "Learn more" links to full docs
+  - First-run: Non-blocking banner prompt, per-page localStorage tracking, "Reset tours" in Settings
+- **Component architecture:** TourProvider, TourPopover, TourSpotlight, HelpPanel, HelpPopover, FirstRunBanner
+- **Key styling:** All components use existing `pf-*` tokens (bg-pf-bg-1, text-pf-text-secondary, border-pf-border, etc.)
+- **Accessibility:** Full keyboard nav (Tab/Enter/Escape/←→), ARIA dialog/modal, `prefers-reduced-motion` support
+- **Industrial constraints addressed:** Dark-first, glove-friendly targets, fast/scannable content, non-intrusive prompts

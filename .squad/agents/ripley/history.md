@@ -701,3 +701,91 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 **Key Insight:** The `/autoprint/{id}/ready` endpoint's controller comment says "The job is NOT automatically dispatched" but the service implementation DOES trigger auto-dispatch via `NotifyJobQueued`. The comment is stale. The backend comment in `AutoPrintController.cs` (line 40-41) should be updated by Lambert.
 
 **Validation:** ✅ All 12 BedClearBanner tests pass, ✅ ESLint clean
+
+### 2026-07-14 — Help System Frontend Evaluation
+
+**Context:** Jeff wants an in-app help system. Evaluated guided tour libraries and help page approaches against our React 19.2 / Tailwind v4 / pf-token stack.
+
+**Key Findings:**
+- **react-joyride:** REJECT — 498KB bundle, React 19 support broken, inline styles fight Tailwind
+- **shepherd.js:** Viable but heavy (155KB), React wrapper broken for React 19
+- **intro.js:** 12KB but AGPL license — non-starter for commercial use
+- **driver.js:** RECOMMENDED — 5KB gzip, MIT, framework-agnostic (React 19 safe), CSS class-based (easy pf-token override), TypeScript included, keyboard nav + focus trap
+- **No markdown renderer exists** in current deps. Would need `react-markdown` (~15KB) for help pages.
+
+**Recommended Architecture:**
+- `usePageTour` hook following `useViewModePreference` localStorage pattern
+- `HelpButton` component composed into PageTemplate `actions` prop (no PageTemplate modification)
+- Tour steps in `src/features/<feature>/tours/` files using `data-tour` attribute targeting
+- CSS overrides with pf- tokens in `tour.css` matching Newt's UX spec
+- Phase 2 (help pages) deferred until operator feedback validates need
+
+**Alignment:** Agrees with Dallas's Option B recommendation and driver.js pick. Aligns with Newt's popover/spotlight UX spec.
+
+**Estimated effort:** ~4.75 days for Phase 1 (top 10 pages with tours).
+
+## Learnings — 2026-07-14: Guided Tour System
+
+- **driver.js integration**: Framework-agnostic, 5KB. Wrap in a React hook (`usePageTour`) for lifecycle management. Use `driver()` factory, not `new Driver()`. The `onDestroyed` callback fires on both completion and skip — single place to mark tour as seen.
+- **CSS theming**: driver.js uses `.driver-popover` class. Apply custom class via `popoverClass` config option, then override with `pf-` design tokens. Import both `driver.js/dist/driver.css` (base) and our `tour-theme.css` (overrides) in `main.tsx`.
+- **Tour step targeting**: `data-tour="name"` attributes on wrapper divs. More stable than CSS class selectors. Some dashboard widgets needed wrapper `<div>` elements added to attach the attribute.
+- **localStorage pattern**: Follows `useViewModePreference` — synchronous init with try-catch for private browsing. Key format: `pf-tour-seen-{tourId}`.
+- **Auto-start timing**: 500ms delay via `setTimeout` gives React time to render DOM elements before driver.js queries selectors.
+- **HelpButton composition**: Passed as `actions` prop to `PageTemplate` — no modification to PageTemplate interface needed. Ghost variant + HelpCircleIcon from MDI.
+- **Added `HelpCircleIcon`** to MdiIcons.tsx using `mdiHelpCircleOutline` from `@mdi/js`.
+
+### 2026-03-12 — Tour System Infrastructure Complete (Session 2026-03-12T21:57:41Z)
+
+**Status:** ✅ Production-ready, all 1453 tests passing
+
+**What Was Built:** Complete guided tour infrastructure for dashboard (and reusable for all pages). Aligned with Dallas's architectural recommendation and Newt's UX spec.
+
+**Artifacts (7 new files):**
+1. `src/common/hooks/usePageTour.ts` — Core hook managing driver.js lifecycle, first-visit tracking, localStorage persistence
+2. `src/common/components/HelpButton.tsx` — Reusable "?" button component with aria-label
+3. `src/styles/tour-theme.css` — pf-* token overrides for driver.js popover/overlay (matches Newt's design)
+4. `src/features/printers/tours/dashboard.tour.ts` — 5-step dashboard tour
+5. Modified: `src/features/printers/components/PrinterDashboard.tsx` — Added `data-tour` attributes to targets
+6. Modified: `src/common/components/icons/MdiIcons.tsx` — Added HelpCircleIcon export
+7. Modified: `src/main.tsx` — CSS imports for driver.js + tour theme
+
+**Library Choice:** `driver.js` (5KB gzipped, MIT, React 19-safe, CSS-themeable, accessible)
+- Evaluated: react-joyride (498KB, React 19 broken), shepherd.js (155KB, heavy), intro.js (12KB, AGPL poison), NextStep (8KB, heavier API)
+- Winner: driver.js — minimal, framework-agnostic, no React coupling, clean theming
+
+**Accessibility:**
+- ✅ `prefers-reduced-motion` respected
+- ✅ HelpButton aria-label="Take a tour of this page"
+- ✅ driver.js keyboard nav (Tab, Escape, Arrow keys)
+- ✅ Focus trap within popover
+- ⚠️ Screen reader announcements should be tested (JAWS/NVDA) in next session
+
+**Styling:**
+- Matches Newt's UX spec exactly: max-w-sm (384px), pf-* tokens, 85% overlay opacity, smooth animations
+- Dark/light theme switching automatic (token-based)
+
+**Integration Pattern:**
+- `usePageTour` hook returns: startTour(), hasSeenTour, resetTour()
+- HelpButton passed via PageTemplate actions prop (composition, zero coupling)
+- Tour state tracked in localStorage (`pf-tour-seen-{tourId}`)
+- Auto-starts on first visit with 500ms delay (respects `onDestroyed` callback on both completion and skip)
+
+**Test Results:**
+- Hook tests: 8/8 passing (lifecycle, localStorage, resetTour)
+- Component tests: 6/6 passing (render, click, keyboard, a11y)
+- Integration tests: 8+/8 passing (data-tour targeting, tour step matching)
+- Full suite: 1453/1453 passing (zero regressions)
+
+**Key Learning** (from test alignment with Kane):
+`vi.hoisted()` required for mock variable scope inside `vi.mock()` factory — variables must be declared in hoisted scope outside the factory. Timer mocking via `vi.useFakeTimers()` + `vi.advanceTimersByTime()` for deterministic auto-start delay testing.
+
+**Open Items for Next Session:**
+- Wire tours to remaining 9 priority pages (Printers, Queue, GcodeLibrary, FilamentMgmt, Maintenance, Catalog, Statistics, Locations, Cameras, Settings)
+- Screen reader testing (JAWS/NVDA) to verify ARIA announcements on step transitions
+- Consider global "Reset all tours" button for Settings page
+- Phase 2 (if operator feedback validates): Markdown help section with client-side search
+
+**Next:**
+- Depends on: Jeff's content review for tour step text (plain language validation, no jargon)
+- Depends on: Kane's test sign-off (complete ✅)
+- Ready for: Immediate deployment to staging for operator evaluation

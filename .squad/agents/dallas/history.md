@@ -324,3 +324,29 @@ Architected 4 parallel analytics features based on competitive analysis:
 - QuestPDF 2025.1.0 + CsvHelper 33.0.1 for export capabilities
 
 **Outcome:** All 4 features implemented, tested, and ready for production.
+
+### Help System Architecture Decision — 2026-07-14
+
+**Request:** Jeff asked for in-app help — wiki pages, guided tours, or both.
+
+**Analysis:** Surveyed all 40+ pages across 25 feature modules. No existing help infrastructure. Evaluated three options: in-app wiki (Option A), guided tours (Option B), hybrid (Option C).
+
+**Decision:** Recommended Option B (guided tours) via `driver.js` library, phased toward Option C only if operators validate the need for reference docs.
+
+**Key reasoning:**
+- Operators are hardware people — they learn by doing, not reading docs
+- Tours require 5x less content than wiki articles (~8 steps vs ~500 words per page)
+- Tour steps co-locate with page components — maintenance stays close to code
+- No backend changes, no new API, no database — pure frontend feature
+- `driver.js` chosen over `react-joyride` for smaller footprint (15KB vs 45KB) and framework-agnostic design (safer with React 19)
+
+**Architecture:**
+- `usePageTour` hook for tour state + first-visit tracking (localStorage)
+- `HelpButton` component for re-launching tours
+- `data-tour` attributes on page elements (stable selectors)
+- Tour definitions co-located in `features/<feature>/tours/` directories
+- Priority: top 10 pages by operator impact
+
+**Estimate:** ~5 days for Phase 1 (infrastructure + 10 pages). Assigned to Ripley.
+
+**Document:** `.squad/decisions/inbox/dallas-help-system-approach.md`
