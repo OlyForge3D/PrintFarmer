@@ -4,7 +4,8 @@ import {
   DocumentIcon, 
   ArrowDownTrayIcon, 
   TrashIcon,
-  TagIcon
+  TagIcon,
+  QueueListIcon
 } from '@heroicons/react/24/outline';
 import { 
   BeakerIcon,
@@ -198,7 +199,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           {file.isDirectory ? (
             <>
               <Button
@@ -215,7 +216,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 disabled={isDeleting}
                 variant="danger"
                 size="sm"
-                className="px-2"
+                className="flex-1"
                 title="Delete Folder"
               >
                 <TrashIcon className="w-4 h-4" />
@@ -238,7 +239,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 disabled={isDeleting}
                 variant="secondary"
                 size="sm"
-                className="px-2"
+                className="flex-1"
                 title="Tag this file"
               >
                 <TagIcon className="w-4 h-4" />
@@ -251,14 +252,14 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 className="flex-1"
                 title="Queue for Print"
               >
-                Queue
+                <QueueListIcon className="w-4 h-4" />
               </Button>
               <Button
                 onClick={() => onDelete?.()}
                 disabled={isDeleting}
                 variant="danger"
                 size="sm"
-                className="px-2"
+                className="flex-1"
                 title="Delete File"
               >
                 <TrashIcon className="w-4 h-4" />
