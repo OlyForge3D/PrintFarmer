@@ -657,3 +657,23 @@ Moonraker uses WebSocket real-time updates (not polling), so state changes are p
 **Expected Combined Impact:** Ready → Printing transition from several seconds → under 1 second (typical G-code on LAN)
 
 **Decision Status:** Proposed (decision.md merged, ready for team review and next sprint implementation)
+
+### Ready → Printing Dispatch Performance Fix (2026-07-22)
+
+**Three-fix optimization to reduce Ready → Printing transition latency:**
+
+1. **Eliminated redundant scoring (Fix 1 — BIGGEST WIN):** Added `DispatchJobAsync(jobId, printerId, userId, preComputedScore, ct)` overload to `IJobDispatchService`. AutoDispatchBackgroundService already scores printers to find the best match — now passes that score through instead of re-scoring. Removed 4 DB queries + EF Core includes per dispatch.
+
+2. **Batched SaveChangesAsync calls (Fix 2):** In `JobDispatchService.DispatchJobCoreAsync`, combined job assignment + dispatch log creation into a single `SaveChangesAsync` (was 2 separate saves). In `AutoDispatchBackgroundService`, combined DispatchMode update + AutoPrintState reset into a single save (was 2 separate saves). Net reduction: 3 DB round-trips eliminated.
+
+3. **Single Moonraker upload+start call (Fix 3):** `UploadAndStartPrintAsync` now uses `UploadGcodeAsync(baseUrl, fileName, stream, print: true)` — Moonraker's `print=true` form parameter starts printing immediately after upload in a single HTTP call. Eliminated the separate `StartPrintAsync` HTTP round-trip. Upload-only path preserved via `UploadGcodeAsync(baseUrl, fileName, stream)` overload.
+
+**Files changed:**
+- `src/infra/Services/Queue/Dispatch/IJobDispatchService.cs` — new 5-param overload
+- `src/infra/Services/Queue/Dispatch/JobDispatchService.cs` — extracted `DispatchJobCoreAsync`, batched saves
+- `src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs` — passes pre-computed score, batched post-dispatch saves
+- `src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs` — `UploadGcodeAsync` gains `print` param, `UploadAndStartPrintAsync` uses single call
+- `src/tests/.../AutoDispatchBackgroundServiceTests.cs` — updated mocks for 5-param overload
+- `src/tests/.../AutoDispatchConcurrencyTests.cs` — updated mocks for 5-param overload
+
+**Build:** 0 errors, 2 pre-existing warnings | **Tests:** 1407 API pass (0 fail), 448 slicer pass (5 transient flaky on Pi)

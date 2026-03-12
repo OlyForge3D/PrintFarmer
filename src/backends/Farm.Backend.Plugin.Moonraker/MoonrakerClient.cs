@@ -972,6 +972,13 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
 
     // File upload and management methods
     public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, CancellationToken ct = default)
+        => await UploadGcodeAsync(baseUrl, fileName, fileContent, print: false, ct);
+
+    /// <summary>
+    /// Uploads a G-code file to the Moonraker printer, optionally starting the print immediately
+    /// via the <c>print=true</c> form parameter. Using this avoids a second HTTP round-trip.
+    /// </summary>
+    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, bool print, CancellationToken ct = default)
     {
         try
         {
@@ -979,13 +986,18 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             Uri uri = new(baseUri, "server/files/upload");
 
             long streamLength = fileContent.CanSeek ? fileContent.Length : -1;
-            _logger.LogInformation("[Moonraker] Uploading G-code file {FileName} to {Uri}, stream length: {StreamLength}", fileName, uri, streamLength);
+            _logger.LogInformation("[Moonraker] Uploading G-code file {FileName} to {Uri}, stream length: {StreamLength}, print: {Print}", fileName, uri, streamLength, print);
 
             using MultipartFormDataContent formContent = new();
             using StreamContent streamContent = new(fileContent);
             streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", fileName);
             formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
+
+            if (print)
+            {
+                formContent.Add(new StringContent("true"), "print");
+            }
 
             // IMPORTANT: don't use an absolute time limit for uploads here.
             // We rely on caller cancellation and HttpClient is configured with an infinite Timeout.
@@ -998,7 +1010,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             }
             else
             {
-                _logger.LogInformation("[Moonraker] Upload succeeded for {FileName}", fileName);
+                _logger.LogInformation("[Moonraker] Upload succeeded for {FileName}{PrintSuffix}", fileName, print ? " (print started)" : string.Empty);
             }
 
             return resp.IsSuccessStatusCode;
@@ -2592,25 +2604,16 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     {
         progress?.Report(UploadAndPrintStage.Uploading);
 
-        bool uploaded = await UploadGcodeAsync(baseUrl, fileName, fileContent, ct);
-        if (!uploaded)
+        // Single HTTP call: upload with print=true so Moonraker starts printing immediately
+        bool success = await UploadGcodeAsync(baseUrl, fileName, fileContent, print: true, ct);
+        if (!success)
         {
-            _logger.LogWarning("[Moonraker] UploadAndStartPrint: upload failed for {FileName}", fileName);
+            _logger.LogWarning("[Moonraker] UploadAndStartPrint: upload+print failed for {FileName}", fileName);
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload {fileName} to printer");
+            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload and start print of {fileName}");
         }
 
-        _logger.LogInformation("[Moonraker] UploadAndStartPrint: upload succeeded for {FileName}, starting print", fileName);
-        progress?.Report(UploadAndPrintStage.StartingPrint);
-
-        bool started = await StartPrintAsync(baseUrl, fileName, ct);
-        if (!started)
-        {
-            _logger.LogWarning("[Moonraker] UploadAndStartPrint: start print failed for {FileName} after successful upload", fileName);
-            progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of {fileName} after successful upload");
-        }
-
+        _logger.LogInformation("[Moonraker] UploadAndStartPrint: upload+print succeeded for {FileName} in single call", fileName);
         progress?.Report(UploadAndPrintStage.Completed);
         return UploadAndPrintResult.Ok();
     }

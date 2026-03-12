@@ -274,27 +274,25 @@ public sealed class AutoDispatchBackgroundService(
         try
         {
             IJobDispatchService dispatchService = sp.GetRequiredService<IJobDispatchService>();
-            await dispatchService.DispatchJobAsync(bestJob.Id, printerId, "system:auto-dispatch", ct);
+            await dispatchService.DispatchJobAsync(bestJob.Id, printerId, "system:auto-dispatch", bestMatch, ct);
 
-            // Update the dispatch mode to Auto on the job
+            // Batch the post-dispatch updates into a single save
             PrintJob? jobToUpdate = await db.PrintJobs.FindAsync([bestJob.Id], ct);
             if (jobToUpdate is not null)
             {
                 jobToUpdate.DispatchMode = (int)DispatchMode.Auto;
-                await db.SaveChangesAsync(ct);
             }
 
-            // Reset auto-print state after successful dispatch so the gate
-            // re-engages for the next queued job after this print completes.
             if (printer.AutoPrintEnabled)
             {
                 Printer? printerToUpdate = await db.Printers.FindAsync([printerId], ct);
                 if (printerToUpdate is not null)
                 {
                     printerToUpdate.AutoPrintState = AutoPrintState.None;
-                    await db.SaveChangesAsync(ct);
                 }
             }
+
+            await db.SaveChangesAsync(ct);
 
             logger.LogInformation(
                 "[AutoDispatch] Dispatched job {JobId} ({JobName}) → printer {PrinterName} (score: {Score:F1})",
