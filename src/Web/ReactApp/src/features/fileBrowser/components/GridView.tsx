@@ -9,6 +9,7 @@ interface GridViewProps {
   onSelectAll: () => void;
   renderItemActions?: (file: FileItem) => ReactNode;
   renderMetadata?: (file: FileItem) => ReactNode;
+  renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => ReactNode;
   isBusy?: boolean;
 }
 
@@ -27,6 +28,7 @@ export const GridView = ({
   onSelectAll,
   renderItemActions,
   renderMetadata,
+  renderCard,
   isBusy,
 }: GridViewProps) => {
   const isAllSelected = selectedIds.length > 0 && selectedIds.length === files.length;
@@ -64,6 +66,15 @@ export const GridView = ({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {files.map((file) => {
               const isSelected = selectedIds.includes(file.id);
+
+              if (renderCard) {
+                return (
+                  <div key={file.id} role="group" aria-label={file.fileName}>
+                    {renderCard(file, isSelected, () => onToggle(file.id))}
+                  </div>
+                );
+              }
+
               const fileExtension = file.fileName.split('.').pop()?.toUpperCase() || 'FILE';
               return (
                 <div

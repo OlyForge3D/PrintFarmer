@@ -1,6 +1,7 @@
 import React from 'react';
 import { FolderIcon, DocumentIcon, TrashIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { Button, Checkbox } from '@/common/components/ui';
+import { NozzleIcon, BedIcon } from '@/common/components/icons/MdiIcons';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { GcodeFile } from '@/types/api';
 
@@ -80,6 +81,18 @@ export const GcodeListView: React.FC<GcodeListViewProps> = ({
             <th className="px-4 py-3 text-left font-semibold text-pf-text-primary w-24">Size</th>
             <th className="px-4 py-3 text-left font-semibold text-pf-text-primary w-24">Nozzle</th>
             <th className="px-4 py-3 text-left font-semibold text-pf-text-primary w-32">Material</th>
+            <th className="px-4 py-3 text-left font-semibold text-pf-text-primary w-20">
+              <span className="flex items-center gap-1">
+                <NozzleIcon className="w-3.5 h-3.5 text-pf-error" isOn={false} />
+                Hotend
+              </span>
+            </th>
+            <th className="px-4 py-3 text-left font-semibold text-pf-text-primary w-20">
+              <span className="flex items-center gap-1">
+                <BedIcon className="w-3.5 h-3.5 text-pf-accent" isOn={false} />
+                Bed
+              </span>
+            </th>
             <th className="px-4 py-3 text-left font-semibold text-pf-text-primary w-32">Printer Model</th>
             <th className="px-4 py-3 text-left font-semibold text-pf-text-primary w-40">Modified</th>
             <th className="px-4 py-3 text-right font-semibold text-pf-text-primary">Actions</th>
@@ -142,6 +155,22 @@ export const GcodeListView: React.FC<GcodeListViewProps> = ({
               </td>
               <td className="px-4 py-3 text-pf-text-secondary text-xs">
                 {file.isDirectory ? '—' : file.extractedMaterial || '—'}
+              </td>
+              <td className="px-4 py-3 text-pf-text-secondary text-xs">
+                {file.isDirectory ? '—' : file.extractedHotendTemp ? (
+                  <span className="flex items-center gap-1">
+                    <NozzleIcon className="w-3 h-3 text-pf-error" isOn={false} />
+                    {Math.round(file.extractedHotendTemp)}°C
+                  </span>
+                ) : '—'}
+              </td>
+              <td className="px-4 py-3 text-pf-text-secondary text-xs">
+                {file.isDirectory ? '—' : file.extractedBedTemp ? (
+                  <span className="flex items-center gap-1">
+                    <BedIcon className="w-3 h-3 text-pf-accent" isOn={false} />
+                    {Math.round(file.extractedBedTemp)}°C
+                  </span>
+                ) : '—'}
               </td>
               <td className="px-4 py-3 text-pf-text-secondary text-xs">
                 {file.isDirectory ? '—' : file.extractedPrinterModel || file.extractedPrinterModelName || '—'}

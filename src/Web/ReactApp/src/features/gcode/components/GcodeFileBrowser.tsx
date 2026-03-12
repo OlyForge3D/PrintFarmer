@@ -4,10 +4,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
 import { type ColumnDef, type FileItem, type FileQueryState, type GcodeFileItem, type UseFileBrowserConfig } from '@/features/fileBrowser/types';
 import { apiClient } from '@/services/api';
-import { Button } from '@/common/components/ui';
-import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon, PlayIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Checkbox } from '@/common/components/ui';
+import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon, PlayIcon, NozzleIcon, BedIcon } from '@/common/components/icons/MdiIcons';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
+import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
@@ -82,6 +83,34 @@ const gcodeColumns: ColumnDef[] = [
     render: (file) => {
       const nozzle = file.meta?.gcode?.extractedNozzleDiameter;
       return nozzle ? `${nozzle}mm` : '—';
+    },
+  },
+  {
+    key: 'extractedHotendTemp',
+    label: 'Hotend',
+    align: 'right',
+    render: (file) => {
+      const temp = file.meta?.gcode?.extractedHotendTemp;
+      return temp ? (
+        <span className="flex items-center justify-end gap-1">
+          <NozzleIcon className="w-3.5 h-3.5 text-pf-error" isOn={false} />
+          {Math.round(temp)}°C
+        </span>
+      ) : '—';
+    },
+  },
+  {
+    key: 'extractedBedTemp',
+    label: 'Bed',
+    align: 'right',
+    render: (file) => {
+      const temp = file.meta?.gcode?.extractedBedTemp;
+      return temp ? (
+        <span className="flex items-center justify-end gap-1">
+          <BedIcon className="w-3.5 h-3.5 text-pf-accent" isOn={false} />
+          {Math.round(temp)}°C
+        </span>
+      ) : '—';
     },
   },
   {
@@ -318,7 +347,7 @@ export const GcodeFileBrowser = ({
 
   const renderMetadata = useCallback(
     (file: FileItem) => {
-      const gcodeMeta = file.meta?.gcode as { requiredMaterial?: string; extractedMaterial?: string; extractedNozzleDiameter?: number; extractedPrinterModelName?: string } | undefined;
+      const gcodeMeta = file.meta?.gcode as { requiredMaterial?: string; extractedMaterial?: string; extractedNozzleDiameter?: number; extractedPrinterModelName?: string; extractedHotendTemp?: number; extractedBedTemp?: number } | undefined;
       if (!gcodeMeta) return null;
 
       return (
@@ -337,6 +366,16 @@ export const GcodeFileBrowser = ({
               <span className="text-pf-text-primary font-medium">{gcodeMeta.extractedNozzleDiameter}mm</span>
             </div>
           )}
+          {(gcodeMeta.extractedHotendTemp || gcodeMeta.extractedBedTemp) && (
+            <div className="flex justify-between items-center gap-2">
+              <span className="text-pf-text-secondary">Temps:</span>
+              <span className="text-pf-text-primary font-medium">
+                {gcodeMeta.extractedHotendTemp ? `${Math.round(gcodeMeta.extractedHotendTemp)}°` : '—'}
+                {' / '}
+                {gcodeMeta.extractedBedTemp ? `${Math.round(gcodeMeta.extractedBedTemp)}°` : '—'}
+              </span>
+            </div>
+          )}
           {gcodeMeta.extractedPrinterModelName && (
             <div className="flex justify-between items-center gap-2">
               <span className="text-pf-text-secondary">Printer:</span>
@@ -351,6 +390,31 @@ export const GcodeFileBrowser = ({
   
   // Use prop if provided (controlled), otherwise use local state (uncontrolled)
   const currentViewMode = viewMode ?? localViewMode;
+
+  const renderGcodeCard = useCallback(
+    (file: FileItem, isSelected: boolean, onToggle: () => void) => {
+      const gcodeFile = file.meta?.gcode as GcodeFile | undefined;
+      if (!gcodeFile) return null;
+
+      return (
+        <div className={`relative h-full rounded-lg transition-all ${isSelected ? 'ring-2 ring-pf-primary' : ''}`}>
+          <div className="absolute top-2 left-2 z-10">
+            <Checkbox
+              aria-label={`Select ${file.fileName}`}
+              checked={isSelected}
+              onChange={onToggle}
+            />
+          </div>
+          <GcodeFileCard
+            file={gcodeFile}
+            onDownload={() => handleDownload(file)}
+            onDelete={() => handleDeleteClick(file)}
+          />
+        </div>
+      );
+    },
+    [handleDownload, handleDeleteClick],
+  );
   
   // Handle view mode changes
   const handleViewModeChange = useCallback((mode: 'grid' | 'explorer') => {
@@ -677,6 +741,7 @@ export const GcodeFileBrowser = ({
         onViewModeChange={onViewModeChange}
         renderItemActions={renderActions}
         renderMetadata={renderMetadata}
+        renderCard={renderGcodeCard}
       />
       <GcodeUploadModal
         isOpen={showUploadModal}
