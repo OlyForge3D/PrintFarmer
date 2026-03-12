@@ -2460,6 +2460,7 @@ public sealed class MoonrakerSubscriptionService(
                 JsonElement root = doc.RootElement;
 
                 double? remainingWeight = root.TryGetProperty("remaining_weight", out JsonElement weightEl) && weightEl.ValueKind == JsonValueKind.Number ? weightEl.GetDouble() : (double?)null;
+
                 // initial_weight is at root level in Spoolman spool JSON; fallback to filament.weight
                 double? initialWeight = root.TryGetProperty("initial_weight", out JsonElement iwEl) && iwEl.ValueKind == JsonValueKind.Number
                     ? iwEl.GetDouble()
