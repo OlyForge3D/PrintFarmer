@@ -38,7 +38,7 @@ const formatBytes = (bytes: number): string => {
 const EMPTY_VALUE = '---';
 
 const formatTemperature = (temp: number | undefined): string => {
-  if (!temp) return EMPTY_VALUE;
+  if (!temp) return `${EMPTY_VALUE}`;
   return `${temp}°C`;
 };
 
@@ -95,8 +95,8 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 </div>
                 <div className="flex justify-between gap-1">
                   <span>Printer:</span>
-                  <span className="font-medium text-right truncate ml-2" title={file.extractedPrinterModel || ''}>
-                    {file.extractedPrinterModel || EMPTY_VALUE}
+                  <span className="font-medium text-right truncate ml-2" title={file.extractedPrinterModel || file.extractedPrinterModelName || ''}>
+                    {file.extractedPrinterModel || file.extractedPrinterModelName || EMPTY_VALUE}
                   </span>
                 </div>
                 <div className="flex justify-between gap-1">
