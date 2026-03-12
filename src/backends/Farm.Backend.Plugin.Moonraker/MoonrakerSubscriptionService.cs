@@ -21,7 +21,7 @@ public sealed class MoonrakerSubscriptionService(
     IServiceScopeFactory scopeFactory,
     ILogger<MoonrakerSubscriptionService> logger,
     IHttpClientFactory httpClientFactory,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
+    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
 {
     private readonly ILogger<MoonrakerSubscriptionService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
@@ -142,6 +142,71 @@ public sealed class MoonrakerSubscriptionService(
         }
 
         _cts.Dispose();
+    }
+
+    /// <inheritdoc/>
+    public async Task RefreshPrinterStatusAsync(Guid printerId, int delayMs = 750, CancellationToken ct = default)
+    {
+        try
+        {
+            if (delayMs > 0)
+            {
+                await Task.Delay(delayMs, ct);
+            }
+
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            Printer? printer = await unitOfWork.Printers.FindByIdAsync(printerId, ct);
+
+            if (printer is null || printer.Backend != (int)PrinterBackend.Moonraker)
+            {
+                return;
+            }
+
+            IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
+            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.BackendUrl, ct);
+
+            if (compositeStatus is not { IsOnline: true })
+            {
+                return;
+            }
+
+            PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
+
+            PrinterStatusUpdate statusUpdate = new(
+                printerId,
+                compositeStatus.IsOnline,
+                PrinterStateNormalizer.NormalizeState(compositeStatus.State),
+                compositeStatus.Progress,
+                compositeStatus.JobName,
+                compositeStatus.ThumbnailUrl,
+                compositeStatus.CameraStreamUrl,
+                compositeStatus.X,
+                compositeStatus.Y,
+                compositeStatus.Z,
+                compositeStatus.HotendTemp,
+                compositeStatus.BedTemp,
+                compositeStatus.HotendTarget,
+                compositeStatus.BedTarget,
+                null,
+                spoolInfo,
+                FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName));
+
+            await hub!.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
+            _lastHttpPollTimes[printerId] = DateTime.UtcNow;
+
+            _logger.LogInformation(
+                "Post-dispatch immediate refresh for printer {PrinterId}: State={State}",
+                printerId, compositeStatus.State);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Post-dispatch status refresh failed for printer {PrinterId}", printerId);
+        }
     }
 
     /// <summary>

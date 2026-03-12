@@ -26,7 +26,8 @@ public class PrintJobManagementService(
     IHubContext<PrinterHub> hubContext,
     IStoredFileOperationsService fileOperations,
     INotificationService? notificationService = null,
-    IRetryService? retryService = null) : IPrintJobManagementService
+    IRetryService? retryService = null,
+    IPrinterStatusRefreshService? printerStatusRefreshService = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -36,6 +37,7 @@ public class PrintJobManagementService(
     private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
     private readonly INotificationService? _notificationService = notificationService;
     private readonly IRetryService? _retryService = retryService;
+    private readonly IPrinterStatusRefreshService? _printerStatusRefreshService = printerStatusRefreshService;
 
     // ============= QUERY OPERATIONS =============
 
@@ -685,6 +687,14 @@ public class PrintJobManagementService(
             if (job.Status == PrintJobStatus.Printing)
             {
                 await SendJobStartNotificationAsync(job, cancellationToken);
+
+                // Fire-and-forget: query Moonraker for fresh state and broadcast via SignalR.
+                // This eliminates the UI delay when the subscription is in HTTP polling fallback mode.
+                if (_printerStatusRefreshService is not null && job.AssignedPrinterId.HasValue)
+                {
+                    _ = _printerStatusRefreshService.RefreshPrinterStatusAsync(
+                        job.AssignedPrinterId.Value, delayMs: 750, CancellationToken.None);
+                }
             }
 
             return MapToQueuedPrintJobDto(job);
