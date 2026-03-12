@@ -5,7 +5,7 @@ import {
   ArrowDownTrayIcon, 
   TrashIcon,
   TagIcon,
-  QueueListIcon
+  PlayIcon
 } from '@heroicons/react/24/outline';
 import { 
   BeakerIcon,
@@ -35,8 +35,10 @@ const formatBytes = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
+const EMPTY_VALUE = '---';
+
 const formatTemperature = (temp: number | undefined): string => {
-  if (!temp) return 'N/A';
+  if (!temp) return EMPTY_VALUE;
   return `${temp}°C`;
 };
 
@@ -79,104 +81,82 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
             <>
               {/* Label: Value properties grouped at top */}
               <div className="space-y-1 border-t border-pf-border/50 pt-1">
-                {file.fileSize != null && file.fileSize > 0 && (
-                  <div className="flex justify-between gap-1">
-                    <span>Size:</span>
-                    <span className="font-medium text-right">{formatBytes(file.fileSize)}</span>
-                  </div>
-                )}
-                {file.uploadedAt && (
-                  <div className="flex justify-between gap-1">
-                    <span>Modified:</span>
-                    <span className="font-medium text-right">
-                      {new Date(file.uploadedAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                )}
-                {file.extractedPrinterModel && (
-                  <div className="flex justify-between gap-1">
-                    <span>Printer:</span>
-                    <span className="font-medium text-right truncate ml-2" title={file.extractedPrinterModel}>
-                      {file.extractedPrinterModel}
-                    </span>
-                  </div>
-                )}
-                {file.extractedSlicerName && (
-                  <div className="flex justify-between gap-1">
-                    <span>Slicer:</span>
-                    <span className="font-medium text-right truncate ml-2" title={`${file.extractedSlicerName}${file.extractedSlicerVersion ? ` ${file.extractedSlicerVersion}` : ''}`}>
-                      {file.extractedSlicerName}
-                      {file.extractedSlicerVersion && ` ${file.extractedSlicerVersion}`}
-                    </span>
-                  </div>
-                )}
-                {file.extractedPrintTime != null && file.extractedPrintTime > 0 && (
-                  <div className="flex justify-between gap-1">
-                    <span>Print time:</span>
-                    <span className="font-medium text-right">
-                      {formatPrintTimeMinutes(file.extractedPrintTime)}
-                    </span>
-                  </div>
-                )}
+                <div className="flex justify-between gap-1">
+                  <span>Size:</span>
+                  <span className="font-medium text-right">
+                    {file.fileSize != null && file.fileSize > 0 ? formatBytes(file.fileSize) : EMPTY_VALUE}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-1">
+                  <span>Modified:</span>
+                  <span className="font-medium text-right">
+                    {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : EMPTY_VALUE}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-1">
+                  <span>Printer:</span>
+                  <span className="font-medium text-right truncate ml-2" title={file.extractedPrinterModel || ''}>
+                    {file.extractedPrinterModel || EMPTY_VALUE}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-1">
+                  <span>Slicer:</span>
+                  <span className="font-medium text-right truncate ml-2" title={file.extractedSlicerName ? `${file.extractedSlicerName}${file.extractedSlicerVersion ? ` ${file.extractedSlicerVersion}` : ''}` : ''}>
+                    {file.extractedSlicerName
+                      ? `${file.extractedSlicerName}${file.extractedSlicerVersion ? ` ${file.extractedSlicerVersion}` : ''}`
+                      : EMPTY_VALUE}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-1">
+                  <span>Print time:</span>
+                  <span className="font-medium text-right">
+                    {file.extractedPrintTime != null && file.extractedPrintTime > 0
+                      ? formatPrintTimeMinutes(file.extractedPrintTime)
+                      : EMPTY_VALUE}
+                  </span>
+                </div>
               </div>
 
               {/* Icon-only properties at bottom */}
-              {(file.extractedNozzleDiameter || file.extractedMaterial || file.extractedHotendTemp || file.extractedBedTemp) && (
-                <div className="space-y-1 border-t border-pf-border/50 pt-1">
-                  {/* Nozzle & Material row */}
-                  {(file.extractedNozzleDiameter || file.extractedMaterial) && (
-                    <div className="flex items-center gap-2">
-                      {file.extractedNozzleDiameter && (
-                        <div className="flex items-center gap-1 flex-1 min-w-0">
-                          <RectangleStackIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
-                          <span className="truncate" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>
-                            {file.extractedNozzleDiameter}mm
-                          </span>
-                        </div>
-                      )}
-                      {file.extractedMaterial && (
-                        <div className="flex items-center gap-1 flex-1 min-w-0">
-                          <BeakerIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
-                          <span className="truncate" title={`Material: ${file.extractedMaterial}`}>
-                            {file.extractedMaterial}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Hotend & Bed temp row */}
-                  {(file.extractedHotendTemp || file.extractedBedTemp) && (
-                    <div className="flex items-center gap-2">
-                      {file.extractedHotendTemp && (
-                        <div className="flex items-center gap-1 flex-1">
-                          <NozzleIcon className="w-3.5 h-3.5 text-pf-error shrink-0" isOn={false} />
-                          <span title={`Hotend: ${formatTemperature(file.extractedHotendTemp)}`}>
-                            {formatTemperature(file.extractedHotendTemp)}
-                          </span>
-                        </div>
-                      )}
-                      {file.extractedBedTemp && (
-                        <div className="flex items-center gap-1 flex-1">
-                          <BedIcon className="w-3.5 h-3.5 text-pf-accent shrink-0" isOn={false} />
-                          <span title={`Bed: ${formatTemperature(file.extractedBedTemp)}`}>
-                            {formatTemperature(file.extractedBedTemp)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+              <div className="space-y-1 border-t border-pf-border/50 pt-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <RectangleStackIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
+                    <span className="truncate" title={file.extractedNozzleDiameter ? `Nozzle: ${file.extractedNozzleDiameter}mm` : ''}>
+                      {file.extractedNozzleDiameter ? `${file.extractedNozzleDiameter}mm` : EMPTY_VALUE}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <BeakerIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
+                    <span className="truncate" title={file.extractedMaterial ? `Material: ${file.extractedMaterial}` : ''}>
+                      {file.extractedMaterial || EMPTY_VALUE}
+                    </span>
+                  </div>
                 </div>
-              )}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 flex-1">
+                    <NozzleIcon className="w-3.5 h-3.5 text-pf-error shrink-0" isOn={false} />
+                    <span title={`Hotend: ${formatTemperature(file.extractedHotendTemp)}`}>
+                      {formatTemperature(file.extractedHotendTemp)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-1">
+                    <BedIcon className="w-3.5 h-3.5 text-pf-accent shrink-0" isOn={false} />
+                    <span title={`Bed: ${formatTemperature(file.extractedBedTemp)}`}>
+                      {formatTemperature(file.extractedBedTemp)}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </>
           )}
 
           {/* Directory: just show modified date */}
-          {file.isDirectory && file.uploadedAt && (
+          {file.isDirectory && (
             <div className="flex justify-between gap-1 border-t border-pf-border/50 pt-1">
               <span>Modified:</span>
               <span className="font-medium text-right">
-                {new Date(file.uploadedAt).toLocaleDateString()}
+                {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : EMPTY_VALUE}
               </span>
             </div>
           )}
@@ -252,12 +232,12 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 className="flex-1"
                 title="Queue for Print"
               >
-                <QueueListIcon className="w-4 h-4" />
+                <PlayIcon className="w-4 h-4" />
               </Button>
               <Button
                 onClick={() => onDelete?.()}
                 disabled={isDeleting}
-                variant="danger"
+                variant="secondary"
                 size="sm"
                 className="flex-1"
                 title="Delete File"
