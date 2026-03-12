@@ -685,3 +685,19 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 **Validation**: ✅ Lint passes (0 errors), ✅ All tests pass (1432/1444 passing, 12 skipped)
 
 **Commit**: `1ded064c` - "refactor: rename autoPrint to autoDispatch in frontend"
+
+### 2026-03-12 — BedClearBanner Double-Dispatch Race Condition Fix
+
+**Bug:** Clicking "confirm bed is clear" showed a false "failed to dispatch" error toast, even though the print job dispatched successfully and appeared in the queue as "Printing".
+
+**Root Cause:** Classic double-dispatch race condition. The backend's `AutoPrintService.MarkReadyAsync()` (line 241 in `AutoPrintService.cs`) calls `dispatchTrigger.NotifyJobQueued(printerId)`, which triggers `AutoDispatchBackgroundService` to dispatch the job immediately. But the frontend's `BedClearBanner.handleConfirm()` ALSO called `apiClient.dispatchPrintQueueJob(result.nextJob.id)` after the `/ready` response returned. By the time the frontend's second dispatch call hit the API, the background service had already dispatched the job (status = Printing), so the second call failed with a status validation error.
+
+**Fix:** Removed the manual `apiClient.dispatchPrintQueueJob()` call from `BedClearBanner.tsx`. The backend auto-dispatch background service is the single authority for dispatching after bed-clear confirmation. Frontend now just shows the success toast. Also removed the unused `apiClient` import and updated all test assertions to match.
+
+**Files Changed:**
+- `src/features/printers/components/BedClearBanner.tsx` — removed manual dispatch call, removed `apiClient` import
+- `src/features/printers/__tests__/BedClearBanner.test.tsx` — updated test to not expect `dispatchPrintQueueJob` call, removed mock
+
+**Key Insight:** The `/autoprint/{id}/ready` endpoint's controller comment says "The job is NOT automatically dispatched" but the service implementation DOES trigger auto-dispatch via `NotifyJobQueued`. The comment is stale. The backend comment in `AutoPrintController.cs` (line 40-41) should be updated by Lambert.
+
+**Validation:** ✅ All 12 BedClearBanner tests pass, ✅ ESLint clean

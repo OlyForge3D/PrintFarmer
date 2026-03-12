@@ -2,7 +2,6 @@ import React from 'react';
 import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { useConfirmBedClear, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
-import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import type { AutoDispatchStatus } from '@/types/api';
 
@@ -47,13 +46,10 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
         return;
       }
 
-      // Filament check passed — dispatch the job
-      try {
-        await apiClient.dispatchPrintQueueJob(result.nextJob.id);
-        toast.success(`Dispatching "${result.nextJob.name}" to ${printerName}`);
-      } catch {
-        toast.error(`Bed cleared but failed to dispatch "${result.nextJob.name}"`);
-      }
+      // Filament check passed — the backend's auto-dispatch background service
+      // handles dispatching the job (triggered by the /ready endpoint).
+      // We don't dispatch manually here to avoid a double-dispatch race condition.
+      toast.success(`Dispatching "${result.nextJob.name}" to ${printerName}`);
     } catch {
       toast.error('Failed to confirm bed clear');
     }

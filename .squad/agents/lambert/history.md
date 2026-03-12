@@ -538,3 +538,23 @@ Decision document for "Auto-Dispatch Bug — Upload & Print Does Not Auto-Start"
 - **CORS consideration:** In monolith mode, CORS may not be needed (same-origin), but kept for microservices compatibility
 - **File location:** `src/api/Program.cs` (lines 370-408, 633-645)
 - **Tests:** 2041 passed (1593 API + 448 slicer), 0 failures
+
+### Auto-Dispatch Idempotent Fix (Race Condition) — 2026-03-12
+
+**Bug:** "Confirm bed clear" button on CompactPrinterCard showed false "failed to queue" error even though the print dispatched successfully.
+
+**Root Cause:** Race condition between two dispatch paths:
+1. `AutoPrintService.MarkReadyAsync` calls `dispatchTrigger?.NotifyJobQueued(printerId)` (line 241) → triggers `AutoDispatchBackgroundService` which dispatches the job server-side
+2. Frontend `BedClearBanner.handleConfirm` receives the `AutoPrintReadyResult`, then calls `POST /api/job-queue/{id}/dispatch` to dispatch the same job client-side
+3. Auto-dispatch wins the race (server-side, no network round-trip), job status becomes Starting/Printing
+4. Frontend's dispatch call hits `PrintJobManagementService.DispatchJobAsync` validation (line 495): "Only Queued or Assigned jobs can be dispatched" → throws → 400 → false error toast
+
+**Fix:** Made `DispatchJobAsync` idempotent — if the job is already Starting or Printing, return current state as success instead of throwing. This allows both dispatch paths to coexist safely.
+
+**File changed:** `src/api/Services/PrintQueue/PrintJobManagementService.cs` (lines 494-504)
+
+**Key files:**
+- `src/api/Controllers/AutoPrintController.cs` — bed-clear API endpoint (`POST /api/autoprint/{printerId}/ready`)
+- `src/infra/Services/AutoPrint/AutoPrintService.cs` — `MarkReadyAsync` triggers auto-dispatch via `dispatchTrigger`
+- `src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs` — background service that dispatches on idle
+- `src/Web/ReactApp/src/features/printers/components/BedClearBanner.tsx` — frontend bed-clear UI (handleConfirm calls ready then dispatch)

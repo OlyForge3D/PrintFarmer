@@ -491,6 +491,16 @@ public class PrintJobManagementService(
                 throw new InvalidOperationException($"Print job {jobId} not found");
             }
 
+            // Idempotent: if the job is already being dispatched (e.g. by auto-dispatch),
+            // return its current state as success rather than erroring out.
+            if (job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing)
+            {
+                _logger.LogInformation(
+                    "Job {JobId} already in {Status} state — returning current state (idempotent dispatch)",
+                    jobId, job.Status);
+                return MapToQueuedPrintJobDto(job);
+            }
+
             // Validate job is in a dispatchable state
             if (job.Status != PrintJobStatus.Queued && job.Status != PrintJobStatus.Assigned)
             {

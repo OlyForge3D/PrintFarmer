@@ -8,7 +8,6 @@ import type { AutoDispatchStatus } from '@/types/api';
 vi.mock('@/services/api', () => ({
   apiClient: {
     post: vi.fn().mockResolvedValue({ data: {} }),
-    dispatchPrintQueueJob: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -136,9 +135,8 @@ describe('BedClearBanner', () => {
     expect(screen.getByText(/1 job queued/)).toBeInTheDocument();
   });
 
-  it('confirms and dispatches job when filament check passes', async () => {
+  it('confirms bed clear and shows dispatch toast without manual dispatch call', async () => {
     vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultWithJob });
-    vi.mocked(apiClient.dispatchPrintQueueJob).mockResolvedValueOnce({});
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -146,9 +144,6 @@ describe('BedClearBanner', () => {
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
       expect(apiClient.post).toHaveBeenCalledWith('/autoprint/printer-1/ready');
-    });
-    await waitFor(() => {
-      expect(apiClient.dispatchPrintQueueJob).toHaveBeenCalledWith('job-1');
     });
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Dispatching "benchy.gcode" to MK4');
@@ -165,7 +160,6 @@ describe('BedClearBanner', () => {
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Bed clear confirmed for MK4 — no jobs queued');
     });
-    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
   });
 
   it('warns on material mismatch without dispatching', async () => {
@@ -181,7 +175,6 @@ describe('BedClearBanner', () => {
         expect.objectContaining({ duration: 8000 }),
       );
     });
-    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
   });
 
   it('warns on insufficient filament without dispatching', async () => {
@@ -197,7 +190,6 @@ describe('BedClearBanner', () => {
         expect.objectContaining({ duration: 8000 }),
       );
     });
-    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
   });
 
   it('calls skip endpoint when Skip button is clicked', async () => {
