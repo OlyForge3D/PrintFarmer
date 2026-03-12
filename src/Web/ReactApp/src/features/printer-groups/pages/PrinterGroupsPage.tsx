@@ -24,6 +24,13 @@ export function PrinterGroupsPage() {
     staleTime: 30_000,
   });
 
+  const { data: selectedGroupDetail } = useQuery({
+    queryKey: ['printer-groups', selectedGroupId],
+    queryFn: () => apiClient.getPrinterGroup(selectedGroupId!),
+    enabled: !!selectedGroupId,
+    staleTime: 10_000,
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiClient.deletePrinterGroup(id),
     onSuccess: () => {
@@ -78,7 +85,7 @@ export function PrinterGroupsPage() {
           onEdit={handleEdit}
           onDelete={handleDelete}
         />
-        <PrinterGroupModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} editGroup={editGroup} />
+        <PrinterGroupModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} editGroup={editGroup} assignedPrinters={editGroup ? selectedGroupDetail?.printers : undefined} />
         <DeleteConfirmationModal
           isOpen={!!deleteGroup}
           onClose={() => setDeleteGroup(null)}

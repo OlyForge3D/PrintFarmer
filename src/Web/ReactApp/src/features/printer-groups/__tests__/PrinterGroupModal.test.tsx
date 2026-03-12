@@ -19,18 +19,26 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
+vi.mock('@/common/hooks/useApi', () => ({
+  usePrinters: () => ({ data: [], isLoading: false }),
+}));
+
 vi.mock('@/common/components/modals/Modal', () => ({
   Modal: ({ children, isOpen, title, footer }: { children: React.ReactNode; isOpen: boolean; title: string; footer?: React.ReactNode; onClose: () => void; size?: string }) => (
     isOpen ? <div data-testid="modal" data-title={title}>{children}{footer}</div> : null
   ),
 }));
 
+vi.mock('@/common/components/icons/MdiIcons', () => ({
+  SearchIcon: (props: React.SVGAttributes<SVGElement>) => <svg data-testid="search-icon" {...props} />,
+}));
+
 vi.mock('@/common/components/ui', () => ({
-  Button: ({ children, onClick, loading, disabled, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; loading?: boolean }) => (
+  Button: ({ children, onClick, loading, disabled, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; loading?: boolean; iconLeft?: React.ReactNode }) => (
     <button onClick={onClick} disabled={disabled || loading} data-loading={loading} {...rest}>{children}</button>
   ),
-  Input: ({ id, value, onChange, placeholder, invalid, disabled }: React.InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) => (
-    <input id={id} value={value} onChange={onChange} placeholder={placeholder} aria-invalid={invalid} disabled={disabled} />
+  Input: ({ id, value, onChange, placeholder, invalid, disabled, className }: React.InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) => (
+    <input id={id} value={value} onChange={onChange} placeholder={placeholder} aria-invalid={invalid} disabled={disabled} className={className} />
   ),
   Textarea: ({ id, value, onChange, placeholder, rows, disabled }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => (
     <textarea id={id} value={value as string} onChange={onChange} placeholder={placeholder} rows={rows} disabled={disabled} />
@@ -41,6 +49,13 @@ vi.mock('@/common/components/ui', () => ({
       {children}
       {error && <span data-testid="field-error">{error}</span>}
     </div>
+  ),
+  Badge: ({ children }: { children: React.ReactNode; variant?: string; size?: string }) => <span>{children}</span>,
+  Select: ({ children, value, onChange, disabled }: React.SelectHTMLAttributes<HTMLSelectElement> & { containerClassName?: string }) => (
+    <select value={value} onChange={onChange} disabled={disabled}>{children}</select>
+  ),
+  Checkbox: ({ checked, onChange, disabled }: { checked?: boolean; onChange?: () => void; disabled?: boolean }) => (
+    <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
   ),
 }));
 
@@ -89,14 +104,14 @@ describe('PrinterGroupModal', () => {
     expect(screen.getByTestId('modal')).toHaveAttribute('data-title', 'Edit Printer Group');
   });
 
-  it('shows Create button in create mode', () => {
+  it('shows Create Group button in create mode', () => {
     renderModal({ isOpen: true });
-    expect(screen.getByText('Create')).toBeInTheDocument();
+    expect(screen.getByText('Create Group')).toBeInTheDocument();
   });
 
-  it('shows Update button in edit mode', () => {
+  it('shows Save button in edit mode', () => {
     renderModal({ isOpen: true, editGroup });
-    expect(screen.getByText('Update')).toBeInTheDocument();
+    expect(screen.getByText('Save')).toBeInTheDocument();
   });
 
   it('populates form fields in edit mode', () => {
@@ -107,13 +122,13 @@ describe('PrinterGroupModal', () => {
 
   it('shows empty fields in create mode', () => {
     renderModal({ isOpen: true });
-    const nameInput = screen.getByPlaceholderText('Enter group name');
+    const nameInput = screen.getByPlaceholderText('e.g., MK4S Fleet');
     expect(nameInput).toHaveValue('');
   });
 
   it('shows validation error when name is empty on submit', () => {
     renderModal({ isOpen: true });
-    fireEvent.click(screen.getByText('Create'));
+    fireEvent.click(screen.getByText('Create Group'));
     expect(screen.getByTestId('field-error')).toHaveTextContent('Name is required');
   });
 
@@ -121,8 +136,8 @@ describe('PrinterGroupModal', () => {
     mockCreatePrinterGroup.mockResolvedValue({ id: 'new', name: 'New Group', printerCount: 0 });
     renderModal({ isOpen: true });
 
-    fireEvent.change(screen.getByPlaceholderText('Enter group name'), { target: { value: 'New Group' } });
-    fireEvent.click(screen.getByText('Create'));
+    fireEvent.change(screen.getByPlaceholderText('e.g., MK4S Fleet'), { target: { value: 'New Group' } });
+    fireEvent.click(screen.getByText('Create Group'));
 
     await waitFor(() => {
       expect(mockCreatePrinterGroup).toHaveBeenCalledWith({ name: 'New Group', description: undefined });
@@ -133,8 +148,8 @@ describe('PrinterGroupModal', () => {
     mockCreatePrinterGroup.mockResolvedValue({ id: 'new', name: 'New Group', printerCount: 0 });
     renderModal({ isOpen: true });
 
-    fireEvent.change(screen.getByPlaceholderText('Enter group name'), { target: { value: 'New Group' } });
-    fireEvent.click(screen.getByText('Create'));
+    fireEvent.change(screen.getByPlaceholderText('e.g., MK4S Fleet'), { target: { value: 'New Group' } });
+    fireEvent.click(screen.getByText('Create Group'));
 
     await waitFor(() => {
       expect(mockToast.success).toHaveBeenCalledWith('Group "New Group" created');
@@ -146,7 +161,7 @@ describe('PrinterGroupModal', () => {
     renderModal({ isOpen: true, editGroup });
 
     fireEvent.change(screen.getByDisplayValue('Existing Group'), { target: { value: 'Updated Group' } });
-    fireEvent.click(screen.getByText('Update'));
+    fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => {
       expect(mockUpdatePrinterGroup).toHaveBeenCalledWith('g1', { name: 'Updated Group', description: 'Existing description' });
@@ -157,8 +172,8 @@ describe('PrinterGroupModal', () => {
     mockCreatePrinterGroup.mockRejectedValue({ message: 'Server error' });
     renderModal({ isOpen: true });
 
-    fireEvent.change(screen.getByPlaceholderText('Enter group name'), { target: { value: 'Fail Group' } });
-    fireEvent.click(screen.getByText('Create'));
+    fireEvent.change(screen.getByPlaceholderText('e.g., MK4S Fleet'), { target: { value: 'Fail Group' } });
+    fireEvent.click(screen.getByText('Create Group'));
 
     await waitFor(() => {
       expect(mockToast.error).toHaveBeenCalled();
@@ -169,6 +184,11 @@ describe('PrinterGroupModal', () => {
     renderModal({ isOpen: true });
     fireEvent.click(screen.getByText('Cancel'));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('renders search box for printer filtering', () => {
+    renderModal({ isOpen: true });
+    expect(screen.getByPlaceholderText('Search printers...')).toBeInTheDocument();
   });
 
   it('renders name field as required', () => {
