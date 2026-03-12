@@ -677,3 +677,24 @@ Moonraker uses WebSocket real-time updates (not polling), so state changes are p
 - `src/tests/.../AutoDispatchConcurrencyTests.cs` — updated mocks for 5-param overload
 
 **Build:** 0 errors, 2 pre-existing warnings | **Tests:** 1407 API pass (0 fail), 448 slicer pass (5 transient flaky on Pi)
+
+### Post-Dispatch Immediate State Refresh (2026-07-22)
+
+**Problem:** After clicking "confirm bed is clear," the UI could wait up to 10 seconds to show "Printing" state if the Moonraker subscription was in HTTP polling fallback mode (10-second poll interval). WebSocket mode was fine (~200-300ms), but polling fallback created a noticeable lag.
+
+**Solution:** Fire-and-forget HTTP status query to Moonraker after successful dispatch, with 750ms delay to let Klipper transition state.
+
+**Implementation:**
+- Created `IPrinterStatusRefreshService` interface in `src/infra/Services/Printers/` — single method `RefreshPrinterStatusAsync(printerId, delayMs, ct)`
+- Implemented on `MoonrakerSubscriptionService` — reuses existing `GetCompositeStatusAsync` + `GetSpoolInfoAsync` pattern from `TriggerHttpPollingFallbackAsync`, builds `PrinterStatusUpdate`, broadcasts via SignalR hub
+- Registered as singleton forwarding in `MoonrakerBackendPlugin.RegisterAdditionalServices()`
+- Injected as optional parameter into `PrintJobManagementService` constructor
+- After `job.Status == PrintJobStatus.Printing`, fires `_ = _printerStatusRefreshService.RefreshPrinterStatusAsync(...)` (fire-and-forget, uses `CancellationToken.None` to survive request completion)
+
+**Files changed:**
+- `src/infra/Services/Printers/IPrinterStatusRefreshService.cs` (NEW)
+- `src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerSubscriptionService.cs` — added interface impl + `RefreshPrinterStatusAsync` method
+- `src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerBackendPlugin.cs` — DI registration
+- `src/api/Services/PrintQueue/PrintJobManagementService.cs` — optional injection + fire-and-forget call
+
+**Build:** 0 errors, 2 pre-existing warnings | **Tests:** 1604 API pass, 448 slicer pass (0 failures)
