@@ -2460,6 +2460,12 @@ public sealed class MoonrakerSubscriptionService(
                 JsonElement root = doc.RootElement;
 
                 double? remainingWeight = root.TryGetProperty("remaining_weight", out JsonElement weightEl) && weightEl.ValueKind == JsonValueKind.Number ? weightEl.GetDouble() : (double?)null;
+                // initial_weight is at root level in Spoolman spool JSON; fallback to filament.weight
+                double? initialWeight = root.TryGetProperty("initial_weight", out JsonElement iwEl) && iwEl.ValueKind == JsonValueKind.Number
+                    ? iwEl.GetDouble()
+                    : (root.TryGetProperty("filament", out JsonElement filEl2) && filEl2.ValueKind == JsonValueKind.Object
+                        && filEl2.TryGetProperty("weight", out JsonElement fwEl) && fwEl.ValueKind == JsonValueKind.Number
+                        ? fwEl.GetDouble() : (double?)null);
 
                 string? material = null;
                 string? colorHex = null;
@@ -2484,7 +2490,8 @@ public sealed class MoonrakerSubscriptionService(
                     ColorHex: colorHex != null ? $"#{colorHex}" : null,
                     FilamentName: filamentName,
                     Vendor: vendor,
-                    RemainingWeightG: remainingWeight);
+                    RemainingWeightG: remainingWeight,
+                    InitialWeightG: initialWeight);
             }
             catch (Exception parseEx)
             {

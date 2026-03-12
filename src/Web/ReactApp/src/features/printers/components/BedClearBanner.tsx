@@ -83,14 +83,14 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
       role="alert"
       aria-label="Bed clear confirmation required"
     >
-      <p className="text-xs font-medium text-pf-warning mb-2">
+      <p className="text-xs font-medium text-pf-warning mb-0.5">
         Print complete — confirm bed is clear
-        {autoDispatchStatus.queuedJobCount > 0 && (
-          <span className="text-pf-text-secondary font-normal">
-            {' '}({autoDispatchStatus.queuedJobCount} job{autoDispatchStatus.queuedJobCount !== 1 ? 's' : ''} queued)
-          </span>
-        )}
       </p>
+      {autoDispatchStatus.queuedJobCount > 0 && (
+        <p className="text-[10px] text-pf-text-secondary mb-2">
+          {autoDispatchStatus.queuedJobCount} job{autoDispatchStatus.queuedJobCount !== 1 ? 's' : ''} queued
+        </p>
+      )}
       <div className="flex gap-2">
         <Button
           variant="success"
