@@ -28,6 +28,9 @@ import { PrinterBackend } from '@/types/api';
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
 import PrinterBulkControls from '@/features/printers/components/admin/PrinterBulkControls';
+import { usePageTour } from '@/common/hooks/usePageTour';
+import { printersTour } from '@/features/printers/tours/printers.tour';
+import { HelpButton } from '@/common/components/HelpButton';
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -105,6 +108,7 @@ export function PrintersPage() {
   }>({ isOpen: false, printers: [] });
 
   const navigate = useNavigate();
+  const { startTour } = usePageTour({ tourId: 'printers', steps: printersTour });
 
   // Discovery availability state
   const [discoveryAvailable, setDiscoveryAvailable] = useState(false);
@@ -307,6 +311,7 @@ export function PrintersPage() {
       title="Printers"
       subtitle="Monitor and manage your 3D printer farm"
       icon={PrinterIcon}
+      actions={<HelpButton onClick={startTour} />}
     >
       <div className={isCollapsedSidebarOpen ? 'min-w-0 lg:pr-96' : 'min-w-0'}>
         <div className="min-w-0">
@@ -314,7 +319,7 @@ export function PrintersPage() {
           <div className="flex flex-col gap-4 mb-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               {/* Primary Actions (Left) */}
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div data-tour="printers-actions" className="flex flex-col sm:flex-row sm:items-center gap-2">
                 {hasPermission('printers', 'create') && (
                   <AddPrinterButton onSuccess={refetchPrinters} />
                 )}
@@ -334,7 +339,7 @@ export function PrintersPage() {
               </div>
 
               {/* View & Filters (Right) */}
-              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-end gap-3">
+              <div data-tour="printers-filters" className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-end gap-3">
                 {/* State Filter */}
                 <div className="flex items-center gap-2">
                   <label htmlFor="state-filter" className="text-sm text-pf-text-secondary hidden sm:inline">State:</label>
@@ -392,7 +397,7 @@ export function PrintersPage() {
           )}
 
           {/* Content Area */}
-          <div className="space-y-6">
+          <div data-tour="printers-grid" className="space-y-6">
             {(
               (userPrinters.length === 0) ? (
                 <div className="text-center py-12">
@@ -402,14 +407,15 @@ export function PrintersPage() {
                 </div>
               ) : viewMode === 'collapsed' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,18rem)] gap-4 transition-opacity duration-200 min-w-0">
-                  {userPrinters.map((printer) => (
-                    <CompactPrinterCard
-                      key={printer.id}
-                      printer={printer}
-                      backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
-                      onExpand={() => setExpandedPrinterId(printer.id)}
-                      onEdit={() => handleEditPrinter(printer)}
-                    />
+                  {userPrinters.map((printer, index) => (
+                    <div key={printer.id} {...(index === 0 ? { 'data-tour': 'printers-card' } : {})}>
+                      <CompactPrinterCard
+                        printer={printer}
+                        backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
+                        onExpand={() => setExpandedPrinterId(printer.id)}
+                        onEdit={() => handleEditPrinter(printer)}
+                      />
+                    </div>
                   ))}
                 </div>
               ) : viewMode === 'detailed' ? (
