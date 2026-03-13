@@ -470,8 +470,25 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 continue;
             }
 
+            _logger.LogWarning(
+                "[OrphanedJobSync] Evaluating job {JobId} ({JobName}): Status={Status}, ActualStartTime={ActualStartTime}, UpdatedAt={UpdatedAt}, ActiveTime={ActiveTime}, Elapsed={Elapsed}",
+                job.Id,
+                job.Name ?? job.GcodeFile?.Name ?? "Unknown",
+                job.Status,
+                job.ActualStartTime?.ToString("o") ?? "(null)",
+                job.UpdatedAt.ToString("o"),
+                jobActiveTime.ToString("o"),
+                elapsed);
+
             Guid printerId = job.AssignedPrinterId.Value;
             string? currentPrinterState = printerStateLookup(printerId);
+
+            _logger.LogWarning(
+                "[OrphanedJobSync] Printer {PrinterId} cached state='{CachedState}' for job {JobId} (job status={JobStatus})",
+                printerId,
+                currentPrinterState ?? "(null/offline)",
+                job.Id,
+                job.Status);
 
             if (currentPrinterState == null)
             {

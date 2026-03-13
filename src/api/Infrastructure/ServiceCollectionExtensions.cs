@@ -503,9 +503,9 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.ManagedSpoolProviderHelper>();
 
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)
-        var printerStatusCache = new Farm.Infrastructure.Services.Printers.PrinterStatusCache();
-        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(printerStatusCache);
-        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(printerStatusCache);
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.PrinterStatusCache>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
 
         // Register the printer status update receiver (scoped - one per request)
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusUpdateReceiver, Farm.Infrastructure.Services.Printers.PrinterStatusUpdateReceiver>();
