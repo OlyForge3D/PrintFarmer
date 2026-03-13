@@ -35,6 +35,17 @@ import { HelpButton } from '@/common/components/HelpButton';
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint' | 'FlashForge';
+type PrinterSortMode = 'state' | 'name' | 'backend';
+
+/** State priority for sorting: lower number = higher in list */
+function getStateSortPriority(printer: Printer, pendingIds: Set<string>): number {
+  if (pendingIds.has(printer.id)) return 0;       // PendingReady (attention)
+  if (!printer.isOnline) return 4;                 // Offline
+  const state = (printer.state || '').toLowerCase();
+  if (state.includes('printing')) return 1;        // Printing
+  if (state.includes('paused')) return 2;           // Paused
+  return 3;                                         // Idle / other online
+}
 
 // Helper function to get backend name from enum value
 function getBackendName(backend: PrinterBackend | string | number): string {
@@ -143,6 +154,17 @@ export function PrintersPage() {
   // Filter state
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
+  const [sortMode, setSortMode] = useState<PrinterSortMode>(() => {
+    const saved = localStorage.getItem('printerSortMode');
+    if (saved === 'state' || saved === 'name' || saved === 'backend') return saved;
+    return 'state';
+  });
+
+  // Save sort mode preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('printerSortMode', sortMode);
+  }, [sortMode]);
+
   // Tabs removed — admin controls are now inline and permission-gated
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
   const printersById = useMemo(() => {
@@ -169,18 +191,28 @@ export function PrintersPage() {
     if (backendFilter !== 'all') {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
     }
-    // Sort: attention first, then online, then offline
+    // Sort based on selected mode
     filtered.sort((a, b) => {
-      const aAttention = pendingPrinterIds.has(a.id) ? 0 : 1;
-      const bAttention = pendingPrinterIds.has(b.id) ? 0 : 1;
-      if (aAttention !== bAttention) return aAttention - bAttention;
-      const aOnline = a.isOnline ? 0 : 1;
-      const bOnline = b.isOnline ? 0 : 1;
-      if (aOnline !== bOnline) return aOnline - bOnline;
-      return (a.name ?? '').localeCompare(b.name ?? '');
+      if (sortMode === 'state') {
+        const aPriority = getStateSortPriority(a, pendingPrinterIds);
+        const bPriority = getStateSortPriority(b, pendingPrinterIds);
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        return (a.name ?? '').localeCompare(b.name ?? '');
+      }
+      if (sortMode === 'name') {
+        return (a.name ?? '').localeCompare(b.name ?? '');
+      }
+      if (sortMode === 'backend') {
+        const aBackend = getBackendName(a.backend);
+        const bBackend = getBackendName(b.backend);
+        const cmp = aBackend.localeCompare(bBackend);
+        if (cmp !== 0) return cmp;
+        return (a.name ?? '').localeCompare(b.name ?? '');
+      }
+      return 0;
     });
     return filtered;
-  }, [optimisticPrinters, stateFilter, backendFilter, pendingPrinterIds]);
+  }, [optimisticPrinters, stateFilter, backendFilter, sortMode, pendingPrinterIds]);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -374,6 +406,22 @@ export function PrintersPage() {
                     <option value="SDCP">SDCP</option>
                     <option value="OctoPrint">OctoPrint</option>
                     <option value="FlashForge">FlashForge</option>
+                  </Select>
+                </div>
+
+                {/* Sort Order */}
+                <div className="flex items-center gap-2">
+                  <label htmlFor="sort-mode" className="text-sm text-pf-text-secondary hidden sm:inline">Sort:</label>
+                  <Select
+                    id="sort-mode"
+                    value={sortMode}
+                    onChange={e => setSortMode(e.target.value as PrinterSortMode)}
+                    aria-label="Sort printers by"
+                    className="min-w-0"
+                  >
+                    <option value="state">State</option>
+                    <option value="name">Name</option>
+                    <option value="backend">Backend</option>
                   </Select>
                 </div>
 
