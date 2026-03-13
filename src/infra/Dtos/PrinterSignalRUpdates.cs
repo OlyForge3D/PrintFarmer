@@ -36,6 +36,7 @@ public record PrinterHeaterBedUpdate(
 /// <param name="State">Current printer state (e.g., "printing", "idle", "paused").</param>
 /// <param name="Progress">Print progress as percentage (0-100), or null if not printing.</param>
 /// <param name="JobName">Name of the current print job, or null if not printing.</param>
+/// <param name="FileName">Original filename of the G-code file being printed, or null if not printing.</param>
 public record PrinterStateUpdate(
     Guid PrinterId,
     string? State,

@@ -14,6 +14,7 @@ namespace Farm.Infrastructure;
 /// <param name="ModelName">Resolved model name if catalogued.</param>
 /// <param name="Progress">Active job progress percentage (0-100).</param>
 /// <param name="JobName">Current job / file name if printing.</param>
+/// <param name="FileName">Original filename of the G-code file being printed.</param>
 /// <param name="ThumbnailUrl">URL to a job or printer thumbnail (if provided by backend).</param>
 /// <param name="CameraStreamUrl">Live camera stream URL.</param>
 /// <param name="CameraSnapshotUrl">Snapshot image URL.</param>

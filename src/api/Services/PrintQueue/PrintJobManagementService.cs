@@ -640,6 +640,7 @@ public class PrintJobManagementService(
                         }
 
                         job.Status = PrintJobStatus.Printing;
+                        job.ActualStartTime = DateTime.UtcNow;
                         _logger.LogInformation("Print job {JobId} successfully uploaded and started on printer {PrinterId}", jobId, job.AssignedPrinterId);
                     }
                     else
