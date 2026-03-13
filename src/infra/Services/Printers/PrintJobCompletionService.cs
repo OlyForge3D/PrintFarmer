@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoPrint;
+using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -26,6 +27,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IBackendClientFactory? _backendFactory;
     private readonly ISpoolmanService? _spoolmanService;
     private readonly IAutoDispatchTrigger? _autoDispatchTrigger;
+    private readonly IDiagnosticChannelService? _diagnostics;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -84,7 +86,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         IAutoPrintService? autoPrintService = null,
         IBackendClientFactory? backendFactory = null,
         ISpoolmanService? spoolmanService = null,
-        IAutoDispatchTrigger? autoDispatchTrigger = null)
+        IAutoDispatchTrigger? autoDispatchTrigger = null,
+        IDiagnosticChannelService? diagnostics = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -95,6 +98,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _backendFactory = backendFactory;
         _spoolmanService = spoolmanService;
         _autoDispatchTrigger = autoDispatchTrigger;
+        _diagnostics = diagnostics;
     }
 
     /// <summary>
@@ -470,7 +474,10 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 continue;
             }
 
-            _logger.LogWarning(
+            bool verbose = _diagnostics?.IsEnabled(DiagnosticChannelService.Channels.OrphanedJobSync) == true;
+
+            _logger.Log(
+                verbose ? LogLevel.Warning : LogLevel.Debug,
                 "[OrphanedJobSync] Evaluating job {JobId} ({JobName}): Status={Status}, ActualStartTime={ActualStartTime}, UpdatedAt={UpdatedAt}, ActiveTime={ActiveTime}, Elapsed={Elapsed}",
                 job.Id,
                 job.Name ?? job.GcodeFile?.Name ?? "Unknown",
@@ -483,7 +490,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             Guid printerId = job.AssignedPrinterId.Value;
             string? currentPrinterState = printerStateLookup(printerId);
 
-            _logger.LogWarning(
+            _logger.Log(
+                verbose ? LogLevel.Warning : LogLevel.Debug,
                 "[OrphanedJobSync] Printer {PrinterId} cached state='{CachedState}' for job {JobId} (job status={JobStatus})",
                 printerId,
                 currentPrinterState ?? "(null/offline)",

@@ -507,6 +507,9 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
 
+        // Register runtime diagnostic channel service (singleton - toggleable verbose logging per subsystem)
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Diagnostics.IDiagnosticChannelService, Farm.Infrastructure.Services.Diagnostics.DiagnosticChannelService>();
+
         // Register the printer status update receiver (scoped - one per request)
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusUpdateReceiver, Farm.Infrastructure.Services.Printers.PrinterStatusUpdateReceiver>();
 
