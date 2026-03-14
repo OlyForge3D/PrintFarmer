@@ -45,6 +45,7 @@ import { ProfileImportWizardPage } from '@/features/tasks';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
 import { FilesPage } from '@/features/files/pages/FilesPage';
+import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
 import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
@@ -201,7 +202,9 @@ function AuthenticatedAppRoutes() {
         <Route path="printer-groups" element={<ProtectedRoute requiredRole="farm_admin"><PrinterGroupsPage /></ProtectedRoute>} />
         <Route path="printQueue" element={<PrintQueueDashboardPage />} />
         <Route path="printQueue/:tabId" element={<PrintQueueDashboardPage />} />
+        <Route path="files/projects" element={<Navigate to="/projects" replace />} />
         <Route path="files/*" element={<FilesPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
         <Route path="spools" element={<FilamentManagementPage />} />
         <Route path="spools/:tabId" element={<FilamentManagementPage />} />
         <Route path="cameras" element={<CamerasPage />} />

@@ -102,6 +102,7 @@ import {
   mdiTrayArrowUp,
   mdiSwapVertical,
   mdiEject,
+  mdiClipboardListOutline,
 } from '@mdi/js';
 
 interface IconProps {
@@ -2945,6 +2946,22 @@ export function EjectIcon({ className = 'w-4 h-4', ariaLabel = 'Eject' }: Omit<I
       role="img"
     >
       <path fill="currentColor" d={mdiEject} />
+    </svg>
+  );
+}
+
+/**
+ * Clipboard list icon — project management / task tracking
+ */
+export function ClipboardListIcon({ className = 'w-4 h-4', ariaLabel = 'Projects' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiClipboardListOutline} />
     </svg>
   );
 }

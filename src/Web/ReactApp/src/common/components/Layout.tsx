@@ -31,6 +31,7 @@ import {
   ChartIcon,
   ExternalLinkIcon,
   AlertIcon,
+  ClipboardListIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -91,6 +92,12 @@ const navigation: NavigationElement[] = [
     name: 'Files',
     href: '/files',
     icon: FolderOpenIcon,
+    requiredPermission: { resource: 'models', action: 'read' }
+  },
+  {
+    name: 'Projects',
+    href: '/projects',
+    icon: ClipboardListIcon,
     requiredPermission: { resource: 'models', action: 'read' }
   },
   {
