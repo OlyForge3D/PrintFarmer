@@ -347,10 +347,14 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
         {
             // Step 1: Try to resolve using PrinterModelAlias (handles slicer-specific names)
             // This allows "COREONEL" (PrusaSlicer) to map to the same PrinterModel as "Prusa CORE One" (OrcaSlicer)
+            // Case-insensitive comparison: slicer metadata may differ in casing from seed data
+            string extractedLower = extractedModelName.ToLowerInvariant();
+#pragma warning disable CA1862 // Use the 'StringComparison' method overloads to perform case-insensitive string comparisons
             Guid aliasMatch = await _db.PrinterModelAliases
-                .Where(a => a.SlicerModelName == extractedModelName)
+                .Where(a => a.SlicerModelName != null && a.SlicerModelName.ToLower() == extractedLower)
                 .Select(a => a.PrinterModelId)
                 .FirstOrDefaultAsync(ct);
+#pragma warning restore CA1862 // Use the 'StringComparison' method overloads to perform case-insensitive string comparisons
 
             if (aliasMatch != Guid.Empty)
             {

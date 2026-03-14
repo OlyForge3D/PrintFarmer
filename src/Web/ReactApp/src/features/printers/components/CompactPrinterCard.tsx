@@ -85,13 +85,12 @@ export function CompactPrinterCard({
   // Per-printer job queue for "X of Y" indicator
   const { data: printerQueue = [] } = useJobQueue(printer.id);
   const activeQueueJobs = printerQueue.filter(
-    (j) => j.job?.status === 'Queued' || j.job?.status === 'Printing' || j.job?.status === 'Dispatched'
+    (j) => {
+      // Analytics endpoint returns flat objects with status at top level
+      const status = (j as unknown as { status?: string }).status ?? j.job?.status;
+      return status === 'Queued' || status === 'Printing' || status === 'Dispatched';
+    }
   );
-  const queueLabel = activeQueueJobs.length > 1
-    ? `1 of ${activeQueueJobs.length}`
-    : activeQueueJobs.length === 1
-      ? '1 of 1'
-      : undefined;
 
   const handleAutoDispatchToggle = async () => {
     const newEnabled = !(autoDispatchStatus?.autoPrintEnabled ?? false);
@@ -110,6 +109,15 @@ export function CompactPrinterCard({
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
+
+  // Queue label: "1 of 3" when printing with more jobs queued
+  const printingIndex = activeQueueJobs.findIndex(j => {
+    const status = (j as unknown as { status?: string }).status ?? j.job?.status;
+    return status === 'Printing';
+  });
+  const queueLabel = activeQueueJobs.length > 1
+    ? `${(printingIndex >= 0 ? printingIndex + 1 : 1)} of ${activeQueueJobs.length}`
+    : undefined;
 
   const support = getPrinterSupport(backendCapabilities, {
     supportsHistory: printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint,
@@ -130,6 +138,18 @@ export function CompactPrinterCard({
 
   return (
     <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
+      {/* Bed clear banner — overlay on top of card */}
+      {autoDispatchStatus && autoDispatchStatus.state === 'PendingReady' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-black/75">
+          <div className="w-[90%]">
+            <BedClearBanner
+              printerId={printer.id}
+              printerName={printer.name}
+              autoDispatchStatus={autoDispatchStatus}
+            />
+          </div>
+        </div>
+      )}
       {/* Colored header — background tinted by printer state */}
       <div style={headerStyle} className="px-3 pt-3 pb-2 rounded-t-xl">
         {/* Top row: Name + Status Pill */}
@@ -162,38 +182,9 @@ export function CompactPrinterCard({
       <div className="flex px-3 pb-3">
         {/* Left: content area */}
         <div className="flex-1 min-w-0">
-          {/* Auto-dispatch icon toggle */}
-          <div className="flex items-center justify-end mb-2 mt-2 px-1">
-            <Button
-              variant="unstyled"
-              onClick={handleAutoDispatchToggle}
-              disabled={setAutoDispatchEnabled.isPending}
-              className={`p-1 rounded transition-colors ${
-                autoDispatchStatus?.autoPrintEnabled
-                  ? 'text-pf-accent bg-pf-accent-bg'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary'
-              } disabled:opacity-50`}
-              aria-label={`Toggle auto-dispatch for ${printer.name}`}
-              aria-pressed={autoDispatchStatus?.autoPrintEnabled ?? false}
-              title={autoDispatchStatus?.autoPrintEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
-            >
-              <Zap className="w-4 h-4" fill={autoDispatchStatus?.autoPrintEnabled ? 'currentColor' : 'none'} />
-            </Button>
-          </div>
-
-          {/* Bed clear confirmation banner */}
-          {autoDispatchStatus && (
-            <div className="mb-2">
-              <BedClearBanner
-                printerId={printer.id}
-                printerName={printer.name}
-                autoDispatchStatus={autoDispatchStatus}
-              />
-            </div>
-          )}
 
           {/* Progress bar — always visible */}
-          <div className="mt-2">
+          <div className="mt-4 mb-3">
             <PrintProgressBar
               progress={printer.progress}
               jobName={printer.fileName ?? printer.jobName}
@@ -288,6 +279,21 @@ export function CompactPrinterCard({
             title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera available' : 'No camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
+          <Button
+            type="button"
+            variant="unstyled"
+            onClick={handleAutoDispatchToggle}
+            disabled={setAutoDispatchEnabled.isPending}
+            className={`h-8 w-8 p-0 rounded transition-colors inline-flex items-center justify-center ${
+              autoDispatchStatus?.autoPrintEnabled
+                ? 'text-pf-accent'
+                : 'text-pf-text-secondary hover:text-pf-text-primary'
+            } disabled:opacity-50`}
+            aria-label={`Toggle auto-dispatch for ${printer.name}`}
+            aria-pressed={autoDispatchStatus?.autoPrintEnabled ?? false}
+            title={autoDispatchStatus?.autoPrintEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
+            iconCenter={<Zap className="w-4 h-4" fill={autoDispatchStatus?.autoPrintEnabled ? 'currentColor' : 'none'} />}
+          />
         </div>
       </div>
 
@@ -305,7 +311,7 @@ export function CompactPrinterCard({
                   : null;
                 const r = 8;
                 const circumference = 2 * Math.PI * r;
-                const offset = percent != null ? circumference * (1 - percent / 100) : 0;
+                const offset = percent != null ? circumference * (1 - percent / 100) : circumference;
                 const ringTooltip = [
                   printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Unknown',
                   printer.spoolInfo.vendor,
@@ -333,7 +339,6 @@ export function CompactPrinterCard({
                       strokeLinecap="round"
                       transform="rotate(-90 10 10)"
                     />
-                    <circle cx="10" cy="10" r="4" fill={color} />
                   </svg>
                 );
               })()}
@@ -350,6 +355,11 @@ export function CompactPrinterCard({
                     : `${Math.round(printer.spoolInfo.remainingWeightG)}g`}
                 </span>
               )}
+              <span
+                className="shrink-0 w-8 h-4 rounded-full border border-white/20"
+                style={{ backgroundColor: printer.spoolInfo.colorHex ?? '#888' }}
+                title={printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Filament color'}
+              />
             </>
           ) : (
             <span className="italic text-pf-text-tertiary">No spool loaded</span>

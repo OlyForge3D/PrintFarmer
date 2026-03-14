@@ -16,6 +16,9 @@ import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
 import { apiClient } from "@/services/api";
 import { printerSignalRService } from "@/services/printer-signalr";
+import { usePageTour } from "@/common/hooks/usePageTour";
+import { printQueueTour } from "@/features/queue/tours/print-queue.tour";
+import { HelpButton } from "@/common/components/HelpButton";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
   QueuedPrintJobWithFileMetaDto,
@@ -113,6 +116,7 @@ export function PrintQueueDashboardPage() {
   const [searchParams] = useSearchParams();
   const { tabId } = useParams<{ tabId?: string }>();
   const navigate = useNavigate();
+  const { startTour } = usePageTour({ tourId: 'print-queue', steps: printQueueTour });
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState<string | null>(null);
@@ -380,6 +384,7 @@ export function PrintQueueDashboardPage() {
     <PageTemplate
       title="Print Queue Dashboard"
       subtitle="View and manage all queued and printing jobs"
+      actions={<HelpButton onClick={startTour} />}
     >
       {displayError && (
         <Alert type="error" className="mb-4">
@@ -389,7 +394,7 @@ export function PrintQueueDashboardPage() {
 
       {/* Stats Summary */}
       {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div data-tour="queue-stats" className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
             <div className="text-pf-text-secondary text-sm font-medium">Queued Jobs</div>
             <div className="text-3xl font-bold text-pf-info">
@@ -423,18 +428,20 @@ export function PrintQueueDashboardPage() {
 
       {/* Tabbed Interface */}
       <Tabs activeTab={activeTab} onTabChange={setActiveTab}>
-        <Tabs.List>
-          <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
-          <Tabs.Tab id="history">History</Tabs.Tab>
-          <Tabs.Tab id="dispatch-log">Dispatch Log</Tabs.Tab>
-        </Tabs.List>
+        <div data-tour="queue-tabs">
+          <Tabs.List>
+            <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
+            <Tabs.Tab id="history">History</Tabs.Tab>
+            <Tabs.Tab id="dispatch-log">Dispatch Log</Tabs.Tab>
+          </Tabs.List>
+        </div>
 
         <Tabs.Panels>
           {/* Tab 1: Queue */}
           <Tabs.Panel id="print-queue">
             <div className="flex flex-col h-full w-full min-h-0">
               {/* Filters + Auto-dispatch global toggle */}
-              <div className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
+              <div data-tour="queue-filters" className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div className="flex-1 min-w-0">
                     <TableFiltersBar
@@ -450,7 +457,7 @@ export function PrintQueueDashboardPage() {
               </div>
 
               {/* Jobs Table */}
-              <div className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
+              <div data-tour="queue-jobs-table" className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
                 <QueueJobsTable
                   jobs={jobs}
                   isLoading={loading}

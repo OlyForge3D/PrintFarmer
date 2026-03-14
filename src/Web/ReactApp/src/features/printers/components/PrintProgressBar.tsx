@@ -74,7 +74,7 @@ export function PrintProgressBar({
       </div>
       {/* Temperature readouts */}
       {showTemperatures && isOnline && (
-        <div className="grid grid-cols-2 gap-3 mt-1.5 text-xs text-pf-text-secondary">
+        <div className="grid grid-cols-2 gap-3 mt-3 text-xs text-pf-text-secondary">
           <span className="flex items-center gap-1" title="Hotend temperature">
             <NozzleIcon className={`w-3.5 h-3.5 ${hotendTemp != null ? 'text-pf-error' : ''}`} isOn={(hotendTemp ?? 0) > 50} />
             <span>{hotendTemp != null ? `${Math.round(hotendTemp)}°` : '--°'}</span>

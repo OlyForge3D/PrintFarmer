@@ -685,3 +685,242 @@ Implemented analytics dashboard and supporting components per Dallas's architect
 **Validation**: ✅ Lint passes (0 errors), ✅ All tests pass (1432/1444 passing, 12 skipped)
 
 **Commit**: `1ded064c` - "refactor: rename autoPrint to autoDispatch in frontend"
+
+### 2026-03-12 — BedClearBanner Double-Dispatch Race Condition Fix
+
+**Bug:** Clicking "confirm bed is clear" showed a false "failed to dispatch" error toast, even though the print job dispatched successfully and appeared in the queue as "Printing".
+
+**Root Cause:** Classic double-dispatch race condition. The backend's `AutoPrintService.MarkReadyAsync()` (line 241 in `AutoPrintService.cs`) calls `dispatchTrigger.NotifyJobQueued(printerId)`, which triggers `AutoDispatchBackgroundService` to dispatch the job immediately. But the frontend's `BedClearBanner.handleConfirm()` ALSO called `apiClient.dispatchPrintQueueJob(result.nextJob.id)` after the `/ready` response returned. By the time the frontend's second dispatch call hit the API, the background service had already dispatched the job (status = Printing), so the second call failed with a status validation error.
+
+**Fix:** Removed the manual `apiClient.dispatchPrintQueueJob()` call from `BedClearBanner.tsx`. The backend auto-dispatch background service is the single authority for dispatching after bed-clear confirmation. Frontend now just shows the success toast. Also removed the unused `apiClient` import and updated all test assertions to match.
+
+**Files Changed:**
+- `src/features/printers/components/BedClearBanner.tsx` — removed manual dispatch call, removed `apiClient` import
+- `src/features/printers/__tests__/BedClearBanner.test.tsx` — updated test to not expect `dispatchPrintQueueJob` call, removed mock
+
+**Key Insight:** The `/autoprint/{id}/ready` endpoint's controller comment says "The job is NOT automatically dispatched" but the service implementation DOES trigger auto-dispatch via `NotifyJobQueued`. The comment is stale. The backend comment in `AutoPrintController.cs` (line 40-41) should be updated by Lambert.
+
+**Validation:** ✅ All 12 BedClearBanner tests pass, ✅ ESLint clean
+
+### 2026-07-14 — Help System Frontend Evaluation
+
+**Context:** Jeff wants an in-app help system. Evaluated guided tour libraries and help page approaches against our React 19.2 / Tailwind v4 / pf-token stack.
+
+**Key Findings:**
+- **react-joyride:** REJECT — 498KB bundle, React 19 support broken, inline styles fight Tailwind
+- **shepherd.js:** Viable but heavy (155KB), React wrapper broken for React 19
+- **intro.js:** 12KB but AGPL license — non-starter for commercial use
+- **driver.js:** RECOMMENDED — 5KB gzip, MIT, framework-agnostic (React 19 safe), CSS class-based (easy pf-token override), TypeScript included, keyboard nav + focus trap
+- **No markdown renderer exists** in current deps. Would need `react-markdown` (~15KB) for help pages.
+
+**Recommended Architecture:**
+- `usePageTour` hook following `useViewModePreference` localStorage pattern
+- `HelpButton` component composed into PageTemplate `actions` prop (no PageTemplate modification)
+- Tour steps in `src/features/<feature>/tours/` files using `data-tour` attribute targeting
+- CSS overrides with pf- tokens in `tour.css` matching Newt's UX spec
+- Phase 2 (help pages) deferred until operator feedback validates need
+
+**Alignment:** Agrees with Dallas's Option B recommendation and driver.js pick. Aligns with Newt's popover/spotlight UX spec.
+
+**Estimated effort:** ~4.75 days for Phase 1 (top 10 pages with tours).
+
+## Learnings — 2026-07-14: Guided Tour System
+
+- **driver.js integration**: Framework-agnostic, 5KB. Wrap in a React hook (`usePageTour`) for lifecycle management. Use `driver()` factory, not `new Driver()`. The `onDestroyed` callback fires on both completion and skip — single place to mark tour as seen.
+- **CSS theming**: driver.js uses `.driver-popover` class. Apply custom class via `popoverClass` config option, then override with `pf-` design tokens. Import both `driver.js/dist/driver.css` (base) and our `tour-theme.css` (overrides) in `main.tsx`.
+- **Tour step targeting**: `data-tour="name"` attributes on wrapper divs. More stable than CSS class selectors. Some dashboard widgets needed wrapper `<div>` elements added to attach the attribute.
+- **localStorage pattern**: Follows `useViewModePreference` — synchronous init with try-catch for private browsing. Key format: `pf-tour-seen-{tourId}`.
+- **Auto-start timing**: 500ms delay via `setTimeout` gives React time to render DOM elements before driver.js queries selectors.
+- **HelpButton composition**: Passed as `actions` prop to `PageTemplate` — no modification to PageTemplate interface needed. Ghost variant + HelpCircleIcon from MDI.
+- **Added `HelpCircleIcon`** to MdiIcons.tsx using `mdiHelpCircleOutline` from `@mdi/js`.
+
+### 2026-03-12 — Tour System Infrastructure Complete (Session 2026-03-12T21:57:41Z)
+
+**Status:** ✅ Production-ready, all 1453 tests passing
+
+**What Was Built:** Complete guided tour infrastructure for dashboard (and reusable for all pages). Aligned with Dallas's architectural recommendation and Newt's UX spec.
+
+**Artifacts (7 new files):**
+1. `src/common/hooks/usePageTour.ts` — Core hook managing driver.js lifecycle, first-visit tracking, localStorage persistence
+2. `src/common/components/HelpButton.tsx` — Reusable "?" button component with aria-label
+3. `src/styles/tour-theme.css` — pf-* token overrides for driver.js popover/overlay (matches Newt's design)
+4. `src/features/printers/tours/dashboard.tour.ts` — 5-step dashboard tour
+5. Modified: `src/features/printers/components/PrinterDashboard.tsx` — Added `data-tour` attributes to targets
+6. Modified: `src/common/components/icons/MdiIcons.tsx` — Added HelpCircleIcon export
+7. Modified: `src/main.tsx` — CSS imports for driver.js + tour theme
+
+**Library Choice:** `driver.js` (5KB gzipped, MIT, React 19-safe, CSS-themeable, accessible)
+- Evaluated: react-joyride (498KB, React 19 broken), shepherd.js (155KB, heavy), intro.js (12KB, AGPL poison), NextStep (8KB, heavier API)
+- Winner: driver.js — minimal, framework-agnostic, no React coupling, clean theming
+
+**Accessibility:**
+- ✅ `prefers-reduced-motion` respected
+- ✅ HelpButton aria-label="Take a tour of this page"
+- ✅ driver.js keyboard nav (Tab, Escape, Arrow keys)
+- ✅ Focus trap within popover
+- ⚠️ Screen reader announcements should be tested (JAWS/NVDA) in next session
+
+**Styling:**
+- Matches Newt's UX spec exactly: max-w-sm (384px), pf-* tokens, 85% overlay opacity, smooth animations
+- Dark/light theme switching automatic (token-based)
+
+**Integration Pattern:**
+- `usePageTour` hook returns: startTour(), hasSeenTour, resetTour()
+- HelpButton passed via PageTemplate actions prop (composition, zero coupling)
+- Tour state tracked in localStorage (`pf-tour-seen-{tourId}`)
+- Auto-starts on first visit with 500ms delay (respects `onDestroyed` callback on both completion and skip)
+
+**Test Results:**
+- Hook tests: 8/8 passing (lifecycle, localStorage, resetTour)
+- Component tests: 6/6 passing (render, click, keyboard, a11y)
+- Integration tests: 8+/8 passing (data-tour targeting, tour step matching)
+- Full suite: 1453/1453 passing (zero regressions)
+
+**Key Learning** (from test alignment with Kane):
+`vi.hoisted()` required for mock variable scope inside `vi.mock()` factory — variables must be declared in hoisted scope outside the factory. Timer mocking via `vi.useFakeTimers()` + `vi.advanceTimersByTime()` for deterministic auto-start delay testing.
+
+**Open Items for Next Session:**
+- Wire tours to remaining 9 priority pages (Printers, Queue, GcodeLibrary, FilamentMgmt, Maintenance, Catalog, Statistics, Locations, Cameras, Settings)
+- Screen reader testing (JAWS/NVDA) to verify ARIA announcements on step transitions
+- Consider global "Reset all tours" button for Settings page
+- Phase 2 (if operator feedback validates): Markdown help section with client-side search
+
+**Next:**
+- Depends on: Jeff's content review for tour step text (plain language validation, no jargon)
+- Depends on: Kane's test sign-off (complete ✅)
+- Ready for: Immediate deployment to staging for operator evaluation
+
+## 2026-03-12 — File Browser + Settings Tours Completed
+
+**Agent:** Ripley (Frontend Dev)  
+**Status:** ✅ COMPLETE
+
+**Tasks:**
+1. Built File Browser tour (5 steps: upload, file list, search, navigation, preview+quick-print)
+2. Built Settings tour (3 steps: display prefs, notifications, keyboard shortcuts)
+3. Added 14 comprehensive test assertions across 2 new test files
+4. Wired both tours with usePageTour + HelpButton
+5. Full a11y + keyboard nav test coverage
+6. Build clean, linting clean, 365/365 React tests passing
+
+**Test Coverage Added:**
+- FileUploadTour.test.tsx — 8 assertions (visibility, progression, keyboard nav, localStorage)
+- SettingsTour.test.tsx — 6 assertions (focus management, mobile responsive, ARIA)
+
+**Key Implementation Details:**
+- Settings tour keeps notification settings visible while walking through config changes
+- File Browser tour integrates with drag-drop upload flow
+- Both tours now match Newt's UX spec: max-w-sm, pf-tokens, 85% overlay, smooth animations
+- Tour state persists across sessions via localStorage
+
+**Validation:**
+✅ Build 0 errors, 0 new warnings  
+✅ ESLint 0 violations  
+✅ All 14 assertions passing  
+✅ React suite: 365/365 passing (zero regressions)  
+✅ Git pushed
+
+**Next Steps:**
+- Wire tours to remaining 7 priority pages (Gcode Library, Filament Mgmt, Maintenance, Catalog, Statistics, Locations, Cameras)
+- Ripley to coordinate with Jeff on content review for all pending tours
+
+## 2026-03-12 — Dispatch Bottleneck Analysis Complete
+
+**Agent:** Lambert (Backend Dev)  
+**Status:** ✅ COMPLETE — Analysis written to decision inbox, merged to decisions.md
+
+**Investigation:** Ready → Printing state transition delay (several seconds on Moonraker)
+
+**Root Causes Identified:**
+
+1. **Double Scoring** (Critical, 40-60ms)
+   - `ScorePrintersForJobAsync` runs twice: AutoDispatchBackgroundService + JobDispatchService
+   - Each call = 4 DB queries with EF Core includes
+   - Solution: Pass pre-computed score through dispatch pipeline
+
+2. **Serial DB Saves** (Medium, 50-140ms)
+   - 6-7 SaveChangesAsync round-trips in dispatch path
+   - Job assignment + dispatch log saved separately (no reason)
+   - Solution: Batch into single SaveChangesAsync
+
+3. **Double HTTP Calls** (Medium, 500ms+ LAN)
+   - Upload to Moonraker (POST /server/files/upload) → separate start print (POST /printer/print/start)
+   - Moonraker supports `print=true` form field (atomic operation)
+   - Solution: Use print=true parameter on upload
+
+**Proposed Fixes Written to decision.md:**
+- Fix 1: Overload DispatchJobAsync to accept pre-computed score
+- Fix 2: Batch job + log saves in JobDispatchService
+- Fix 3: Use Moonraker print=true parameter in UploadAndStartPrintAsync
+
+**Expected Impact:** Ready → Printing from seconds → <1 second (typical LAN)
+
+**Files Affected:**
+- src/infra/Services/Queue/Dispatch/JobDispatchService.cs
+- src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs
+- src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs
+- src/infra/Services/Queue/Dispatch/IJobDispatchService.cs
+
+**Decision Status:** Proposed (ready for team review + Lambert implementation next sprint)
+
+## 2026-03-12 — Optimistic UI Update for Bed-Clear Dispatch
+
+**Agent:** Ripley (Frontend Dev)
+**Status:** ✅ COMPLETE
+
+**Task:** After clicking "confirm bed is clear" and a job dispatches successfully, the printer card showed a delay before transitioning to "Printing" state (waiting for SignalR round-trip ~500ms). Added optimistic React Query cache update so the UI shows instant feedback.
+
+**Implementation:**
+- In `BedClearBanner.tsx`, after the `/ready` endpoint returns success with a passing filament check and a next job, immediately update both `queryKeys.printers` (list) and `queryKeys.printer(id)` (individual) caches
+- Sets printer state to `"Starting..."`, `jobName` to the dispatched job name, and `progress` to `0`
+- Only triggers when filament check passes AND a next job exists — no optimistic update for no-job, mismatch, or insufficient filament scenarios
+- The real SignalR update arrives within ~500ms and overwrites with authoritative state
+
+**Files Changed:**
+- `src/Web/ReactApp/src/features/printers/components/BedClearBanner.tsx` — Added `useQueryClient`, `queryKeys`, `Printer` imports; added optimistic `setQueryData` calls after successful dispatch path
+- `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx` — Added mock for `@/common/hooks/useApi`; added 2 new tests: optimistic cache update on dispatch, no cache update when no next job
+
+**Validation:**
+✅ Build: 0 errors
+✅ ESLint: 0 violations
+✅ Tests: 14/14 passing (12 existing + 2 new)
+
+## Learnings
+
+- `queryClient.setQueryData` with both the list key (`['printers']`) and individual key (`['printers', id]`) is needed because components may read from either cache entry — missing one causes inconsistent UI across views
+- Using `"Starting..."` as the optimistic state string (not `"Printing"`) gives the user a visually distinct transient state that won't be confused with real printing if something goes wrong — SignalR will replace it with `"Printing"` within ~500ms
+
+---
+
+## 2026-03-12 — Optimistic UI Update: Bed-Clear Dispatch (Concurrent Sprint 1)
+
+**Session:** Dispatch Perf & State Refresh (concurrent with Lambert)  
+**Outcome:** ✅ COMPLETE & PUSHED
+
+Added React Query optimistic cache update in `BedClearBanner` for instant UX feedback on successful dispatch. Printer card immediately transitions to "Starting..." state before SignalR broadcasts authoritative Printing state (~500ms later).
+
+**Implementation:**
+- In `BedClearBanner.tsx`, after `/ready` endpoint returns success:
+  - If filament check passes AND next job exists, immediately update both `queryKeys.printers` (list) and `queryKeys.printer(id)` (individual) caches
+  - Set state → `"Starting..."`, jobName → dispatched job name, progress → 0
+- Optimistic update only triggers for success + next-job scenarios (no update for no-job, mismatch, insufficient filament)
+- Real SignalR update (~500ms) overwrites with authoritative state
+
+**Design Decisions:**
+1. Use transient `"Starting..."` state (not `"Printing"`) — visually distinct, won't confuse if rollback needed
+2. Update both cache entries — components may read from either key
+3. No cache update if next job missing — avoid false "Starting..." if dispatch failed to queue
+
+**Files Changed:**
+- `src/Web/ReactApp/src/features/printers/components/BedClearBanner.tsx` — Added `useQueryClient`, `queryKeys` imports; optimistic setQueryData calls post-dispatch
+- `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx` — Added mock for `@/common/hooks/useApi`, 2 new tests
+
+**Validation:**
+✅ Build: 0 errors  
+✅ ESLint: 0 violations  
+✅ Tests: 14/14 pass (12 existing + 2 new optimistic-update tests)
+
+**Pairing:**
+- Works with Lambert's post-dispatch state refresh service (750ms probe bridges polling gap)
+- Creates seamless UX: optimistic immediate → real update within 500ms → state refresh ensures polling mode doesn't lag
+

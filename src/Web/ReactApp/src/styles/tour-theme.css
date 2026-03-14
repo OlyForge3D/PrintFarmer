@@ -1,0 +1,125 @@
+/* driver.js theme overrides — aligned with PrintFarmer pf- design tokens */
+
+.driver-popover.pf-tour-popover {
+  background: var(--pf-bg-1);
+  border: 1px solid var(--pf-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  max-width: 384px;
+  padding: 1rem;
+  color: var(--pf-text-primary);
+}
+
+.driver-popover.pf-tour-popover .driver-popover-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--pf-text-primary);
+}
+
+.driver-popover.pf-tour-popover .driver-popover-description {
+  font-size: 0.875rem;
+  color: var(--pf-text-secondary);
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
+
+.driver-popover.pf-tour-popover .driver-popover-progress-text {
+  font-size: 0.75rem;
+  color: var(--pf-text-tertiary);
+}
+
+/* Arrow inherits popover background */
+.driver-popover.pf-tour-popover .driver-popover-arrow {
+  border-color: var(--pf-bg-1);
+}
+
+.driver-popover.pf-tour-popover .driver-popover-arrow-side-top {
+  border-top-color: var(--pf-bg-1);
+}
+
+.driver-popover.pf-tour-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--pf-bg-1);
+}
+
+.driver-popover.pf-tour-popover .driver-popover-arrow-side-left {
+  border-left-color: var(--pf-bg-1);
+}
+
+.driver-popover.pf-tour-popover .driver-popover-arrow-side-right {
+  border-right-color: var(--pf-bg-1);
+}
+
+/* Footer buttons */
+.driver-popover.pf-tour-popover .driver-popover-navigation-btns {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--pf-border);
+}
+
+/* Next / Done button — primary style */
+.driver-popover.pf-tour-popover .driver-popover-next-btn {
+  background: var(--pf-accent-bg);
+  color: #fff;
+  border: none;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-shadow: none;
+}
+
+.driver-popover.pf-tour-popover .driver-popover-next-btn:hover {
+  opacity: 0.9;
+}
+
+/* Previous button — secondary style */
+.driver-popover.pf-tour-popover .driver-popover-prev-btn {
+  background: transparent;
+  color: var(--pf-text-secondary);
+  border: 1px solid var(--pf-border);
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-shadow: none;
+}
+
+.driver-popover.pf-tour-popover .driver-popover-prev-btn:hover {
+  color: var(--pf-text-primary);
+  border-color: var(--pf-border-light);
+}
+
+/* Close button */
+.driver-popover.pf-tour-popover .driver-popover-close-btn {
+  color: var(--pf-text-tertiary);
+}
+
+.driver-popover.pf-tour-popover .driver-popover-close-btn:hover {
+  color: var(--pf-text-primary);
+}
+
+/* Highlight ring on the spotlighted element.
+   Uses outline instead of box-shadow so the glow is never clipped
+   by ancestor overflow: hidden/auto/scroll containers. */
+.driver-active-element {
+  outline: 3px solid var(--pf-accent) !important;
+  outline-offset: 3px !important;
+  border-radius: 8px;
+  filter: drop-shadow(0 0 10px rgba(88, 166, 255, 0.35)) !important;
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .driver-popover,
+  .driver-overlay,
+  .driver-active-element {
+    transition: none !important;
+    animation: none !important;
+  }
+}

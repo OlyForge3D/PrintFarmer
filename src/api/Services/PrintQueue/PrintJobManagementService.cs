@@ -26,7 +26,8 @@ public class PrintJobManagementService(
     IHubContext<PrinterHub> hubContext,
     IStoredFileOperationsService fileOperations,
     INotificationService? notificationService = null,
-    IRetryService? retryService = null) : IPrintJobManagementService
+    IRetryService? retryService = null,
+    IPrinterStatusRefreshService? printerStatusRefreshService = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -36,6 +37,7 @@ public class PrintJobManagementService(
     private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
     private readonly INotificationService? _notificationService = notificationService;
     private readonly IRetryService? _retryService = retryService;
+    private readonly IPrinterStatusRefreshService? _printerStatusRefreshService = printerStatusRefreshService;
 
     // ============= QUERY OPERATIONS =============
 
@@ -491,6 +493,16 @@ public class PrintJobManagementService(
                 throw new InvalidOperationException($"Print job {jobId} not found");
             }
 
+            // Idempotent: if the job is already being dispatched (e.g. by auto-dispatch),
+            // return its current state as success rather than erroring out.
+            if (job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing)
+            {
+                _logger.LogInformation(
+                    "Job {JobId} already in {Status} state — returning current state (idempotent dispatch)",
+                    jobId, job.Status);
+                return MapToQueuedPrintJobDto(job);
+            }
+
             // Validate job is in a dispatchable state
             if (job.Status != PrintJobStatus.Queued && job.Status != PrintJobStatus.Assigned)
             {
@@ -628,6 +640,7 @@ public class PrintJobManagementService(
                         }
 
                         job.Status = PrintJobStatus.Printing;
+                        job.ActualStartTime = DateTime.UtcNow;
                         _logger.LogInformation("Print job {JobId} successfully uploaded and started on printer {PrinterId}", jobId, job.AssignedPrinterId);
                     }
                     else
@@ -675,6 +688,14 @@ public class PrintJobManagementService(
             if (job.Status == PrintJobStatus.Printing)
             {
                 await SendJobStartNotificationAsync(job, cancellationToken);
+
+                // Fire-and-forget: query Moonraker for fresh state and broadcast via SignalR.
+                // This eliminates the UI delay when the subscription is in HTTP polling fallback mode.
+                if (_printerStatusRefreshService is not null && job.AssignedPrinterId.HasValue)
+                {
+                    _ = _printerStatusRefreshService.RefreshPrinterStatusAsync(
+                        job.AssignedPrinterId.Value, delayMs: 750, CancellationToken.None);
+                }
             }
 
             return MapToQueuedPrintJobDto(job);

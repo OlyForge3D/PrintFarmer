@@ -94,6 +94,7 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
         services.AddSingleton<MoonrakerSubscriptionService>();
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<MoonrakerSubscriptionService>());
         services.AddSingleton<IPrinterConnectionHealthProvider>(sp => sp.GetRequiredService<MoonrakerSubscriptionService>());
+        services.AddSingleton<IPrinterStatusRefreshService>(sp => sp.GetRequiredService<MoonrakerSubscriptionService>());
     }
 
     /// <summary>

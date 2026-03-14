@@ -716,3 +716,280 @@ Comprehensive feasibility analysis for running PrintFarmer on Raspberry Pi 4 wit
 
 **Final Verdict:**  
 PrintFarmer is **viable on Pi 4**, production-ready for this use case, but requires careful service selection and proper storage (USB SSD, not MicroSD).
+
+---
+
+## Help System Decisions (Phase 1: Guided Tours)
+
+### Decision: In-App Help System Approach (Tours First)
+
+**Author:** Dallas (Lead/Architect)  
+**Date:** 2026-03-12  
+**Status:** ✅ APPROVED  
+
+**Context:**  
+PrintFarmer has 40+ pages across 25 feature modules. Operators managing 3D printer farms need contextual guidance — they're hardware people, not software people.
+
+**Options Evaluated:**
+1. **Option A:** In-app wiki with searchable markdown articles (HIGH maintenance, good reference)
+2. **Option B:** Guided tours on first visit (LOW maintenance, excellent discovery)
+3. **Option C:** Hybrid (tours + wiki) (HIGH maintenance, best UX, deferred)
+
+**Decision:** **Option B (Guided Tours) — Phase 1. Wiki deferred until operator feedback validates need.**
+
+**Reasoning:**
+- Operators learn by doing, not reading. Tours teach in context.
+- Content volume is 5x lower (tour = 6-8 steps vs. wiki article = 500+ words)
+- Tours live next to components — maintenance stays coupled to code
+- Ship fast, validate the need. Top 10 pages in week 1. Wiki in Phase 2 if requested.
+
+**Implementation:**
+- **Library:** `driver.js` (5KB, MIT, React 19 safe, CSS-themeable, accessible)
+- **Architecture:** `usePageTour` hook + `HelpButton` component + per-page tour definitions
+- **State:** localStorage per tour ID (`pf-tour-seen-{tourId}`)
+- **Styling:** CSS overrides with `pf-*` tokens (matches Newt's UX spec)
+- **Target elements:** `data-tour` attributes (stable, explicit, refactor-proof)
+
+**Phase 1 Priority Pages (top 10 by operator impact):**
+1. PrintersPage — core page, most complex
+2. PrintQueueDashboardPage — job management
+3. GcodeLibraryPage — file management
+4. FilamentManagementPage — material tracking
+5. MaintenanceDashboardPage — maintenance scheduling
+6. CatalogPage — printer/model catalog
+7. StatisticsPage — farm analytics
+8. LocationDashboardPage — location hierarchy
+9. CamerasPage — camera monitoring
+10. SettingsPage — system configuration
+
+**Estimated Effort (Phase 1):**
+- `driver.js` install + vite config: 0.25d
+- `usePageTour` hook: 0.5d
+- `HelpButton` component: 0.25d
+- Tour theme CSS: 0.25d
+- `data-tour` attributes on top 10 pages: 1d
+- Tour step content: 1.5d
+- Tests: 1d
+- **Total: ~4.75 days**
+
+**Dependencies:**
+- None. Pure frontend. No API changes. No database changes.
+
+**Risks (Mitigated):**
+- **Tour selectors break on refactor:** Use `data-tour` attributes (stable) not CSS selectors
+- **Content quality:** Jeff reviews tour text for plain language (hardware terminology)
+- **Accessibility:** driver.js keyboard nav + ARIA; verify with screen reader testing
+
+---
+
+### Decision: Frontend Help System Evaluation & Library Choice
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-12  
+**Status:** ✅ IMPLEMENTED  
+
+**Evaluation:** Tested 6 tour libraries against actual codebase (React 19.2, Tailwind v4, `pf-*` tokens, 27 features, existing context/hook patterns).
+
+**Library Comparison:**
+
+| Library | Bundle (gzip) | React 19 | TypeScript | Tailwind Styling | Accessibility | License | Verdict |
+|---------|--------------|----------|------------|-----------------|---------------|---------|---------|
+| **react-joyride** | ~498KB | ❌ Unstable | ✅ Built-in | ⚠️ Inline styles, clunky | ⚠️ Basic | MIT | REJECT — bloated, React 19 broken |
+| **shepherd.js** | ~155KB | ⚠️ Wrapper broken | ✅ Types available | ✅ CSS class-based | ✅ Good ARIA/keyboard | MIT | Viable — but heavy |
+| **intro.js** | ~12KB | ✅ Vanilla | ⚠️ Community types | ⚠️ Own CSS, fights Tailwind | ⚠️ Basic | AGPL | REJECT — AGPL license poison for commercial |
+| **driver.js** | ~5KB | ✅ Framework-agnostic | ✅ Built-in | ✅ CSS class-based, easy override | ✅ Keyboard nav, focus trap | MIT | **STRONG PICK** |
+| **NextStep** | ~8KB | ✅ Built for React 19 | ✅ Built-in | ✅ Framer Motion + custom | ✅ Good | MIT | Alternative — heavier API |
+| **Custom (Headless UI)** | 0KB new | ✅ Already in deps | ✅ | ✅ Full control | ✅ Full control | N/A | Fallback — 3-5 days dev |
+
+**Winner: `driver.js`**
+
+**Why driver.js Wins:**
+1. **5KB gzipped** — won't trigger chunk warnings (vite config: 1200KB limit)
+2. **Zero React coupling** — no wrapper to break with React 19; DOM-direct via selectors
+3. **CSS class-based theming** — override `.driver-popover` classes with `pf-*` tokens; no inline style wrestling
+4. **TypeScript out of box** — full type definitions included
+5. **MIT licensed** — no AGPL or commercial restrictions
+6. **Keyboard navigation + focus management** — Tab/Escape/Arrow keys; meets accessibility requirements
+
+**Why NOT react-joyride (despite popularity):**
+- 498KB bundle — 100x larger than driver.js for same features
+- React 19 support broken — stable release incompatible; "next" branch unstable
+- Inline styles — fights Tailwind; requires deep component prop drilling to override
+- Risk: might not render correctly in production
+
+**Why NOT intro.js:**
+- **AGPL license** — requires open-sourcing PrintFarmer or buying commercial license (non-starter unless Jeff approves cost)
+
+**Why NOT custom solution:**
+- driver.js provides spotlight/overlay/positioning/animation/keyboard handling for free
+- Custom from Headless UI would be 3-5 extra days for no benefit
+- driver.js is barely a dependency at 5KB
+
+**Integration Plan:**
+```
+src/
+  common/
+    hooks/
+      usePageTour.ts              ← Core hook (driver.js lifecycle + localStorage)
+    components/
+      HelpButton.tsx              ← "?" button for tour triggering
+  features/<feature>/
+    tours/
+      <page>.tour.ts              ← Tour step definitions per page
+```
+
+**Phase 2 (if validated) — Help Section:**
+- Markdown rendering via `react-markdown` (~15KB)
+- Stored as `.md` files in `src/features/<feature>/help/`
+- Client-side search via simple text matching
+- Content seeded from Phase 1 tour steps
+
+**Open Questions for Next Session:**
+1. Should tour progress sync to backend (user prefs API) or stay localStorage-only?
+2. Global "Reset all tours" button in Settings, or per-page only?
+3. Auto-fire on first visit or "Take a tour" prompt?
+
+---
+
+### Decision: UX Design Spec for Tour Popover (Driver.js Styling)
+
+**Author:** Newt (UX Designer)  
+**Date:** 2026-03-12  
+**Status:** ✅ IMPLEMENTED  
+
+**Specification:** CSS styling for driver.js tour popovers to match PrintFarmer design system.
+
+**Popover Styling (using pf-* tokens):**
+```css
+.driver-popover {
+  background: var(--pf-bg-1);
+  border: 1px solid var(--pf-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  max-width: 384px;                    /* sm breakpoint equivalent */
+  padding: 1rem;
+  color: var(--pf-text-primary);
+}
+
+.driver-popover-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--pf-text-primary);
+}
+
+.driver-popover-description {
+  font-size: 0.875rem;
+  color: var(--pf-text-secondary);
+}
+
+.driver-overlay {
+  background: rgba(13, 17, 23, 0.85);  /* Dark overlay with 85% opacity */
+}
+```
+
+**Design Decisions:**
+- **Max width: 384px** (Tailwind `max-w-sm`) — prevents popover from overwhelming mobile screens
+- **Overlay opacity: 85%** — dark overlay focuses attention without being too opaque
+- **Token usage:** `pf-bg-1`, `pf-border`, `pf-text-primary/secondary` — ensures theme switching works automatically
+- **Shadow:** Consistent with component library (0 25px 50px -12px / 25% opacity)
+- **Radius:** 0.5rem — matches form controls and buttons throughout PrintFarmer
+
+**Accessibility:**
+- ✅ High contrast (WCAG AA): `pf-text-primary` on `pf-bg-1` meets 4.5:1 minimum
+- ✅ Focus trap: driver.js provides built-in focus management within popover
+- ✅ Keyboard nav: Tab/Escape/Arrow keys supported by driver.js
+- ✅ Animation: Respects `prefers-reduced-motion` (disables via `usePageTour` hook)
+
+---
+
+### Decision: Backend Dispatch Authority in Bed-Clear Confirmation Flow
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-12  
+**Status:** ✅ IMPLEMENTED  
+
+**Problem:**  
+Race condition in bed-clear confirmation: backend's `MarkReadyAsync()` triggers auto-dispatch background service, but frontend also called `dispatchPrintQueueJob()` — double-dispatch caused false error toasts.
+
+**Decision:** **Backend auto-dispatch is the sole dispatch authority after bed-clear confirmation.**
+
+**Implementation:**
+- Frontend confirms bed clear via `POST /autoprint/{id}/ready` → shows appropriate toast
+- Frontend **never** calls `dispatchPrintQueueJob()` in this flow
+- Backend's `AutoDispatchBackgroundService` triggered by `NotifyJobQueued` is responsible for dispatch
+- Dispatch endpoint is idempotent (Lambert's decision) — safe for concurrent callers
+
+**Impact:**
+- **Lambert (Backend):** Controller comment on line 40-41 of `AutoPrintController.cs` is stale; update to reflect backend auto-dispatch authority
+- **Ripley (Frontend):** `BedClearBanner` no longer imports or calls `apiClient.dispatchPrintQueueJob()`
+- **No false errors** — dispatch happens once, via authoritative path
+
+**Related Decision:** Lambert's idempotent dispatch endpoint ensures this works safely even if multiple callers attempt dispatch.
+
+---
+
+### Decision: Idempotent Dispatch Endpoint (Race Condition Fix)
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-03-12  
+**Status:** ✅ IMPLEMENTED  
+
+**Problem:**  
+Auto-dispatch background service and frontend manual dispatch could both run when confirming bed-clear. Loser gets a false error.
+
+**Solution:**  
+`PrintJobManagementService.DispatchJobAsync` now returns current job state as success if job is already `Starting` or `Printing`, instead of throwing.
+
+**Implementation:**
+- If job already dispatched (state ≥ Starting), return success with current job state (idempotent)
+- Decouples race condition risk — both backend auto-dispatch and frontend confirmation can call safely
+- **No breaking changes** — existing behavior preserved for normal dispatch flow
+- **All dispatch/queue tests pass** — 162 tests verified
+
+**Impact:**
+- Frontend no longer sees false "failed to dispatch" errors during auto-dispatch race
+- Pairs with Ripley's decision: frontend no longer calls dispatch in bed-clear flow anyway
+- Provides defense-in-depth: dispatch is now safe for concurrent callers
+
+---
+
+
+---
+
+### Decision: Ready → Printing Dispatch Performance Optimization
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-07-22  
+**Status:** ✅ IMPLEMENTED
+
+## Summary
+
+Three targeted fixes to reduce the Ready → Printing state transition latency:
+
+### Fix 1: Eliminate Redundant Scoring
+- **Before:** `AutoDispatchBackgroundService` scored printers, found the best match, then called `JobDispatchService.DispatchJobAsync` which scored *again* for "audit"
+- **After:** New overload `DispatchJobAsync(jobId, printerId, userId, preComputedScore, ct)` accepts pre-computed score, skipping the second 4-query scoring pass
+- **Impact:** Eliminated ~50% of DB queries in the dispatch hot path
+
+### Fix 2: Batched DB Saves
+- **Before:** 4 serial `SaveChangesAsync` calls (job assignment, dispatch log, mode update, auto-print state reset)
+- **After:** 2 calls (assignment+log batched, mode+state batched)
+- **Impact:** Eliminated 2 DB round-trips (10-40ms on SQLite/Pi)
+
+### Fix 3: Single Moonraker Upload+Start
+- **Before:** Two HTTP calls: `UploadGcodeAsync` then `StartPrintAsync`
+- **After:** Single call using Moonraker's `print=true` upload parameter
+- **Impact:** Eliminated 1 HTTP round-trip to the printer
+
+## Design Decisions
+
+1. **Kept the no-score overload** for manual dispatch from the UI (where the user explicitly picks a printer and scoring happens on-demand)
+2. **Kept `UploadGcodeAsync(baseUrl, fileName, stream)` overload** for upload-only scenarios (no breaking change)
+3. **All existing tests updated** to match new mock signatures
+
+## Validation
+
+- Build: 0 errors
+- Tests: 1407/1407 API tests passing, all dispatch tests green
+- State machine flow unchanged: Ready → dispatch → Starting → Printing
+

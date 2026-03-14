@@ -26,6 +26,7 @@ import {
   mdiCog,
   mdiAlert,
   mdiInformation,
+  mdiHelpCircleOutline,
   mdiMagnify,
   mdiRefresh,
   mdiContentSave,
@@ -2962,6 +2963,19 @@ export function ClipboardListIcon({ className = 'w-4 h-4', ariaLabel = 'Projects
       role="img"
     >
       <path fill="currentColor" d={mdiClipboardListOutline} />
+    </svg>
+  );
+}
+
+export function HelpCircleIcon({ className = 'w-4 h-4', ariaLabel = 'Help' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiHelpCircleOutline} />
     </svg>
   );
 }

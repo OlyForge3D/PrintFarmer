@@ -1,10 +1,11 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { useConfirmBedClear, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
-import { apiClient } from '@/services/api';
+import { queryKeys } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
-import type { AutoDispatchStatus } from '@/types/api';
+import type { AutoDispatchStatus, Printer } from '@/types/api';
 
 interface BedClearBannerProps {
   printerId: string;
@@ -13,6 +14,7 @@ interface BedClearBannerProps {
 }
 
 export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: BedClearBannerProps) {
+  const queryClient = useQueryClient();
   const confirmBedClear = useConfirmBedClear();
   const skipNextJob = useSkipNextJob();
   const cancelAutoDispatch = useCancelAutoDispatch();
@@ -47,13 +49,23 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
         return;
       }
 
-      // Filament check passed — dispatch the job
-      try {
-        await apiClient.dispatchPrintQueueJob(result.nextJob.id);
-        toast.success(`Dispatching "${result.nextJob.name}" to ${printerName}`);
-      } catch {
-        toast.error(`Bed cleared but failed to dispatch "${result.nextJob.name}"`);
-      }
+      // Filament check passed — the backend's auto-dispatch background service
+      // handles dispatching the job (triggered by the /ready endpoint).
+      // We don't dispatch manually here to avoid a double-dispatch race condition.
+      toast.success(`Dispatching "${result.nextJob.name}" to ${printerName}`);
+
+      // Optimistic UI: immediately show "Starting..." state so the printer card
+      // reflects the dispatch without waiting for the SignalR round-trip (~500ms).
+      // The next SignalR update will overwrite with the real state.
+      const optimisticUpdate = (printer: Printer): Printer =>
+        printer.id === printerId
+          ? { ...printer, state: 'Starting...', jobName: result.nextJob!.name, progress: 0 }
+          : printer;
+
+      queryClient.setQueryData<Printer[]>(queryKeys.printers, (old) => old?.map(optimisticUpdate));
+      queryClient.setQueryData<Printer>(queryKeys.printer(printerId), (old) =>
+        old ? optimisticUpdate(old) : undefined,
+      );
     } catch {
       toast.error('Failed to confirm bed clear');
     }
@@ -83,14 +95,14 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
       role="alert"
       aria-label="Bed clear confirmation required"
     >
-      <p className="text-xs font-medium text-pf-warning mb-2">
+      <p className="text-xs font-medium text-pf-warning mb-0.5">
         Print complete — confirm bed is clear
-        {autoDispatchStatus.queuedJobCount > 0 && (
-          <span className="text-pf-text-secondary font-normal">
-            {' '}({autoDispatchStatus.queuedJobCount} job{autoDispatchStatus.queuedJobCount !== 1 ? 's' : ''} queued)
-          </span>
-        )}
       </p>
+      {autoDispatchStatus.queuedJobCount > 0 && (
+        <p className="text-[10px] text-pf-text-secondary mb-2">
+          {autoDispatchStatus.queuedJobCount} job{autoDispatchStatus.queuedJobCount !== 1 ? 's' : ''} queued
+        </p>
+      )}
       <div className="flex gap-2">
         <Button
           variant="success"

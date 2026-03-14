@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -33,6 +35,14 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
 {
     private readonly Dictionary<Guid, PrinterStatusDto> _cache = new();
     private readonly Lock _lockObj = new();
+    private readonly ILogger<PrinterStatusCache> _logger;
+    private readonly IDiagnosticChannelService _diagnostics;
+
+    public PrinterStatusCache(ILogger<PrinterStatusCache> logger, IDiagnosticChannelService diagnostics)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
+    }
 
     public PrinterStatusDto? GetStatus(Guid printerId)
     {
@@ -55,7 +65,9 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
     {
         lock (_lockObj)
         {
+            _cache.TryGetValue(status.Id, out PrinterStatusDto? existing);
             _cache[status.Id] = status.WithNormalizedFileName();
+            LogTransitionIfChanged(status.Id, existing, status);
         }
     }
 
@@ -70,7 +82,9 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         {
             foreach (PrinterStatusDto status in statuses)
             {
+                _cache.TryGetValue(status.Id, out PrinterStatusDto? existing);
                 _cache[status.Id] = status.WithNormalizedFileName();
+                LogTransitionIfChanged(status.Id, existing, status);
             }
         }
     }
@@ -101,6 +115,40 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         lock (_lockObj)
         {
             _cache.Clear();
+        }
+    }
+
+    private void LogTransitionIfChanged(Guid printerId, PrinterStatusDto? previous, PrinterStatusDto current)
+    {
+        string? prevState = previous?.State;
+        bool prevOnline = previous?.IsOnline ?? false;
+        bool stateChanged = !string.Equals(prevState, current.State, StringComparison.OrdinalIgnoreCase);
+        bool onlineChanged = prevOnline != current.IsOnline;
+
+        if (!stateChanged && !onlineChanged)
+        {
+            return;
+        }
+
+        if (_diagnostics.IsEnabled(DiagnosticChannelService.Channels.PrinterStateTransitions))
+        {
+            _logger.LogWarning(
+                "[PrinterStateTransition] Printer {PrinterId}: State '{PreviousState}' -> '{NewState}', Online {PreviousOnline} -> {NewOnline}",
+                printerId,
+                prevState ?? "(none)",
+                current.State ?? "(none)",
+                prevOnline,
+                current.IsOnline);
+        }
+        else
+        {
+            _logger.LogDebug(
+                "[PrinterStateTransition] Printer {PrinterId}: State '{PreviousState}' -> '{NewState}', Online {PreviousOnline} -> {NewOnline}",
+                printerId,
+                prevState ?? "(none)",
+                current.State ?? "(none)",
+                prevOnline,
+                current.IsOnline);
         }
     }
 }

@@ -4,6 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import { GcodeFileBrowser } from '@/features/gcode/components/GcodeFileBrowser';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
+import { usePageTour } from '@/common/hooks/usePageTour';
+import { gcodeLibraryTour } from '@/features/gcode/tours/gcode-library.tour';
+import { HelpButton } from '@/common/components/HelpButton';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { CloseIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
@@ -18,6 +21,7 @@ import type { ModelTag } from '@/types/models';
 export const GcodeLibraryPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-gcode-viewmode');
+  const { startTour } = usePageTour({ tourId: 'gcode-library', steps: gcodeLibraryTour });
   const harvestId = searchParams.get('harvest') || undefined;
   const printerId = searchParams.get('printer') || undefined;
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -79,9 +83,9 @@ export const GcodeLibraryPage: React.FC = () => {
     <PageTemplate
       title="G-code Library"
       subtitle="Browse and manage your G-code files"
-      showHeader={false}
       padding="px-4"
       backgroundColor="bg-pf-bg-2"
+      actions={<HelpButton onClick={startTour} />}
     >
       <div className="space-y-4 h-full flex flex-col">
         {/* Filter Panel */}
@@ -187,16 +191,18 @@ export const GcodeLibraryPage: React.FC = () => {
       </div>
 
       {/* Floating Action Button for Upload */}
-      <FloatingActionButton
-        icon={PlusIcon}
-        onClick={() => {
-          const uploadButton = document.querySelector('[title="Upload files"]') as HTMLButtonElement;
-          uploadButton?.click();
-        }}
-        label="Upload G-Code"
-        position="bottom-right"
-        variant="primary"
-      />
+      <div data-tour="gcode-fab">
+        <FloatingActionButton
+          icon={PlusIcon}
+          onClick={() => {
+            const uploadButton = document.querySelector('[title="Upload files"]') as HTMLButtonElement;
+            uploadButton?.click();
+          }}
+          label="Upload G-Code"
+          position="bottom-right"
+          variant="primary"
+        />
+      </div>
     </PageTemplate>
   );
 };

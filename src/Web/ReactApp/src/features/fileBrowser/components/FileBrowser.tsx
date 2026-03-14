@@ -11,6 +11,7 @@ interface FileBrowserProps<TDomain> {
   columns: ColumnDef[];
   renderItemActions?: (file: FileItem) => ReactNode;
   renderMetadata?: (file: FileItem) => ReactNode;
+  renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => ReactNode;
   extraToolbarActions?: ReactNode;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
@@ -31,6 +32,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
     columns,
     renderItemActions,
     renderMetadata,
+    renderCard,
     extraToolbarActions,
     viewMode,
     onViewModeChange,
@@ -70,6 +72,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
           {isBusy ? (browser.isMutating ? 'Applying changes…' : 'Loading files…') : 'Ready'}
         </div>
 
+        <div data-tour="gcode-file-list">
         {browser.viewMode === 'grid' ? (
           <GridView
             files={browser.files}
@@ -78,6 +81,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
             onSelectAll={browser.selectAll}
             renderItemActions={renderItemActions}
             renderMetadata={renderMetadata}
+            renderCard={renderCard}
             isBusy={browser.isMutating}
           />
         ) : (
@@ -106,6 +110,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
             isBusy={browser.isMutating}
           />
         )}
+        </div>
       </div>
     );
   }

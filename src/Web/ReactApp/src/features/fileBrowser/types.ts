@@ -21,6 +21,8 @@ export interface FileItem {
       extractedMaterial?: string;
       extractedPrintTime?: number;
       extractedLayerHeight?: number;
+      extractedHotendTemp?: number;
+      extractedBedTemp?: number;
     };
     model3d?: Record<string, unknown>;
   };

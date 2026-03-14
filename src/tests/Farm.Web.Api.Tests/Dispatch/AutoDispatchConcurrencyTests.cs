@@ -236,8 +236,8 @@ public class AutoDispatchConcurrencyTests : IDisposable
 
         // Track dispatch calls and update DB to simulate real dispatch behavior
         dispatchMock
-            .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid jId, Guid pId, string _, CancellationToken _) =>
+            .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid jId, Guid pId, string _, DispatchScore _, CancellationToken _) =>
             {
                 lock (_dispatchLock)
                 {
@@ -313,8 +313,8 @@ public class AutoDispatchConcurrencyTests : IDisposable
             ]);
 
         dispatchMock
-            .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid jId, Guid pId, string _, CancellationToken _) =>
+            .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid jId, Guid pId, string _, DispatchScore _, CancellationToken _) =>
             {
                 lock (_dispatchLock)
                 {
@@ -387,8 +387,8 @@ public class AutoDispatchConcurrencyTests : IDisposable
 
         // Simulate a slow dispatch (takes 500ms)
         dispatchMock
-            .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(async (Guid jId, Guid pId, string _, CancellationToken _) =>
+            .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Guid jId, Guid pId, string _, DispatchScore _, CancellationToken _) =>
             {
                 await Task.Delay(500);
                 lock (_dispatchLock)

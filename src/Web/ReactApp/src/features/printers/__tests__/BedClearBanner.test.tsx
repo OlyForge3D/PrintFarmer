@@ -8,7 +8,6 @@ import type { AutoDispatchStatus } from '@/types/api';
 vi.mock('@/services/api', () => ({
   apiClient: {
     post: vi.fn().mockResolvedValue({ data: {} }),
-    dispatchPrintQueueJob: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -39,6 +38,13 @@ vi.mock('@/common/components/icons/MdiIcons', () => ({
   CheckCircleIcon: () => <span data-testid="check-icon" />,
   SkipForwardIcon: () => <span data-testid="skip-icon" />,
   CloseIcon: () => <span data-testid="close-icon" />,
+}));
+
+vi.mock('@/common/hooks/useApi', () => ({
+  queryKeys: {
+    printers: ['printers'] as const,
+    printer: (id: string) => ['printers', id] as const,
+  },
 }));
 
 import { BedClearBanner } from '../components/BedClearBanner';
@@ -136,9 +142,8 @@ describe('BedClearBanner', () => {
     expect(screen.getByText(/1 job queued/)).toBeInTheDocument();
   });
 
-  it('confirms and dispatches job when filament check passes', async () => {
+  it('confirms bed clear and shows dispatch toast without manual dispatch call', async () => {
     vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultWithJob });
-    vi.mocked(apiClient.dispatchPrintQueueJob).mockResolvedValueOnce({});
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -148,11 +153,67 @@ describe('BedClearBanner', () => {
       expect(apiClient.post).toHaveBeenCalledWith('/autoprint/printer-1/ready');
     });
     await waitFor(() => {
-      expect(apiClient.dispatchPrintQueueJob).toHaveBeenCalledWith('job-1');
+      expect(toast.success).toHaveBeenCalledWith('Dispatching "benchy.gcode" to MK4');
     });
+  });
+
+  it('optimistically updates printer cache to Starting state on dispatch', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultWithJob });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const existingPrinter = { id: 'printer-1', name: 'MK4', state: 'Idle', jobName: undefined, progress: undefined };
+    queryClient.setQueryData(['printers'], [existingPrinter]);
+    queryClient.setQueryData(['printers', 'printer-1'], existingPrinter);
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Dispatching "benchy.gcode" to MK4');
     });
+
+    const updatedList = queryClient.getQueryData<Array<{ id: string; state: string; jobName?: string; progress?: number }>>(['printers']);
+    expect(updatedList?.[0]?.state).toBe('Starting...');
+    expect(updatedList?.[0]?.jobName).toBe('benchy.gcode');
+    expect(updatedList?.[0]?.progress).toBe(0);
+
+    const updatedSingle = queryClient.getQueryData<{ state: string; jobName?: string }>(['printers', 'printer-1']);
+    expect(updatedSingle?.state).toBe('Starting...');
+    expect(updatedSingle?.jobName).toBe('benchy.gcode');
+  });
+
+  it('does not optimistically update cache when no next job', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultNoJob });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const existingPrinter = { id: 'printer-1', name: 'MK4', state: 'Idle' };
+    queryClient.setQueryData(['printers'], [existingPrinter]);
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Bed clear confirmed for MK4 — no jobs queued');
+    });
+
+    const updatedList = queryClient.getQueryData<Array<{ id: string; state: string }>>(['printers']);
+    expect(updatedList?.[0]?.state).toBe('Idle');
   });
 
   it('shows success without dispatch when no jobs queued', async () => {
@@ -165,7 +226,6 @@ describe('BedClearBanner', () => {
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Bed clear confirmed for MK4 — no jobs queued');
     });
-    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
   });
 
   it('warns on material mismatch without dispatching', async () => {
@@ -181,7 +241,6 @@ describe('BedClearBanner', () => {
         expect.objectContaining({ duration: 8000 }),
       );
     });
-    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
   });
 
   it('warns on insufficient filament without dispatching', async () => {
@@ -197,7 +256,6 @@ describe('BedClearBanner', () => {
         expect.objectContaining({ duration: 8000 }),
       );
     });
-    expect(apiClient.dispatchPrintQueueJob).not.toHaveBeenCalled();
   });
 
   it('calls skip endpoint when Skip button is clicked', async () => {

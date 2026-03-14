@@ -40,6 +40,7 @@ import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
+import type { AutoDispatchStatus } from '@/types/api';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinterSignalRPanel';
 import { printerSignalRService } from '@/services/printer-signalr';
@@ -240,7 +241,7 @@ export function Layout() {
   const navigate = useNavigate();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const pendingAttentionCount = useMemo(
-    () => (allAutoDispatchStatuses ?? []).filter(s => s.state === 'PendingReady').length,
+    () => ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter(s => s.state === 'PendingReady').length,
     [allAutoDispatchStatuses]
   );
   const location = useLocation();
@@ -482,9 +483,11 @@ export function Layout() {
           <div className="flex items-center space-x-3">
             {/* Printer attention badge */}
             {pendingAttentionCount > 0 && (
-              <button
+              <Button
+                type="button"
+                variant="unstyled"
                 onClick={() => navigate('/printers?view=collapsed')}
-                className="relative flex items-center text-pf-warning animate-pulse hover:animate-none cursor-pointer bg-transparent border-none outline-none p-0"
+                className="relative flex items-center text-pf-warning animate-pulse hover:animate-none cursor-pointer p-0 mr-6"
                 title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention — click to view`}
                 aria-label={`${pendingAttentionCount} printers need attention`}
               >
@@ -492,7 +495,7 @@ export function Layout() {
                 <span className="absolute -top-1.5 -right-1.5 bg-pf-warning text-black text-[9px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center leading-none">
                   {pendingAttentionCount}
                 </span>
-              </button>
+              </Button>
             )}
 
             {/* Connection status */}

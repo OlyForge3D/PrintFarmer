@@ -18,6 +18,7 @@ public interface IJobDispatchService
     /// <summary>
     /// Assigns a job to the specified printer and triggers print start.
     /// Records the dispatch in the audit log with the printer's score.
+    /// Scores the printer on-demand if no pre-computed score is provided.
     /// </summary>
     /// <param name="jobId">The print job to dispatch.</param>
     /// <param name="printerId">The target printer.</param>
@@ -25,4 +26,17 @@ public interface IJobDispatchService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The updated job DTO.</returns>
     Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Assigns a job to the specified printer using a pre-computed dispatch score,
+    /// skipping the redundant scoring pass. Use this overload when the caller
+    /// (e.g. auto-dispatch) already has a valid score.
+    /// </summary>
+    /// <param name="jobId">The print job to dispatch.</param>
+    /// <param name="printerId">The target printer.</param>
+    /// <param name="userId">The user initiating the dispatch.</param>
+    /// <param name="preComputedScore">Score from a prior scoring pass.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The updated job DTO.</returns>
+    Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, DispatchScore preComputedScore, CancellationToken ct = default);
 }

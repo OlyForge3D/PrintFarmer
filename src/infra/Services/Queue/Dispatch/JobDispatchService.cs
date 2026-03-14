@@ -61,15 +61,26 @@ public class JobDispatchService(
 
     public async Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, CancellationToken ct = default)
     {
+        // No pre-computed score — score on demand
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(jobId, ct);
+        DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printerId);
+
+        return await DispatchJobCoreAsync(jobId, printerId, userId, printerScore, ct);
+    }
+
+    public Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, DispatchScore preComputedScore, CancellationToken ct = default)
+    {
+        // Caller already scored — skip the redundant scoring pass
+        return DispatchJobCoreAsync(jobId, printerId, userId, preComputedScore, ct);
+    }
+
+    private async Task<QueuedPrintJobDto> DispatchJobCoreAsync(Guid jobId, Guid printerId, string userId, DispatchScore? printerScore, CancellationToken ct)
+    {
         PrintJob? job = await db.PrintJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct)
             ?? throw new InvalidOperationException($"Print job {jobId} not found");
 
         Printer? printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == printerId, ct)
             ?? throw new InvalidOperationException($"Printer {printerId} not found");
-
-        // Score the printer for audit and to populate DispatchScore on the job
-        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(jobId, ct);
-        DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printerId);
 
         if (printerScore is { Eliminated: true })
         {
@@ -77,15 +88,12 @@ public class JobDispatchService(
             throw new InvalidOperationException($"Printer '{printer.Name}' is eliminated: {reasons}");
         }
 
-        // Assign the job to the printer
+        // Assign the job and log the dispatch in a single batch save
         job.AssignedPrinterId = printerId;
         job.DispatchedAt = DateTime.UtcNow;
         job.DispatchScore = printerScore?.TotalScore;
         job.DispatchMode = (int)DispatchMode.Suggested;
 
-        await db.SaveChangesAsync(ct);
-
-        // Log the dispatch
         db.DispatchLogs.Add(new DispatchLog
         {
             Id = Guid.NewGuid(),
@@ -99,9 +107,9 @@ public class JobDispatchService(
             Reason = $"Dispatched by {userId}",
             CreatedAtUtc = DateTime.UtcNow,
         });
+
         await db.SaveChangesAsync(ct);
 
-        // Trigger print start via existing service
         logger.LogInformation(
             "Dispatching job {JobId} to printer {PrinterName} (score: {Score})",
             jobId, printer.Name, printerScore?.TotalScore ?? 0);

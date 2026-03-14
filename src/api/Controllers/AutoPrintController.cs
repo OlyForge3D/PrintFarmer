@@ -37,8 +37,9 @@ public class AutoPrintController(
 
     /// <summary>
     /// Mark the printer as ready (bed is clear). Returns the next queued job
-    /// and filament pre-flight check result. The job is NOT automatically dispatched;
-    /// the client should call the dispatch endpoint if the filament check passes.
+    /// and filament pre-flight check result. If auto-dispatch is in Auto mode,
+    /// the job is dispatched by the background service; the dispatch endpoint
+    /// is idempotent so a redundant client call is harmless.
     /// </summary>
     [HttpPost("{printerId:guid}/ready")]
     [ProducesResponseType(typeof(AutoPrintReadyResult), StatusCodes.Status200OK)]

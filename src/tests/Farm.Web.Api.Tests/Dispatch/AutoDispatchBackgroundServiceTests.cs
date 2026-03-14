@@ -246,7 +246,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .ReturnsAsync([goodScore]);
 
         _dispatchServiceMock
-            .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<CancellationToken>()))
+            .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto());
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
@@ -268,7 +268,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         // Assert: DispatchJobAsync was called
         _dispatchServiceMock.Verify(
-            d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<CancellationToken>()),
+            d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Once);
 
         // Assert: SignalR event was sent
@@ -307,7 +307,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _dispatchServiceMock.Verify(
-            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -371,7 +371,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _dispatchServiceMock.Verify(
-            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -413,7 +413,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         // Should NOT dispatch
         _dispatchServiceMock.Verify(
-            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Never);
 
         // Should send dispatchfailed SignalR event
@@ -458,7 +458,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         catch (OperationCanceledException) { }
 
         _dispatchServiceMock.Verify(
-            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -499,7 +499,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         // Should NOT call DispatchJobAsync
         _dispatchServiceMock.Verify(
-            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Never);
 
         // Should send dispatchsuggestion event
@@ -585,7 +585,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _dispatchServiceMock.Verify(
-            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -701,7 +701,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             .ReturnsAsync([goodScore]);
 
         _dispatchServiceMock
-            .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<CancellationToken>()))
+            .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Printer connection failed"));
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
