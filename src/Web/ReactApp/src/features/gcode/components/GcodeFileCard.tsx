@@ -18,6 +18,8 @@ import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 import { useState } from 'react';
 import { QueueGcodeModal } from './QueueGcodeModal';
 import { TaggingModal } from '@/components/TaggingModal';
+import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
+import { ClipboardListIcon } from '@/common/components/icons/MdiIcons';
 
 interface GcodeFileCardProps {
   file: GcodeFile;
@@ -51,6 +53,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
 }) => {
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isTaggingOpen, setIsTaggingOpen] = useState(false);
+  const [isAddToProjectOpen, setIsAddToProjectOpen] = useState(false);
   return (
     <>
     <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group min-h-0">
@@ -225,6 +228,16 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <TagIcon className="w-4 h-4" />
               </Button>
               <Button
+                onClick={() => setIsAddToProjectOpen(true)}
+                disabled={isDeleting}
+                variant="secondary"
+                size="sm"
+                className="flex-1"
+                title="Add to Project"
+              >
+                <ClipboardListIcon className="w-4 h-4" />
+              </Button>
+              <Button
                 onClick={() => setIsQueueOpen(true)}
                 disabled={isDeleting}
                 variant="primary"
@@ -259,6 +272,13 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
         initialTags={file.tags || []}
         isOpen={isTaggingOpen}
         onClose={() => setIsTaggingOpen(false)}
+      />
+    )}
+    {isAddToProjectOpen && !file.isDirectory && (
+      <AddToProjectModal
+        files={[file]}
+        isOpen={isAddToProjectOpen}
+        onClose={() => setIsAddToProjectOpen(false)}
       />
     )}
     </>

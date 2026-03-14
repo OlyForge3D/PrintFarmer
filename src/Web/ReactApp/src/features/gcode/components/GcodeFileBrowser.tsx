@@ -5,7 +5,7 @@ import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
 import { type ColumnDef, type FileItem, type FileQueryState, type GcodeFileItem, type UseFileBrowserConfig } from '@/features/fileBrowser/types';
 import { apiClient } from '@/services/api';
 import { Button, Checkbox } from '@/common/components/ui';
-import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon, PlayIcon, NozzleIcon, BedIcon } from '@/common/components/icons/MdiIcons';
+import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon, PlayIcon, NozzleIcon, BedIcon, ClipboardListIcon } from '@/common/components/icons/MdiIcons';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
@@ -153,6 +153,7 @@ interface GcodeFileBrowserProps {
   onSelectionChange?: (ids: string[]) => void;
   onShowTagModal?: () => void;
   onShowSingleTagModal?: (file: GcodeFile) => void;
+  onShowAddToProjectModal?: () => void;
   onToggleTagFilterPanel?: () => void;
   onAvailablePrinterModelsChange?: (models: Array<{ id: string | null; name: string }>) => void;
 }
@@ -168,6 +169,7 @@ export const GcodeFileBrowser = ({
   onSelectionChange,
   onShowTagModal,
   onShowSingleTagModal,
+  onShowAddToProjectModal,
   onToggleTagFilterPanel,
   onAvailablePrinterModelsChange,
 }: GcodeFileBrowserProps) => {
@@ -643,6 +645,18 @@ export const GcodeFileBrowser = ({
           iconLeft={<TagIcon className="h-4 w-4" />}
         >
           Tag ({selection.length})
+        </Button>
+      )}
+      {selection.length > 0 && onShowAddToProjectModal && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onShowAddToProjectModal}
+          title={`Add ${selection.length} selected file${selection.length > 1 ? 's' : ''} to a project`}
+          iconLeft={<ClipboardListIcon className="h-4 w-4" />}
+        >
+          Add to Project ({selection.length})
         </Button>
       )}
       {selection.length > 0 && hasPermission('gcode_harvest', 'delete') && (

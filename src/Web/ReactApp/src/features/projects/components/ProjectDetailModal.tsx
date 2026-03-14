@@ -158,6 +158,13 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             >
               Edit
             </Button>
+            <Button
+              variant="secondary"
+              onClick={onEdit}
+              iconLeft={<PlusIcon className="w-4 h-4" />}
+            >
+              Add Files
+            </Button>
             {hasPendingFiles && (
               <Button
                 variant="primary"

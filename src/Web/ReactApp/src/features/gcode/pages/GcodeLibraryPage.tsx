@@ -12,6 +12,7 @@ import { CloseIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
 import { TaggingModal } from '@/components/TaggingModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
+import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
 import { Button, Select } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
 import { apiClient } from '@/services/api';
@@ -29,6 +30,7 @@ export const GcodeLibraryPage: React.FC = () => {
   const [availablePrinterModels, setAvailablePrinterModels] = useState<Array<{ id: string | null; name: string }>>([]);
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
+  const [showAddToProjectModal, setShowAddToProjectModal] = useState(false);
   const [selectedFileForTagging, setSelectedFileForTagging] = useState<GcodeFile | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
 
@@ -164,6 +166,7 @@ export const GcodeLibraryPage: React.FC = () => {
             selectedFileIds={selectedFileIds}
             onSelectionChange={setSelectedFileIds}
             onShowTagModal={() => setShowBulkTagModal(true)}
+            onShowAddToProjectModal={() => setShowAddToProjectModal(true)}
             onShowSingleTagModal={(file) => setSelectedFileForTagging(file)}
             onToggleTagFilterPanel={() => setShowFiltersPanel(!showFiltersPanel)}
             selectedPrinterModels={selectedPrinterModels}
@@ -176,6 +179,16 @@ export const GcodeLibraryPage: React.FC = () => {
           isOpen={showBulkTagModal}
           onClose={() => setShowBulkTagModal(false)}
           initialSelectedModelIds={selectedFileIds}
+        />
+
+        {/* Bulk Add to Project Modal */}
+        <AddToProjectModal
+          fileIds={selectedFileIds}
+          isOpen={showAddToProjectModal}
+          onClose={() => {
+            setShowAddToProjectModal(false);
+            setSelectedFileIds([]);
+          }}
         />
 
         {/* Individual Tagging Modal */}
