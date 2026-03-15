@@ -12,14 +12,14 @@ import {
   RectangleStackIcon
 } from '@heroicons/react/24/solid';
 import { NozzleIcon, BedIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { Button, Badge } from '@/common/components/ui';
 import { GcodeFile } from '@/types/api';
 import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 import { useState } from 'react';
 import { QueueGcodeModal } from './QueueGcodeModal';
 import { TaggingModal } from '@/components/TaggingModal';
 import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
-import { ClipboardListIcon } from '@/common/components/icons/MdiIcons';
+import { ClipboardListIcon, LayersTripleOutlineIcon, CubeIcon } from '@/common/components/icons/MdiIcons';
 
 interface GcodeFileCardProps {
   file: GcodeFile;
@@ -151,6 +151,43 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Print details: layers, dimensions, badges */}
+              {(file.totalLayers || file.objectDimensionX || file.supportEnabled !== undefined) && (
+                <div className="space-y-1 border-t border-pf-border/50 pt-1">
+                  {file.totalLayers != null && (
+                    <div className="flex items-center gap-1">
+                      <LayersTripleOutlineIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
+                      <span title={`${file.totalLayers} layers${file.firstLayerHeight ? `, first layer ${file.firstLayerHeight}mm` : ''}`}>
+                        {file.totalLayers} layers
+                        {file.extractedLayerHeight ? ` @ ${file.extractedLayerHeight}mm` : ''}
+                      </span>
+                    </div>
+                  )}
+                  {file.objectDimensionX != null && file.objectDimensionY != null && (
+                    <div className="flex items-center gap-1">
+                      <CubeIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
+                      <span title={`Object size: ${file.objectDimensionX} × ${file.objectDimensionY} × ${file.objectDimensionZ ?? '?'}mm`}>
+                        {file.objectDimensionX}×{file.objectDimensionY}×{file.objectDimensionZ ?? '?'}mm
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-1">
+                    {file.supportEnabled && (
+                      <Badge variant="warning" size="sm">Support</Badge>
+                    )}
+                    {file.toolChangesCount != null && file.toolChangesCount > 0 && (
+                      <Badge variant="info" size="sm">{file.toolChangesCount} tool change{file.toolChangesCount > 1 ? 's' : ''}</Badge>
+                    )}
+                    {file.objectCount != null && file.objectCount > 1 && (
+                      <Badge variant="default" size="sm">{file.objectCount} objects</Badge>
+                    )}
+                    {file.ironingEnabled && (
+                      <Badge variant="default" size="sm">Ironing</Badge>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
 

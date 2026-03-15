@@ -491,6 +491,28 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
             {file.extractedMaterial && <div>- Material: {file.extractedMaterial}</div>}
           </div>
         )}
+
+        {/* Print details from gcode metadata */}
+        {(file.totalLayers || file.objectDimensionX || file.supportEnabled || file.extractedPrintTime) && (
+          <div className="text-sm text-pf-text-secondary bg-pf-bg-2 p-3 rounded-lg">
+            <div className="font-medium mb-1">Print details:</div>
+            {file.totalLayers != null && (
+              <div>- Layers: {file.totalLayers.toLocaleString()}{file.extractedLayerHeight ? ` @ ${file.extractedLayerHeight}mm` : ''}{file.firstLayerHeight ? ` (first: ${file.firstLayerHeight}mm)` : ''}</div>
+            )}
+            {file.objectDimensionX != null && file.objectDimensionY != null && (
+              <div>- Dimensions: {file.objectDimensionX} × {file.objectDimensionY} × {file.objectDimensionZ ?? '?'} mm</div>
+            )}
+            {file.supportEnabled && (
+              <div className="text-pf-warning">- ⚠ Support material enabled (extra filament + post-processing)</div>
+            )}
+            {file.toolChangesCount != null && file.toolChangesCount > 0 && (
+              <div>- Tool changes: {file.toolChangesCount}</div>
+            )}
+            {file.objectCount != null && file.objectCount > 1 && (
+              <div>- Objects on plate: {file.objectCount}</div>
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   );

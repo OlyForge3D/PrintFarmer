@@ -120,6 +120,36 @@ const gcodeColumns: ColumnDef[] = [
     render: (file) => file.meta?.gcode?.extractedPrinterModelName || '—',
   },
   {
+    key: 'totalLayers',
+    label: 'Layers',
+    sortable: true,
+    align: 'right',
+    render: (file) => {
+      const layers = file.meta?.gcode?.totalLayers;
+      return layers ? layers.toLocaleString() : '—';
+    },
+  },
+  {
+    key: 'objectDimensions',
+    label: 'Dimensions',
+    render: (file) => {
+      const x = file.meta?.gcode?.objectDimensionX;
+      const y = file.meta?.gcode?.objectDimensionY;
+      const z = file.meta?.gcode?.objectDimensionZ;
+      if (!x && !y) return '—';
+      return `${x ?? '?'}×${y ?? '?'}×${z ?? '?'}mm`;
+    },
+  },
+  {
+    key: 'supportEnabled',
+    label: 'Support',
+    render: (file) => {
+      const support = file.meta?.gcode?.supportEnabled;
+      if (support === undefined || support === null) return '—';
+      return support ? '✓' : '—';
+    },
+  },
+  {
     key: 'tags',
     label: 'Tags',
     render: (file) =>
