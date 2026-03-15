@@ -60,6 +60,7 @@ public class EfCameraRepository : ICameraRepository
 
     /// <summary>
     /// Finds a camera by name (case-insensitive, trimmed).
+    /// Uses server-side ToLower() for portable cross-provider comparison.
     /// </summary>
     /// <param name="name">The camera name to search for.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -70,15 +71,11 @@ public class EfCameraRepository : ICameraRepository
             return null;
         }
 
-        string trimmed = name.Trim();
+        string trimmed = name.Trim().ToLower();
 
-        // EF Core cannot translate the StringComparison overload, so materialize
-        // the candidates and perform a culture-invariant ordinal comparison on the client.
-        List<Camera> candidates = await _dbContext.Cameras
-            .Where(c => c.Name != null)
-            .ToListAsync(ct);
-
-        return candidates.FirstOrDefault(c => string.Equals(c.Name?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+        return await _dbContext.Cameras
+            .Where(c => c.Name != null && c.Name.ToLower().Trim() == trimmed)
+            .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>
@@ -110,5 +107,46 @@ public class EfCameraRepository : ICameraRepository
     {
         ArgumentNullException.ThrowIfNull(camera);
         _dbContext.Cameras.Remove(camera);
+    }
+
+    /// <summary>
+    /// Gets all cameras attached to a specific printer, ordered by sort order, then by name.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<List<Camera>> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
+    {
+        return await _dbContext.Cameras
+            .Where(c => c.PrinterId == printerId)
+            .OrderBy(c => c.SortOrder)
+            .ThenBy(c => c.Name)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Finds a camera attached to a printer with a specific camera type.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="type">The camera type to search for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<Camera?> FindByPrinterIdAndTypeAsync(Guid printerId, CameraType type, CancellationToken ct)
+    {
+        return await _dbContext.Cameras
+            .Where(c => c.PrinterId == printerId && c.CameraType == type)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>
+    /// Gets all enabled cameras with their associated Printer navigation property loaded.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<List<Camera>> GetEnabledWithPrinterAsync(CancellationToken ct)
+    {
+        return await _dbContext.Cameras
+            .Include(c => c.Printer)
+            .Where(c => c.IsEnabled)
+            .OrderBy(c => c.SortOrder)
+            .ThenBy(c => c.Name)
+            .ToListAsync(ct);
     }
 }

@@ -3538,6 +3538,14 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Get cameras linked to a specific printer
+   */
+  async getCamerasByPrinter(printerId: string): Promise<import('@/types/api').CameraDto[]> {
+    const response = await this.client.get(`/cameras/by-printer/${printerId}`);
+    return response.data;
+  }
+
   // ====== NFC Devices ======
 
   async getNfcDevices(): Promise<import('@/types/api').NfcDeviceDto[]> {

@@ -428,3 +428,19 @@ Ash specializes in comprehensive documentation work. Key expertise areas and sta
   - Not recommended: Pi 4 2GB (too tight)
   - Excellent: Pi 4 4GB (1-5 printers, with lite monitoring)
   - Full features: Pi 4 8GB (5-20+ printers, with all services)
+
+---
+
+## 2026-03-15 Camera Phase A Backend — Frontend Impact
+
+**Related Work:** Lambert completed Camera Phase A backend unification (2026-03-15T01-57-00Z)
+
+**Impact:** Frontend should expect unified Camera API in Phase D:
+- `GET /api/cameras/by-printer/{printerId}` — cameras for specific printer
+- New Camera DTO fields: PrinterId, Source, CameraType, HealthStatus, LastHealthCheck
+- Support multi-camera per printer UI
+- Camera type filters (General, Bed, Nozzle, Wide, Timelapse)
+- Health status indicators
+
+**Decision:** `.squad/decisions.md` #17 — Camera Management Phase A  
+**Next Phase:** Phase D — Frontend multi-camera UI

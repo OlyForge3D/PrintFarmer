@@ -146,9 +146,23 @@ public class Printer
     [NotMapped]
     public PrinterCredential? Credential { get; set; }
 
+    /// <summary>
+    /// Legacy camera stream URL.
+    /// </summary>
+    [Obsolete("Use Cameras navigation property instead. Will be removed in v3.")]
     public string? CameraStreamUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
 
+    /// <summary>
+    /// Legacy camera snapshot URL.
+    /// </summary>
+    [Obsolete("Use Cameras navigation property instead. Will be removed in v3.")]
     public string? CameraSnapshotUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
+
+    /// <summary>
+    /// Cameras attached to this printer.
+    /// Cameras are discovered from Moonraker, PrusaLink, OctoPrint, etc. or manually configured.
+    /// </summary>
+    public ICollection<Camera> Cameras { get; set; } = new List<Camera>();
 
     public Guid ManufacturerId { get; set; } // No longer nullable - uses default "Unknown" manufacturer
 

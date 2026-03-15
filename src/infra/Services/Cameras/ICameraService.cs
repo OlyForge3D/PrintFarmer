@@ -87,4 +87,26 @@ public interface ICameraService
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     Task<CameraDto[]> GetEnabledCamerasAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Gets all cameras attached to a specific printer.
+    /// </summary>
+    /// <param name="printerId">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<List<CameraDto>> GetByPrinterIdAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>
+    /// Creates a new camera attached to a specific printer.
+    /// </summary>
+    /// <param name="printerId">The unique identifier of the printer.</param>
+    /// <param name="dto">The data transfer object containing camera creation data.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<CameraDto> CreateForPrinterAsync(Guid printerId, CreateCameraDto dto, CancellationToken ct);
+
+    /// <summary>
+    /// Gets all enabled cameras (standalone and printer-attached) with printer names resolved.
+    /// Used for the Camera View display page.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<List<DisplayCameraDto>> GetDisplayCamerasAsync(CancellationToken ct);
 }

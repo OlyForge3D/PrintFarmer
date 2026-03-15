@@ -1288,10 +1288,70 @@ None. Can ship independently.
 
 ---
 
+### 17. Camera Management Phase A — Backend Foundation (Approved)
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2025-01-14  
+**Status:** APPROVED — Phase A.1 (migrations) ready
+
+#### Problem
+PrintFarmer had two parallel camera systems:
+1. Standalone cameras (full Camera entity with CRUD)
+2. Printer-attached cameras (string URL fields on Printer entity)
+
+Need unified model supporting both with health tracking foundation.
+
+#### Solution
+**Unified Camera Entity with Optional PrinterId FK**
+- Extend Camera entity to support both standalone and printer-attached cameras
+- Add `PrinterId` optional FK (nullable for standalone, set for printer-attached)
+- Add enums for classification: CameraSource (Standalone, Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge), CameraType (General, Bed, Nozzle, Wide, Timelapse), HealthStatus (Unknown, Healthy, Degraded, Unhealthy)
+- Add health tracking fields: LastHealthCheck, HealthMessage, ConsecutiveFailures (foundation for Phase B)
+
+#### Key Design Decisions
+1. **Optional PrinterId** — Camera can be standalone (PrinterId = null) OR printer-attached (PrinterId = guid)
+2. **Cascade delete** — When printer deleted, its cameras are cleaned up
+3. **String enum storage** — Database portability (SQLite, PostgreSQL, SQL Server, MySQL)
+4. **Backward compatible** — Legacy Printer.CameraStreamUrl/SnapshotUrl marked [Obsolete] but functional
+5. **Relationship pattern** — Follows proven PrinterGroup → Printer pattern
+
+#### Entities
+- **Camera:** Added PrinterId (FK), Source, CameraType, HealthStatus, LastHealthCheck, HealthMessage, ConsecutiveFailures
+- **Printer:** Added Cameras navigation, marked legacy URL fields [Obsolete]
+- **CameraEnums:** 3 new enums (Source, Type, HealthStatus) stored as strings
+
+#### API Changes
+- **NEW:** `GET /api/cameras/by-printer/{printerId}` — Cameras for specific printer
+- **EXTENDED:** `POST /api/cameras` — Accepts optional PrinterId
+- **EXTENDED:** `PUT /api/cameras/{id}` — Can link/unlink from printers
+- All existing endpoints remain unchanged
+
+#### Implementation Status
+- ✅ All 11 files modified/created (548 lines)
+- ✅ 0 errors, 0 warnings
+- ✅ 2052/2052 tests pass
+- ⏳ EF Core migrations (Phase A.1) — not created yet
+- ⏳ Data migration from Printer URLs → Camera rows — pending
+
+#### Next Phases
+- **Phase A.1:** Create migrations for PostgreSQL/SQL Server, data migration
+- **Phase B:** CameraHealthMonitoringService background service
+- **Phase C:** Discovery plugin integration (Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge)
+- **Phase D:** Frontend multi-camera UI with type filters and health status
+
+#### Build Quality
+- **Files:** Camera.cs, Printer.cs, CameraConfiguration.cs, CameraDtos.cs, ICameraRepository.cs, EfCameraRepository.cs, ICameraService.cs, CameraService.cs, CamerasController.cs, CameraEnums.cs (new)
+- **Build Time:** ~83 seconds
+- **Test Status:** All 2052 tests passing
+- **Quality Gate:** PASS
+
+---
+
 ## References
 
-- **Dallas:** Camera management architecture — `.squad/decisions/inbox/dallas-camera-management-architecture.md`
-- **Previous:** Architecture analysis — `.squad/decisions/inbox/dallas-blocked-items-architecture.md`
-- **Previous:** Codebase analysis — `.squad/decisions/inbox/lambert-codebase-analysis.md`
-- **Previous:** Competitive research — `.squad/decisions/inbox/brett-competitor-research.md`
+- **Lambert:** Orchestration log — `.squad/orchestration-log/2026-03-15T01-57-00Z-lambert.md`
+- **Dallas:** Camera management architecture — (deprecated inbox file deleted)
+- **Previous:** Architecture analysis — (deprecated inbox file deleted)
+- **Previous:** Codebase analysis — (deprecated inbox file deleted)
+- **Previous:** Competitive research — (deprecated inbox file deleted)
 

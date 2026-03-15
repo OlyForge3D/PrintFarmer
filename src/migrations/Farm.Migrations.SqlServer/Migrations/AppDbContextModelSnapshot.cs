@@ -150,6 +150,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CameraType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -157,10 +164,21 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<string>("HealthMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("HealthStatus")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<bool>("IsEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
+
+                    b.Property<DateTime?>("LastHealthCheck")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Location")
                         .HasMaxLength(100)
@@ -171,6 +189,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<Guid?>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("SnapshotUrl")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -179,6 +200,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("StreamUrl")
                         .HasMaxLength(500)
@@ -193,7 +218,11 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("Name");
 
+                    b.HasIndex("PrinterId");
+
                     b.HasIndex("SortOrder");
+
+                    b.HasIndex("Source");
 
                     b.ToTable("Cameras", (string)null);
                 });
@@ -3958,6 +3987,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany("Cameras")
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Printer");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
@@ -4880,6 +4919,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
+                    b.Navigation("Cameras");
+
                     b.Navigation("MaintenanceLogs");
 
                     b.Navigation("Statistics");

@@ -860,3 +860,166 @@ Performed comprehensive code-level investigation of 5 blocked/deferred items to 
 - Unblocks external camera support + multi-camera per printer + bandwidth control
 
 **Full analysis:** `.squad/decisions/inbox/lambert-camera-infrastructure.md`
+
+---
+
+### 2025-01-14: Camera Management Phase A — Backend Foundation Complete
+
+**Status:** ✅ Implementation complete, all tests passing (2052/2052 PASS)
+
+**What Was Built:**
+Unified camera infrastructure to support both standalone cameras and printer-attached cameras within a single Camera entity.
+
+**Entity Changes:**
+- Created `CameraEnums.cs` with CameraSource, CameraType, CameraHealthStatus enums
+- Extended Camera entity with:
+  - `PrinterId` (nullable FK to Printer)
+  - `Printer` navigation property
+  - `Source`, `CameraType`, `HealthStatus` enums
+  - `LastHealthCheck`, `HealthMessage`, `ConsecutiveFailures` health tracking fields
+- Extended Printer entity with:
+  - `Cameras` navigation property (ICollection<Camera>)
+  - Marked `CameraStreamUrl`/`CameraSnapshotUrl` as [Obsolete] for backward compat
+
+**Configuration Updates:**
+- CameraConfiguration: Added FK relationship, enum conversions (string storage), indexes on PrinterId/Source
+- Relationship: Camera.Printer (many-to-one) with cascade delete
+
+**DTO Updates:**
+- CameraDto: Added PrinterId, Source, CameraType, HealthStatus, LastHealthCheck fields
+- CreateCameraDto: Added PrinterId?, Source?, CameraType? (all nullable for optional config)
+- UpdateCameraDto: Added PrinterId?, Source?, CameraType? (nullable for partial updates)
+- DisplayCameraDto: Changed Source from string to CameraSource enum, added CameraType/HealthStatus
+
+**Repository Layer:**
+- ICameraRepository: Added `GetByPrinterIdAsync()`, `FindByPrinterIdAndTypeAsync()`
+- EfCameraRepository: Implemented both methods with proper ordering (SortOrder → Name)
+
+**Service Layer:**
+- ICameraService: Added `GetByPrinterIdAsync()`, `CreateForPrinterAsync()`
+- CameraService:
+  - Updated CreateAsync to validate PrinterId if provided
+  - Updated UpdateAsync to handle PrinterId changes with printer validation
+  - Implemented GetByPrinterIdAsync and CreateForPrinterAsync
+  - Added MapToDto helper method to map Camera → CameraDto with all new fields
+
+**Controller Layer:**
+- CamerasController: Added `GET /api/cameras/by-printer/{printerId}` endpoint
+- Updated GetCameraAsync to include new fields in manual DTO mapping
+- CreateCameraAsync accepts PrinterId in DTO
+
+**Key Patterns Applied:**
+- One-to-many relationship pattern from PrinterGroup → Printer
+- Enum storage as strings for database portability
+- Cascade delete for printer camera cleanup
+- Nullable FK for optional printer association
+
+**Files Changed:**
+- `src/infra/Domain/Enums/CameraEnums.cs` (NEW)
+- `src/infra/Domain/Camera.cs`
+- `src/infra/Domain/Printer.cs`
+- `src/infra/Data/Configurations/CameraConfiguration.cs`
+- `src/infra/Dtos/CameraDtos.cs`
+- `src/infra/Repositories/Cameras/ICameraRepository.cs`
+- `src/infra/Repositories/Cameras/EfCameraRepository.cs`
+- `src/infra/Services/Cameras/ICameraService.cs`
+- `src/infra/Services/Cameras/CameraService.cs`
+- `src/api/Controllers/CamerasController.cs`
+
+**Validation Results:**
+- ✅ Build: 0 errors, 0 warnings (clean build)
+- ✅ Format: No formatting issues
+- ✅ Tests: 2052/2052 PASS (448 Slicer + 1604 API tests)
+
+**Next Steps:**
+- Create EF Core migrations for schema changes (separate task)
+- Phase B: Camera health monitoring service
+- Phase C: Discovery probe integration
+
+
+---
+
+## 2026-03-15 Camera Phase A Backend Complete
+
+**Session:** 2026-03-15T01-57-00Z  
+**Task:** Camera Management Phase A — Backend Foundation  
+**Status:** ✅ COMPLETE  
+
+**Outcome:** Unified camera entity with optional PrinterId FK for both standalone and printer-attached cameras. Foundation for health monitoring (Phase B) and discovery integration (Phase C).
+
+**Build Quality:**
+- ✅ 548 lines across 11 files
+- ✅ 0 errors, 0 warnings
+- ✅ 2052/2052 tests pass
+- ✅ Quality gates: PASS
+
+**Decision:** Documented in `.squad/decisions.md` (decision #17)  
+**Orchestration Log:** `.squad/orchestration-log/2026-03-15T01-57-00Z-lambert.md`  
+**Session Log:** `.squad/log/2026-03-15T01-57-00Z-camera-phase-a.md`
+
+### Camera Phase B — EF Migrations + Health Monitor Service (2026-03-15)
+
+**Status:** ✅ COMPLETE
+
+**Deliverables:**
+
+1. **EF Core Migrations:**
+   - PostgreSQL migration: `20260315021959_AddCameraPrinterRelationship`
+   - SqlServer migration: `20260315022009_AddCameraPrinterRelationship`
+   - Added Camera columns: PrinterId (nullable FK → Printers.Id, cascade delete), Source, CameraType, HealthStatus, LastHealthCheck, HealthMessage, ConsecutiveFailures
+   - Added indexes: IX_Cameras_PrinterId, IX_Cameras_Source
+   - Fixed SA1122 warnings (replaced `""` with `string.Empty`)
+
+2. **Camera Health Monitor Service:**
+   - Created `src/infra/Services/Cameras/CameraHealthMonitorService.cs` — background service for periodic camera URL probing
+   - Created `src/infra/Services/Cameras/ICameraHealthMonitorService.cs` — interface for manual trigger/testing
+   - Runs every 5 minutes, HTTP GET with 10-second timeout
+   - Health status transitions: Healthy (0 failures), Degraded (1-2), Unhealthy (3+)
+   - Logs status changes, tracks consecutive failures, updates LastHealthCheck timestamp
+   - Registered in `ServiceCollectionExtensions.RegisterBackgroundServices()` as `AddHostedService`
+   - Uses IServiceScopeFactory for scoped DbContext access from singleton-lifetime hosted service
+
+3. **Test Fix:**
+   - Fixed `CameraManagementTests.CreateTestPrinterAsync()` — randomized ServerUrl to prevent UNIQUE constraint violations
+
+**Build:** 0 errors, 9 pre-existing warnings (obsolete camera properties)
+**Tests:** 1615/1616 pass (1 pre-existing failure in PrinterImportFacadeIntegrationTests unrelated to changes)
+
+**Design decisions:**
+- Health check interval: 5 minutes (balance between responsiveness and network overhead)
+- Failure thresholds: 1-2 failures = Degraded, 3+ = Unhealthy
+- HTTP timeout: 10 seconds (cameras typically respond within 2-3s, 10s allows for network variance)
+- Per-camera exception handling: one failed camera doesn't stop the loop
+- IHttpClientFactory usage: standard pattern for HTTP clients in background services
+- Initial 30-second delay: ensures database initialization completes before first health check
+
+**Learnings:**
+- Background services implementing IHostedService must use IServiceScopeFactory to create scoped DbContext
+- Migration warnings about `defaultValue: ""` resolved with `string.Empty`
+- Camera entity already had all required fields — CameraConfiguration.cs exists with indexes and FK relationship
+- Test data randomization critical for parallel test execution without constraint violations
+
+### Code Review Fixes — 5 Backend Issues (2026-03-15)
+
+**Status:** ✅ COMPLETE
+
+**Fixes Applied:**
+
+1. **CRITICAL — `/cameras/display` endpoint**: Added `GetEnabledWithPrinterAsync()` to `ICameraRepository`/`EfCameraRepository` (uses `.Include(c => c.Printer)`), `GetDisplayCamerasAsync()` to `ICameraService`/`CameraService`, and `[HttpGet("display")]` endpoint to `CamerasController`. Returns `List<DisplayCameraDto>` with printer names resolved.
+
+2. **HIGH — SSRF vulnerability in health monitor**: Added `IsUrlSafeForProbing()` helper to `CameraHealthMonitorService`. Blocks loopback (localhost, 127.x, ::1), link-local (169.254.x.x), and non-HTTP(S) schemes. Allows private IPs (10.x, 192.168.x, 172.16-31.x) since this is a local network app. Unsafe URLs log a warning and mark camera as unhealthy.
+
+3. **HIGH — FindByNameAsync full table scan**: Replaced client-side `ToListAsync()` + `FirstOrDefault()` with server-side `ToLower().Trim()` comparison in `EfCameraRepository.FindByNameAsync()`. EF Core translates `ToLower()` to appropriate SQL for all providers.
+
+4. **MEDIUM — Migration enum defaults**: Changed `defaultValue: string.Empty` to proper enum strings (`"General"`, `"Unknown"`, `"Standalone"`) for CameraType, HealthStatus, Source columns in both PostgreSQL and SqlServer migration files.
+
+5. **MEDIUM — Race condition in health batch**: Changed `CameraHealthMonitorService.RunHealthCheckAsync()` to call `SaveChangesAsync()` after each camera probe instead of batching all saves at the end. Prevents concurrent API updates from being overwritten.
+
+**Build:** 0 errors, 30 warnings (all pre-existing obsolete camera property warnings)
+**Tests:** 2064/2064 pass (0 failures)
+
+**Learnings:**
+- `ToLower()` in EF Core LINQ translates to `LOWER()` in SQL across SQLite, PostgreSQL, SqlServer, MySQL — safe for portable case-insensitive comparison
+- SSRF validation for local-network apps: block loopback + link-local but explicitly allow RFC 1918 private ranges
+- Per-entity SaveChangesAsync in background services prevents race conditions with concurrent API writes
+- Migration `defaultValue` for string-serialized enums must be the actual enum member name string, not empty

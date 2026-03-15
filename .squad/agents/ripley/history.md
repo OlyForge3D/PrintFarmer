@@ -958,3 +958,93 @@ Global CSS in `controls.css` (line ~1415) applies `background-image` with an SVG
 - **Rule of thumb:** Components providing custom dropdown arrows should always explicitly zero out `background-image` to avoid conflicts with global resets.
 - The global `controls.css` `select` rule is a "safety net" for raw selects — it's correct for raw `<select>` elements that have no custom overlay. The conflict only arises when components add their own.
 
+
+---
+
+## 2026-03-15 Camera Phase A Backend — Testing Impact
+
+**Related Work:** Lambert completed Camera Phase A backend (2026-03-15T01-57-00Z)
+
+**Impact:** Test suite updated:
+- New repository methods tested: GetByPrinterIdAsync, FindByPrinterIdAndTypeAsync
+- New service methods tested: GetByPrinterIdAsync, CreateForPrinterAsync
+- New controller endpoint: `GET /api/cameras/by-printer/{printerId}`
+- All 2052 tests passing (no test regressions)
+
+**Coverage:** All new camera entity fields, enums, relationships covered  
+**Decision:** `.squad/decisions.md` #17 — Camera Management Phase A
+
+
+---
+
+## 2026-03-15 Camera Phase 1.5 Frontend — Camera Management UI
+
+**Related Work:** Lambert completed Camera Phase A backend (2026-03-15T01-57-00Z)
+
+**Impact:** Frontend components updated to support new camera entity features:
+
+### Type System Updates (`api.ts`)
+- Added `CameraSource` enum: Standalone, Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge
+- Added `CameraType` enum: General, Bed, Nozzle, Wide, Timelapse
+- Added `CameraHealthStatus` enum: Unknown, Healthy, Degraded, Unhealthy
+- Updated `CameraDto` with: printerId, source, cameraType, healthStatus, lastHealthCheck
+- Updated `CreateCameraDto` with: printerId, source, cameraType
+- Updated `DisplayCameraDto` with: source, cameraType, healthStatus
+
+### API Integration
+- Added `getCamerasByPrinter(printerId)` to ApiClient and cameraService
+- Returns cameras linked to specific printer via `GET /api/cameras/by-printer/{printerId}`
+
+### New Components
+1. **CameraHealthBadge** (`features/cameras/components/CameraHealthBadge.tsx`):
+   - Visual health indicator with icon + label
+   - Color-coded: green (Healthy), yellow (Degraded), red (Unhealthy), gray (Unknown)
+   - Optional last health check timestamp display (relative time via date-fns)
+
+2. **usePrinterCameras Hook** (`features/cameras/hooks/usePrinterCameras.ts`):
+   - TanStack Query hook fetching cameras for specific printer
+   - 30-second stale time
+   - Query key: `['cameras', 'by-printer', printerId]`
+
+### Updated Components
+1. **CamerasPage** (`features/cameras/pages/CamerasPage.tsx`):
+   - Switched to `getDisplayCameras()` for combined camera view
+   - Added health status badge display (top-left overlay)
+   - Added source badge display (top-right corner)
+   - Added printer name display for linked cameras
+   - Camera type label shown if not "General"
+
+2. **CameraCard** (`features/printers/components/CameraCard.tsx`):
+   - Integrated usePrinterCameras hook for health data
+   - Health status indicator (colored dot)
+   - Camera count badge if multiple cameras (e.g., "3 cameras")
+   - Graceful handling when no camera health data available
+
+### Test Results
+- ✅ TypeScript build: 0 errors (7.51s)
+- ✅ ESLint: 0 errors related to changes (1 pre-existing in PrinterGroupModal)
+- ✅ Tests: 1469/1469 passing (9.23s)
+- ✅ No regressions introduced
+
+**Key Learning:** When backend adds new entity properties (especially enums), frontend must:
+1. Add TypeScript enum declarations matching backend serialization format
+2. Update all affected DTOs (CameraDto, CreateCameraDto, DisplayCameraDto)
+3. Create helper components (CameraHealthBadge) for consistent UI patterns
+4. Use TanStack Query hooks for fetching related data (usePrinterCameras)
+5. Update existing components to display new properties without breaking existing UI
+
+**Pattern Applied:** 
+- Health status shown via color-coded indicators (dot/badge) — consistent with printer status patterns
+- Source/type shown via subtle badges — avoids clutter while providing context
+- Optional printer linkage shown via printer name display
+- Camera count badge for multi-camera printers
+
+**Decision:** `.squad/decisions.md` #17 — Camera Management Phase A
+
+## Learnings
+
+### Code Review Fix — UpdateCameraDto + DisplayCameraDto alignment (2025-07-18)
+- `UpdateCameraDto` was missing `printerId` (string | null), `source` (CameraSource), and `cameraType` (CameraType) — added to match C# DTO
+- `printerId` uses `string | null` (not just optional) to allow clearing printer association
+- `DisplayCameraDto` was missing `lastHealthCheck` and `healthMessage` — added to match C# DTO
+- Always compare TS interfaces against C# DTOs when adding backend endpoints; partial interfaces cause silent data loss
