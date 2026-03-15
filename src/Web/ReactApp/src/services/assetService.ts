@@ -55,7 +55,7 @@ class AssetService {
         }
       }
 
-      console.log(
+      console.debug(
         `[AssetService] Loaded ${this.manufacturerMap.size} manufacturers with ${this.printerMap.size} printer models`
       );
     } catch (error) {

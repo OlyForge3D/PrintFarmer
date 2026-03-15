@@ -237,50 +237,6 @@ public class SlicerQueueStats
 }
 
 /// <summary>
-/// Validation result for slicer file input.
-/// </summary>
-#pragma warning disable SA1402
-public class SlicerValidationResult
-#pragma warning restore SA1402
-{
-    public bool IsValid { get; set; }
-
-    private readonly List<string> _issues = new();
-    private readonly List<string> _warnings = new();
-
-    public IReadOnlyList<string> Issues => _issues;
-
-    public IReadOnlyList<string> Warnings => _warnings;
-
-    public long FileSizeBytes { get; set; }
-
-    public string? FileType { get; set; }
-
-    public Dictionary<string, object> Metadata { get; } = new Dictionary<string, object>();
-
-    public void AddIssue(string issue)
-    {
-        if (!string.IsNullOrWhiteSpace(issue))
-        {
-            _issues.Add(issue);
-        }
-    }
-
-    public void AddWarning(string warning)
-    {
-        if (!string.IsNullOrWhiteSpace(warning))
-        {
-            _warnings.Add(warning);
-        }
-    }
-
-    public SlicerValidationResult()
-    {
-        IsValid = true;
-    }
-}
-
-/// <summary>
 /// File metadata for slicer storage.
 /// </summary>
 #pragma warning disable SA1402

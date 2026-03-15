@@ -69,24 +69,24 @@ export class SlicerHubService {
       .build();
 
     this.connection.onclose((error) => {
-      console.log('SlicerHub connection closed', error);
+      console.debug('SlicerHub connection closed', error);
       if (error && this.reconnectAttempts < this.maxReconnectAttempts) {
         setTimeout(() => this.reconnect(), this.reconnectDelay);
       }
     });
 
     this.connection.onreconnecting((error) => {
-      console.log('SlicerHub reconnecting...', error);
+      console.debug('SlicerHub reconnecting...', error);
     });
 
     this.connection.onreconnected((connectionId) => {
-      console.log('SlicerHub reconnected:', connectionId);
+      console.debug('SlicerHub reconnected:', connectionId);
       this.reconnectAttempts = 0;
     });
 
     try {
       await this.connection.start();
-      console.log('SlicerHub connected successfully');
+      console.debug('SlicerHub connected successfully');
       this.reconnectAttempts = 0;
     } catch (error) {
       console.error('Failed to connect to SlicerHub:', error);
@@ -115,7 +115,7 @@ export class SlicerHubService {
     if (this.connection) {
       try {
         await this.connection.start();
-        console.log('SlicerHub reconnected successfully');
+        console.debug('SlicerHub reconnected successfully');
         this.reconnectAttempts = 0;
       } catch (error) {
         console.error('Failed to reconnect to SlicerHub:', error);

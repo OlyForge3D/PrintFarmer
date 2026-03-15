@@ -28,7 +28,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
 
-// using Microsoft.Extensions.Caching.Memory; // removed unused
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Register DLL import resolver for Lib3MF to handle cross-platform native library loading

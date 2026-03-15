@@ -59,13 +59,7 @@ public class PrintersController(
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
-#pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
-#pragma warning disable S1144 // Unused private types or members should be removed
-#pragma warning disable CA1823 // Avoid unused private fields
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
-#pragma warning restore CA1823 // Avoid unused private fields
-#pragma warning restore S1144 // Unused private types or members should be removed
-#pragma warning restore IDE0052
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
