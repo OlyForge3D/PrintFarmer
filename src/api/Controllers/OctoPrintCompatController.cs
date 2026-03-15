@@ -113,7 +113,17 @@ namespace Farm.Web.Api.Controllers
                 return BadRequest(new { message = "Uploaded file is empty" });
             }
 
-            // TODO: enforce _settings.MaxUploadSizeMb
+            long maxBytes = (long)_settings.MaxUploadSizeMb * 1024 * 1024;
+            if (file.Length > maxBytes)
+            {
+                _logger.LogWarning(
+                    "OctoPrint upload rejected: file size {SizeMb:F1} MB exceeds limit of {MaxMb} MB",
+                    file.Length / (1024.0 * 1024.0),
+                    _settings.MaxUploadSizeMb);
+                return StatusCode(
+                    StatusCodes.Status413PayloadTooLarge,
+                    new { message = $"File size exceeds the maximum allowed size of {_settings.MaxUploadSizeMb} MB" });
+            }
 
             // Save to IFormFile directly using existing file upload pipeline
             try

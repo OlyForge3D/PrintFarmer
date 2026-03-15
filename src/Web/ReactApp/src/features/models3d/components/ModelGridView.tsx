@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
 import { CubeIcon, EyeIcon, TagIcon, FileIcon, LayersTripleOutlineIcon, DeleteIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { ContextMenu } from '@/common/components/ContextMenu';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useContextMenu } from '@/common/hooks/useContextMenu';
+import { apiClient } from '@/services/api';
 import type { Model } from '@/types/models';
 import type { ModelGridViewProps } from '@/types/components';
 
@@ -205,11 +207,14 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
         isDangerous={true}
         onConfirm={async () => {
           try {
-            // TODO: Implement deleteModel API call
-            // await fileService.deleteModel(selectedModelForDelete?.id);
+            if (selectedModelForDelete?.id) {
+              await apiClient.deleteModel3dFile(selectedModelForDelete.id);
+              toast.success(`Deleted "${selectedModelForDelete.name}"`);
+            }
             setSelectedModelForDelete(null);
-          } catch {
-            // Handle error
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Failed to delete model';
+            toast.error(msg);
           }
         }}
         onCancel={() => setSelectedModelForDelete(null)}

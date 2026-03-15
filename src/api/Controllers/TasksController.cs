@@ -77,8 +77,9 @@ public class TasksController(IUserTaskService taskService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DismissAsync(Guid id, CancellationToken ct)
     {
-        // TODO: Get userId from authentication context when auth is implemented
-        bool success = await _taskService.DismissTaskAsync(id, null, ct);
+        string? userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        Guid? userId = Guid.TryParse(userIdStr, out Guid parsed) ? parsed : null;
+        bool success = await _taskService.DismissTaskAsync(id, userId, ct);
         if (!success)
         {
             return NotFound();

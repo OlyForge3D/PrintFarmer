@@ -188,10 +188,6 @@ builder.Services.AddOpenApi();
 // CORS configuration for API access
 builder.Services.AddPrintFarmerCors();
 
-// TODO: Simple rate limiting scaffold for OctoPrint endpoints - implementation pending
-// NOTE: This is a lightweight scaffold; replace with production-ready rate limiter if needed
-// builder.Services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
-
 // Configure OpenTelemetry (skippable for tests)
 builder.Services.AddPrintFarmerTelemetry(builder.Configuration, builder.Environment);
 
@@ -528,7 +524,11 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
     string? portsEnv = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
     NetworkDiscoverySettings current = settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
 
-    // TODO: Update logic for new NetworkDiscoverySettings properties if needed
+    if (!string.IsNullOrWhiteSpace(rangesEnv))
+    {
+        current.DiscoverySubnets = rangesEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
     settingsService.Save(current);
     return Results.Ok(current);
 });

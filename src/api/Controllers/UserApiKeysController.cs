@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -29,7 +30,11 @@ namespace Farm.Web.Api.Controllers
         [Authorize]
         public async Task<IActionResult> ListApiKeysAsync([FromRoute] Guid userId)
         {
-            // TODO: verify caller is same user or admin
+            if (!IsCallerAuthorized(userId))
+            {
+                return Forbid();
+            }
+
             IEnumerable<ApiKey> keys = await _repo.GetByUserIdAsync(userId);
             IEnumerable<ApiKeyDto> result = keys.Select(k => new ApiKeyDto(
                 k.Id,
@@ -44,7 +49,11 @@ namespace Farm.Web.Api.Controllers
         [Authorize]
         public async Task<IActionResult> CreateApiKeyAsync([FromRoute] Guid userId, [FromBody] CreateApiKeyRequest req)
         {
-            // TODO: verify caller is same user or admin
+            if (!IsCallerAuthorized(userId))
+            {
+                return Forbid();
+            }
+
             OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
             string rawKey = GenerateKey();
             string storedValue = settings.HashStoredApiKeys ? ComputeSha256Hash(rawKey) : rawKey;
@@ -66,7 +75,11 @@ namespace Farm.Web.Api.Controllers
         [Authorize]
         public async Task<IActionResult> ToggleApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
         {
-            // TODO: verify caller is same user or admin
+            if (!IsCallerAuthorized(userId))
+            {
+                return Forbid();
+            }
+
             ApiKey? key = await _repo.GetByIdAsync(keyId);
             if (key == null || key.UserId != userId)
             {
@@ -83,7 +96,11 @@ namespace Farm.Web.Api.Controllers
         [Authorize]
         public async Task<IActionResult> DeleteApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
         {
-            // TODO: verify caller is same user or admin
+            if (!IsCallerAuthorized(userId))
+            {
+                return Forbid();
+            }
+
             ApiKey? key = await _repo.GetByIdAsync(keyId);
             if (key == null || key.UserId != userId)
             {
@@ -98,7 +115,11 @@ namespace Farm.Web.Api.Controllers
         [Authorize]
         public async Task<IActionResult> RotateApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
         {
-            // TODO: verify caller is same user or admin
+            if (!IsCallerAuthorized(userId))
+            {
+                return Forbid();
+            }
+
             ApiKey? oldKey = await _repo.GetByIdAsync(keyId);
             if (oldKey == null || oldKey.UserId != userId)
             {
@@ -123,6 +144,11 @@ namespace Farm.Web.Api.Controllers
         [Authorize]
         public async Task<IActionResult> RevealApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
         {
+            if (!IsCallerAuthorized(userId))
+            {
+                return Forbid();
+            }
+
             OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
             if (settings.HashStoredApiKeys)
             {
@@ -148,6 +174,22 @@ namespace Farm.Web.Api.Controllers
         {
             OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
             return Ok(new { hashingEnabled = settings.HashStoredApiKeys });
+        }
+
+        private bool IsCallerAuthorized(Guid targetUserId)
+        {
+            string? callerIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(callerIdStr))
+            {
+                return false;
+            }
+
+            if (Guid.TryParse(callerIdStr, out Guid callerId) && callerId == targetUserId)
+            {
+                return true;
+            }
+
+            return User.IsInRole("Admin") || User.IsInRole("Administrator");
         }
 
         private static string GenerateKey()

@@ -197,7 +197,7 @@ export const Model3DFileBrowser = ({
         });
       },
       onDownload: async (id: string) => {
-        // TODO: Implement download for 3D models when API method is available
+        toast.info('3D model download is not yet available');
         if (window.PrintFarmerDebug?.enabled) {
           console.log('Download 3D model:', id);
         }
