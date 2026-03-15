@@ -147,16 +147,16 @@ public class Printer
     public PrinterCredential? Credential { get; set; }
 
     /// <summary>
-    /// Legacy camera stream URL.
+    /// Camera stream URL discovered from the printer backend.
+    /// Will be migrated to the Cameras navigation property in a future release.
     /// </summary>
-    [Obsolete("Use Cameras navigation property instead. Will be removed in v3.")]
-    public string? CameraStreamUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
+    public string? CameraStreamUrl { get; set; }
 
     /// <summary>
-    /// Legacy camera snapshot URL.
+    /// Camera snapshot URL discovered from the printer backend.
+    /// Will be migrated to the Cameras navigation property in a future release.
     /// </summary>
-    [Obsolete("Use Cameras navigation property instead. Will be removed in v3.")]
-    public string? CameraSnapshotUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
+    public string? CameraSnapshotUrl { get; set; }
 
     /// <summary>
     /// Cameras attached to this printer.
