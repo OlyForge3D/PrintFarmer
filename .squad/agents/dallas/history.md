@@ -465,3 +465,21 @@ Architected 4 parallel analytics features based on competitive analysis:
 **Why this works:** Platform owns camera visibility/toggle state. Backends remain readonly camera URL providers via discovery. No firmware API dependency.
 
 **Document:** `.squad/decisions.md` (#4: Camera Management — Platform Feature)
+
+---
+
+## 2026-03-15 Camera Phase A Backend Complete
+
+**Completion:** Lambert successfully implemented Phase A backend foundation (2026-03-15T01-57-00Z)
+
+**Architecture Alignment:**
+- ✅ Unified Camera entity (domain layer decision implemented)
+- ✅ Optional PrinterId FK (one-to-many pattern consistent with PrinterGroup → Printer)
+- ✅ String enum storage strategy (portability across SQLite, PostgreSQL, SQL Server, MySQL)
+- ✅ Health tracking foundation (ready for Phase B monitoring service)
+- ✅ Backward compatible (legacy Printer URL fields [Obsolete] but functional)
+
+**Quality:** 0 errors, 0 warnings, 2052/2052 tests pass
+
+**Decision Record:** `.squad/decisions.md` #17 — Camera Management Phase A  
+**Status:** Ready for Phase A.1 (migrations) and Phase B (health monitoring)

@@ -1,12 +1,13 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button } from '@/common/components/ui';
+import { Button, Badge } from '@/common/components/ui';
 import { CameraIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
-import type { CameraDto } from '@/types/api';
+import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
 import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
+import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
 
 /**
  * CamerasPage - Display all enabled cameras in a grid view
@@ -16,7 +17,7 @@ import { CameraManagementPanel } from '@/features/cameras/components/CameraManag
  */
 export function CamerasPage() {
   const auth = useAuth();
-  const [cameras, setCameras] = useState<CameraDto[]>([]);
+  const [cameras, setCameras] = useState<DisplayCameraDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +41,7 @@ export function CamerasPage() {
     try {
       setLoading(true);
       setError(null);
-      const data = await cameraService.getEnabledCameras();
+      const data = await cameraService.getDisplayCameras();
       // Sort by sortOrder
       data.sort((a, b) => a.sortOrder - b.sortOrder);
       setCameras(data);
@@ -128,8 +129,25 @@ export function CamerasPage() {
 }
 
 interface CameraViewCardProps {
-  camera: CameraDto;
+  camera: DisplayCameraDto;
 }
+
+const sourceLabels: Record<CameraSource, string> = {
+  Standalone: 'Standalone',
+  Moonraker: 'Moonraker',
+  PrusaLink: 'PrusaLink',
+  OctoPrint: 'OctoPrint',
+  SDCP: 'SDCP',
+  FlashForge: 'FlashForge',
+};
+
+const cameraTypeLabels: Record<CameraType, string> = {
+  General: 'General',
+  Bed: 'Bed',
+  Nozzle: 'Nozzle',
+  Wide: 'Wide',
+  Timelapse: 'Timelapse',
+};
 
 /**
  * CameraViewCard - Individual camera feed card
@@ -169,6 +187,18 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
           </div>
         )}
 
+        {/* Health status - top left */}
+        <div className="absolute top-2 left-2">
+          <CameraHealthBadge healthStatus={camera.healthStatus} size="sm" />
+        </div>
+
+        {/* Source badge - top right */}
+        <div className="absolute top-2 right-2">
+          <Badge variant="default" size="sm" className="backdrop-blur-sm bg-pf-bg-1/80">
+            {sourceLabels[camera.source]}
+          </Badge>
+        </div>
+
         {/* Camera mode toggle - bottom right (only if both modes available) */}
         {hasSnapshot && hasStream && (
           <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
@@ -198,15 +228,27 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
 
       {/* Camera info */}
       <div className="p-3 bg-pf-bg-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 mb-1">
           <CameraIcon className="w-4 h-4 text-pf-text-tertiary shrink-0" />
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-pf-text-primary truncate">{camera.name}</h3>
+            {camera.printerName && (
+              <p className="text-xs text-pf-text-secondary truncate">
+                Printer: {camera.printerName}
+              </p>
+            )}
             {camera.location && (
               <p className="text-xs text-pf-text-tertiary truncate">{camera.location}</p>
             )}
           </div>
         </div>
+        {camera.cameraType !== 'General' && (
+          <div className="mt-1">
+            <Badge variant="default" size="sm">
+              {cameraTypeLabels[camera.cameraType]}
+            </Badge>
+          </div>
+        )}
       </div>
     </div>
   );

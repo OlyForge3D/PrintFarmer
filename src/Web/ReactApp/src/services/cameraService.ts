@@ -36,4 +36,8 @@ export const cameraService = {
   async toggleCamera(id: string, isEnabled: boolean): Promise<CameraDto> {
     return apiClient.toggleCamera(id, isEnabled);
   },
+
+  async getCamerasByPrinter(printerId: string): Promise<CameraDto[]> {
+    return apiClient.getCamerasByPrinter(printerId);
+  },
 };

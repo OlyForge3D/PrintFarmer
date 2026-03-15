@@ -139,7 +139,12 @@ public class CamerasController(
                 Location = camera.Location,
                 CreatedAt = camera.CreatedAt,
                 UpdatedAt = camera.UpdatedAt,
-                IsStandalone = true
+                PrinterId = camera.PrinterId,
+                Source = camera.Source,
+                CameraType = camera.CameraType,
+                HealthStatus = camera.HealthStatus,
+                LastHealthCheck = camera.LastHealthCheck,
+                IsStandalone = !camera.PrinterId.HasValue
             };
             return Ok(dto);
         }
@@ -150,6 +155,41 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in GetCameraAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
+            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+        }
+    }
+
+    /// <summary>
+    /// Gets all cameras attached to a specific printer.
+    /// </summary>
+    /// <param name="printerId">The printer ID</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>List of cameras for the specified printer</returns>
+    /// <response code="200">Returns the list of cameras for the printer</response>
+    /// <response code="503">If the system is still initializing</response>
+    [AllowAnonymous]
+    [HttpGet("by-printer/{printerId}")]
+    [ProducesResponseType(typeof(IEnumerable<CameraDto>), 200)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasByPrinterAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            if (!_startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
+
+            List<CameraDto> cameras = await _cameraService.GetByPrinterIdAsync(printerId, ct);
+            return Ok(cameras);
+        }
+        catch (InvalidOperationException)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[CamerasController] Exception in GetCamerasByPrinterAsync for PrinterId {PrinterId}: {Message}", printerId.ToString(), ex.Message);
             return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
         }
     }

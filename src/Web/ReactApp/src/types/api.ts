@@ -2307,6 +2307,31 @@ export interface BackgroundServicesSummary {
 }
 
 // Camera Types - for standalone webcam management
+
+export enum CameraSource {
+  Standalone = 'Standalone',
+  Moonraker = 'Moonraker',
+  PrusaLink = 'PrusaLink',
+  OctoPrint = 'OctoPrint',
+  SDCP = 'SDCP',
+  FlashForge = 'FlashForge',
+}
+
+export enum CameraType {
+  General = 'General',
+  Bed = 'Bed',
+  Nozzle = 'Nozzle',
+  Wide = 'Wide',
+  Timelapse = 'Timelapse',
+}
+
+export enum CameraHealthStatus {
+  Unknown = 'Unknown',
+  Healthy = 'Healthy',
+  Degraded = 'Degraded',
+  Unhealthy = 'Unhealthy',
+}
+
 export interface CameraDto {
   id: string;
   name: string;
@@ -2319,6 +2344,11 @@ export interface CameraDto {
   createdAt: string;
   updatedAt?: string;
   isStandalone: boolean;
+  printerId?: string;
+  source: CameraSource;
+  cameraType: CameraType;
+  healthStatus: CameraHealthStatus;
+  lastHealthCheck?: string;
 }
 
 export interface CreateCameraDto {
@@ -2329,6 +2359,9 @@ export interface CreateCameraDto {
   isEnabled?: boolean;
   sortOrder?: number;
   location?: string;
+  printerId?: string;
+  source?: CameraSource;
+  cameraType?: CameraType;
 }
 
 export interface UpdateCameraDto {
@@ -2360,6 +2393,9 @@ export interface DisplayCameraDto {
   printerName?: string;
   printerState?: string;
   isPrinterOnline?: boolean;
+  source: CameraSource;
+  cameraType: CameraType;
+  healthStatus: CameraHealthStatus;
 }
 
 // ============== Print Project Types ==============

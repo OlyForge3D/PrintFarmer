@@ -141,6 +141,16 @@ public class CameraService : ICameraService
                 throw new InvalidOperationException($"A camera with name '{dto.Name}' already exists");
             }
 
+            // Validate PrinterId if provided
+            if (dto.PrinterId.HasValue)
+            {
+                Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
+                if (printer == null)
+                {
+                    throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
+                }
+            }
+
             Camera camera = new()
             {
                 Id = Guid.NewGuid(),
@@ -151,6 +161,9 @@ public class CameraService : ICameraService
                 IsEnabled = dto.IsEnabled,
                 SortOrder = dto.SortOrder,
                 Location = dto.Location?.Trim(),
+                PrinterId = dto.PrinterId,
+                Source = dto.Source ?? CameraSource.Standalone,
+                CameraType = dto.CameraType ?? CameraType.General,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -160,7 +173,7 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Created camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
 
-            return _mapper.Map<CameraDto>(camera);
+            return MapToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
@@ -229,13 +242,38 @@ public class CameraService : ICameraService
                 camera.Location = string.IsNullOrWhiteSpace(dto.Location) ? null : dto.Location.Trim();
             }
 
+            if (dto.Source.HasValue)
+            {
+                camera.Source = dto.Source.Value;
+            }
+
+            if (dto.CameraType.HasValue)
+            {
+                camera.CameraType = dto.CameraType.Value;
+            }
+
+            // Validate and update PrinterId if provided
+            if (dto.PrinterId != camera.PrinterId)
+            {
+                if (dto.PrinterId.HasValue)
+                {
+                    Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
+                    if (printer == null)
+                    {
+                        throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
+                    }
+                }
+
+                camera.PrinterId = dto.PrinterId;
+            }
+
             camera.UpdatedAt = DateTime.UtcNow;
 
             await _unitOfWork.SaveChangesAsync(ct);
 
             _logger.LogInformation("Updated camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
 
-            return _mapper.Map<CameraDto>(camera);
+            return MapToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
@@ -297,7 +335,7 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Toggled camera {CameraName} enabled status to {IsEnabled}", camera.Name, isEnabled);
 
-            return _mapper.Map<CameraDto>(camera);
+            return MapToDto(camera);
         }
         catch (Exception ex)
         {
@@ -334,5 +372,112 @@ public class CameraService : ICameraService
             _logger.LogError(ex, "Error getting enabled camera DTOs");
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<List<CameraDto>> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
+    {
+        if (printerId == Guid.Empty)
+        {
+            throw new ArgumentException("Printer ID cannot be empty", nameof(printerId));
+        }
+
+        try
+        {
+            List<Camera> cameras = await _unitOfWork.Cameras.GetByPrinterIdAsync(printerId, ct);
+            return cameras.Select(MapToDto).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving cameras for printer {PrinterId}", printerId);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<CameraDto> CreateForPrinterAsync(Guid printerId, CreateCameraDto dto, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        if (printerId == Guid.Empty)
+        {
+            throw new ArgumentException("Printer ID cannot be empty", nameof(printerId));
+        }
+
+        if (string.IsNullOrWhiteSpace(dto.Name))
+        {
+            throw new ArgumentException("Camera name is required", nameof(dto));
+        }
+
+        try
+        {
+            // Validate printer exists
+            Printer? printer = await _printersService.FindByIdAsync(printerId, ct);
+            if (printer == null)
+            {
+                throw new InvalidOperationException($"Printer with ID '{printerId}' not found");
+            }
+
+            // Check for duplicate name
+            if (await ExistsByNameAsync(dto.Name, ct))
+            {
+                throw new InvalidOperationException($"A camera with name '{dto.Name}' already exists");
+            }
+
+            Camera camera = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = dto.Name.Trim(),
+                Description = dto.Description?.Trim(),
+                StreamUrl = dto.StreamUrl?.Trim(),
+                SnapshotUrl = dto.SnapshotUrl?.Trim(),
+                IsEnabled = dto.IsEnabled,
+                SortOrder = dto.SortOrder,
+                Location = dto.Location?.Trim(),
+                PrinterId = printerId,
+                Source = dto.Source ?? CameraSource.Standalone,
+                CameraType = dto.CameraType ?? CameraType.General,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            _unitOfWork.Cameras.Add(camera);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            _logger.LogInformation("Created camera {CameraName} with ID {CameraId} for printer {PrinterId}", camera.Name, camera.Id, printerId);
+
+            return MapToDto(camera);
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
+        {
+            _logger.LogError(ex, "Error creating camera {DtoName} for printer {PrinterId}", dto.Name, printerId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Maps a Camera entity to CameraDto with all new fields.
+    /// </summary>
+    private static CameraDto MapToDto(Camera camera)
+    {
+        return new CameraDto
+        {
+            Id = camera.Id,
+            Name = camera.Name,
+            Description = camera.Description,
+            StreamUrl = camera.StreamUrl,
+            SnapshotUrl = camera.SnapshotUrl,
+            IsEnabled = camera.IsEnabled,
+            SortOrder = camera.SortOrder,
+            Location = camera.Location,
+            CreatedAt = camera.CreatedAt,
+            UpdatedAt = camera.UpdatedAt,
+            PrinterId = camera.PrinterId,
+            Source = camera.Source,
+            CameraType = camera.CameraType,
+            HealthStatus = camera.HealthStatus,
+            LastHealthCheck = camera.LastHealthCheck,
+            IsStandalone = !camera.PrinterId.HasValue
+        };
     }
 }

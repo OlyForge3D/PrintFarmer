@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 
@@ -33,7 +34,7 @@ public sealed class OptionalUrlAttribute : ValidationAttribute
 }
 
 /// <summary>
-/// Camera DTO for reading and listing standalone cameras.
+/// Camera DTO for reading and listing cameras (standalone and printer-attached).
 /// Contains all camera properties for display and management.
 /// </summary>
 public class CameraDto
@@ -59,6 +60,32 @@ public class CameraDto
     public DateTime? UpdatedAt { get; set; }
 
     /// <summary>
+    /// If this camera is attached to a printer, this is the printer's ID.
+    /// Null for standalone cameras.
+    /// </summary>
+    public Guid? PrinterId { get; set; }
+
+    /// <summary>
+    /// Source that discovered or created this camera
+    /// </summary>
+    public CameraSource Source { get; set; } = CameraSource.Standalone;
+
+    /// <summary>
+    /// Purpose/position classification of the camera
+    /// </summary>
+    public CameraType CameraType { get; set; } = CameraType.General;
+
+    /// <summary>
+    /// Health status from periodic connectivity probes
+    /// </summary>
+    public CameraHealthStatus HealthStatus { get; set; } = CameraHealthStatus.Unknown;
+
+    /// <summary>
+    /// Timestamp of the last health check
+    /// </summary>
+    public DateTime? LastHealthCheck { get; set; }
+
+    /// <summary>
     /// Indicates this is a standalone camera (not attached to a printer).
     /// Used to differentiate from printer-attached cameras in the UI.
     /// </summary>
@@ -66,7 +93,7 @@ public class CameraDto
 }
 
 /// <summary>
-/// DTO for creating a new standalone camera.
+/// DTO for creating a new camera (standalone or printer-attached).
 /// </summary>
 public class CreateCameraDto
 {
@@ -91,6 +118,24 @@ public class CreateCameraDto
 
     [StringLength(256, ErrorMessage = "Location cannot exceed 256 characters.")]
     public string? Location { get; set; }
+
+    /// <summary>
+    /// Optional printer ID if this camera is attached to a printer.
+    /// Null for standalone cameras.
+    /// </summary>
+    public Guid? PrinterId { get; set; }
+
+    /// <summary>
+    /// Source that discovered or created this camera.
+    /// If not specified, defaults to Standalone.
+    /// </summary>
+    public CameraSource? Source { get; set; }
+
+    /// <summary>
+    /// Purpose/position classification of the camera.
+    /// If not specified, defaults to General.
+    /// </summary>
+    public CameraType? CameraType { get; set; }
 }
 
 /// <summary>
@@ -118,6 +163,22 @@ public class UpdateCameraDto
 
     [StringLength(256, ErrorMessage = "Location cannot exceed 256 characters.")]
     public string? Location { get; set; }
+
+    /// <summary>
+    /// Optional printer ID if this camera should be attached to or moved to a different printer.
+    /// Can be set to null to convert a printer-attached camera to standalone.
+    /// </summary>
+    public Guid? PrinterId { get; set; }
+
+    /// <summary>
+    /// Source that discovered or created this camera
+    /// </summary>
+    public CameraSource? Source { get; set; }
+
+    /// <summary>
+    /// Purpose/position classification of the camera
+    /// </summary>
+    public CameraType? CameraType { get; set; }
 }
 
 /// <summary>
@@ -170,7 +231,17 @@ public class DisplayCameraDto
     public bool IsStandalone { get; set; }
 
     /// <summary>
-    /// The source of this camera (e.g., "Standalone", "Moonraker", "PrusaLink").
+    /// The source of this camera (e.g., Standalone, Moonraker, PrusaLink).
     /// </summary>
-    public string Source { get; set; } = "Standalone";
+    public CameraSource Source { get; set; } = CameraSource.Standalone;
+
+    /// <summary>
+    /// Purpose/position classification of the camera
+    /// </summary>
+    public CameraType CameraType { get; set; } = CameraType.General;
+
+    /// <summary>
+    /// Health status from periodic connectivity probes
+    /// </summary>
+    public CameraHealthStatus HealthStatus { get; set; } = CameraHealthStatus.Unknown;
 }

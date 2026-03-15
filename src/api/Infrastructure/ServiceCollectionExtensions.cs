@@ -649,6 +649,9 @@ public static class ServiceCollectionExtensions
             // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
 
+            // Camera health monitor - periodic HTTP probes of camera snapshot URLs
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();
+
             // Slicer hosted services (WorkerHealthMonitor, JobDispatching,
             // JobTimeoutScanner, StaleWorkerCleanup) are now registered by
             // AddSlicerModule() in Farm.Slicer.Module.

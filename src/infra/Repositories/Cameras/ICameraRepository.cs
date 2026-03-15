@@ -56,4 +56,19 @@ public interface ICameraRepository
     /// </summary>
     /// <param name="camera">The camera to remove.</param>
     void Remove(Camera camera);
+
+    /// <summary>
+    /// Gets all cameras attached to a specific printer.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<Camera>> GetByPrinterIdAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>
+    /// Finds a camera attached to a printer with a specific camera type.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="type">The camera type to search for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Camera?> FindByPrinterIdAndTypeAsync(Guid printerId, CameraType type, CancellationToken ct);
 }

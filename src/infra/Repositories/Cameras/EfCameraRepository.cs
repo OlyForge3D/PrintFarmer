@@ -111,4 +111,31 @@ public class EfCameraRepository : ICameraRepository
         ArgumentNullException.ThrowIfNull(camera);
         _dbContext.Cameras.Remove(camera);
     }
+
+    /// <summary>
+    /// Gets all cameras attached to a specific printer, ordered by sort order, then by name.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<List<Camera>> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
+    {
+        return await _dbContext.Cameras
+            .Where(c => c.PrinterId == printerId)
+            .OrderBy(c => c.SortOrder)
+            .ThenBy(c => c.Name)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Finds a camera attached to a printer with a specific camera type.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="type">The camera type to search for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<Camera?> FindByPrinterIdAndTypeAsync(Guid printerId, CameraType type, CancellationToken ct)
+    {
+        return await _dbContext.Cameras
+            .Where(c => c.PrinterId == printerId && c.CameraType == type)
+            .FirstOrDefaultAsync(ct);
+    }
 }

@@ -36,8 +36,33 @@ public class CameraConfiguration : IEntityTypeConfiguration<Camera>
         builder.Property(c => c.SortOrder)
             .HasDefaultValue(0);
 
+        builder.Property(c => c.HealthMessage)
+            .HasMaxLength(500);
+
+        // Enum conversions (store as strings)
+        builder.Property(c => c.Source)
+            .HasConversion<string>()
+            .IsRequired();
+
+        builder.Property(c => c.CameraType)
+            .HasConversion<string>()
+            .IsRequired();
+
+        builder.Property(c => c.HealthStatus)
+            .HasConversion<string>()
+            .IsRequired();
+
+        // Foreign key relationship to Printer
+        builder.HasOne(c => c.Printer)
+            .WithMany(p => p.Cameras)
+            .HasForeignKey(c => c.PrinterId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Indexes
         builder.HasIndex(c => c.Name);
         builder.HasIndex(c => c.IsEnabled);
         builder.HasIndex(c => c.SortOrder);
+        builder.HasIndex(c => c.PrinterId);
+        builder.HasIndex(c => c.Source);
     }
 }
