@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useActionState, useEffectEvent } from 'react';
-import { useFormStatus } from 'react-dom';
+import React, { useState, useEffect, useEffectEvent } from 'react';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -19,73 +18,15 @@ import { TableSkeleton } from '@/common/components/skeletons/TableSkeleton';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { User, Role } from '@/types/admin';
 
-/**
- * React 19 Form State for Create User
- */
-interface CreateUserFormState {
-  errors: {
-    username?: string;
-    email?: string;
-    password?: string;
-    general?: string;
-    roles?: string;
-  };
-  submitting?: boolean;
-}
-
-/**
- * React 19 Action: Handles user creation form submission
- * Validates form data and sends to API
- */
-async function createUserAction(
-  prevState: CreateUserFormState,
-  formData: FormData
-): Promise<CreateUserFormState> {
-  const username = (formData.get('username') as string)?.trim() || '';
-  const email = (formData.get('email') as string)?.trim() || '';
-  const password = formData.get('password') as string;
-  // firstName and lastName are extracted but used in component's createUser function
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const firstName = (formData.get('firstName') as string)?.trim() || '';
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const lastName = (formData.get('lastName') as string)?.trim() || '';
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const selectedRoleId = formData.get('roleId') as string;
-
-  const errors: CreateUserFormState['errors'] = {};
-
-  // Basic validation
-  if (!username) errors.username = 'Username is required';
-  if (!email) errors.email = 'Email is required';
-  else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.email = 'Invalid email format';
-  if (!password) errors.password = 'Password is required';
-
-  if (Object.keys(errors).length > 0) {
-    return { errors };
-  }
-
-  // Note: Password policy validation and availability check happen client-side before submission
-  // This action just handles the final API call after validation passes
-  return { errors, submitting: false };
-}
-
-/**
- * Create User Submit Button using React 19 useFormStatus
- */
-function CreateUserSubmitButton({ isDisabled }: { isDisabled: boolean }) {
-  const { pending } = useFormStatus();
-
-  return (
-    <Button
-      type="submit"
-      variant="primary"
-      loading={pending}
-      disabled={pending || isDisabled}
-    >
-      {pending ? 'Creating User...' : 'Create User'}
-    </Button>
-  );
-}
+const APPLICATION_AREAS = [
+  { id: 'printers', name: 'Printers', description: 'View and manage printer configurations' },
+  { id: 'files', name: 'Files', description: 'Access harvested G-code files' },
+  { id: 'harvest', name: 'Harvest', description: 'Use the harvester interface' },
+  { id: 'jobs', name: 'Jobs', description: 'View and manage print jobs' },
+  { id: 'catalog', name: 'Catalog', description: 'Access manufacturer and model catalog' },
+  { id: 'settings', name: 'Settings', description: 'Modify account and application settings' },
+  { id: 'spools', name: 'Spools', description: 'Manage filament spools inventory' },
+] as const;
 
 export function UserManagementPage() {
   const { hasRole } = useAuth();
@@ -101,20 +42,14 @@ export function UserManagementPage() {
   const { data: passwordPolicy } = usePasswordPolicy();
   const [newUser, setNewUser] = useState({ username: '', email: '', password: '', firstName: '', lastName: '' });
   const [selectedRoleId, setSelectedRoleId] = useState<string>('');
-  const [applicationAreas, setApplicationAreas] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
   type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
   const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
   const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>('idle');
   const [, setAvailabilityMessage] = useState('');
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+  const [isCreating, setIsCreating] = useState(false);
   const DEBOUNCE_MS = 450;
-
-  // React 19 useActionState for form submission
-  // Note: formAction is not currently used - actual submission via createUser function
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [formState, formAction, isPending] = useActionState(createUserAction, {
-    errors: {},
-  });
 
   // Helper: Check if a role is admin role
   const isAdminRole = (roleName: string | undefined) => roleName === 'farm_admin';
@@ -184,14 +119,15 @@ export function UserManagementPage() {
     return errs;
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const createUser = async () => {
-    if (isPending) return;
+    if (isCreating) return;
     const fieldErrs = validateForm();
     if (Object.keys(fieldErrs).length > 0) {
-      // Validation errors handled by form action on submit
+      setCreateErrors(fieldErrs);
       return;
     }
+    setCreateErrors({});
+    setIsCreating(true);
 
     try {
       await apiClient.createUser({
@@ -222,24 +158,8 @@ export function UserManagementPage() {
         }
 
         toast.error(errorMessage);
-    }
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const loadApplicationAreas = async () => {
-    try {
-      // Start with common application areas. In future, these could come from API
-      setApplicationAreas([
-        { id: 'printers', name: 'Printers', description: 'View and manage printer configurations' },
-        { id: 'files', name: 'Files', description: 'Access harvested G-code files' },
-        { id: 'harvest', name: 'Harvest', description: 'Use the harvester interface' },
-        { id: 'jobs', name: 'Jobs', description: 'View and manage print jobs' },
-        { id: 'catalog', name: 'Catalog', description: 'Access manufacturer and model catalog' },
-        { id: 'settings', name: 'Settings', description: 'Modify account and application settings' },
-        { id: 'spools', name: 'Spools', description: 'Manage filament spools inventory' }
-      ]);
-    } catch (error) {
-      console.error('Error loading application areas:', error);
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -251,16 +171,6 @@ export function UserManagementPage() {
       console.error('Error loading users:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const loadRoles = async () => {
-    try {
-      const data = await apiClient.getRoles();
-      setRoles((data as unknown) as Role[]);
-    } catch (error) {
-      console.error('Error loading roles:', error);
     }
   };
 
@@ -519,7 +429,6 @@ export function UserManagementPage() {
           Showing {filteredUsers.length} of {users.length} users
         </div>
 
-        {/* TODO: Modals for create/edit users */}
         {showCreateModal && (
           <Modal
             isOpen={showCreateModal}
@@ -528,12 +437,12 @@ export function UserManagementPage() {
             size="lg"
           >
             <div className="space-y-4">
-              {formState.errors.general && (
-                <Alert type="error">{formState.errors.general}</Alert>
+              {createErrors.general && (
+                <Alert type="error">{createErrors.general}</Alert>
               )}
               <FormField 
                 label="Username" 
-                error={formState.errors.username}
+                error={createErrors.username}
                 required
               >
                 <Input
@@ -546,7 +455,7 @@ export function UserManagementPage() {
                   }}
                   placeholder="Enter username"
                 />
-                {!formState.errors.username && newUser.username && (
+                {!createErrors.username && newUser.username && (
                   <div className="mt-2 text-xs flex items-center gap-1" aria-live="polite" aria-atomic="true">
                     {usernameStatus === 'checking' && (
                       <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
@@ -563,7 +472,7 @@ export function UserManagementPage() {
               
               <FormField 
                 label="Email" 
-                error={formState.errors.email}
+                error={createErrors.email}
                 required
               >
                 <Input
@@ -576,7 +485,7 @@ export function UserManagementPage() {
                   }}
                   placeholder="Enter email address"
                 />
-                {!formState.errors.email && newUser.email && (
+                {!createErrors.email && newUser.email && (
                   <div className="mt-2 text-xs flex items-center gap-1" aria-live="polite" aria-atomic="true">
                     {emailStatus === 'checking' && (
                       <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
@@ -612,7 +521,7 @@ export function UserManagementPage() {
 
               <FormField 
                 label="Password" 
-                error={formState.errors.password}
+                error={createErrors.password}
                 required
               >
                 <Input
@@ -660,7 +569,7 @@ export function UserManagementPage() {
                     setSelectedRoleId(e.target.value);
                     const selectedRole = roles.find(r => r.id === e.target.value);
                     if (selectedRole?.name === 'farm_admin') {
-                      setSelectedPermissions(applicationAreas.map(a => a.id));
+                      setSelectedPermissions(APPLICATION_AREAS.map(a => a.id));
                     } else if (selectedRole?.name === 'farm_user') {
                       setSelectedPermissions(['printers', 'files', 'jobs', 'spools']);
                     } else {
@@ -690,7 +599,7 @@ export function UserManagementPage() {
                   Select which areas of the application this user can access:
                 </p>
                 <div className="space-y-3">
-                  {applicationAreas.map(area => {
+                  {APPLICATION_AREAS.map(area => {
                     const isAdmin = isAdminRole(roles.find(r => r.id === selectedRoleId)?.name);
                     const isDisabled = isAdmin;
 
@@ -725,7 +634,14 @@ export function UserManagementPage() {
               <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
                 Cancel
               </Button>
-              <CreateUserSubmitButton isDisabled={!newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'} />
+              <Button
+                variant="primary"
+                loading={isCreating}
+                disabled={isCreating || !newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'}
+                onClick={createUser}
+              >
+                {isCreating ? 'Creating User...' : 'Create User'}
+              </Button>
             </div>
           </Modal>
         )}
@@ -807,7 +723,7 @@ export function UserManagementPage() {
                       const newRole = e.target.value;
                       let newPermissions = u.permissions;
                       if (newRole === 'farm_admin') {
-                        newPermissions = applicationAreas.map(a => a.id);
+                        newPermissions = APPLICATION_AREAS.map(a => a.id);
                       } else if (newRole === 'farm_user' && !newPermissions.includes('printers')) {
                         newPermissions = ['printers', 'files', 'jobs', 'spools'];
                       }
@@ -851,7 +767,7 @@ export function UserManagementPage() {
                 <div className="flex flex-wrap gap-2 p-3 bg-pf-bg-0 rounded-sm border border-pf-border">
                   {selectedUser.permissions.length > 0 ? (
                     selectedUser.permissions.map(p => {
-                      const area = applicationAreas.find(a => a.id === p);
+                      const area = APPLICATION_AREAS.find(a => a.id === p);
                       return (
                         <span key={p} className="inline-block bg-pf-accent/20 text-pf-accent px-2 py-1 rounded-sm text-xs font-medium" title={area?.description}>
                           {area?.name || p}
@@ -917,7 +833,7 @@ export function UserManagementPage() {
                 Select which areas of the application this user can access:
               </p>
               <div className="space-y-3 bg-pf-bg-0 p-4 rounded-sm border border-pf-border">
-                {applicationAreas.map(area => {
+                {APPLICATION_AREAS.map(area => {
                   const userRole = selectedUser.roles[0];
                   const isAdmin = userRole === 'farm_admin';
                   const isDisabled = isAdmin;
@@ -992,11 +908,7 @@ export function UserManagementPage() {
           onConfirm={async () => {
             if (!userToDelete) return;
             try {
-              // TODO: Implement actual user deletion API call
-              // await apiClient.deleteUser(userToDelete.id);
-              if (window.PrintFarmerDebug?.userManagementPage) {
-                console.log('Delete user:', userToDelete.id);
-              }
+              await apiClient.deleteUser(userToDelete.id);
               toast.success(`User "${userToDelete.username}" deleted`);
               setUserToDelete(null);
               loadUsers();

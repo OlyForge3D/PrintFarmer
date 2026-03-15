@@ -306,8 +306,7 @@ export function PrinterTableView({
                   {/* Last Updated */}
                   <td className="px-4 py-4">
                     <span className="text-sm text-pf-text-tertiary">
-                      {/* TODO: Add lastUpdated field to Printer interface */}
-                      Recently
+                      {displayPrinter.isOnline ? 'Online' : 'Offline'}
                     </span>
                   </td>
 

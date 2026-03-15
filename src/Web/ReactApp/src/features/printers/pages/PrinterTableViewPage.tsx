@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
 import { usePrinters } from '@/common/hooks/useApi';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
@@ -45,8 +46,8 @@ export function PrinterTableViewPage() {
       setDeleteModalOpen(false);
       setPrintersToDelete([]);
     } catch (error) {
-      console.error('Failed to delete printers:', error);
-      // TODO: Show error toast
+      const msg = error instanceof Error ? error.message : 'Failed to delete printers';
+      toast.error(msg);
     }
   };
 

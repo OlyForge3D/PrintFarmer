@@ -99,6 +99,12 @@ public interface IPrintJobManagementRepository
     Task<(int queued, int printing, int paused, int completed, int failed)> GetQueueStatsAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Get average wait time in minutes for recently completed jobs.
+    /// Wait time = ActualStartTime - QueuedAt for completed jobs within the lookback period.
+    /// </summary>
+    Task<double> GetAverageWaitTimeMinutesAsync(Guid? printerModelId = null, int lookbackDays = 30, CancellationToken ct = default);
+
+    /// <summary>
     /// Get statistics grouped by printer model.
     /// </summary>
     Task<List<PrinterModelQueueStats>> GetModelStatsAsync(CancellationToken ct = default);

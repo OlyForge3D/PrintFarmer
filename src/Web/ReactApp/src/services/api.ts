@@ -2640,6 +2640,13 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Delete a user
+   */
+  async deleteUser(userId: string): Promise<void> {
+    await this.client.delete(`/users/${userId}`);
+  }
+
   // ============ Setup & Initialization API methods ============
 
   /**
