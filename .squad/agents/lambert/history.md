@@ -998,3 +998,28 @@ Unified camera infrastructure to support both standalone cameras and printer-att
 - Migration warnings about `defaultValue: ""` resolved with `string.Empty`
 - Camera entity already had all required fields — CameraConfiguration.cs exists with indexes and FK relationship
 - Test data randomization critical for parallel test execution without constraint violations
+
+### Code Review Fixes — 5 Backend Issues (2026-03-15)
+
+**Status:** ✅ COMPLETE
+
+**Fixes Applied:**
+
+1. **CRITICAL — `/cameras/display` endpoint**: Added `GetEnabledWithPrinterAsync()` to `ICameraRepository`/`EfCameraRepository` (uses `.Include(c => c.Printer)`), `GetDisplayCamerasAsync()` to `ICameraService`/`CameraService`, and `[HttpGet("display")]` endpoint to `CamerasController`. Returns `List<DisplayCameraDto>` with printer names resolved.
+
+2. **HIGH — SSRF vulnerability in health monitor**: Added `IsUrlSafeForProbing()` helper to `CameraHealthMonitorService`. Blocks loopback (localhost, 127.x, ::1), link-local (169.254.x.x), and non-HTTP(S) schemes. Allows private IPs (10.x, 192.168.x, 172.16-31.x) since this is a local network app. Unsafe URLs log a warning and mark camera as unhealthy.
+
+3. **HIGH — FindByNameAsync full table scan**: Replaced client-side `ToListAsync()` + `FirstOrDefault()` with server-side `ToLower().Trim()` comparison in `EfCameraRepository.FindByNameAsync()`. EF Core translates `ToLower()` to appropriate SQL for all providers.
+
+4. **MEDIUM — Migration enum defaults**: Changed `defaultValue: string.Empty` to proper enum strings (`"General"`, `"Unknown"`, `"Standalone"`) for CameraType, HealthStatus, Source columns in both PostgreSQL and SqlServer migration files.
+
+5. **MEDIUM — Race condition in health batch**: Changed `CameraHealthMonitorService.RunHealthCheckAsync()` to call `SaveChangesAsync()` after each camera probe instead of batching all saves at the end. Prevents concurrent API updates from being overwritten.
+
+**Build:** 0 errors, 30 warnings (all pre-existing obsolete camera property warnings)
+**Tests:** 2064/2064 pass (0 failures)
+
+**Learnings:**
+- `ToLower()` in EF Core LINQ translates to `LOWER()` in SQL across SQLite, PostgreSQL, SqlServer, MySQL — safe for portable case-insensitive comparison
+- SSRF validation for local-network apps: block loopback + link-local but explicitly allow RFC 1918 private ranges
+- Per-entity SaveChangesAsync in background services prevents race conditions with concurrent API writes
+- Migration `defaultValue` for string-serialized enums must be the actual enum member name string, not empty

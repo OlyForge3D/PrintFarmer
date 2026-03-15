@@ -71,4 +71,10 @@ public interface ICameraRepository
     /// <param name="type">The camera type to search for.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<Camera?> FindByPrinterIdAndTypeAsync(Guid printerId, CameraType type, CancellationToken ct);
+
+    /// <summary>
+    /// Gets all enabled cameras with their associated Printer navigation property loaded.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<Camera>> GetEnabledWithPrinterAsync(CancellationToken ct);
 }

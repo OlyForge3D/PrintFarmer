@@ -480,4 +480,35 @@ public class CameraService : ICameraService
             IsStandalone = !camera.PrinterId.HasValue
         };
     }
+
+    /// <inheritdoc />
+    public async Task<List<DisplayCameraDto>> GetDisplayCamerasAsync(CancellationToken ct)
+    {
+        try
+        {
+            List<Camera> cameras = await _unitOfWork.Cameras.GetEnabledWithPrinterAsync(ct);
+            return cameras.Select(c => new DisplayCameraDto
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Description = c.Description,
+                StreamUrl = c.StreamUrl,
+                SnapshotUrl = c.SnapshotUrl,
+                IsEnabled = c.IsEnabled,
+                SortOrder = c.SortOrder,
+                Location = c.Location,
+                PrinterId = c.PrinterId,
+                PrinterName = c.Printer?.Name,
+                IsStandalone = !c.PrinterId.HasValue,
+                Source = c.Source,
+                CameraType = c.CameraType,
+                HealthStatus = c.HealthStatus
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting display cameras");
+            throw;
+        }
+    }
 }

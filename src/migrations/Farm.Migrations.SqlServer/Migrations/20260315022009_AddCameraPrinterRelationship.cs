@@ -16,7 +16,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 table: "Cameras",
                 type: "nvarchar(max)",
                 nullable: false,
-                defaultValue: string.Empty);
+                defaultValue: "General");
 
             migrationBuilder.AddColumn<int>(
                 name: "ConsecutiveFailures",
@@ -37,7 +37,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 table: "Cameras",
                 type: "nvarchar(max)",
                 nullable: false,
-                defaultValue: string.Empty);
+                defaultValue: "Unknown");
 
             migrationBuilder.AddColumn<DateTime>(
                 name: "LastHealthCheck",
@@ -56,7 +56,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 table: "Cameras",
                 type: "nvarchar(450)",
                 nullable: false,
-                defaultValue: string.Empty);
+                defaultValue: "Standalone");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Cameras_PrinterId",

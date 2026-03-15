@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Net;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -106,6 +107,9 @@ public sealed class CameraHealthMonitorService(
                     await CheckCameraHealthAsync(camera, cancellationToken);
                     checkedCount++;
 
+                    // Save after each camera probe to prevent race conditions with concurrent API updates
+                    await dbContext.SaveChangesAsync(cancellationToken);
+
                     // Track health status distribution
                     switch (camera.HealthStatus)
                     {
@@ -127,9 +131,6 @@ public sealed class CameraHealthMonitorService(
                 }
             }
 
-            // Save all changes in one transaction
-            await dbContext.SaveChangesAsync(cancellationToken);
-
             stopwatch.Stop();
             _logger.LogInformation(
                 "Camera health check completed: {Checked} cameras checked in {Elapsed}ms. " +
@@ -146,6 +147,18 @@ public sealed class CameraHealthMonitorService(
     {
         if (string.IsNullOrWhiteSpace(camera.SnapshotUrl))
         {
+            return;
+        }
+
+        // Validate URL before probing to prevent SSRF
+        if (!IsUrlSafeForProbing(camera.SnapshotUrl))
+        {
+            _logger.LogWarning(
+                "Camera {CameraId} ({CameraName}) has an unsafe snapshot URL, skipping probe: {Url}",
+                camera.Id, camera.Name, camera.SnapshotUrl);
+            camera.HealthStatus = CameraHealthStatus.Unhealthy;
+            camera.LastHealthCheck = DateTime.UtcNow;
+            camera.HealthMessage = "URL blocked by safety validation";
             return;
         }
 
@@ -197,6 +210,58 @@ public sealed class CameraHealthMonitorService(
         {
             HandleFailure(camera, checkTime, previousStatus, $"Error: {ex.GetType().Name}");
         }
+    }
+
+    /// <summary>
+    /// Validates a URL is safe to probe, blocking loopback, link-local, and non-HTTP schemes.
+    /// Private network IPs (10.x, 192.168.x, 172.16-31.x) are allowed since this is a local network app.
+    /// </summary>
+    private bool IsUrlSafeForProbing(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
+        {
+            return false;
+        }
+
+        // Block non-HTTP(S) schemes
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+        {
+            return false;
+        }
+
+        string host = uri.Host;
+
+        // Block loopback addresses
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(host, "127.0.0.1", StringComparison.Ordinal) ||
+            string.Equals(host, "::1", StringComparison.Ordinal) ||
+            string.Equals(host, "[::1]", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Check IP address ranges
+        if (IPAddress.TryParse(host, out IPAddress? ip))
+        {
+            byte[] bytes = ip.GetAddressBytes();
+
+            // Block IPv4 loopback range (127.0.0.0/8)
+            if (bytes.Length == 4 && bytes[0] == 127)
+            {
+                return false;
+            }
+
+            // Block link-local (169.254.x.x — cloud metadata endpoint range)
+            if (bytes.Length == 4 && bytes[0] == 169 && bytes[1] == 254)
+            {
+                return false;
+            }
+
+            // Private IPs are ALLOWED: 10.x, 192.168.x, 172.16-31.x
+            // (this is a local network printer management app)
+        }
+
+        return true;
     }
 
     private void HandleFailure(Camera camera, DateTime checkTime, CameraHealthStatus previousStatus, string errorMessage)

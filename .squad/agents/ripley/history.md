@@ -1040,3 +1040,11 @@ Global CSS in `controls.css` (line ~1415) applies `background-image` with an SVG
 - Camera count badge for multi-camera printers
 
 **Decision:** `.squad/decisions.md` #17 — Camera Management Phase A
+
+## Learnings
+
+### Code Review Fix — UpdateCameraDto + DisplayCameraDto alignment (2025-07-18)
+- `UpdateCameraDto` was missing `printerId` (string | null), `source` (CameraSource), and `cameraType` (CameraType) — added to match C# DTO
+- `printerId` uses `string | null` (not just optional) to allow clearing printer association
+- `DisplayCameraDto` was missing `lastHealthCheck` and `healthMessage` — added to match C# DTO
+- Always compare TS interfaces against C# DTOs when adding backend endpoints; partial interfaces cause silent data loss

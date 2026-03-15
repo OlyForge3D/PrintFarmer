@@ -2372,6 +2372,9 @@ export interface UpdateCameraDto {
   isEnabled?: boolean;
   sortOrder?: number;
   location?: string;
+  printerId?: string | null;
+  source?: CameraSource;
+  cameraType?: CameraType;
 }
 
 export interface ToggleCameraDto {
@@ -2396,6 +2399,8 @@ export interface DisplayCameraDto {
   source: CameraSource;
   cameraType: CameraType;
   healthStatus: CameraHealthStatus;
+  lastHealthCheck?: string;
+  healthMessage?: string;
 }
 
 // ============== Print Project Types ==============
