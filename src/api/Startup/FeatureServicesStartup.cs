@@ -20,7 +20,6 @@ public static class FeatureServicesStartup
         // OctoPrint compatibility settings and services
         services.Configure<Farm.Infrastructure.Settings.OctoPrintSettings>(configuration.GetSection("OctoPrint"));
         services.AddScoped<Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService, Farm.Web.Api.Services.OctoPrint.OctoPrintAuthService>();
-        services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
 
         // ApiKey repository
         services.AddScoped<Farm.Infrastructure.Repositories.Api.IApiKeyRepository, Farm.Infrastructure.Repositories.Api.EfApiKeyRepository>();
