@@ -977,3 +977,160 @@ Combined, these fixes should reduce the Ready → Printing transition from sever
 - `src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs` — Pass score to dispatch
 - `src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs` — Use `print=true` on upload
 - `src/infra/Services/Queue/Dispatch/IJobDispatchService.cs` — New overload signature
+---
+
+# Decision: Blocked/Deferred TODO Items Architecture Review
+
+**Authors:** Dallas (Lead), Lambert (Backend Dev), Brett (Researcher)  
+**Date:** 2026-03-15  
+**Status:** APPROVED  
+**Context:** Architecture, feasibility, and competitive analysis for 5 blocked/deferred TODO items
+
+## Executive Summary
+
+Three-agent parallel review (architecture, code-level feasibility, competitive landscape) of 5 blocked TODO items. Conclusions: 2 items closed (camera control rejected due to firmware limitations; tag support deferred in favor of Projects feature), 1 item confirmed complete (OpenAPI using native .NET 10), 2 items deferred to Phase 3E (slicer artifacts, OrcaSlicer types).
+
+## Items Resolved
+
+### Item 1: Camera Control (CLOSED — REJECTED)
+
+**Decision:** Do not implement camera enable/disable.
+
+**Rationale:**
+- Moonraker API: No camera control; only retrieves URLs via `/server/webcams/list`
+- PrusaLink API: Has camera configuration methods but no on/off toggle
+- OctoPrint: No runtime camera control (requires config file edits)
+- SDCP/FlashForge: No camera support
+- **Conclusion:** Firmware APIs don't support enable/disable — PrintFarmer cannot implement this feature
+
+**Competitive Context:** SimplyPrint offers per-printer camera toggle; most competitors only support passive streaming. However, this requires firmware API support that doesn't exist across PrintFarmer's backends.
+
+**Action:** Closed TODO #283 (camera control)
+
+### Item 2: Slicer Artifacts (DEFERRED → Phase 3E)
+
+**Decision:** Defer comprehensive artifact pipeline to Phase 3E.
+
+**Current State:**
+- Core upload flow exists in JobSlicer service
+- Thumbnails tracked in Metadata dictionary
+- Missing: Storage, retrieval, persistence, metadata management
+
+**Implementation Scope:**
+- Artifact storage service (database-backed)
+- Metadata persistence
+- Retrieval API
+- Frontend artifact browser
+- Timelapse generation (optional)
+
+**Competitive Advantage:** Farm management platform differentiator; competitors under-invest in artifact management.
+
+**Action:** Updated TODO with Phase 3E reference
+
+### Item 3: OpenAPI Migration (CLOSED — COMPLETE)
+
+**Decision:** No work needed. Already complete.
+
+**Current State:**
+- Using native .NET 10 `services.AddOpenApi()` (not Swashbuckle)
+- All API endpoints properly documented via OpenAPI
+- ExampleSchemaFilter.cs: Dead code (unused, safe to delete)
+
+**Action:** Deleted dead code (`ExampleSchemaFilter.cs`); no migration work required
+
+### Item 4: Tag Support (CLOSED — DEFERRED)
+
+**Decision:** Do not implement tags. Projects feature provides better organizational structure.
+
+**Analysis:**
+- No database schema exists for tags (would require JSON column or join table)
+- User need: Job organization and filtering
+- Better solution: Projects feature offers hierarchical organization (Phase 2/3)
+- Redundant feature: Projects + tags = feature bloat
+
+**Competitive Context:** Limited competitor implementation. Market leans toward folder/project organization (Repetier, SimplyPrint).
+
+**Action:** Closed TODO #286 (tag support)
+
+### Item 5: OrcaSlicer Types (DEFERRED → Phase 3E)
+
+**Decision:** Defer type definitions to Phase 3E.
+
+**Current State:**
+- Stub types exist in OrcaSlicerTypesClient
+- Missing: ProfileConfigType and SettingsType definitions
+- Depends on: OrcaSlicer API documentation review
+
+**Scope:**
+- Type definition mapping (OrcaSlicer API → PrintFarmer domain)
+- Profile/settings type contracts
+- Integration with job configuration
+
+**Competitive Context:** OrcaSlicer is niche in farm context (Bambu ecosystem specialized). Not a general-purpose feature; lower priority than camera/artifacts.
+
+**Action:** Updated TODO with Phase 3E reference
+
+---
+
+## Architecture Decisions
+
+### Backend Plugin Capability Matrix
+
+| Feature | Moonraker | PrusaLink | OctoPrint | SDCP | FlashForge |
+|---------|-----------|-----------|-----------|------|-----------|
+| Camera Stream | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Camera Control | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Tags | N/A | N/A | N/A | N/A | N/A |
+| Artifacts | ✅ Upload | ✅ Upload | ✅ Upload | ✅ Upload | ✅ Upload |
+
+**Conclusion:** PrintFarmer backend diversity reveals firmware limitations (no universal camera control) but strong artifact pipeline foundation across all backends.
+
+---
+
+## Phase 3E Planning Implications
+
+### Slicer Artifacts Pipeline
+
+**New Entities:**
+- `ArtifactMetadata` — file size, format, checksum, creation timestamp
+- `ArtifactStorage` — storage location (filesystem, S3, cloud)
+- `ArtifactRetrieval` — API contract for artifact download
+
+**API Endpoints:**
+- `GET /api/jobs/{id}/artifacts` — List artifacts
+- `GET /api/jobs/{id}/artifacts/{artifactId}` — Download artifact
+- `POST /api/artifacts/timelapse` — Generate timelapse
+
+### OrcaSlicer Types Mapping
+
+**Dependencies:**
+- OrcaSlicer API documentation review (firmware team)
+- Profile/settings schema definition
+- Type validation and transformation
+
+---
+
+## Build & Test Verification
+
+✅ **Build:** 0 errors  
+✅ **Tests:** 2052/2052 pass  
+✅ **Changes:** Committed to main branch
+
+---
+
+## Immediate Actions Taken
+
+1. Closed camera control TODO (firmware limitation)
+2. Closed tag support TODO (Projects preferred)
+3. Deleted dead code (ExampleSchemaFilter.cs)
+4. Updated artifact TODO (Phase 3E reference)
+5. Updated OrcaSlicer types TODO (Phase 3E reference)
+
+---
+
+## References
+
+- **Dallas:** Architecture analysis — `.squad/decisions/inbox/dallas-blocked-items-architecture.md`
+- **Lambert:** Codebase analysis — `.squad/decisions/inbox/lambert-codebase-analysis.md`
+- **Brett:** Competitive research — `.squad/decisions/inbox/brett-competitor-research.md`
+
