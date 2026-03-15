@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Printer } from '@/types/api';
+import { Printer, CameraHealthStatus } from '@/types/api';
 import { CameraIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { Button, Badge } from '@/common/components/ui';
+import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
 
 interface CameraCardProps {
   printer: Printer;
@@ -27,6 +28,11 @@ export function CameraCard({
   const hasSnapshot = !!cameraSnapshotUrl;
   const hasStream = !!cameraStreamUrl;
 
+  // Fetch cameras for this printer to get health status
+  const { data: printerCameras } = usePrinterCameras(p.id);
+  const primaryCamera = printerCameras?.[0];
+  const cameraCount = printerCameras?.length ?? 0;
+
   // Determine which URL to show
   const activeUrl = cameraMode === 'stream' && hasStream 
     ? cameraStreamUrl 
@@ -35,6 +41,16 @@ export function CameraCard({
     : hasStream 
     ? cameraStreamUrl 
     : cameraSnapshotUrl;
+
+  // Health status dot color
+  const getHealthDotColor = (health: CameraHealthStatus) => {
+    switch (health) {
+      case CameraHealthStatus.Healthy: return 'bg-pf-success';
+      case CameraHealthStatus.Degraded: return 'bg-pf-warning';
+      case CameraHealthStatus.Unhealthy: return 'bg-pf-error';
+      default: return 'bg-pf-text-tertiary';
+    }
+  };
 
   return (
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
@@ -71,6 +87,21 @@ export function CameraCard({
           )}
         </div>
 
+        {/* Camera health indicator & count - top left */}
+        {primaryCamera && (
+          <div className="absolute top-2 left-2 flex items-center gap-1.5">
+            <span 
+              className={`w-2.5 h-2.5 rounded-full ${getHealthDotColor(primaryCamera.healthStatus)}`}
+              title={`Camera health: ${primaryCamera.healthStatus}`}
+            />
+            {cameraCount > 1 && (
+              <Badge variant="default" size="sm" className="backdrop-blur-sm bg-pf-bg-1/80">
+                {cameraCount} cameras
+              </Badge>
+            )}
+          </div>
+        )}
+
         {/* Camera mode toggle - bottom right (only if both modes available) */}
         {hasSnapshot && hasStream && (
           <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
@@ -97,8 +128,8 @@ export function CameraCard({
           </div>
         )}
 
-        {/* Camera indicator - top left */}
-        {hasCameraUrls && !imageError && (
+        {/* Camera indicator - only if we don't have camera data yet */}
+        {hasCameraUrls && !imageError && !primaryCamera && (
           <div className="absolute top-2 left-2">
             <CameraIcon className="w-5 h-5 text-white/70 drop-shadow-sm" />
           </div>

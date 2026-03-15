@@ -9,14 +9,38 @@ Three Squad members analyzed the 5 blocked/deferred items in parallel:
 
 ## Consolidated Decisions
 
-### ❌ ITEM 1: Camera Control → CLOSE (Won't Fix)
+### ✅ ITEM 1: Camera Management → REOPENED as Phase 1.5 (Platform Feature)
 
-**Team consensus: Defer indefinitely / close.**
+**Revised consensus: Implement as platform-level camera management layer.**
 
-- **Lambert's finding**: Moonraker has NO enable/disable API. PrusaLink has camera *config* but no on/off toggle. The firmware concept doesn't exist.
-- **Brett's finding**: Only SimplyPrint offers per-printer camera toggle. Most competitors treat cameras as always-on. Users want *smarter* cameras (AI failure detection), not on/off.
-- **Dallas's design**: Provided full interface expansion (`ISupportsCameraControl`) but acknowledged firmware limitations.
-- **Action**: Remove TODO stubs from `PrintersService.cs:2639,2663`. Add comment explaining firmware limitation.
+The original analysis focused narrowly on firmware-level camera control (Moonraker/PrusaLink APIs don't support enable/disable). The user correctly identified that camera management belongs ABOVE the backend level — PrintFarmer should manage cameras as first-class entities independent of printer firmware.
+
+**What already exists (80% built):**
+- `Camera` entity with `IsEnabled`, `Name`, `StreamUrl`, `SnapshotUrl`, CRUD, DTOs ✅
+- `CamerasController` with full CRUD + toggle endpoint ✅
+- `ISupportsCamera` interface (Moonraker, OctoPrint, PrusaLink) ✅
+- `DisplayCameraDto` merging standalone + printer cameras ✅
+- React `CamerasPage`, `CameraCard`, `cameraService` ✅
+- Camera URL discovery during printer registration ✅
+- `NetworkUrlRewriteService` for Docker/native URL rewriting ✅
+
+**What's missing (the 20% gap):**
+1. No `PrinterId` FK on `Camera` — standalone and printer cameras are two separate systems
+2. No multi-camera per printer — printer has flat `CameraStreamUrl`/`CameraSnapshotUrl` strings
+3. No health monitoring — no polling to detect dead streams
+4. Toggle exists but doesn't suppress cameras in printer cards/dashboard
+
+**Competitive validation (Brett):**
+- All 5 major competitors manage cameras as independent entities linked to printers
+- 7/10 farm operators use multiple cameras per printer
+- 9/10 want bandwidth/polling control
+- Implementation is ~200 lines C# + ~300 lines React + 1 migration
+
+**Architecture approach (Lambert):**
+- Add `PrinterId` FK + `Source` tracking to `Camera` entity
+- Data migration: promote printer URL strings into proper Camera rows
+- Unified model gives: enable/disable, multi-camera, external cameras, health monitoring
+- Estimated effort: 11-16 hours total, phased
 
 ### ✅ ITEM 2: Slicer Artifact Uploads → Phase 3E (Implement)
 
@@ -51,19 +75,44 @@ Three Squad members analyzed the 5 blocked/deferred items in parallel:
 
 | # | Item | Decision | Phase |
 |---|------|----------|-------|
-| 1 | OpenAPI Migration | ✅ Already done — delete dead code | Now |
-| 2 | Camera Control | ❌ Won't fix — close TODOs | Now |
-| 3 | Tag Support | ⚠️ Defer — projects are better | Now |
+| 1 | OpenAPI Migration | ✅ Already done — dead code deleted | Done ✅ |
+| 2 | Tag Support | ⚠️ Defer — projects are better | Done ✅ |
+| 3 | Camera Management | ✅ Reopened — platform-level camera management | 1.5 |
 | 4 | Slicer Artifacts | ✅ Implement full artifact pipeline | 3E |
 | 5 | OrcaSlicer Types | ✅ Implement profile/settings/manifest | 3E |
 
-## Immediate Actions (Can do now)
+## Completed Actions ✅
 
-- [ ] Delete `ExampleSchemaFilter.cs` (dead code)
-- [ ] Close camera control TODOs with explanation
-- [ ] Close tag support TODO with explanation
+- [x] Delete `ExampleSchemaFilter.cs` (dead code)
+- [x] Close camera control TODOs with firmware limitation explanation
+- [x] Close tag support TODO with Projects explanation
+- [x] Update slicer artifact TODO with Phase 3E reference
 
-## Phase 3E Work Items (Future sprint)
+## Phase 1.5: Camera Management (Next Sprint)
+
+### Backend (Lambert)
+- [ ] Add `PrinterId` FK + `Source` + `CameraType` + `IsHealthy` fields to `Camera` entity
+- [ ] EF Core migration for Camera schema changes
+- [ ] Data migration: promote Printer.CameraStreamUrl/SnapshotUrl into Camera rows
+- [ ] Update `CamerasController` to support printer-linked cameras (CRUD by printer)
+- [ ] Camera health monitoring service (periodic snapshot probe, dead stream detection)
+- [ ] Update `PrintersService` camera stubs to use Camera entity toggle
+- [ ] API endpoint: `GET /api/printers/{id}/cameras` (multi-camera per printer)
+
+### Frontend (Ripley)
+- [ ] Multi-camera support in printer detail view
+- [ ] Camera enable/disable toggle in printer cards
+- [ ] "Add External Camera" flow (IP camera, USB cam on separate host)
+- [ ] Camera health indicators (green/yellow/red based on last successful poll)
+- [ ] Camera grid view improvements on CamerasPage
+
+### Testing (Kane)
+- [ ] Unit tests for Camera entity FK relationships
+- [ ] Integration tests for camera CRUD with printer association
+- [ ] Health monitoring service tests
+- [ ] Frontend component tests for multi-camera UI
+
+## Phase 3E Work Items (Future Sprint)
 
 - [ ] Artifact entity + EF Core migration
 - [ ] ArtifactsController (upload/download)
