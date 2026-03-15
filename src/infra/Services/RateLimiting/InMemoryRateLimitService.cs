@@ -12,6 +12,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, ILogger<InMemory
     private readonly ConcurrentDictionary<Guid, List<DateTime>> _sliceJobSubmitAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _loginAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _registerAttempts = new();
+    private readonly ConcurrentDictionary<string, List<DateTime>> _octoPrintUploadAttempts = new();
 
     public Task<RateLimitResult> CheckPasswordResetLimitAsync(string email, CancellationToken ct = default)
     {
@@ -227,6 +228,22 @@ public class InMemoryRateLimitService(RateLimitOptions options, ILogger<InMemory
 
                 return existing;
             });
+    }
+
+    public Task<RateLimitResult> CheckOctoPrintUploadLimitAsync(string key, int maxPerMinute, CancellationToken ct = default)
+    {
+        return CheckShortTermLimitAsync(
+            key,
+            _octoPrintUploadAttempts,
+            maxPerMinute,
+            TimeSpan.FromMinutes(1),
+            "OctoPrintUpload");
+    }
+
+    public Task RecordOctoPrintUploadAttemptAsync(string key, CancellationToken ct = default)
+    {
+        RecordAttempt(key, _octoPrintUploadAttempts);
+        return Task.CompletedTask;
     }
 
     private Task<RateLimitResult> CheckShortTermLimitAsync(

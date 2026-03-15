@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Filters;
@@ -31,19 +32,22 @@ namespace Farm.Web.Api.Controllers
         private readonly OctoPrintSettings _settings;
         private readonly IGcodeFilesService _gcodeFilesService;
         private readonly IJobQueueService _jobQueueService;
+        private readonly IRateLimitService _rateLimitService;
 
         public OctoPrintCompatController(
             ILogger<OctoPrintCompatController> logger,
             IOctoPrintAuthService authService,
             IOptions<OctoPrintSettings> settings,
             IGcodeFilesService gcodeFilesService,
-            IJobQueueService jobQueueService)
+            IJobQueueService jobQueueService,
+            IRateLimitService rateLimitService)
         {
             _logger = logger;
             _authService = authService;
             _settings = settings.Value;
             _gcodeFilesService = gcodeFilesService;
             _jobQueueService = jobQueueService;
+            _rateLimitService = rateLimitService;
         }
 
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
@@ -78,15 +82,15 @@ namespace Farm.Web.Api.Controllers
 
             // Rate limiting: key by apiKey if present otherwise by remote IP
             var apiKey = Request.Headers["X-Api-Key"].ToString();
-            var rateLimiter = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Middleware.SimpleRateLimitService)) as Farm.Web.Api.Middleware.SimpleRateLimitService;
-            OctoPrintSettings octoSettings = _settings;
             string rateKey = !string.IsNullOrWhiteSpace(apiKey) ? $"apikey:{apiKey}" : $"ip:{HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
-            var limitOk = rateLimiter?.TryConsume(rateKey, octoSettings.RateLimitPerMinute, TimeSpan.FromMinutes(1)) ?? true;
-            if (!limitOk)
+            RateLimitResult rateResult = await _rateLimitService.CheckOctoPrintUploadLimitAsync(rateKey, _settings.RateLimitPerMinute);
+            if (!rateResult.IsAllowed)
             {
                 _logger.LogWarning("Rate limit exceeded for {Key}", rateKey);
                 return StatusCode(429, new { message = "Rate limit exceeded" });
             }
+
+            await _rateLimitService.RecordOctoPrintUploadAttemptAsync(rateKey);
 
             if (!Request.HasFormContentType)
             {

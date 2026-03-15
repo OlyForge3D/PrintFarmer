@@ -80,6 +80,22 @@ public interface IRateLimitService
     /// <param name="ipAddress">The IP address that attempted to register.</param>
     /// <param name="ct">Cancellation token.</param>
     Task RecordRegisterAttemptAsync(string ipAddress, CancellationToken ct = default);
+
+    /// <summary>
+    /// Checks if an OctoPrint-compatible upload is allowed for the specified key.
+    /// </summary>
+    /// <param name="key">The rate limit key (API key or IP address).</param>
+    /// <param name="maxPerMinute">Maximum uploads allowed per minute.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Result indicating whether the upload is allowed and remaining attempts.</returns>
+    Task<RateLimitResult> CheckOctoPrintUploadLimitAsync(string key, int maxPerMinute, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records an OctoPrint-compatible upload attempt for rate limiting purposes.
+    /// </summary>
+    /// <param name="key">The rate limit key (API key or IP address).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task RecordOctoPrintUploadAttemptAsync(string key, CancellationToken ct = default);
 }
 
 public record RateLimitResult(
