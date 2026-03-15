@@ -800,3 +800,63 @@ Performed comprehensive code-level investigation of 5 blocked/deferred items to 
 
 **Documentation:** Complete analysis in `.squad/decisions/inbox/lambert-codebase-analysis.md` (27KB)
 
+
+---
+
+## 2025-07-22 — Camera Infrastructure Analysis
+
+**Session:** Camera Management Layer Investigation  
+**Requested by:** Jeff Papiez  
+**Outcome:** ✅ COMPLETE — Analysis delivered to `.squad/decisions/inbox/lambert-camera-infrastructure.md`
+
+### Learnings
+
+- **Two parallel camera systems exist:** Printer-attached cameras (URL strings on Printer entity) and standalone cameras (full Camera entity with CRUD). They merge only at the DTO level via `DisplayCameraDto`.
+- **Camera entity already exists:** `src/infra/Domain/Camera.cs` has Id, Name, StreamUrl, SnapshotUrl, IsEnabled, SortOrder, Location — but NO relationship to Printer (no PrinterId FK).
+- **ISupportsCamera vs ISupportsConfiguredCameraDetection:** The former constructs default URLs, the latter (Moonraker only) queries the actual webcam list API to validate cameras exist before returning URLs.
+- **No camera health monitoring:** Camera URLs are discovered once at registration and stored. No background polling. Manual refresh only via `PrintersService.RefreshCameraUrlsAsync`.
+- **PrusaLink returns null for cameras:** Its `ISupportsCamera` implementation returns null for both stream and snapshot — camera URLs must be managed at the application level for PrusaLink printers.
+- **NetworkUrlRewriteService rewrites camera URLs** for Docker vs native environments (private IPs → host.docker.internal). This service must remain in the camera URL pipeline.
+- **Entity patterns for linked entities:** PrinterGroup with `ICollection<Printer>` is the model to follow for Camera ↔ Printer one-to-many relationship.
+- **Unification path is clear:** Extend existing Camera entity with optional `PrinterId` FK, add Source/Type/health fields, migrate printer URL data to Camera rows, deprecate Printer.CameraStreamUrl/SnapshotUrl.
+
+
+---
+
+### 2026-03-15: Camera Infrastructure Analysis — Decision Approved
+
+**Status:** ✅ Analysis merged into decisions.md (Decision #20)
+
+**Outcome:** Camera control Phase 1.5 approved; technical path clear; no blockers; 6-9 hour MVP.
+
+**Research Summary:**
+- Analyzed 80% of camera infrastructure already built in PrintFarmer
+- Identified single critical gap: No `PrinterId` FK on Camera entity
+- Mapped four-phase implementation path with effort estimates:
+  - Phase 1 (4-6h): Unify model, add FK, migrate printer cameras → Camera rows
+  - Phase 2 (2-3h): Extend API with camera-to-printer linking
+  - Phase 3 (3-4h): Health monitoring background service
+  - Phase 4 (2-3h): Update discovery probes
+
+**Technical Path (MVP — Phase 1+2 = 6-9 hours):**
+1. Extend Camera entity: Add nullable `PrinterId` FK, `Source` enum, `Type` enum, health tracking fields
+2. Create EF migration with data migration (Printer URLs → Camera rows)
+3. Keep Printer.CameraStreamUrl/SnapshotUrl readable during transition (computed properties)
+4. Extend CamerasController with link/unlink endpoints
+5. Update PrinterDto mapping to read from Camera entities
+6. Test camera-to-printer association, enable/disable, multi-camera queries
+
+**Existing Patterns to Leverage:**
+- `PrinterGroup` → `Printer` one-to-many (copy relationship pattern)
+- `CamerasController` full CRUD (extend, don't replace)
+- `MoonrakerSubscriptionService` background service pattern (reuse for health monitoring)
+- `ServiceCollectionExtensions` DI registration (tested pattern)
+- Existing Camera entity, DTO set, React components, SignalR integration
+
+**Decision Impact:**
+- No architecture risk (follows proven one-to-many relationship pattern)
+- Backward compatible (computed properties maintain existing API surface)
+- Foundation for Phase 3 (health monitoring) and Phase 4 (discovery integration)
+- Unblocks external camera support + multi-camera per printer + bandwidth control
+
+**Full analysis:** `.squad/decisions/inbox/lambert-camera-infrastructure.md`

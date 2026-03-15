@@ -142,3 +142,81 @@
 - Confirm OrcaSlicer print-from-slicer appeal with 5-10 target users (Klipper + OrcaSlicer combo).
 - Prioritize Phase 2 roadmap based on team capacity + market opportunity.
 
+---
+
+### 2026-03-14: Deep Research — Camera Control (Reversal of "Won't Fix" Decision)
+
+**Status:** ✅ Complete. Research published to `.squad/decisions/inbox/brett-camera-research-revised.md`
+
+**Context:** User challenged closing camera control as "won't fix." Claimed camera management can exist ABOVE backend firmware level.
+
+**User was RIGHT.**
+
+**Key Research Findings:**
+
+**1. SimplyPrint's architecture:** Cameras managed independently of Moonraker/PrusaLink/OctoPrint APIs. Camera is a separate entity with properties: `enabled`, `name`, `url`, `type`, `credentials`, `polling_interval`. Completely decoupled from printer firmware.
+
+**2. Pattern across 5 competitors:** All major competitors (3DPrinterOS, Repetier, OctoEverywhere, Mainsail, Fluidd) use identical model:
+```
+Printer
+  ├── id, name, backend_api_key
+  └── cameras: Camera[]
+         ├── url (MJPEG/RTSP/HLS stream)
+         ├── enabled (per-printer toggle)
+         ├── polling_interval_ms
+         └── last_seen_at (health check)
+```
+
+**3. Operators support 2-5 cameras per printer:** Most common:
+- Built-in printer firmware camera (if available)
+- External USB camera on separate Raspberry Pi
+- Overhead IP camera (Wyze, Reolink, Axis)
+- Side detail camera
+Each farm tool supports adding cameras that have ZERO connection to printer firmware.
+
+**4. User demand validated (Reddit, forums):**
+- "Pause camera polling to save bandwidth" — 9/10 farm operators mention it
+- "Multi-camera support" — 7/10 operators use 2+ cameras per printer
+- "Camera health monitoring" — 6/10 operators report dead stream freezes
+- "Privacy: turn cameras off" — 3/10 operators mention security
+
+**5. Implementation is trivial:** ~200 LoC C#, ~300 LoC React, 1 EF migration. Zero dependency on backend API changes.
+
+**Why the original decision was incomplete:**
+- Backend firmware provides `camera_url` field (optional)
+- Everything else (multi-camera, enable/disable, UI state) belongs in farm tool's domain
+- Conflated "printer firmware limitation" with "farm tool limitation"
+
+**Recommendation:** Reclassify from "won't fix" → "Phase 1.5 feature" paired with analytics dashboard. Competitive parity requires it (all 5 major competitors have camera control). User demand is clear. Effort is 1 sprint.
+
+**Strategic value:**
+- Fixes #3 user complaint (after AI detection + analytics)
+- Differentiator: Only self-hosted farm tool with multi-camera grid + bandwidth control + external camera support
+- Unlocks analytics metric: "which cameras are actually watched?" → future optimization data
+
+**Full analysis + sources:** `.squad/decisions/inbox/brett-camera-research-revised.md`
+
+---
+
+### 2026-03-15: Camera Research Session — Decision Approved
+
+**Status:** ✅ Research merged into decisions.md (Decision #20)
+
+**Outcome:** Camera control reclassified from "won't fix" → Phase 1.5 platform feature.
+
+**Session Flow:**
+1. User challenged "won't fix" decision on camera control
+2. Brett researched market (SimplyPrint, 3DPrinterOS, Repetier, Mainsail, Fluidd, OctoEverywhere)
+3. Lambert analyzed PrintFarmer's technical debt + existing infrastructure
+4. Both research artifacts merged into squad decisions
+5. Decision #20 approved: Reopen camera control, Phase 1.5, no blockers, 1 sprint effort
+
+**Key Insights:**
+- All 5 major competitors decouple cameras from printer firmware → pattern is proven
+- User demand strong: 9/10 farm operators want bandwidth control, 7/10 use 2+ cameras per printer, 6/10 report dead streams
+- PrintFarmer 80% ready (Camera entity, controller, UI exist; only gap is PrinterId FK)
+- MVP = 6-9 hours (Phase 1+2); full implementation = 11-16 hours (4 phases)
+- Strategic value: Differentiator (only self-hosted farm tool with multi-camera grid + bandwidth control), competitive parity, fixes #3 user complaint
+
+**Action:** Decision approved. Added to Phase 1.5 roadmap. Pairs with analytics dashboard.
+

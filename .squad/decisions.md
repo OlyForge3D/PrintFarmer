@@ -1087,6 +1087,88 @@ Three-agent parallel review (architecture, code-level feasibility, competitive l
 
 ---
 
+## Decision #20: Camera Control — Reclassified to Phase 1.5 (2026-03-15)
+
+**Status:** ✅ APPROVED  
+**Impact:** Reclassifies "won't fix" → Phase 1.5 platform feature  
+**Blocking:** None  
+**Pairs with:** Analytics dashboard (Phase 2)  
+**Effort:** 1 sprint (5 days)  
+**Lead:** Lambert (technical) + Brett (market validation)
+
+### Background
+
+User challenged the decision to close camera control as "won't fix" (firmware limitation). Research validates:
+
+**Brett's Competitive Research (`.squad/decisions/inbox/brett-camera-research-revised.md`):**
+- All 5 major competitors (SimplyPrint, 3DPrinterOS, Repetier, Mainsail, Fluidd) decouple cameras from printer firmware
+- Camera is a first-class entity with properties: `enabled`, `name`, `url`, `type`, `credentials`, `polling_interval`
+- Operators support 2-5 cameras per printer; many not connected to printer firmware
+- User demand validated via Reddit analysis:
+  - 9/10 farm operators want bandwidth control (pause camera polling)
+  - 7/10 operators use 2+ cameras per printer
+  - 6/10 operators report dead camera streams + want health monitoring
+  - 3/10 operators mention privacy concerns (disable cameras when not monitoring)
+- **Pattern:** Camera is application-level concern, not firmware-level
+
+**Lambert's Technical Analysis (`.squad/decisions/inbox/lambert-camera-infrastructure.md`):**
+- PrintFarmer already has 80% of camera infrastructure built
+- Current state:
+  - `Camera` entity (standalone, full CRUD)
+  - `ISupportsCamera` interface (printer-attached via backend plugins)
+  - `NetworkUrlRewriteService` (URL rewriting for Docker/native)
+  - React components and SignalR integration
+- Critical gap: No `PrinterId` FK on Camera entity (cannot link external cameras to printers)
+- Minimal viable path:
+  - Phase 1 (4-6h): Add FK, migration, data migration
+  - Phase 2 (2-3h): Extend API with camera-to-printer linking
+  - Phase 3 (3-4h): Health monitoring background service
+  - Phase 4 (2-3h): Update discovery probes
+  - **Total:** 11-16 hours; MVP (Phase 1+2) = 6-9 hours
+
+### Decision
+
+**Reopen camera control as Phase 1.5 feature.**
+
+**Rationale:**
+1. ✅ User demand validated (9/10 operators cite bandwidth control as critical)
+2. ✅ Competitive parity required (all major self-hosted competitors have it)
+3. ✅ Existing infrastructure ready (80% already built; only gap is FK relationship)
+4. ✅ Low effort (1 sprint)
+5. ✅ Fixes #3 user complaint (after AI detection + analytics)
+6. ✅ Differentiator: Only self-hosted farm tool with multi-camera grid + bandwidth control + external camera support
+
+### Implementation Path
+
+**Phase 1 (Unify Model):** Add `PrinterId` FK to Camera, create EF migration, data migration for existing printer cameras → 4-6 hours  
+**Phase 2 (Extend API):** Add linking/unlinking endpoints, camera queries by printer → 2-3 hours  
+**Phase 3 (Health Monitoring):** Background service, SignalR broadcast (independent) → 3-4 hours  
+**Phase 4 (Discovery):** Update probes to create Camera entities for discovered URLs (independent) → 2-3 hours  
+
+**MVP Deliverable (Phase 1+2):** External cameras linked to printers, enable/disable for all cameras, foundation for multi-camera per printer, zero breaking changes.
+
+### Blockers
+
+None. Can ship independently.
+
+### Acceptance Criteria
+
+- [ ] EF migration adds `PrinterId` FK to Cameras table
+- [ ] Data migration creates Camera rows for existing printer cameras
+- [ ] API supports `POST /api/cameras/{id}/link/{printerId}` and unlink
+- [ ] React UI allows adding/removing cameras from printer page
+- [ ] Camera can be disabled independently of printer state
+- [ ] Tests verify camera-to-printer association
+- [ ] SignalR broadcasts camera state changes
+
+### References
+
+- **Brett's research:** `.squad/decisions/inbox/brett-camera-research-revised.md`
+- **Lambert's analysis:** `.squad/decisions/inbox/lambert-camera-infrastructure.md`
+- **Orchestration:** `.squad/orchestration-log/2026-03-15T01-46-46Z-brett-camera-research.md`, `.squad/orchestration-log/2026-03-15T01-46-46Z-lambert-camera-infrastructure.md`
+
+---
+
 ## Phase 3E Planning Implications
 
 ### Slicer Artifacts Pipeline
