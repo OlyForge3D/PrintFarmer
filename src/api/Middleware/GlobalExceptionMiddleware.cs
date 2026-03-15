@@ -67,10 +67,6 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
     {
         (HttpStatusCode, string, string?) result = ex switch
         {
-            // Domain-specific exceptions
-            PrinterNotFoundException => (HttpStatusCode.NotFound, "Printer not found", ex.Message),
-            SpoolmanServiceException => (HttpStatusCode.BadGateway, "External service error", ex.Message),
-
             // Authentication and authorization
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "Unauthorized access", null),
 

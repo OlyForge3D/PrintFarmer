@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Input, Textarea, FormField, Badge, Select, Checkbox } from '@/common/components/ui';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
@@ -88,22 +88,24 @@ export function PrinterGroupModal({ isOpen, onClose, editGroup, assignedPrinters
     return p ? `${p.manufacturerName ?? ''} ${p.modelName ?? ''}`.trim() : undefined;
   }, [effectiveModelId, allPrinters]);
 
-  // Reset form when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      if (editGroup) {
-        setName(editGroup.name);
-        setDescription(editGroup.description || '');
-      } else {
-        setName('');
-        setDescription('');
-      }
-      setNameError('');
-      setSelectedPrinterIds(new Set());
-      setSearchQuery('');
-      setModelFilter('all');
+  // Reset form when modal opens (React-recommended pattern for adjusting state on prop change)
+  const [prevIsOpen, setPrevIsOpen] = useState(false);
+  if (isOpen && !prevIsOpen) {
+    if (editGroup) {
+      setName(editGroup.name);
+      setDescription(editGroup.description || '');
+    } else {
+      setName('');
+      setDescription('');
     }
-  }, [isOpen, editGroup]);
+    setNameError('');
+    setSelectedPrinterIds(new Set());
+    setSearchQuery('');
+    setModelFilter('all');
+  }
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
+  }
 
   const togglePrinter = (printerId: string) => {
     setSelectedPrinterIds((prev) => {
