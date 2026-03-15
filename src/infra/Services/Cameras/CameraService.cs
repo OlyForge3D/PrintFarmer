@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using AutoMapper;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
@@ -18,25 +17,41 @@ public class CameraService : ICameraService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CameraService> _logger;
-    private readonly IMapper _mapper;
     private readonly IPrintersService _printersService;
 
     public CameraService(
         IUnitOfWork unitOfWork,
         ILogger<CameraService> logger,
-        IMapper mapper,
         IPrintersService printersService)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(mapper);
         ArgumentNullException.ThrowIfNull(printersService);
 
         _unitOfWork = unitOfWork;
         _logger = logger;
-        _mapper = mapper;
         _printersService = printersService;
     }
+
+    private static CameraDto ToDto(Camera camera) => new()
+    {
+        Id = camera.Id,
+        Name = camera.Name,
+        Description = camera.Description,
+        StreamUrl = camera.StreamUrl,
+        SnapshotUrl = camera.SnapshotUrl,
+        IsEnabled = camera.IsEnabled,
+        SortOrder = camera.SortOrder,
+        Location = camera.Location,
+        CreatedAt = camera.CreatedAt,
+        UpdatedAt = camera.UpdatedAt,
+        PrinterId = camera.PrinterId,
+        Source = camera.Source,
+        CameraType = camera.CameraType,
+        HealthStatus = camera.HealthStatus,
+        LastHealthCheck = camera.LastHealthCheck,
+        IsStandalone = !camera.PrinterId.HasValue
+    };
 
     /// <inheritdoc />
     public async Task<List<Camera>> GetAllAsync(CancellationToken ct)
@@ -173,7 +188,7 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Created camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
 
-            return MapToDto(camera);
+            return ToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
@@ -273,7 +288,7 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Updated camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
 
-            return MapToDto(camera);
+            return ToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
@@ -335,7 +350,7 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Toggled camera {CameraName} enabled status to {IsEnabled}", camera.Name, isEnabled);
 
-            return MapToDto(camera);
+            return ToDto(camera);
         }
         catch (Exception ex)
         {
@@ -350,7 +365,7 @@ public class CameraService : ICameraService
         try
         {
             List<Camera> cameras = await GetAllAsync(ct);
-            return _mapper.Map<CameraDto[]>(cameras);
+            return cameras.Select(ToDto).ToArray();
         }
         catch (Exception ex)
         {
@@ -365,7 +380,7 @@ public class CameraService : ICameraService
         try
         {
             List<Camera> cameras = await GetEnabledAsync(ct);
-            return _mapper.Map<CameraDto[]>(cameras);
+            return cameras.Select(ToDto).ToArray();
         }
         catch (Exception ex)
         {
@@ -385,7 +400,7 @@ public class CameraService : ICameraService
         try
         {
             List<Camera> cameras = await _unitOfWork.Cameras.GetByPrinterIdAsync(printerId, ct);
-            return cameras.Select(MapToDto).ToList();
+            return cameras.Select(ToDto).ToList();
         }
         catch (Exception ex)
         {
@@ -446,39 +461,13 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Created camera {CameraName} with ID {CameraId} for printer {PrinterId}", camera.Name, camera.Id, printerId);
 
-            return MapToDto(camera);
+            return ToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
             _logger.LogError(ex, "Error creating camera {DtoName} for printer {PrinterId}", dto.Name, printerId);
             throw;
         }
-    }
-
-    /// <summary>
-    /// Maps a Camera entity to CameraDto with all new fields.
-    /// </summary>
-    private static CameraDto MapToDto(Camera camera)
-    {
-        return new CameraDto
-        {
-            Id = camera.Id,
-            Name = camera.Name,
-            Description = camera.Description,
-            StreamUrl = camera.StreamUrl,
-            SnapshotUrl = camera.SnapshotUrl,
-            IsEnabled = camera.IsEnabled,
-            SortOrder = camera.SortOrder,
-            Location = camera.Location,
-            CreatedAt = camera.CreatedAt,
-            UpdatedAt = camera.UpdatedAt,
-            PrinterId = camera.PrinterId,
-            Source = camera.Source,
-            CameraType = camera.CameraType,
-            HealthStatus = camera.HealthStatus,
-            LastHealthCheck = camera.LastHealthCheck,
-            IsStandalone = !camera.PrinterId.HasValue
-        };
     }
 
     /// <inheritdoc />

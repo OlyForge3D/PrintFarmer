@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
@@ -23,25 +22,64 @@ public class LocationService : ILocationService
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LocationService> _logger;
-    private readonly IMapper _mapper;
     private readonly IPrinterStatusCacheReader _statusCache;
 
     public LocationService(
         IUnitOfWork unitOfWork,
         ILogger<LocationService> logger,
-        IMapper mapper,
         IPrinterStatusCacheReader statusCache)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(mapper);
         ArgumentNullException.ThrowIfNull(statusCache);
 
         _unitOfWork = unitOfWork;
         _logger = logger;
-        _mapper = mapper;
         _statusCache = statusCache;
     }
+
+    private static LocationDto ToLocationDto(Location src) => new()
+    {
+        Id = src.Id,
+        Name = src.Name,
+        Description = src.Description,
+        PrinterCount = src.Printers.Count,
+        ParentId = src.ParentId,
+        Path = src.Path,
+        Depth = src.Depth,
+        SortOrder = src.SortOrder,
+        TotalPrinterCount = src.TotalPrinterCount,
+        CreatedAt = src.CreatedAt,
+        ModifiedAt = src.ModifiedAt,
+        IsActive = src.IsActive
+    };
+
+    private static LocationDetailsDto ToLocationDetailsDto(Location src) => new()
+    {
+        Id = src.Id,
+        Name = src.Name,
+        Description = src.Description,
+        PrinterCount = src.Printers.Count,
+        ParentId = src.ParentId,
+        Path = src.Path,
+        Depth = src.Depth,
+        SortOrder = src.SortOrder,
+        TotalPrinterCount = src.TotalPrinterCount,
+        CreatedAt = src.CreatedAt,
+        ModifiedAt = src.ModifiedAt,
+        IsActive = src.IsActive
+    };
+
+    private static DiscoveryPrinterInfoDto ToPrinterInfoDto(Printer p) => new()
+    {
+        Name = p.Name,
+        ServerUrl = p.ServerUrl,
+        IpAddress = string.Empty,
+        Backend = (PrinterBackend)p.Backend,
+        BackendPort = p.BackendPort,
+        FrontendPort = p.FrontendPort,
+        CameraStreamUrl = p.CameraStreamUrl ?? string.Empty
+    };
 
     public async Task<List<Location>> GetAllAsync(CancellationToken ct)
     {
@@ -185,7 +223,7 @@ public class LocationService : ILocationService
 
             _logger.LogInformation("Location '{LocationName}' created at path '{Path}'", location.Name, location.Path);
 
-            return _mapper.Map<LocationDto>(location);
+            return ToLocationDto(location);
         }
         catch (Exception ex)
         {
@@ -247,7 +285,7 @@ public class LocationService : ILocationService
 
             _logger.LogInformation("Location '{LocationName}' updated successfully", location.Name);
 
-            return _mapper.Map<LocationDto>(location);
+            return ToLocationDto(location);
         }
         catch (Exception ex)
         {
@@ -300,7 +338,7 @@ public class LocationService : ILocationService
         try
         {
             List<Location> locations = await GetAllAsync(ct);
-            return _mapper.Map<LocationDto[]>(locations);
+            return locations.Select(ToLocationDto).ToArray();
         }
         catch (Exception ex)
         {
@@ -326,8 +364,8 @@ public class LocationService : ILocationService
 
             List<Printer> printers = await GetPrintersInLocationAsync(id, ct);
 
-            LocationDetailsDto detailsDto = _mapper.Map<LocationDetailsDto>(location);
-            detailsDto.Printers = _mapper.Map<DiscoveryPrinterInfoDto[]>(printers);
+            LocationDetailsDto detailsDto = ToLocationDetailsDto(location);
+            detailsDto.Printers = printers.Select(ToPrinterInfoDto).ToArray();
 
             return detailsDto;
         }
@@ -521,7 +559,7 @@ public class LocationService : ILocationService
         try
         {
             List<Location> descendants = await _unitOfWork.Locations.GetDescendantsAsync(id, ct);
-            return _mapper.Map<List<LocationDto>>(descendants);
+            return descendants.Select(ToLocationDto).ToList();
         }
         catch (Exception ex)
         {
@@ -589,7 +627,7 @@ public class LocationService : ILocationService
 
             _logger.LogInformation("Location '{LocationName}' moved to parent {NewParentId}", location.Name, newParentId?.ToString() ?? "root");
 
-            return _mapper.Map<LocationDto>(location);
+            return ToLocationDto(location);
         }
         catch (Exception ex)
         {
