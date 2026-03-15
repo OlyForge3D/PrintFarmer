@@ -152,6 +152,61 @@ public class MaintenancePlanController(
         }
     }
 
+    /// <summary>
+    /// Deep-copies a maintenance plan including all PlanTask join entities.
+    /// Does not copy deployments (PrinterMaintenanceSchedule).
+    /// </summary>
+    [HttpPost("{id:guid}/clone")]
+    public async Task<ActionResult<MaintenancePlanResponse>> ClonePlanAsync(Guid id, CancellationToken ct)
+    {
+        MaintenancePlan? source = await _planRepository.GetByIdAsync(id, ct);
+        if (source == null)
+        {
+            return NotFound();
+        }
+
+        const int maxNameLength = 200;
+        const string suffix = " (Copy)";
+        string clonedName = source.Name.Length + suffix.Length > maxNameLength
+            ? source.Name[..(maxNameLength - suffix.Length)] + suffix
+            : source.Name + suffix;
+
+        var clone = new MaintenancePlan
+        {
+            Id = Guid.NewGuid(),
+            Name = clonedName,
+            Description = source.Description,
+            PrinterId = source.PrinterId,
+            PrinterModelId = source.PrinterModelId,
+            ManufacturerId = source.ManufacturerId,
+            MotionType = source.MotionType,
+            IsActive = source.IsActive,
+            IsDefault = false,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        foreach (PlanTask pt in source.PlanTasks)
+        {
+            clone.PlanTasks.Add(new PlanTask
+            {
+                Id = Guid.NewGuid(),
+                MaintenancePlanId = clone.Id,
+                MaintenanceTaskId = pt.MaintenanceTaskId,
+                SortOrder = pt.SortOrder,
+                IntervalHoursOverride = pt.IntervalHoursOverride,
+                IntervalDaysOverride = pt.IntervalDaysOverride
+            });
+        }
+
+        await _planRepository.AddAsync(clone, ct);
+        _logger.LogInformation("Cloned maintenance plan {SourceId} as {CloneId} '{CloneName}'", id, clone.Id, clone.Name);
+
+        // Reload to get navigation properties for the response
+        MaintenancePlan? saved = await _planRepository.GetByIdAsync(clone.Id, ct);
+        return Created($"/api/maintenance/plans/{clone.Id}", MaintenanceResponseMapper.ToPlanResponse(saved!));
+    }
+
     // ───────────────────────── Tasks ─────────────────────────
 
     /// <summary>

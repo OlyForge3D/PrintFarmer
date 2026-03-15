@@ -29,6 +29,7 @@ import {
   ChevronDownIcon,
   DownloadIcon,
   UploadIcon,
+  CopyIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
   useMaintenancePlans,
@@ -51,6 +52,8 @@ import type {
   MaintenanceExportEnvelope,
 } from '@/types/maintenance';
 import { useTaskCategories } from '../hooks/useTaskCatalog';
+import { usePrinters, useManufacturers, useModels } from '@/common/hooks/useApi';
+import { DeployPlanModal } from './DeployPlanModal';
 
 // ──────────────────────── Helpers ────────────────────────
 
@@ -92,11 +95,35 @@ const priorityOptions = [
 interface PlanFormModalProps {
   isOpen: boolean;
   plan?: MaintenancePlanDto | null;
+  cloneSource?: MaintenancePlanDto | null;
   onClose: () => void;
 }
 
-function PlanFormModal({ isOpen, plan, onClose }: PlanFormModalProps) {
+const MOTION_OPTIONS = [
+  { value: '0', label: 'Cartesian' },
+  { value: '1', label: 'CoreXY' },
+  { value: '2', label: 'Delta' },
+  { value: '3', label: 'Polar' },
+];
+
+function motionLabel(mt: number | null | undefined): string {
+  return MOTION_OPTIONS.find(o => o.value === String(mt))?.label ?? `Motion ${mt}`;
+}
+
+type ScopeType = 'all' | 'printer' | 'model' | 'manufacturer' | 'motion';
+
+function deriveScopeType(plan: MaintenancePlanDto | null | undefined): ScopeType {
+  if (!plan) return 'all';
+  if (plan.printerId) return 'printer';
+  if (plan.printerModelId) return 'model';
+  if (plan.manufacturerId) return 'manufacturer';
+  if (plan.motionType != null) return 'motion';
+  return 'all';
+}
+
+function PlanFormModal({ isOpen, plan, cloneSource, onClose }: PlanFormModalProps) {
   const isEdit = !!plan;
+  const source = plan ?? cloneSource;
   const createPlan = useCreatePlan();
   const updatePlan = useUpdatePlan();
 
@@ -105,25 +132,49 @@ function PlanFormModal({ isOpen, plan, onClose }: PlanFormModalProps) {
   const [isActive, setIsActive] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Scope fields
+  const [scopeType, setScopeType] = useState<ScopeType>('all');
+  const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
+  const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [selectedManufacturerId, setSelectedManufacturerId] = useState<string>('');
+  const [selectedMotionType, setSelectedMotionType] = useState<string>('');
+
+  // Data for scope selectors
+  const { data: printers = [] } = usePrinters();
+  const { data: manufacturers = [] } = useManufacturers();
+  const { data: models = [] } = useModels(selectedManufacturerId || undefined);
+
   React.useEffect(() => {
     if (isOpen) {
-      setName(plan?.name ?? '');
-      setDescription(plan?.description ?? '');
-      setIsActive(plan?.isActive ?? true);
+      setName(cloneSource ? `${cloneSource.name} (Copy)` : (plan?.name ?? ''));
+      setDescription(source?.description ?? '');
+      setIsActive(source?.isActive ?? true);
+      const st = deriveScopeType(source);
+      setScopeType(st);
+      setSelectedPrinterId(source?.printerId ?? '');
+      setSelectedModelId(source?.printerModelId ?? '');
+      setSelectedManufacturerId(source?.manufacturerId ?? '');
+      setSelectedMotionType(source?.motionType != null ? String(source.motionType) : '');
     }
-  }, [isOpen, plan]);
+  }, [isOpen, plan, cloneSource, source]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     setIsSubmitting(true);
     try {
+      const scopeFields = {
+        printerId: scopeType === 'printer' ? selectedPrinterId || null : null,
+        printerModelId: scopeType === 'model' ? selectedModelId || null : null,
+        manufacturerId: scopeType === 'manufacturer' ? selectedManufacturerId || null : null,
+        motionType: scopeType === 'motion' && selectedMotionType ? Number(selectedMotionType) : null,
+      };
       if (isEdit && plan) {
-        const data: UpdateMaintenancePlanDto = { name: name.trim(), description: description.trim() || null, isActive };
+        const data: UpdateMaintenancePlanDto = { name: name.trim(), description: description.trim() || null, isActive, ...scopeFields };
         await updatePlan.mutateAsync({ id: plan.id, data });
         toast.success('Plan updated');
       } else {
-        const data: CreateMaintenancePlanDto = { name: name.trim(), description: description.trim() || null, isActive };
+        const data: CreateMaintenancePlanDto = { name: name.trim(), description: description.trim() || null, isActive, ...scopeFields };
         await createPlan.mutateAsync(data);
         toast.success('Plan created');
       }
@@ -136,7 +187,7 @@ function PlanFormModal({ isOpen, plan, onClose }: PlanFormModalProps) {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Plan' : 'New Maintenance Plan'} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Plan' : cloneSource ? 'Clone Plan' : 'New Maintenance Plan'} size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="plan-name" className="block text-sm font-medium text-pf-text-secondary mb-1">
@@ -148,6 +199,65 @@ function PlanFormModal({ isOpen, plan, onClose }: PlanFormModalProps) {
           <label htmlFor="plan-desc" className="block text-sm font-medium text-pf-text-secondary mb-1">Description</label>
           <Textarea id="plan-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What does this plan cover?" rows={3} maxLength={1000} />
         </div>
+
+        {/* ── Scope Section ── */}
+        <div className="border-t border-pf-border pt-4">
+          <h4 className="text-sm font-medium text-pf-text-secondary mb-3">Scope</h4>
+          <div className="space-y-3">
+            <Select
+              id="scope-type"
+              value={scopeType}
+              onChange={(e) => {
+                setScopeType(e.target.value as ScopeType);
+                setSelectedPrinterId('');
+                setSelectedModelId('');
+                setSelectedManufacturerId('');
+                setSelectedMotionType('');
+              }}
+            >
+              <option value="all">All Printers</option>
+              <option value="printer">Specific Printer</option>
+              <option value="model">Printer Model</option>
+              <option value="manufacturer">Manufacturer</option>
+              <option value="motion">Motion Type</option>
+            </Select>
+
+            {scopeType === 'printer' && (
+              <Select id="scope-printer" value={selectedPrinterId} onChange={(e) => setSelectedPrinterId(e.target.value)}>
+                <option value="">Select printer…</option>
+                {printers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            )}
+
+            {scopeType === 'manufacturer' && (
+              <Select id="scope-mfr" value={selectedManufacturerId} onChange={(e) => setSelectedManufacturerId(e.target.value)}>
+                <option value="">Select manufacturer…</option>
+                {manufacturers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </Select>
+            )}
+
+            {scopeType === 'model' && (
+              <div className="space-y-2">
+                <Select id="scope-model-mfr" value={selectedManufacturerId} onChange={(e) => { setSelectedManufacturerId(e.target.value); setSelectedModelId(''); }}>
+                  <option value="">All manufacturers…</option>
+                  {manufacturers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </Select>
+                <Select id="scope-model" value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)}>
+                  <option value="">Select model…</option>
+                  {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </Select>
+              </div>
+            )}
+
+            {scopeType === 'motion' && (
+              <Select id="scope-motion" value={selectedMotionType} onChange={(e) => setSelectedMotionType(e.target.value)}>
+                <option value="">Select motion type…</option>
+                {MOTION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select>
+            )}
+          </div>
+        </div>
+
         <Checkbox label="Active" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
@@ -353,15 +463,25 @@ function TaskRow({ task, onEdit, onDelete }: TaskRowProps) {
 
 // ──────────────────────── Plan Row ────────────────────────
 
+function ScopeBadge({ plan }: { plan: MaintenancePlanDto }) {
+  if (plan.printerName) return <Badge variant="default" className="text-xs">Printer: {plan.printerName}</Badge>;
+  if (plan.printerModelName) return <Badge variant="default" className="text-xs">Model: {plan.printerModelName}</Badge>;
+  if (plan.manufacturerName) return <Badge variant="default" className="text-xs">Manufacturer: {plan.manufacturerName}</Badge>;
+  if (plan.motionType != null) return <Badge variant="default" className="text-xs">Motion: {motionLabel(plan.motionType)}</Badge>;
+  return <Badge variant="default" className="text-xs">All Printers</Badge>;
+}
+
 interface PlanRowProps {
   plan: MaintenancePlanDto;
   isExpanded: boolean;
   onToggle: () => void;
   onEditPlan: () => void;
   onDeletePlan: () => void;
+  onClonePlan: () => void;
+  onDeployPlan: () => void;
 }
 
-function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanRowProps) {
+function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan, onClonePlan, onDeployPlan }: PlanRowProps) {
   const [editingTask, setEditingTask] = useState<MaintenanceTaskDto | null>(null);
   const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
   const [deletingTask, setDeletingTask] = useState<MaintenanceTaskDto | null>(null);
@@ -414,6 +534,7 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
           <span className="flex-1 min-w-0">
             <span className="flex items-center gap-2 flex-wrap">
               <span className="font-medium text-pf-text-primary truncate">{plan.name}</span>
+              <ScopeBadge plan={plan} />
               {!plan.isActive && <Badge variant="default" className="text-xs">Inactive</Badge>}
               {plan.isDefault && <Badge variant="success" className="text-xs">Default</Badge>}
             </span>
@@ -427,6 +548,12 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan }: PlanR
           </span>
         </Button>
         <div className="flex items-center gap-1.5 shrink-0">
+          <Button variant="subtle" size="sm" onClick={onDeployPlan} aria-label={`Deploy plan ${plan.name}`} title="Deploy to printer">
+            <UploadIcon className="h-4 w-4" />
+          </Button>
+          <Button variant="subtle" size="sm" onClick={onClonePlan} aria-label={`Clone plan ${plan.name}`} title="Clone plan">
+            <CopyIcon className="h-4 w-4" />
+          </Button>
           <Button variant="subtle" size="sm" onClick={onEditPlan} aria-label={`Edit plan ${plan.name}`}>
             <EditIcon className="h-4 w-4" />
           </Button>
@@ -492,7 +619,9 @@ export function MaintenancePlansTab() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isPlanFormOpen, setIsPlanFormOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<MaintenancePlanDto | null>(null);
+  const [cloneSource, setCloneSource] = useState<MaintenancePlanDto | null>(null);
   const [deletingPlan, setDeletingPlan] = useState<MaintenancePlanDto | null>(null);
+  const [deployingPlan, setDeployingPlan] = useState<MaintenancePlanDto | null>(null);
 
   const toggleExpanded = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -529,6 +658,12 @@ export function MaintenancePlansTab() {
       toast.error(err instanceof Error ? err.message : 'Failed to delete plan');
     }
     setDeletingPlan(null);
+  };
+
+  const handleClonePlan = (plan: MaintenancePlanDto) => {
+    setEditingPlan(null);
+    setCloneSource(plan);
+    setIsPlanFormOpen(true);
   };
 
   const handleExport = async () => {
@@ -605,7 +740,7 @@ export function MaintenancePlansTab() {
         <Button
           variant="primary"
           size="sm"
-          onClick={() => { setEditingPlan(null); setIsPlanFormOpen(true); }}
+          onClick={() => { setEditingPlan(null); setCloneSource(null); setIsPlanFormOpen(true); }}
           iconLeft={<PlusIcon className="h-4 w-4" />}
           className="shrink-0"
         >
@@ -644,8 +779,10 @@ export function MaintenancePlansTab() {
               plan={plan}
               isExpanded={expandedIds.has(plan.id)}
               onToggle={() => toggleExpanded(plan.id)}
-              onEditPlan={() => { setEditingPlan(plan); setIsPlanFormOpen(true); }}
+              onEditPlan={() => { setEditingPlan(plan); setCloneSource(null); setIsPlanFormOpen(true); }}
               onDeletePlan={() => setDeletingPlan(plan)}
+              onClonePlan={() => handleClonePlan(plan)}
+              onDeployPlan={() => setDeployingPlan(plan)}
             />
           ))}
         </div>
@@ -655,7 +792,8 @@ export function MaintenancePlansTab() {
       <PlanFormModal
         isOpen={isPlanFormOpen}
         plan={editingPlan}
-        onClose={() => setIsPlanFormOpen(false)}
+        cloneSource={cloneSource}
+        onClose={() => { setIsPlanFormOpen(false); setCloneSource(null); }}
       />
 
       {/* Plan Delete Confirmation */}
@@ -667,6 +805,13 @@ export function MaintenancePlansTab() {
         isDangerous
         onConfirm={handleDeletePlanConfirm}
         onCancel={() => setDeletingPlan(null)}
+      />
+
+      {/* Deploy Plan Modal */}
+      <DeployPlanModal
+        isOpen={!!deployingPlan}
+        plan={deployingPlan}
+        onClose={() => setDeployingPlan(null)}
       />
     </>
   );

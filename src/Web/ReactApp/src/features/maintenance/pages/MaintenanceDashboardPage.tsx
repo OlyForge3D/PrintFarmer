@@ -372,7 +372,7 @@ export function MaintenanceDashboardPage() {
           <Tabs.Panel id="library">
             <div className="space-y-0 mt-6">
               <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
-                <Tabs defaultTab="tasks" className="p-0">
+                <Tabs defaultTab="plans" className="p-0">
                   <Tabs.List className="border-b border-pf-border bg-pf-bg-2 px-2">
                     <Tabs.Tab id="plans" icon={<ListIcon className="h-4 w-4" />}>
                       Maintenance Plans

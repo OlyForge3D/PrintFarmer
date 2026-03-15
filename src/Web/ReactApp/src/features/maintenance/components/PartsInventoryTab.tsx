@@ -8,6 +8,7 @@
 
 import React, { useRef, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import clsx from 'clsx';
 import { Badge, Button } from '@/common/components/ui';
 import { FileUpload } from '@/common/components/ui/FileUpload';
 import { Input } from '@/common/components/ui/Input';
@@ -25,6 +26,10 @@ import {
   ExternalLinkIcon,
   DownloadIcon,
   UploadIcon,
+  CopyIcon,
+  GridViewIcon,
+  ListViewIcon,
+  MinusIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
   useMaintenanceComponents,
@@ -47,12 +52,13 @@ import type {
 interface ComponentFormModalProps {
   isOpen: boolean;
   component?: MaintenanceComponentDto | null;
+  isClone?: boolean;
   categories: string[];
   onClose: () => void;
 }
 
-function ComponentFormModal({ isOpen, component, categories, onClose }: ComponentFormModalProps) {
-  const isEdit = !!component;
+function ComponentFormModal({ isOpen, component, isClone, categories, onClose }: ComponentFormModalProps) {
+  const isEdit = !!component && !isClone;
   const createComponent = useCreateComponent();
   const updateComponent = useUpdateComponent();
 
@@ -70,7 +76,7 @@ function ComponentFormModal({ isOpen, component, categories, onClose }: Componen
 
   React.useEffect(() => {
     if (isOpen) {
-      setName(component?.name ?? '');
+      setName(isClone ? `${component?.name ?? ''} (Copy)` : (component?.name ?? ''));
       const cat = component?.category ?? '';
       if (cat && !categories.includes(cat)) {
         setCategory('__custom__');
@@ -84,10 +90,10 @@ function ComponentFormModal({ isOpen, component, categories, onClose }: Componen
       setUnitCost(component?.unitCost?.toString() ?? '');
       setSupplier(component?.supplier ?? '');
       setUrl(component?.url ?? '');
-      setInStock((component?.inStock ?? 0).toString());
+      setInStock(isClone ? '0' : (component?.inStock ?? 0).toString());
       setMinimumStock((component?.minimumStock ?? 0).toString());
     }
-  }, [isOpen, component, categories]);
+  }, [isOpen, component, categories, isClone]);
 
   const resolvedCategory = category === '__custom__' ? customCategory.trim() : category;
 
@@ -123,7 +129,7 @@ function ComponentFormModal({ isOpen, component, categories, onClose }: Componen
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Part' : 'Add Part'} size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Part' : isClone ? 'Clone Part' : 'Add Part'} size="xl">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -202,6 +208,7 @@ export function PartsInventoryTab() {
   const { data: components = [], isLoading, error } = useMaintenanceComponents();
   const { data: categories = [] } = useComponentCategories();
   const deleteComponent = useDeleteComponent();
+  const updateComponent = useUpdateComponent();
   const exportMutation = useExportComponents();
   const importMutation = useImportComponents();
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -210,7 +217,9 @@ export function PartsInventoryTab() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingComponent, setEditingComponent] = useState<MaintenanceComponentDto | null>(null);
+  const [cloneSource, setCloneSource] = useState<MaintenanceComponentDto | null>(null);
   const [deletingComponent, setDeletingComponent] = useState<MaintenanceComponentDto | null>(null);
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   const filtered = useMemo(() => {
     let result = components;
@@ -262,6 +271,34 @@ export function PartsInventoryTab() {
       }
     }
     setDeletingComponent(null);
+  };
+
+  const adjustStock = async (comp: MaintenanceComponentDto, delta: number) => {
+    const newStock = Math.max(0, comp.inStock + delta);
+    try {
+      await updateComponent.mutateAsync({
+        id: comp.id,
+        data: {
+          name: comp.name,
+          category: comp.category,
+          sku: comp.sku ?? null,
+          description: comp.description ?? null,
+          unitCost: comp.unitCost ?? null,
+          supplier: comp.supplier ?? null,
+          url: comp.url ?? null,
+          inStock: newStock,
+          minimumStock: comp.minimumStock,
+        },
+      });
+    } catch {
+      toast.error('Failed to update stock');
+    }
+  };
+
+  const handleClone = (comp: MaintenanceComponentDto) => {
+    setEditingComponent(null);
+    setCloneSource(comp);
+    setIsFormOpen(true);
   };
 
   const handleExport = async () => {
@@ -348,12 +385,32 @@ export function PartsInventoryTab() {
         <Button
           variant="primary"
           size="sm"
-          onClick={() => { setEditingComponent(null); setIsFormOpen(true); }}
+          onClick={() => { setEditingComponent(null); setCloneSource(null); setIsFormOpen(true); }}
           iconLeft={<PlusIcon className="h-4 w-4" />}
           className="shrink-0"
         >
           Add Part
         </Button>
+        <div className="flex items-center border border-pf-border rounded-md overflow-hidden shrink-0">
+          <Button
+            variant={viewMode === 'cards' ? 'primary' : 'subtle'}
+            size="sm"
+            onClick={() => setViewMode('cards')}
+            aria-label="Card view"
+            className="rounded-none border-0"
+          >
+            <GridViewIcon className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={viewMode === 'table' ? 'primary' : 'subtle'}
+            size="sm"
+            onClick={() => setViewMode('table')}
+            aria-label="Table view"
+            className="rounded-none border-0"
+          >
+            <ListViewIcon className="h-4 w-4" />
+          </Button>
+        </div>
         <Button variant="secondary" size="sm" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending} className="shrink-0">
           Export
         </Button>
@@ -405,6 +462,7 @@ export function PartsInventoryTab() {
           </p>
         </div>
       ) : (
+        viewMode === 'cards' ? (
         <div className="space-y-2">
           {filtered.map((comp) => {
             const isLow = comp.inStock < comp.minimumStock;
@@ -428,9 +486,6 @@ export function PartsInventoryTab() {
                     {comp.sku && <span>SKU: {comp.sku}</span>}
                     {comp.supplier && <span>{comp.supplier}</span>}
                     {comp.unitCost != null && <span>${comp.unitCost.toFixed(2)}/ea</span>}
-                    <span className={isLow ? 'text-pf-warning font-medium' : ''}>
-                      {comp.inStock} in stock (min: {comp.minimumStock})
-                    </span>
                     {comp.url?.startsWith('http') && (
                       <a
                         href={comp.url}
@@ -445,8 +500,22 @@ export function PartsInventoryTab() {
                     )}
                   </div>
                 </div>
+                <div className="flex items-center gap-1">
+                  <Button variant="subtle" size="sm" onClick={() => adjustStock(comp, -1)} disabled={comp.inStock <= 0} aria-label="Decrease stock">
+                    <MinusIcon className="h-3.5 w-3.5" />
+                  </Button>
+                  <span className={clsx('text-sm font-mono min-w-[2rem] text-center', isLow && 'text-pf-warning font-medium')}>
+                    {comp.inStock}
+                  </span>
+                  <Button variant="subtle" size="xs" onClick={() => adjustStock(comp, 1)} aria-label="Increase stock">
+                    <PlusIcon className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <Button variant="subtle" size="sm" onClick={() => { setEditingComponent(comp); setIsFormOpen(true); }} aria-label={`Edit ${comp.name}`}>
+                  <Button variant="subtle" size="sm" onClick={() => handleClone(comp)} aria-label={`Clone ${comp.name}`} title="Clone part">
+                    <CopyIcon className="h-4 w-4" />
+                  </Button>
+                  <Button variant="subtle" size="sm" onClick={() => { setEditingComponent(comp); setCloneSource(null); setIsFormOpen(true); }} aria-label={`Edit ${comp.name}`}>
                     <EditIcon className="h-4 w-4" />
                   </Button>
                   <Button variant="subtle" size="sm" onClick={() => setDeletingComponent(comp)} aria-label={`Delete ${comp.name}`} className="hover:text-pf-error">
@@ -457,14 +526,75 @@ export function PartsInventoryTab() {
             );
           })}
         </div>
+        ) : (
+        /* Table View */
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-pf-border text-left text-xs text-pf-text-tertiary uppercase">
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-3 py-2 font-medium">Category</th>
+                <th className="px-3 py-2 font-medium">SKU</th>
+                <th className="px-3 py-2 font-medium">Supplier</th>
+                <th className="px-3 py-2 font-medium text-right">Unit Cost</th>
+                <th className="px-3 py-2 font-medium text-center">Stock</th>
+                <th className="px-3 py-2 font-medium text-center">Min</th>
+                <th className="px-3 py-2 font-medium text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-pf-border">
+              {filtered.map((comp) => {
+                const isLow = comp.inStock < comp.minimumStock;
+                return (
+                  <tr key={comp.id} className="hover:bg-pf-bg-2 transition-colors">
+                    <td className="px-3 py-2 font-medium text-pf-text-primary">{comp.name}</td>
+                    <td className="px-3 py-2"><Badge variant="default" className="text-[10px]">{comp.category}</Badge></td>
+                    <td className="px-3 py-2 text-pf-text-tertiary">{comp.sku ?? '—'}</td>
+                    <td className="px-3 py-2 text-pf-text-tertiary">{comp.supplier ?? '—'}</td>
+                    <td className="px-3 py-2 text-right text-pf-text-tertiary">{comp.unitCost != null ? `$${comp.unitCost.toFixed(2)}` : '—'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-center gap-1">
+                        <Button variant="subtle" size="sm" onClick={() => adjustStock(comp, -1)} disabled={comp.inStock <= 0} aria-label="Decrease stock">
+                          <MinusIcon className="h-3 w-3" />
+                        </Button>
+                        <span className={clsx('font-mono min-w-[2rem] text-center', isLow && 'text-pf-warning font-medium')}>
+                          {comp.inStock}
+                        </span>
+                        <Button variant="subtle" size="xs" onClick={() => adjustStock(comp, 1)} aria-label="Increase stock">
+                          <PlusIcon className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-center text-pf-text-tertiary">{comp.minimumStock}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="subtle" size="sm" onClick={() => handleClone(comp)} aria-label={`Clone ${comp.name}`} title="Clone">
+                          <CopyIcon className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="subtle" size="sm" onClick={() => { setEditingComponent(comp); setCloneSource(null); setIsFormOpen(true); }} aria-label={`Edit ${comp.name}`}>
+                          <EditIcon className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="subtle" size="sm" onClick={() => setDeletingComponent(comp)} aria-label={`Delete ${comp.name}`} className="hover:text-pf-error">
+                          <DeleteIcon className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        )
       )}
 
       {/* Form Modal */}
       <ComponentFormModal
         isOpen={isFormOpen}
-        component={editingComponent}
+        component={editingComponent ?? cloneSource}
+        isClone={!!cloneSource}
         categories={categories}
-        onClose={() => setIsFormOpen(false)}
+        onClose={() => { setIsFormOpen(false); setCloneSource(null); }}
       />
 
       {/* Delete Confirmation */}

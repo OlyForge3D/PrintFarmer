@@ -25,6 +25,7 @@ import {
   FilterIcon,
   DownloadIcon,
   UploadIcon,
+  CopyIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
   useTaskCatalog,
@@ -105,14 +106,16 @@ interface TaskFormModalProps {
   taskId: string | null;
   tasks: MaintenanceTaskDto[];
   categories: string[];
+  cloneSource?: MaintenanceTaskDto | null;
   onClose: () => void;
   onTaskCreated?: (taskId: string) => void;
 }
 
-function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreated }: TaskFormModalProps) {
+function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose, onTaskCreated }: TaskFormModalProps) {
   // Derive fresh task from the query-backed array so part mutations auto-refresh
   const task = taskId ? tasks.find(t => t.id === taskId) ?? null : null;
   const isEdit = !!task;
+  const source = task ?? cloneSource;
 
   // Task CRUD mutations
   const createTask = useCreateCatalogTask();
@@ -171,27 +174,27 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreat
   /* Init form state when modal opens (or task switches from create→edit) */
   React.useEffect(() => {
     if (isOpen && !prevOpenRef.current) {
-      setTaskName(task?.taskName ?? '');
-      setCategory(task?.category ?? (categories[0] ?? ''));
+      setTaskName(cloneSource ? `${cloneSource.taskName} (Copy)` : (source?.taskName ?? ''));
+      setCategory(source?.category ?? (categories[0] ?? ''));
       setCustomCategory('');
-      setDescription(task?.description ?? '');
-      if (task?.intervalHours != null) {
+      setDescription(source?.description ?? '');
+      if (source?.intervalHours != null) {
         setIntervalType('hours');
-        setIntervalValue(String(task.intervalHours));
-      } else if (task?.intervalDays != null) {
+        setIntervalValue(String(source.intervalHours));
+      } else if (source?.intervalDays != null) {
         setIntervalType('days');
-        setIntervalValue(String(task.intervalDays));
+        setIntervalValue(String(source.intervalDays));
       } else {
         setIntervalType('none');
         setIntervalValue('');
       }
-      setEstimatedMinutes(task?.estimatedDurationMinutes != null ? String(task.estimatedDurationMinutes) : '');
-      setPriority(String(task?.priority ?? 2));
-      setIsActive(task?.isActive ?? true);
-      setIsDefault(task?.isDefault ?? false);
+      setEstimatedMinutes(source?.estimatedDurationMinutes != null ? String(source.estimatedDurationMinutes) : '');
+      setPriority(String(source?.priority ?? 2));
+      setIsActive(cloneSource ? true : (source?.isActive ?? true));
+      setIsDefault(source?.isDefault ?? false);
       const rules: Record<string, boolean | null> = {};
       for (const rule of SCOPE_RULES) {
-        const val = task?.[rule.key];
+        const val = source?.[rule.key];
         rules[rule.key] = typeof val === 'boolean' ? val : null;
       }
       setScopeRules(rules);
@@ -203,7 +206,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreat
       setPartNotes('');
     }
     prevOpenRef.current = isOpen;
-  }, [isOpen, task]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen, task, cloneSource]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Task form submit ──
   const handleSubmit = async (e: React.FormEvent) => {
@@ -287,7 +290,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, onClose, onTaskCreat
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? `Edit "${task!.taskName}"` : 'New Catalog Task'} size="full">
+      <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? `Edit "${task!.taskName}"` : cloneSource ? 'Clone Task' : 'New Catalog Task'} size="full">
         <div className="max-h-[80vh] overflow-y-auto space-y-6 pr-1">
           {/* ── Task Details Form ── */}
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -583,6 +586,7 @@ export function TaskCatalogTab() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [cloneSource, setCloneSource] = useState<MaintenanceTaskDto | null>(null);
   const [deletingTask, setDeletingTask] = useState<MaintenanceTaskDto | null>(null);
 
   const filtered = useMemo(() => {
@@ -607,17 +611,26 @@ export function TaskCatalogTab() {
 
   const handleEdit = (task: MaintenanceTaskDto) => {
     setEditingTaskId(task.id);
+    setCloneSource(null);
     setIsFormOpen(true);
   };
 
   const handleCreate = () => {
     setEditingTaskId(null);
+    setCloneSource(null);
     setIsFormOpen(true);
   };
 
   const handleFormClose = () => {
     setIsFormOpen(false);
     setEditingTaskId(null);
+    setCloneSource(null);
+  };
+
+  const handleClone = (task: MaintenanceTaskDto) => {
+    setEditingTaskId(null);
+    setCloneSource(task);
+    setIsFormOpen(true);
   };
 
   const handleDelete = async () => {
@@ -779,6 +792,15 @@ export function TaskCatalogTab() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    onClick={() => handleClone(task)}
+                    aria-label={`Clone ${task.taskName}`}
+                    title="Clone task"
+                  >
+                    <CopyIcon className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleEdit(task)}
                     aria-label={`Edit ${task.taskName}`}
                   >
@@ -806,6 +828,7 @@ export function TaskCatalogTab() {
         taskId={editingTaskId}
         tasks={tasks}
         categories={categories}
+        cloneSource={cloneSource}
         onClose={handleFormClose}
         onTaskCreated={(newId) => setEditingTaskId(newId)}
       />
