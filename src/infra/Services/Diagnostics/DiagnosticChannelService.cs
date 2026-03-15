@@ -44,36 +44,36 @@ public record DiagnosticChannelState(
     DateTime? EnabledAt,
     DateTime? ExpiresAt);
 
+/// <summary>
+/// Well-known diagnostic channel names.
+/// </summary>
+public static class DiagnosticChannels
+{
+    public const string PrinterStateTransitions = "printer-state-transitions";
+    public const string OrphanedJobSync = "orphaned-job-sync";
+    public const string PrintJobDispatch = "print-job-dispatch";
+    public const string BackendPolling = "backend-polling";
+    public const string SignalRBroadcast = "signalr-broadcast";
+    public const string AutoDispatch = "auto-dispatch";
+    public const string FileUpload = "file-upload";
+}
+
 public class DiagnosticChannelService : IDiagnosticChannelService
 {
     private readonly ConcurrentDictionary<string, ChannelEntry> _channels = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<DiagnosticChannelService> _logger;
 
-    /// <summary>
-    /// Well-known diagnostic channel names.
-    /// </summary>
-    public static class Channels
-    {
-        public const string PrinterStateTransitions = "printer-state-transitions";
-        public const string OrphanedJobSync = "orphaned-job-sync";
-        public const string PrintJobDispatch = "print-job-dispatch";
-        public const string BackendPolling = "backend-polling";
-        public const string SignalRBroadcast = "signalr-broadcast";
-        public const string AutoDispatch = "auto-dispatch";
-        public const string FileUpload = "file-upload";
-    }
-
     public DiagnosticChannelService(ILogger<DiagnosticChannelService> logger)
     {
         _logger = logger;
 
-        Register(Channels.PrinterStateTransitions, "Printer state changes in the status cache (idle→printing, online/offline transitions)");
-        Register(Channels.OrphanedJobSync, "Orphaned job reconciliation — age checks, printer state lookups, sync decisions");
-        Register(Channels.PrintJobDispatch, "Job dispatch lifecycle — Starting, file upload, Printing transition");
-        Register(Channels.BackendPolling, "Backend polling cycles (Moonraker, PrusaLink, OctoPrint, SDCP)");
-        Register(Channels.SignalRBroadcast, "SignalR hub broadcasts for printer updates and job queue changes");
-        Register(Channels.AutoDispatch, "Auto-dispatch decisions — printer selection, queue evaluation");
-        Register(Channels.FileUpload, "G-code file upload progress and transfer details");
+        Register(DiagnosticChannels.PrinterStateTransitions, "Printer state changes in the status cache (idle→printing, online/offline transitions)");
+        Register(DiagnosticChannels.OrphanedJobSync, "Orphaned job reconciliation — age checks, printer state lookups, sync decisions");
+        Register(DiagnosticChannels.PrintJobDispatch, "Job dispatch lifecycle — Starting, file upload, Printing transition");
+        Register(DiagnosticChannels.BackendPolling, "Backend polling cycles (Moonraker, PrusaLink, OctoPrint, SDCP)");
+        Register(DiagnosticChannels.SignalRBroadcast, "SignalR hub broadcasts for printer updates and job queue changes");
+        Register(DiagnosticChannels.AutoDispatch, "Auto-dispatch decisions — printer selection, queue evaluation");
+        Register(DiagnosticChannels.FileUpload, "G-code file upload progress and transfer details");
     }
 
     public bool IsEnabled(string channel)

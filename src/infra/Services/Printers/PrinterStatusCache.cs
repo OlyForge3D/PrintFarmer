@@ -130,7 +130,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
             return;
         }
 
-        if (_diagnostics.IsEnabled(DiagnosticChannelService.Channels.PrinterStateTransitions))
+        if (_diagnostics.IsEnabled(DiagnosticChannels.PrinterStateTransitions))
         {
             _logger.LogWarning(
                 "[PrinterStateTransition] Printer {PrinterId}: State '{PreviousState}' -> '{NewState}', Online {PreviousOnline} -> {NewOnline}",

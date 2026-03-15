@@ -474,7 +474,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 continue;
             }
 
-            bool verbose = _diagnostics?.IsEnabled(DiagnosticChannelService.Channels.OrphanedJobSync) == true;
+            bool verbose = _diagnostics?.IsEnabled(DiagnosticChannels.OrphanedJobSync) == true;
 
             _logger.Log(
                 verbose ? LogLevel.Warning : LogLevel.Debug,
