@@ -98,6 +98,16 @@
   - `bg-slate-400` → `bg-pf-disabled`
   - Purple/indigo/teal/cyan → nearest semantic token (`pf-accent` or `pf-success`)
 - **dark: variants removed entirely** — pf-* tokens handle theme switching via CSS custom properties, making `dark:text-gray-400`, `dark:bg-red-900/20` etc. redundant
+
+### Maintenance Module Design Review (2026-03-14)
+- **Module architecture**: 5 top-level tabs (Dashboard, Schedule, Library, Analytics, Inventory). Library has nested sub-tabs for Task Catalog and Maintenance Plans.
+- **Key finding — Plan scoping gap**: `MaintenancePlan` domain model has `PrinterId`, `PrinterModelId`, `ManufacturerId`, `MotionType` scoping fields, all supported by the API and DTOs, but the `PlanFormModal` only exposes Name/Description/Active. Zero UI for plan scoping.
+- **Key finding — Deploy flow missing**: The `useScheduleDeployments` hook, `useDeployPlan` mutation, and `maintenancePlanService.deployPlan()` all exist and work, but no component renders deployment management. The Plan→Printer binding is completely invisible.
+- **Key finding — Library tab default**: Defaults to "tasks" sub-tab but "Maintenance Plans" tab header appears first visually — confusing mismatch.
+- **Parts inventory edit friction**: Current flow is find→click edit icon→full XL modal→change field→save→close. Five interactions for a stock count change. Proposed: inline +/- stepper on cards + full table view with editable cells.
+- **Clone pattern**: Clone is a pure client-side pre-fill of existing create modals for Parts and Tasks. Plans need PlanTask join entity deep copy (can be done client-side with N API calls or via a server-side clone endpoint).
+- **PrinterGroup integration**: `PrinterGroup` types exist in api.ts (lines 2994-3042). Future plan scoping should include printer group as a scope option.
+- **Data model reference files**: Types in `features/maintenance/hooks/` (13 hooks), `types/maintenance.ts`, `services/maintenancePlanService.ts`. Backend domain at `infra/Domain/MaintenancePlan.cs` and `infra/Domain/PrinterMaintenanceSchedule.cs`.
 - **Intentionally excluded:**
   - `colorFamilies.ts` — literal filament swatch colors (12 references) that represent actual material colors, not UI chrome
   - `bg-black/50` overlays — standard backdrop dimming pattern, not a design token concern
@@ -128,3 +138,11 @@
 - **Key styling:** All components use existing `pf-*` tokens (bg-pf-bg-1, text-pf-text-secondary, border-pf-border, etc.)
 - **Accessibility:** Full keyboard nav (Tab/Enter/Escape/←→), ARIA dialog/modal, `prefers-reduced-motion` support
 - **Industrial constraints addressed:** Dark-first, glove-friendly targets, fast/scannable content, non-intrusive prompts
+
+### Tour Highlight Clipping Fix (2026-07-22)
+- **Bug:** Guided tour spotlight blue glow was clipped/cut off on some steps where the highlighted element sat inside a parent with `overflow: hidden/auto/scroll`
+- **Root cause:** `box-shadow` renders inside the element's overflow boundary — any ancestor with `overflow: hidden` clips it
+- **Fix:** Replaced `box-shadow` with `outline` + `outline-offset` on `.driver-active-element` in `tour-theme.css`. CSS `outline` is rendered outside the box model and is never clipped by overflow. Added `filter: drop-shadow()` for the subtle outer blue radiance (also not overflow-clipped).
+- **Before:** `box-shadow: 0 0 0 4px var(--pf-accent), 0 0 20px rgba(88, 166, 255, 0.3)`
+- **After:** `outline: 3px solid var(--pf-accent)` + `outline-offset: 3px` + `filter: drop-shadow(0 0 10px rgba(88, 166, 255, 0.35))`
+- **Lesson:** When you need visible effects that must survive `overflow: hidden` ancestors, use `outline` (not `box-shadow`) and `filter: drop-shadow()` (not `box-shadow` glow). Both are painted outside the overflow clip boundary.

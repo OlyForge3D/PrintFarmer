@@ -924,3 +924,37 @@ Added React Query optimistic cache update in `BedClearBanner` for instant UX fee
 - Works with Lambert's post-dispatch state refresh service (750ms probe bridges polling gap)
 - Creates seamless UX: optimistic immediate → real update within 500ms → state refresh ensures polling mode doesn't lag
 
+---
+
+## 2026-03-14 — Double Chevron Bug Fix
+
+**Session:** UI Polish — Double chevron on all `<select>` dropdowns
+**Outcome:** ✅ COMPLETE
+
+### Root Cause
+
+Global CSS in `controls.css` (line ~1415) applies `background-image` with an SVG chevron to ALL `<select>` elements. Components that also render a custom chevron overlay (`ChevronDownIcon` or inline SVG) end up with **two chevrons**: one from the CSS `background-image` and one from the React overlay.
+
+### Files Changed
+
+1. **`src/Web/ReactApp/src/common/components/ui/Select.tsx`** — Added `bg-none` to the `<select>` className to suppress the global CSS `background-image` chevron. The component's `ChevronDownIcon` overlay is the sole chevron.
+2. **`src/Web/ReactApp/src/common/components/ThemeToggle.tsx`** — Added `bg-none` to the dropdown variant's raw `<select>` (which has its own inline SVG chevron overlay).
+3. **`src/Web/ReactApp/src/features/slicer/components/settings/SettingRow.tsx`** — Added `bg-none` to `SelectControl`'s raw `<select>` (which has its own SVG chevron overlay).
+
+### Not Changed (No Issue)
+
+- **`SettingsPagelet.tsx`** — Raw `<select>` with NO custom chevron overlay. The single global CSS `background-image` chevron is correct.
+- **`PrinterCard.tsx`** (harvest) — Raw `<select>` with NO custom chevron overlay. Same — one chevron from global CSS is correct.
+- **`ColorFamilySelect.tsx`** — Uses `<Button>` not `<select>`, so global CSS doesn't apply.
+
+### Validation
+
+✅ Tests: 1469/1469 passed (12 skipped)
+✅ ESLint: 0 new issues (1 pre-existing in PrinterGroupModal.tsx)
+
+## Learnings
+
+- **Pattern to avoid:** When global CSS styles `<select>` elements with `background-image` chevron AND `appearance: none`, any component that adds its own chevron overlay MUST also add `bg-none` (Tailwind for `background-image: none`) to suppress the global one.
+- **Rule of thumb:** Components providing custom dropdown arrows should always explicitly zero out `background-image` to avoid conflicts with global resets.
+- The global `controls.css` `select` rule is a "safety net" for raw selects — it's correct for raw `<select>` elements that have no custom overlay. The conflict only arises when components add their own.
+
