@@ -1210,9 +1210,88 @@ None. Can ship independently.
 
 ---
 
+### 4. Camera Management — Platform Feature (Reclassified & Approved)
+
+**Author:** Dallas (Lead/Architect)  
+**Date:** 2026-03-15  
+**Status:** ✅ APPROVED — Phase A ready
+
+**Summary:** Camera management is a **platform capability**, not a backend limitation. While printer firmware APIs don't support enable/disable, farm software should own this at the application layer. Research confirms 80% infrastructure exists; all 5 competitors manage cameras independently. Reclassified from "Won't Fix" to feature.
+
+**Key Findings:**
+- PrintFarmer has Camera entity, CRUD endpoints, React UI, discovery integration
+- 7/10 operators use multiple cameras per printer
+- SimplyPrint approach: cameras as standalone entities with backend-agnostic toggles
+- Gap: No PrinterId FK, no multi-camera support, no health monitoring
+
+**Data Model Changes:**
+- Add `PrinterId` foreign key + navigation property (nullable for standalone cameras)
+- New enums: `CameraSource` (Standalone/Moonraker/PrusaLink/etc), `CameraType` (General/Bed/Nozzle/Wide/Timelapse)
+- Health monitoring fields: `HealthStatus`, `LastHealthCheckUtc`, `ConsecutiveFailures`
+- Keep legacy `Printer.CameraStreamUrl/SnapshotUrl` marked obsolete (backward compat)
+
+**API Endpoints:**
+- `GET /api/printers/{id}/cameras` — Return all cameras for printer
+- `POST /api/printers/{id}/cameras` — Add external camera to printer
+- `PATCH /api/cameras/{id}/toggle` — Existing, updated to suppress in UI when disabled
+- `GET /api/cameras/health` — Health summary (healthy/degraded/unhealthy/unknown)
+- `POST /api/cameras/{id}/check-health` — Trigger immediate health check
+
+**Service Architecture:**
+- New `CameraHealthMonitorService` background service (5-min health checks)
+- Extend `ICameraService` with printer-camera methods
+- Update `PrintersService.GetPrinterDtoAsync()` to include camera collection
+- Multi-provider migrations (SQL Server + PostgreSQL)
+
+**Frontend Updates:**
+- Multi-camera grid in printer detail page
+- Camera toggle in compact printer card
+- Add external camera modal
+- Health status badges (Healthy=green, Degraded=yellow, Unhealthy=red)
+- Camera type & source indicators
+
+**Implementation Phases:**
+| Phase | Duration | Scope | Deliverable |
+|-------|----------|-------|-------------|
+| A | 3-5 days | Backend: schema, API, migrations | Printer-linked cameras, legacy data promoted |
+| B | 2-3 days | Health monitoring service | 5-min checks, status tracking, manual trigger |
+| C | 4-6 days | Frontend UI | Multi-camera grid, toggles, health indicators |
+
+**Backward Compatibility:**
+- Legacy Printer camera fields returned alongside new camera array
+- 3-month deprecation window before removal in v2.0
+- Discovery probes unchanged; migrations auto-promote existing cameras
+- Zero breaking changes for Phase A
+
+**Testing Strategy:**
+- Unit: Service methods, health state machine
+- Integration: Camera CRUD, migration correctness, health monitor
+- E2E: Add camera, toggle, health indicators work end-to-end
+
+**Files Modified (Phase A):**
+- `src/infra/Domain/Camera.cs`, `Printer.cs` — Add fields/enums
+- `src/infra/Data/FarmDbContext.cs` — Configure relationship
+- `src/infra/Services/Cameras/ICameraService.cs`, `CameraService.cs` — Methods
+- `src/infra/Dtos/CameraDtos.cs`, `PrinterDtos.cs` — Update DTOs
+- `src/api/Controllers/CamerasController.cs`, `PrintersController.cs` — Endpoints
+- Migrations (2 files: schema + data promotion)
+- Tests: `CameraServiceTests.cs`, `CameraHealthMonitorTests.cs`
+
+**Success Metrics:**
+- ✅ Schema migration runs cleanly (dev/staging)
+- ✅ Legacy cameras promoted to Camera entities
+- ✅ API returns camera array for printers
+- ✅ Zero breaking changes for API consumers
+- ✅ Health monitor detects unhealthy cameras within 10 min
+
+**Reference:** Full architecture document at `.squad/decisions/inbox/dallas-camera-management-architecture.md` (800 lines with detailed data models, migrations, service layer, frontend specs, 3-phase roadmap)
+
+---
+
 ## References
 
-- **Dallas:** Architecture analysis — `.squad/decisions/inbox/dallas-blocked-items-architecture.md`
-- **Lambert:** Codebase analysis — `.squad/decisions/inbox/lambert-codebase-analysis.md`
-- **Brett:** Competitive research — `.squad/decisions/inbox/brett-competitor-research.md`
+- **Dallas:** Camera management architecture — `.squad/decisions/inbox/dallas-camera-management-architecture.md`
+- **Previous:** Architecture analysis — `.squad/decisions/inbox/dallas-blocked-items-architecture.md`
+- **Previous:** Codebase analysis — `.squad/decisions/inbox/lambert-codebase-analysis.md`
+- **Previous:** Competitive research — `.squad/decisions/inbox/brett-competitor-research.md`
 

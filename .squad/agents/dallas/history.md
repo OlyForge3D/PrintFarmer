@@ -394,3 +394,74 @@ Architected 4 parallel analytics features based on competitive analysis:
 **Estimate:** ~5 days for Phase 1 (infrastructure + 10 pages). Assigned to Ripley.
 
 **Document:** `.squad/decisions/inbox/dallas-help-system-approach.md`
+
+## Learnings
+
+### Camera Management Architecture Delivery — 2026-03-15
+
+**Status:** ✅ DELIVERED — Architecture approved and merged into decisions registry
+
+**Deliverable:** 800-line comprehensive architecture document covering data model, API design, service layer, frontend changes, and three-phase implementation roadmap.
+
+**Key accomplishments:**
+- Detailed Camera entity enhancements: PrinterId FK, CameraSource enum, CameraType enum, health monitoring fields
+- Database migration strategy: schema changes + legacy camera promotion (SQL Server + PostgreSQL)
+- 5 new/updated API endpoints: printer cameras collection, health status, manual health checks
+- Background service: CameraHealthMonitorService with 5-minute polling and failure tracking
+- Frontend architecture: multi-camera grid, health badges, camera toggle controls, add external camera modal
+- Phase planning: A (backend foundation), B (health monitoring), C (frontend UI)
+- Backward compatibility: legacy fields maintained with 3-month deprecation window before v2.0 removal
+
+**Architecture highlights:**
+- Printer-linked cameras support multi-camera per printer (with configurable limits)
+- Standalone cameras retained for shared/multi-room camera setups
+- Health monitoring via HTTP stream probes with consecutive failure tracking
+- Discovery probes unchanged; migrations auto-promote existing legacy cameras
+- Source tracking (Moonraker/PrusaLink/OctoPrint/SDCP/FlashForge/Standalone) enables compliance with backend-specific UX
+- Frontend suppresses disabled cameras from printer UI while maintaining data integrity
+
+**Research validation:**
+- All 5 competitors (SimplyPrint, Repetier, Mainsail, OctoPrint, Duet) manage cameras above backend layer
+- 7/10 farm operators use multiple cameras per printer
+- 80% of infrastructure already exists in PrintFarmer (Camera entity, CRUD, React UI, discovery)
+- 20% gap addressed: multi-camera support, health monitoring, toggle integration
+
+**Integration points:**
+- Discovery probes: unchanged (still populate legacy fields)
+- Migrations: auto-promote on deployment
+- API contracts: backward compatible (legacy fields still returned alongside new camera array)
+- Frontend: optional phased migration (can use legacy fields or new camera array per component)
+- NetworkUrlRewriteService: works transparently with Camera URLs
+
+**Next steps:** Phase A implementation ready. Backend owner can begin schema migration, API endpoints, and service layer work. No UI changes required for Phase A (fully backward compatible).
+
+**Document location:** Decision merged into `.squad/decisions.md` (#4: Camera Management — Platform Feature). Original 800-line architecture document deleted from inbox after merge.
+
+### Camera Management Architecture Revision — 2026-01-12
+
+**Context:** Team reclassified Camera Control from "Won't Fix" to platform feature after Jeff challenged narrow finding. Research confirmed competitors manage cameras above backend layer.
+
+**Architecture Decision:** Created comprehensive camera management architecture treating cameras as first-class platform entities with printer linkage.
+
+**Key insights:**
+- 80% of infrastructure already exists (Camera entity, CRUD, React UI, discovery)
+- 20% gap: no PrinterId FK, no multi-camera support, no health monitoring, toggle doesn't suppress UI
+- All 5 major competitors manage cameras independently from firmware APIs
+- SimplyPrint pattern: cameras as standalone entities with backend-agnostic toggle states
+
+**Technical approach:**
+- Camera entity with `PrinterId` FK (nullable for standalone cameras)
+- `CameraSource` enum tracking origin (Standalone, Moonraker, PrusaLink, etc.)
+- `CameraType` enum for classification (General, Bed, Nozzle, Wide, Timelapse)
+- Health monitoring via background service with 5-minute polling
+- Migration strategy promoting legacy `Printer.CameraStreamUrl` strings to Camera rows
+- Backward compatibility maintained — legacy fields marked obsolete but kept
+
+**Three-phase implementation:**
+- Phase A: Backend schema + migration + API (3-5 days, non-breaking)
+- Phase B: Health monitoring service (2-3 days)
+- Phase C: Frontend multi-camera UI + toggle controls (4-6 days)
+
+**Why this works:** Platform owns camera visibility/toggle state. Backends remain readonly camera URL providers via discovery. No firmware API dependency.
+
+**Document:** `.squad/decisions.md` (#4: Camera Management — Platform Feature)
