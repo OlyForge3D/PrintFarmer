@@ -25,6 +25,7 @@ public class PrintJobManagementService(
     IStoragePathService storagePathService,
     IHubContext<PrinterHub> hubContext,
     IStoredFileOperationsService fileOperations,
+    IPrinterStatusCacheReader printerStatusCache,
     INotificationService? notificationService = null,
     IRetryService? retryService = null,
     IPrinterStatusRefreshService? printerStatusRefreshService = null) : IPrintJobManagementService
@@ -35,6 +36,7 @@ public class PrintJobManagementService(
     private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
     private readonly IHubContext<PrinterHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
     private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
+    private readonly IPrinterStatusCacheReader _printerStatusCache = printerStatusCache ?? throw new ArgumentNullException(nameof(printerStatusCache));
     private readonly INotificationService? _notificationService = notificationService;
     private readonly IRetryService? _retryService = retryService;
     private readonly IPrinterStatusRefreshService? _printerStatusRefreshService = printerStatusRefreshService;
@@ -113,13 +115,14 @@ public class PrintJobManagementService(
         try
         {
             (int queued, int printing, int paused, int completed, int failed) = await _repository.GetQueueStatsAsync(cancellationToken);
+            double avgWait = await _repository.GetAverageWaitTimeMinutesAsync(printerModelId: null, lookbackDays: 30, ct: cancellationToken);
 
             return new QueueStatsDto
             {
                 TotalQueued = queued,
                 TotalPrinting = printing,
                 TotalPaused = paused,
-                AverageWaitTimeMinutes = 0 // TODO: Calculate from queue entries
+                AverageWaitTimeMinutes = (int)Math.Round(avgWait)
             };
         }
         catch (Exception ex)
@@ -139,13 +142,26 @@ public class PrintJobManagementService(
         {
             List<PrinterModelQueueStats> stats = await _repository.GetModelStatsAsync(cancellationToken);
 
+            // Calculate per-model average wait times from recently completed jobs
+            DateTime cutoff = DateTime.UtcNow.AddDays(-30);
+            List<PrintJob> recentJobs = await _repository.GetCompletedJobsForAnalyticsAsync(
+                dateFrom: cutoff, ct: cancellationToken);
+
+            Dictionary<string, double> avgWaitByModel = recentJobs
+                .Where(j => j.ActualStartTime.HasValue && j.AssignedPrinter?.Model?.Name != null)
+                .GroupBy(j => j.AssignedPrinter!.Model!.Name)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Average(j => (j.ActualStartTime!.Value - j.QueuedAt).TotalMinutes));
+
             return stats.Select(s => new QueuePrinterModelStatsDto
             {
                 ModelName = s.ModelName,
                 TotalQueued = s.TotalQueued,
                 CurrentlyPrinting = s.CurrentlyPrinting,
                 OldestQueuedAtUtc = s.OldestQueuedAtUtc,
-                AverageQueueWaitMinutes = 0 // TODO: Calculate from historical data
+                AverageQueueWaitMinutes = avgWaitByModel.TryGetValue(s.ModelName, out double avg)
+                    ? (int)Math.Round(avg) : 0
             }).ToList();
         }
         catch (Exception ex)
@@ -1562,14 +1578,37 @@ public class PrintJobManagementService(
     // ============= PRIVATE HELPERS =============
     private QueuedPrintJobWithFileMetaDto MapToQueuedPrintJobWithFileMeta(PrintJob job)
     {
+        DateTime? estimatedStart = EstimateStartTime(job);
+        DateTime? estimatedCompletion = EstimateCompletionTime(job, estimatedStart);
+
         return new QueuedPrintJobWithFileMetaDto
         {
             Job = MapToQueuedPrintJobDto(job),
             GcodeFile = job.GcodeFile != null ? MapToQueueGcodeFileMetaDto(job.GcodeFile) : new QueueGcodeFileMetaDto { FileName = "Unknown" },
             AssignedPrinter = job.AssignedPrinter != null ? MapToQueuePrinterMetaDto(job.AssignedPrinter) : null,
-            EstimatedStartTime = null, // TODO: Calculate based on queue position and estimated times
-            EstimatedCompletionTime = null // TODO: Calculate based on estimated print time
+            EstimatedStartTime = estimatedStart,
+            EstimatedCompletionTime = estimatedCompletion
         };
+    }
+
+    private static DateTime? EstimateStartTime(PrintJob job)
+    {
+        if (job.ActualStartTime.HasValue)
+        {
+            return job.ActualStartTime.Value;
+        }
+
+        return null;
+    }
+
+    private static DateTime? EstimateCompletionTime(PrintJob job, DateTime? estimatedStart)
+    {
+        if (!estimatedStart.HasValue || !job.EstimatedPrintTime.HasValue)
+        {
+            return null;
+        }
+
+        return estimatedStart.Value + job.EstimatedPrintTime.Value;
     }
 
     private QueuedPrintJobDto MapToQueuedPrintJobDto(PrintJob job)
@@ -1640,13 +1679,15 @@ public class PrintJobManagementService(
 
     private QueuePrinterMetaDto MapToQueuePrinterMetaDto(Printer printer)
     {
+        PrinterStatusDto? cachedStatus = _printerStatusCache.GetStatus(printer.Id);
+
         return new QueuePrinterMetaDto
         {
             Id = printer.Id.ToString(),
             Name = printer.Name,
             ModelName = printer.Model?.Name ?? "Unknown",
-            Status = "Online", // TODO: Get actual printer status
-            IsOnline = true // TODO: Get actual online status
+            Status = cachedStatus?.State ?? "Unknown",
+            IsOnline = cachedStatus?.IsOnline ?? false
         };
     }
 

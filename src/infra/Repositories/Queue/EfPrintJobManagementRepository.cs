@@ -176,6 +176,35 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             failed: allJobs.Count(j => j.Status == PrintJobStatus.Failed));
     }
 
+    public async Task<double> GetAverageWaitTimeMinutesAsync(Guid? printerModelId = null, int lookbackDays = 30, CancellationToken ct = default)
+    {
+        DateTime cutoff = DateTime.UtcNow.AddDays(-lookbackDays);
+
+        IQueryable<PrintJob> query = _context.PrintJobs
+            .Where(j => j.Status == PrintJobStatus.Completed
+                     && j.ActualStartTime != null
+                     && j.QueuedAt >= cutoff);
+
+        if (printerModelId.HasValue)
+        {
+            query = query
+                .Include(j => j.AssignedPrinter)
+                .Where(j => j.AssignedPrinter != null && j.AssignedPrinter.ModelId == printerModelId.Value);
+        }
+
+        List<PrintJob> completedJobs = await query.ToListAsync(ct);
+
+        if (completedJobs.Count == 0)
+        {
+            return 0;
+        }
+
+        double totalWaitMinutes = completedJobs
+            .Sum(j => (j.ActualStartTime!.Value - j.QueuedAt).TotalMinutes);
+
+        return totalWaitMinutes / completedJobs.Count;
+    }
+
     public async Task<List<PrinterModelQueueStats>> GetModelStatsAsync(CancellationToken ct = default)
     {
         return await _context.PrintJobs
