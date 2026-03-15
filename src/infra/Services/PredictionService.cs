@@ -320,8 +320,9 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
 
         if (printerId.HasValue)
         {
-            // TODO: Filter by printer ID if needed
-            // This would require joining with PrintJob entity
+            stats = stats
+                .Where(s => s.PrintJob?.AssignedPrinterId == printerId.Value)
+                .ToList();
         }
 
         var groupedByMaterial = stats
@@ -411,14 +412,11 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// </summary>
     /// <param name="job">The print job to extract model ID from.</param>
     /// <returns>Printer model ID or null if not available.</returns>
-#pragma warning disable S1172 // Parameter is reserved for future implementation
     private static Guid? GetPrinterModelId(PrintJob job)
     {
-        // TODO: Implement logic to get printer model from assigned printer or gcode file metadata
-        // For now, return null - job parameter reserved for future implementation
-        return null;
+        return job.GcodeFile?.PrinterModelId
+            ?? job.AssignedPrinter?.ModelId;
     }
-#pragma warning restore S1172
 
     /// <summary>
     /// Helper: Calculate estimated completion time
