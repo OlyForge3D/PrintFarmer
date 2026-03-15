@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Diagnostics;
-using AutoMapper;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -146,9 +145,6 @@ public static class ServiceCollectionExtensions
     /// <param name="environment">The host environment.</param>
     public static IServiceCollection AddPrintFarmerServices(this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
-        // AutoMapper
-        _ = services.AddAutoMapper(typeof(Program).Assembly);
-
         // Check if background services should be disabled (for testing)
         bool disableBackgroundServices = ShouldDisableBackgroundServices();
 

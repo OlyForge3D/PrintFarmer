@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using AutoMapper;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
@@ -18,25 +17,36 @@ public class CameraService : ICameraService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CameraService> _logger;
-    private readonly IMapper _mapper;
     private readonly IPrintersService _printersService;
 
     public CameraService(
         IUnitOfWork unitOfWork,
         ILogger<CameraService> logger,
-        IMapper mapper,
         IPrintersService printersService)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(mapper);
         ArgumentNullException.ThrowIfNull(printersService);
 
         _unitOfWork = unitOfWork;
         _logger = logger;
-        _mapper = mapper;
         _printersService = printersService;
     }
+
+    private static CameraDto ToDto(Camera camera) => new()
+    {
+        Id = camera.Id,
+        Name = camera.Name,
+        Description = camera.Description,
+        StreamUrl = camera.StreamUrl,
+        SnapshotUrl = camera.SnapshotUrl,
+        IsEnabled = camera.IsEnabled,
+        SortOrder = camera.SortOrder,
+        Location = camera.Location,
+        CreatedAt = camera.CreatedAt,
+        UpdatedAt = camera.UpdatedAt,
+        IsStandalone = true
+    };
 
     /// <inheritdoc />
     public async Task<List<Camera>> GetAllAsync(CancellationToken ct)
@@ -160,7 +170,7 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Created camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
 
-            return _mapper.Map<CameraDto>(camera);
+            return ToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
@@ -235,7 +245,7 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Updated camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
 
-            return _mapper.Map<CameraDto>(camera);
+            return ToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
@@ -297,7 +307,7 @@ public class CameraService : ICameraService
 
             _logger.LogInformation("Toggled camera {CameraName} enabled status to {IsEnabled}", camera.Name, isEnabled);
 
-            return _mapper.Map<CameraDto>(camera);
+            return ToDto(camera);
         }
         catch (Exception ex)
         {
@@ -312,7 +322,7 @@ public class CameraService : ICameraService
         try
         {
             List<Camera> cameras = await GetAllAsync(ct);
-            return _mapper.Map<CameraDto[]>(cameras);
+            return cameras.Select(ToDto).ToArray();
         }
         catch (Exception ex)
         {
@@ -327,7 +337,7 @@ public class CameraService : ICameraService
         try
         {
             List<Camera> cameras = await GetEnabledAsync(ct);
-            return _mapper.Map<CameraDto[]>(cameras);
+            return cameras.Select(ToDto).ToArray();
         }
         catch (Exception ex)
         {
