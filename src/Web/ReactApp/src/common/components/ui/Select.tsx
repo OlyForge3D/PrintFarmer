@@ -13,7 +13,7 @@ export const Select: React.FC<SelectProps> = ({ invalid, className, containerCla
     <div className={clsx('relative w-full', containerClassName)}>
       <select
         className={clsx(
-          'border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none w-full pr-7 [&::-webkit-outer-spin-button]:hidden [&::-webkit-inner-spin-button]:hidden',
+          'border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none bg-none w-full pr-7 [&::-webkit-outer-spin-button]:hidden [&::-webkit-inner-spin-button]:hidden',
           invalid && 'border-pf-error focus:ring-pf-error focus:border-pf-error',
           className
         )}

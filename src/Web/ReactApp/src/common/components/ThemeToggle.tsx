@@ -45,7 +45,7 @@ export function ThemeToggle({
         <select
           value={theme}
           onChange={(e) => setTheme(e.target.value as Theme)}
-          className={`appearance-none bg-pf-panel border border-pf-border rounded-lg ${sizeClasses[size]} pr-8 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent hover:bg-pf-bg-2 transition-colors duration-200`}
+          className={`appearance-none bg-none bg-pf-panel border border-pf-border rounded-lg ${sizeClasses[size]} pr-8 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent hover:bg-pf-bg-2 transition-colors duration-200`}
           aria-label="Select theme"
         >
           {themes.map(({ value, label }) => (
