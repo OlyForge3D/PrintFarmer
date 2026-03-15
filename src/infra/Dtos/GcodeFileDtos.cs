@@ -40,7 +40,21 @@ public record GcodeFileDto(
     string? PrinterModelName = null,
     string? SlicerName = null,
     string? SlicerVersion = null,
-    bool HasThumbnail = false);
+    bool HasThumbnail = false,
+    int? TotalLayers = null,
+    double? FirstLayerHeight = null,
+    bool? SupportEnabled = null,
+    int? ToolChangesCount = null,
+    double? ObjectDimensionX = null,
+    double? ObjectDimensionY = null,
+    double? ObjectDimensionZ = null,
+    int? ObjectCount = null,
+    double? RetractionLength = null,
+    double? RetractionSpeed = null,
+    int? TopSolidLayers = null,
+    int? BottomSolidLayers = null,
+    double? MaxVolumetricSpeed = null,
+    bool? IroningEnabled = null);
 
 /// <summary>
 /// Multipart metadata section for uploading a new G-code file.

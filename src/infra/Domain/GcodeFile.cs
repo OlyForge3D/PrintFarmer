@@ -58,6 +58,37 @@ public class GcodeFile : StoredFile
 
     public double? PrintSpeed { get; set; }
 
+    // --- High Value: Print Management ---
+    public int? TotalLayers { get; set; }
+
+    public double? FirstLayerHeight { get; set; }
+
+    public bool? SupportEnabled { get; set; }
+
+    public int? ToolChangesCount { get; set; }
+
+    // --- Medium Value: Cost & Planning ---
+    public double? ObjectDimensionX { get; set; }
+
+    public double? ObjectDimensionY { get; set; }
+
+    public double? ObjectDimensionZ { get; set; }
+
+    public int? ObjectCount { get; set; }
+
+    public double? RetractionLength { get; set; }
+
+    public double? RetractionSpeed { get; set; }
+
+    // --- Medium Value: Quality & Compatibility ---
+    public int? TopSolidLayers { get; set; }
+
+    public int? BottomSolidLayers { get; set; }
+
+    public double? MaxVolumetricSpeed { get; set; }
+
+    public bool? IroningEnabled { get; set; }
+
     public Guid? PrinterGroupId { get; set; } // Optional: restricts dispatch to printers in this group
 
     public PrinterGroup? PrinterGroup { get; set; }

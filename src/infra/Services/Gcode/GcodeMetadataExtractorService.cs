@@ -71,6 +71,21 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
     private static readonly Regex PerimetersPattern = new(@";\s*perimeters\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex TrailingEscapePattern = new(@"(\\[nrt])+$", RegexOptions.Compiled);
 
+    // --- New patterns for expanded metadata ---
+    private static readonly Regex TotalLayersPattern = new(@";\s*(?:total layers count|LAYER_COUNT|total_layer_count)\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FirstLayerHeightPattern = new(@";\s*first_layer_height\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SupportEnabledPattern = new(@";\s*(?:support_material|enable_support)\s*[:=]\s*(\d+|true|false)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SupportTypePattern = new(@";\s*support_type\s*[:=]\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ObjectDimensionXPattern = new(@";\s*(?:max_print_width|model_size_x)\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ObjectDimensionYPattern = new(@";\s*(?:max_print_depth|model_size_y)\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ObjectDimensionZPattern = new(@";\s*(?:max_print_height|model_size_z)\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RetractionLengthPattern = new(@";\s*(?:retraction_length|retract_length)\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RetractionSpeedPattern = new(@";\s*(?:retraction_speed|retract_speed)\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex TopSolidLayersPattern = new(@";\s*(?:top_solid_layers|top_shell_layers)\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BottomSolidLayersPattern = new(@";\s*(?:bottom_solid_layers|bottom_shell_layers)\s*[:=]\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex MaxVolumetricSpeedPattern = new(@";\s*max_volumetric_speed\s*[:=]\s*([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex IroningEnabledPattern = new(@";\s*(?:ironing|ironing_type)\s*[:=]\s*(\S+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     /// <summary>
     /// Single-pass extraction of all key-value metadata from G-code comment lines.
     /// Replaces 11 separate Extract* methods that each iterated the full line set.
@@ -80,12 +95,55 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         // Print time uses priority: normal mode (3) > TIME: seconds (2) > generic estimated (1)
         int printTimePriority = 0;
 
+        // Tracking for counted fields
+        HashSet<string> uniqueObjects = new(StringComparer.OrdinalIgnoreCase);
+        int toolChangeCount = 0;
+        int? lastTool = null;
+
         foreach (string line in lines)
         {
-            // Fast skip for non-comment lines (most G-code is G/M commands)
-            if (string.IsNullOrEmpty(line) || !line.StartsWith(';'))
+            if (string.IsNullOrEmpty(line))
             {
                 continue;
+            }
+
+            // Track tool changes from non-comment G-code commands (e.g., "T0", "T1")
+            if (!line.StartsWith(';'))
+            {
+                if (line.Length >= 2 && line[0] == 'T' && char.IsDigit(line[1])
+                    && (line.Length == 2 || line[2] == ' ' || line[2] == ';'))
+                {
+                    int tool = line[1] - '0';
+                    if (lastTool != null && tool != lastTool)
+                    {
+                        toolChangeCount++;
+                    }
+
+                    lastTool = tool;
+                }
+
+                continue;
+            }
+
+            // Track unique object/mesh names from slicer comments
+            if (line.StartsWith("; printing object", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith(";MESH:", StringComparison.OrdinalIgnoreCase))
+            {
+                int separatorIdx = line.IndexOf(':');
+                if (separatorIdx < 0)
+                {
+                    separatorIdx = line.IndexOf(' ', 2);
+                }
+
+                if (separatorIdx >= 0 && separatorIdx + 1 < line.Length)
+                {
+                    string objectName = line[(separatorIdx + 1)..].Trim();
+                    if (!string.IsNullOrWhiteSpace(objectName)
+                        && !string.Equals(objectName, "NONMESH", StringComparison.OrdinalIgnoreCase))
+                    {
+                        uniqueObjects.Add(objectName);
+                    }
+                }
             }
 
             bool isGcodeTemplateLine = line.Contains("_gcode =", StringComparison.OrdinalIgnoreCase) ||
@@ -292,6 +350,149 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                     }
                 }
             }
+
+            // --- Total Layers ---
+            if (metadata.TotalLayers == null)
+            {
+                Match match = TotalLayersPattern.Match(line);
+                if (match.Success && int.TryParse(match.Groups[1].Value, out int totalLayers))
+                {
+                    metadata.TotalLayers = totalLayers;
+                }
+            }
+
+            // --- First Layer Height ---
+            if (metadata.FirstLayerHeight == null)
+            {
+                Match match = FirstLayerHeightPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double firstLayerHeight))
+                {
+                    metadata.FirstLayerHeight = firstLayerHeight;
+                }
+            }
+
+            // --- Support Enabled ---
+            if (metadata.SupportEnabled == null)
+            {
+                Match match = SupportEnabledPattern.Match(line);
+                if (match.Success)
+                {
+                    string val = match.Groups[1].Value.Trim();
+                    metadata.SupportEnabled = val == "1" || string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+                }
+                else
+                {
+                    match = SupportTypePattern.Match(line);
+                    if (match.Success)
+                    {
+                        string val = match.Groups[1].Value.Trim();
+                        metadata.SupportEnabled = !string.Equals(val, "none", StringComparison.OrdinalIgnoreCase)
+                                               && !string.Equals(val, "0", StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+            }
+
+            // --- Object Dimensions (bounding box) ---
+            if (metadata.ObjectDimensionX == null)
+            {
+                Match match = ObjectDimensionXPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double dimX))
+                {
+                    metadata.ObjectDimensionX = dimX;
+                }
+            }
+
+            if (metadata.ObjectDimensionY == null)
+            {
+                Match match = ObjectDimensionYPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double dimY))
+                {
+                    metadata.ObjectDimensionY = dimY;
+                }
+            }
+
+            if (metadata.ObjectDimensionZ == null)
+            {
+                Match match = ObjectDimensionZPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double dimZ))
+                {
+                    metadata.ObjectDimensionZ = dimZ;
+                }
+            }
+
+            // --- Retraction Length ---
+            if (metadata.RetractionLength == null && !isGcodeTemplateLine)
+            {
+                Match match = RetractionLengthPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double retractLen))
+                {
+                    metadata.RetractionLength = retractLen;
+                }
+            }
+
+            // --- Retraction Speed ---
+            if (metadata.RetractionSpeed == null && !isGcodeTemplateLine)
+            {
+                Match match = RetractionSpeedPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double retractSpeed))
+                {
+                    metadata.RetractionSpeed = retractSpeed;
+                }
+            }
+
+            // --- Top/Bottom Solid Layers ---
+            if (metadata.TopSolidLayers == null)
+            {
+                Match match = TopSolidLayersPattern.Match(line);
+                if (match.Success && int.TryParse(match.Groups[1].Value, out int topLayers))
+                {
+                    metadata.TopSolidLayers = topLayers;
+                }
+            }
+
+            if (metadata.BottomSolidLayers == null)
+            {
+                Match match = BottomSolidLayersPattern.Match(line);
+                if (match.Success && int.TryParse(match.Groups[1].Value, out int bottomLayers))
+                {
+                    metadata.BottomSolidLayers = bottomLayers;
+                }
+            }
+
+            // --- Max Volumetric Speed ---
+            if (metadata.MaxVolumetricSpeed == null)
+            {
+                Match match = MaxVolumetricSpeedPattern.Match(line);
+                if (match.Success && double.TryParse(match.Groups[1].Value, out double maxVolSpeed) && maxVolSpeed > 0)
+                {
+                    metadata.MaxVolumetricSpeed = maxVolSpeed;
+                }
+            }
+
+            // --- Ironing Enabled ---
+            if (metadata.IroningEnabled == null)
+            {
+                Match match = IroningEnabledPattern.Match(line);
+                if (match.Success)
+                {
+                    string val = match.Groups[1].Value.Trim();
+                    metadata.IroningEnabled = val == "1"
+                                           || string.Equals(val, "true", StringComparison.OrdinalIgnoreCase)
+                                           || (val != "0" && !string.Equals(val, "false", StringComparison.OrdinalIgnoreCase)
+                                                          && !string.Equals(val, "no ironing", StringComparison.OrdinalIgnoreCase));
+                }
+            }
+        }
+
+        // Post-loop: assign counted fields
+        if (toolChangeCount > 0)
+        {
+            metadata.ToolChangesCount = toolChangeCount;
+        }
+
+        if (uniqueObjects.Count > 0)
+        {
+            metadata.ObjectCount = uniqueObjects.Count;
         }
     }
 

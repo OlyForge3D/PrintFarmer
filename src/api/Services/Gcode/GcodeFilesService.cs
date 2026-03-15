@@ -1382,6 +1382,20 @@ namespace Farm.Web.Api.Services.Gcode
                 Perimeters = metadata?.Perimeters,
                 PrintTemperature = metadata?.PrintTemperature,
                 BedTemperature = metadata?.BedTemperature,
+                TotalLayers = metadata?.TotalLayers,
+                FirstLayerHeight = metadata?.FirstLayerHeight,
+                SupportEnabled = metadata?.SupportEnabled,
+                ToolChangesCount = metadata?.ToolChangesCount,
+                ObjectDimensionX = metadata?.ObjectDimensionX,
+                ObjectDimensionY = metadata?.ObjectDimensionY,
+                ObjectDimensionZ = metadata?.ObjectDimensionZ,
+                ObjectCount = metadata?.ObjectCount,
+                RetractionLength = metadata?.RetractionLength,
+                RetractionSpeed = metadata?.RetractionSpeed,
+                TopSolidLayers = metadata?.TopSolidLayers,
+                BottomSolidLayers = metadata?.BottomSolidLayers,
+                MaxVolumetricSpeed = metadata?.MaxVolumetricSpeed,
+                IroningEnabled = metadata?.IroningEnabled,
                 ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
@@ -1732,7 +1746,21 @@ namespace Farm.Web.Api.Services.Gcode
                 PrinterModelName: file.PrinterModel?.Name,
                 SlicerName: file.SlicerName,
                 SlicerVersion: file.SlicerVersion,
-                HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailFileName));
+                HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailFileName),
+                TotalLayers: file.TotalLayers,
+                FirstLayerHeight: file.FirstLayerHeight,
+                SupportEnabled: file.SupportEnabled,
+                ToolChangesCount: file.ToolChangesCount,
+                ObjectDimensionX: file.ObjectDimensionX,
+                ObjectDimensionY: file.ObjectDimensionY,
+                ObjectDimensionZ: file.ObjectDimensionZ,
+                ObjectCount: file.ObjectCount,
+                RetractionLength: file.RetractionLength,
+                RetractionSpeed: file.RetractionSpeed,
+                TopSolidLayers: file.TopSolidLayers,
+                BottomSolidLayers: file.BottomSolidLayers,
+                MaxVolumetricSpeed: file.MaxVolumetricSpeed,
+                IroningEnabled: file.IroningEnabled);
         }
 
         /// <summary>

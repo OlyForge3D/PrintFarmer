@@ -1603,6 +1603,21 @@ export interface GcodeFile {
   extractedPerimeters?: number;
   extractedHotendTemp?: number;
   extractedBedTemp?: number;
+  // Expanded metadata fields
+  totalLayers?: number;
+  firstLayerHeight?: number;
+  supportEnabled?: boolean;
+  toolChangesCount?: number;
+  objectDimensionX?: number;
+  objectDimensionY?: number;
+  objectDimensionZ?: number;
+  objectCount?: number;
+  retractionLength?: number;
+  retractionSpeed?: number;
+  topSolidLayers?: number;
+  bottomSolidLayers?: number;
+  maxVolumetricSpeed?: number;
+  ironingEnabled?: boolean;
 }
 
 export interface GetGcodeFilesRequest {

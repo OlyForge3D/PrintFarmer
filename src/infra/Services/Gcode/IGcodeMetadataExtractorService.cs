@@ -43,4 +43,35 @@ public class GcodeMetadataExtracted
     public string? PrinterModel { get; set; } // Printer model file was sliced for (e.g., "Phrozen Arco 0.4")
 
     public string? PrintSettingsId { get; set; } // Slicer process profile ID used (e.g., from OrcaSlicer)
+
+    // --- High Value: Print Management ---
+    public int? TotalLayers { get; set; } // Total number of layers in the print
+
+    public double? FirstLayerHeight { get; set; } // First layer height (mm), often differs from layer_height
+
+    public bool? SupportEnabled { get; set; } // Whether support material is enabled
+
+    public int? ToolChangesCount { get; set; } // Number of tool/extruder changes (multi-color indicator)
+
+    // --- Medium Value: Cost & Planning ---
+    public double? ObjectDimensionX { get; set; } // Bounding box X dimension (mm)
+
+    public double? ObjectDimensionY { get; set; } // Bounding box Y dimension (mm)
+
+    public double? ObjectDimensionZ { get; set; } // Bounding box Z dimension (mm)
+
+    public int? ObjectCount { get; set; } // Number of distinct objects/meshes on the plate
+
+    public double? RetractionLength { get; set; } // Retraction distance (mm)
+
+    public double? RetractionSpeed { get; set; } // Retraction speed (mm/s)
+
+    // --- Medium Value: Quality & Compatibility ---
+    public int? TopSolidLayers { get; set; } // Number of top solid layers
+
+    public int? BottomSolidLayers { get; set; } // Number of bottom solid layers
+
+    public double? MaxVolumetricSpeed { get; set; } // Maximum volumetric extrusion speed (mm³/s)
+
+    public bool? IroningEnabled { get; set; } // Whether ironing is enabled for top surfaces
 }
