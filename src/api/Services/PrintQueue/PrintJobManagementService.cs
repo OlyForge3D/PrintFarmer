@@ -1811,11 +1811,11 @@ public class PrintJobManagementService(
                 }
             }
 
-            // Handle tags (future phase enhancement)
+            // Tag support deferred — the Projects feature provides better job organization
+            // than free-form tags. See .squad/decisions/inbox/ for competitive analysis.
             if (updates.Tags != null)
             {
-                // TODO: Implement tag support in Phase 3D
-                _logger.LogDebug("Tags update requested but not yet implemented for job {JobId}", jobId);
+                _logger.LogDebug("Tags update requested but deferred in favor of Projects for job {JobId}", jobId);
             }
 
             if (updates.Copies.HasValue)

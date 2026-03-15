@@ -7,6 +7,50 @@
 
 ## Learnings
 
+### 2025-01-21: Architecture for 5 Blocked/Deferred Items
+
+**Task:** Design implementation plans for 5 TODO items blocking backend/slicer features.
+
+**Investigation:**
+- **Camera Control (Item 1):** `ISupportsCamera` interface only has read methods (stream/snapshot URLs). Backend plugins (Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge) need enable/disable/status methods. `PrintersService.cs` stubs return false.
+- **Slicer Artifacts (Item 2):** `HttpJobPollerService` uploads only G-code. `SlicingResult.Metadata` is unstructured `Dictionary<string, string>`. Need conventions for thumbnails (small/medium/large), logs, configs, and multi-artifact upload.
+- **OpenAPI Migration (Item 3):** `ExampleSchemaFilter.cs` has 19 TODOs with commented OpenAPI v2 code. Need migration to ASP.NET Core 10 native OpenAPI (`Microsoft.AspNetCore.OpenApi`) with document/operation transformers.
+- **Tag Support (Item 4):** `Tag` entity exists but no `PrintJobTag` junction table or repository methods. `PrintJobManagementService` logs "not implemented" on tag updates. Need migration, service layer, API endpoints.
+- **OrcaSlicer Types (Item 5):** `OrcaSlicerAssetRegistry` manifest parsing is TODO. `OrcaSlicerUIProvider` has placeholder `typeof(object)` for profile/settings types. Need OrcaSlicer-specific types and manifest schema.
+
+**Key Patterns:**
+- **Capability Interface Pattern:** Backend plugins use marker interfaces (`ISupportsCamera`, `ISupportsFileUpload`) discovered via reflection. Adding methods requires updating all 6 plugins.
+- **Multi-Artifact Upload:** Need standardized metadata keys (`thumbnail_small`, `slicer_log`) and loop-based upload logic after primary G-code.
+- **OpenAPI Transformers:** ASP.NET Core 10 uses `AddOpenApi()` with document/operation transformers instead of Swashbuckle filters.
+- **Tag Junction Table:** Many-to-many via `PrintJobTag` entity, not direct navigation property. Standard EF Core pattern.
+- **Embedded Resources:** OrcaSlicer assets (bed models, textures) are embedded resources, manifest must be JSON-deserialized at init.
+
+**Architecture Decisions:**
+1. **Camera Control:** Extend `ISupportsCamera` with 3 methods (`Enable`, `Disable`, `IsEnabled`). Research Moonraker/PrusaLink APIs first. SDCP/FlashForge return false gracefully.
+2. **Slicer Artifacts:** Define `SlicingArtifactKeys` constants, implement multi-artifact upload with thumbnail extraction from G-code comments (PNG base64 or file paths).
+3. **OpenAPI Migration:** Replace Swashbuckle with native OpenAPI, use transformers in `Program.cs`, delete `ExampleSchemaFilter.cs`.
+4. **Tag Support:** Create `PrintJobTag` junction table, implement `PrintJobTagService`, migrate database (all 4 providers), add API endpoints.
+5. **OrcaSlicer Types:** Define `OrcaSlicerProfile` and `OrcaSlicerSettings` types (reverse engineer from samples), implement manifest JSON parsing with embedded resources.
+
+**Complexity Estimates:**
+- Camera Control: M (2-3 days) — Research + 6 plugin implementations
+- Slicer Artifacts: L (4-5 days) — Metadata conventions + G-code parsing + upload logic
+- OpenAPI Migration: M (2-3 days) — Straightforward refactor, testing Swagger UI
+- Tag Support: M (3-4 days) — Standard CRUD + migrations + UI
+- OrcaSlicer Types: M (2-3 days) — Reverse engineering + JSON parsing
+
+**Recommended Owners:**
+- Camera Control: Taylor (backend plugins)
+- Slicer Artifacts: Taylor + Morgan (backend + slicer parsing)
+- OpenAPI Migration: Jordan or Taylor (API refactor)
+- Tag Support: Taylor + Jordan (backend + UI)
+- OrcaSlicer Types: Morgan or Jordan (slicer domain knowledge)
+
+**Files Written:**
+- `.squad/decisions/inbox/dallas-blocked-items-architecture.md` — Full architecture document with problem statements, proposed solutions, implementation plans, dependencies, and complexity estimates for all 5 items.
+
+## Learnings
+
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
 ### Architecture Review — 2026-03-06

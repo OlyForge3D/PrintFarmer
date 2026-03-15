@@ -753,3 +753,50 @@ Use Moonraker's `print=true` upload parameter for single call instead of separat
 - Tests: 1407 API pass, all dispatch tests green
 - State machine: Ready → dispatch → Starting → Printing (unchanged)
 
+
+---
+
+## 2025-01-27 — Deep Codebase Analysis for 5 Blocked Items
+
+**Session:** Blocked Item Investigation  
+**Outcome:** ✅ COMPLETE — Analysis document delivered
+
+Performed comprehensive code-level investigation of 5 blocked/deferred items to determine implementation feasibility and resource requirements.
+
+**Items Analyzed:**
+1. **Camera Control** (Enable/Disable) — Interface exists but firmware APIs don't support enable/disable operations
+2. **Slicer Artifact Uploads** (Thumbnails) — Core upload flow incomplete, no artifacts controller exists
+3. **OpenAPI Migration** (.NET 10) — Already complete, using native `AddOpenApi()`
+4. **Tag Support** (Job organization) — No database schema, needs migration for JSON array column
+5. **OrcaSlicer Types** (Profile/Settings) — Stubs exist, need concrete type definitions
+
+**Analysis Deliverables:**
+- Current state assessment (what exists today)
+- Gap analysis (what's missing)
+- Implementation patterns from existing codebase
+- Migration requirements (database changes)
+- Risk factors and recommendations
+
+**Key Findings:**
+- Camera control: Firmware limitation (Moonraker/PrusaLink don't support enable/disable) → **Recommend defer indefinitely**
+- OpenAPI: Already complete, dead code in ExampleSchemaFilter → **Close as done**
+- Tags: JSON array approach following `RequiredCapabilities` pattern → **Phase 3D, low effort**
+- Artifacts: Need controller + entity + storage strategy → **Phase 3E, medium effort**
+- OrcaSlicer: Need profile/settings schema from actual .json files → **Phase 3E, medium effort**
+
+**Files Analyzed:** 23 source files across:
+- 4 backend plugins (Moonraker, PrusaLink, OctoPrint, Sdcp)
+- Slicer module (SlicingResult, Metadata dictionary)
+- API layer (controllers, Program.cs OpenAPI config)
+- Infrastructure (PrintersService, IBackendClientCapabilities)
+- Domain entities (PrintJob, GcodeFile)
+
+**Learnings:**
+- Camera APIs are read-only (URL retrieval) — no firmware concept of enable/disable
+- SlicingResult.Metadata dictionary holds thumbnail paths but no receiver endpoint exists
+- .NET 10 native OpenAPI replaces Swashbuckle with document/operation transformers
+- Existing array patterns (RequiredCapabilities, PreferredPrinterIds) guide tag implementation
+- Plugin architecture requires concrete types for ProfileConfigType/SettingsType
+
+**Documentation:** Complete analysis in `.squad/decisions/inbox/lambert-codebase-analysis.md` (27KB)
+

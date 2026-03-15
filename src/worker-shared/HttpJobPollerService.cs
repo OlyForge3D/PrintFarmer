@@ -337,7 +337,9 @@ public abstract class HttpJobPollerService(
         artifactIds.Add(artifactResponse.Id);
         _logger.LogInformation("Uploaded G-code artifact: {ArtifactResponseId} ({GcodeBytesLength} bytes)", artifactResponse.Id, gcodeBytes.Length);
 
-        // TODO: Upload additional artifacts (thumbnails, metadata, etc.) if present in result.Metadata
+        // Phase 3E: Upload additional artifacts (thumbnails, metadata) from result.Metadata
+        // Requires ArtifactsController endpoint and SlicingArtifactKeys conventions.
+        // See .squad/decisions/inbox/dallas-blocked-items-architecture.md for design.
         return artifactIds;
     }
 }

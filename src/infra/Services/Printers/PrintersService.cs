@@ -2633,10 +2633,11 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>True if camera was enabled, false if not currently supported</returns>
     /// <remarks>
-    /// Camera enable/disable is not currently supported via capability interfaces.
-    /// This would need to be implemented as a new capability interface.
-    /// Currently returns false regardless of input parameters.
-    /// TODO: Implement camera control capability when interface is available.
+    /// Camera enable/disable is not supported by printer firmware APIs (Moonraker, PrusaLink,
+    /// OctoPrint, SDCP). These firmwares provide camera stream URLs and snapshots but have no
+    /// concept of toggling cameras on/off at runtime. Most users run cameras via external
+    /// systems (mjpg-streamer, crowsnest) that are outside PrintFarmer's control.
+    /// See .squad/decisions/inbox/ for full architecture analysis.
     /// </remarks>
     public async Task<bool> EnableCameraAsync(Guid id, CancellationToken ct)
     {
@@ -2646,8 +2647,7 @@ public class PrintersService(
             return false;
         }
 
-        // Camera enable/disable is not currently supported via capability interfaces
-        // This would need to be implemented as a new capability interface
+        // Camera enable/disable is not supported by printer firmware APIs
         return false;
     }
 
@@ -2658,9 +2658,8 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>True if camera was disabled, false if not currently supported</returns>
     /// <remarks>
-    /// Camera enable/disable is not currently supported via capability interfaces.
-    /// Currently delegates to EnableCameraAsync as placeholder implementation.
-    /// TODO: Implement camera control capability when interface is available.
+    /// Camera enable/disable is not supported by printer firmware APIs.
+    /// Delegates to EnableCameraAsync (both return false). See EnableCameraAsync remarks.
     /// </remarks>
     public Task<bool> DisableCameraAsync(Guid id, CancellationToken ct)
     {

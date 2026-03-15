@@ -81,3 +81,64 @@
 - Competitive analysis (10 competitors, market gaps, strategic positioning) centralized
 - Three-phase roadmap ready for team review and prioritization decision
 
+---
+
+### 5-Feature Architecture Research (2026-03-10)
+
+**Status:** ✅ Complete. Research published to `.squad/decisions/inbox/brett-competitor-research.md`
+
+**Research Scope:** Deep competitive analysis on 5 planned features:
+1. **Camera Control** — How competitors (SimplyPrint, OctoPrint, Moonraker, 3DPrinterOS, Bambu) handle camera enable/disable
+2. **Slicer Artifacts** — Thumbnails + metadata (OrcaSlicer, PrusaSlicer, Cura, SimplyPrint, Repetier)
+3. **Print Job Tagging** — Categorization patterns (SimplyPrint projects, 3DPrinterOS groups, Repetier tags)
+4. **OpenAPI Documentation** — API quality & tooling (Swagger UI, code examples, webhook docs)
+5. **OrcaSlicer Integration** — Slicer-level integration depth (print-from-slicer, metadata pass-through, printer selection)
+
+**Key Findings:**
+
+**Camera Control:**
+- Competitors: Only SimplyPrint offers per-print camera toggle + multi-camera dashboard selection. OctoPrint/Moonraker = passive streaming only.
+- Users want: Bandwidth control, privacy (ability to disable), multi-camera UI (select subset of 10+ cameras for mobile view).
+- Opportunity: PrintFarmer's multi-backend support → unified camera interface across Moonraker, OctoPrint, PrusaLink.
+- Recommendation: Nice-to-have (Phase 2), pairs with Obico integration.
+
+**Slicer Artifacts:**
+- Competitors: OrcaSlicer leads (embedded PNG + metadata in gcode). SimplyPrint auto-extracts + displays. OctoPrint/Mainsail = fragmented plugins.
+- Users want: Quick visual identification in job queue, estimated time + material cost, pre-print validation (toolpath), standardized metadata.
+- Opportunity: PrintFarmer's multi-backend position → unified artifact extraction across all slicers.
+- Recommendation: Must-have (Phase 1.5), necessary for business analytics dashboard.
+
+**Print Job Tagging:**
+- Competitors: SimplyPrint projects (high adoption). Repetier tags (moderate adoption). OctoPrint/Mainsail = no tagging.
+- Users want: NOT free-form tags (low adoption, inconsistency). DO want project grouping ("Customer A", "Prototypes") + filtering.
+- Observation: Search term analysis shows "organize jobs" >> "tag jobs". Users want context containers, not metadata labels.
+- Recommendation: Nice-to-have (Phase 2), do projects if building multi-user features. Skip free-form tagging.
+
+**OpenAPI Documentation:**
+- Competitors: SimplyPrint (Swagger UI), 3DPrinterOS (SDKs), Repetier (OpenAPI 3.0) = enterprise standard. OctoPrint (hand-written, fragmented), Moonraker (Wiki only), Bambu (proprietary API, undocumented).
+- Users want: Interactive API explorer, code examples (cURL + JavaScript), webhook documentation, schema validation examples.
+- Opportunity: .NET 10 ships with built-in OpenAPI (replaces Swashbuckle). Zero cost to implement. No self-hosted competitor has full OpenAPI.
+- Recommendation: Must-have (Phase 1), high signaling value + integration unlock (Home Assistant, Zapier).
+
+**OrcaSlicer Integration:**
+- Competitors: Bambu = closed ecosystem. SimplyPrint = experimental plugin. OctoPrint/Moonraker = generic support (no slicer integration).
+- Users want: Print-from-slicer workflow (slice → click "Print on X" → queued), metadata + thumbnail pass-through, smart dispatch (send to printer with matching material).
+- Market Insight: OrcaSlicer = fastest-growing slicer (2023+). Forked from PrusaSlicer. Bambu user + Klipper user base = explosive adoption momentum NOW.
+- Opportunity: PrintFarmer = ONLY tool offering multi-backend print-from-slicer (Bambu users can't print Prusa/Klipper today; Bambu = locked in).
+- Recommendation: Nice-to-have (Phase 2+). High differentiation. Validate with 5-10 OrcaSlicer + Klipper users first.
+
+**Prioritization Summary:**
+- Must-have Phase 1: OpenAPI (zero cost, high value)
+- Must-have Phase 1.5: Slicer Artifacts (foundation for analytics)
+- Nice-to-have Phase 1.5-2: Camera control, Projects, OrcaSlicer
+
+**Strategic Insights:**
+1. PrintFarmer's unique niche: Only player at intersection of self-hosted + multi-backend + subscription-free. Features should lock this in.
+2. OrcaSlicer timing = critical. Market inflection point (Bambu ecosystem + Klipper adoption). Competitors won't move for 12+ months.
+3. Self-hosted rebellion continues. Users cite cloud subscription costs (#2 complaint for SimplyPrint). Analytics dashboard (Phase 2) = major differentiator if self-hosted.
+4. Tagging fails across ecosystem. Projects + filtering win. Don't build free-form tagging; invest in project UX instead.
+
+**Validation Next Steps:**
+- Confirm OrcaSlicer print-from-slicer appeal with 5-10 target users (Klipper + OrcaSlicer combo).
+- Prioritize Phase 2 roadmap based on team capacity + market opportunity.
+
