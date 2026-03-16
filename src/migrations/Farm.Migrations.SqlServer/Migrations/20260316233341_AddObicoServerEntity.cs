@@ -10,11 +10,13 @@ namespace Farm.Migrations.SqlServer.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Method intentionally left empty — schema managed by EnsureCreated for new deployments.
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // Method intentionally left empty — no rollback needed for empty Up.
         }
     }
 }

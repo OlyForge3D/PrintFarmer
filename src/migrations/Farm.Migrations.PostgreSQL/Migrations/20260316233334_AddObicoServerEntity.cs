@@ -10,6 +10,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Method intentionally left empty — schema managed by EnsureCreated for new deployments.
         }
 
         /// <inheritdoc />

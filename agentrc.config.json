@@ -1,0 +1,16 @@
+{
+  "areas": [
+    {
+      "name": "scripts",
+      "applyTo": "scripts/**"
+    },
+    {
+      "name": "tools",
+      "applyTo": "tools/**"
+    },
+    {
+      "name": "src",
+      "applyTo": "src/**"
+    }
+  ]
+}

@@ -182,13 +182,15 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     /// Obico ML API response format.
     /// Example: {"result": {"p": 0.85}}
     /// </summary>
+#pragma warning disable S3459, S1144 // JSON deserialization DTOs — properties populated by System.Text.Json
     private sealed class ObicoApiResponse
     {
-        public ObicoResult? Result { get; }
+        public ObicoResult? Result { get; init; }
     }
 
     private sealed class ObicoResult
     {
-        public double? P { get; }
+        public double? P { get; init; }
     }
+#pragma warning restore S3459, S1144
 }
