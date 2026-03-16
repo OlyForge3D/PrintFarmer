@@ -1048,3 +1048,103 @@ Global CSS in `controls.css` (line ~1415) applies `background-image` with an SVG
 - `printerId` uses `string | null` (not just optional) to allow clearing printer association
 - `DisplayCameraDto` was missing `lastHealthCheck` and `healthMessage` — added to match C# DTO
 - Always compare TS interfaces against C# DTOs when adding backend endpoints; partial interfaces cause silent data loss
+
+### 2026-01-11 — Notification Center & PWA Install Prompt (Feature #2 from Roadmap)
+
+**Status:** ✅ Complete — Notification Center UI + PWA Install Banner built and tested
+
+**What Was Built:**
+1. **Notification Types & API Integration** (`api.ts`):
+   - Added `NotificationDto`, `NotificationPreferencesDto`, `NotificationType` enum, `NotificationFrequency` enum
+   - Added 8 API methods: `getNotifications()`, `getUnreadNotifications()`, `getUnreadCount()`, `markNotificationAsRead()`, `markMultipleNotificationsAsRead()`, `deleteNotification()`, `getNotificationPreferences()`, `updateNotificationPreferences()`
+   - Backend endpoints already existed in NotificationsController — just needed frontend integration
+
+2. **Notification Hooks** (`useApi.ts`):
+   - `useNotifications(options)` — Query for all notifications with optional limit
+   - `useUnreadCount(options)` — Poll for unread count (10s staleTime)
+   - `useMarkNotificationAsRead()` — Mark single notification as read
+   - `useMarkAllNotificationsAsRead()` — Mark multiple as read with toast feedback
+   - `useDeleteNotification()` — Delete notification with toast feedback
+   - All mutations invalidate both `notifications` and `unreadCount` query keys
+
+3. **NotificationBell Component** (`NotificationBell.tsx`):
+   - Bell icon with unread count badge (shows "99+" for >99)
+   - Positioned in Layout header after TasksBadge, before user menu
+   - Opens NotificationDrawer on click
+   - Only shown for authenticated users
+
+4. **NotificationDrawer Component** (`NotificationDrawer.tsx`):
+   - Slide-out drawer from right side (full width on mobile, 384px on desktop)
+   - Lists recent notifications with type icon, subject, body, timestamp
+   - Shows unread indicator dot
+   - "Mark all as read" button when unread notifications exist
+   - Click notification to mark as read
+   - Delete button per notification
+   - Empty state with friendly message
+   - Uses `formatDistanceToNow` from date-fns for timestamps
+
+5. **PWA Install Prompt** (`useInstallPrompt.ts` + `InstallBanner.tsx`):
+   - Hook captures `beforeinstallprompt` event
+   - Stores dismissal in localStorage with 7-day cooldown
+   - Banner shows "Install PrintFarmer" with Install/Dismiss buttons
+   - Positioned below EmailConfirmationBanner and PlatformBanner
+   - Only shows when browser supports PWA install and user hasn't dismissed recently
+
+6. **Bell Icon Addition** (`MdiIcons.tsx`):
+   - Added `mdiBell` import from @mdi/js
+   - Created `BellIcon` component following project icon pattern
+
+**Technical Details:**
+- Backend already had full NotificationsController with 8 endpoints (GET /notifications, GET /notifications/unread, GET /notifications/unread/count, PUT /notifications/{id}/mark-read, PUT /notifications/mark-read-batch, DELETE /notifications/{id}, GET /notifications/preferences, PUT /notifications/preferences)
+- Notification types: JobStarted, JobCompleted, JobFailed, JobPaused, JobResumed, QueueAlert, SystemAlert
+- Query staleTime: 30s for notifications, 10s for unread count (faster polling for real-time feel)
+- All API calls through apiClient singleton — no raw fetch/axios
+- NotificationDrawer uses backdrop + slide-in animation with Tailwind transitions
+
+**Build Results:**
+- ✅ Build succeeded: 6.61s, 0 errors
+- ✅ Lint passed: 0 errors
+- ✅ All imports use @/ path aliases
+- ✅ All UI components from project library
+- ✅ Toast feedback via sonner
+
+**Key Learning:**
+- Backend notification system already existed — just needed frontend UI
+- PWA install prompt uses browser's native `beforeinstallprompt` event
+- localStorage cooldown prevents banner spam (7-day dismissal period)
+- Query invalidation pattern: always invalidate both related queries (notifications + unreadCount) after mutations
+
+**Next Steps for PWA:**
+- Mobile bottom navigation bar (Part B) — not completed yet
+- Service worker upgrade investigation (Part D) — deferred, existing sw.js works well
+- SignalR integration for real-time notification updates (optional enhancement)
+
+**Impact:** Users can now see and manage in-app notifications, and the app promotes PWA installation when supported. Backend notifications (JobCompleted, JobFailed, etc.) will now surface in the UI.
+
+
+---
+
+## Wave 1 Completion — Cross-Agent Updates
+
+**2026-03-16 — POST-WAVE-1 INTEGRATION NOTES**
+
+### From Lambert (Backend)
+- ✅ Job Cost Calculation backend complete
+- 6 new API endpoints: monthly trends, per-printer totals, settings CRUD
+- Cost factors: Material ($/g), Energy ($/kWh), Support Labor ($/hour), Direct Labor ($/hour)
+- **Action for Feature #3 (Cost Dashboard):** Consume these endpoints in your Wave 2 dashboard build
+- Full docs in orchestration log: `.squad/orchestration-log/2026-03-16T22-37-51Z-lambert.md`
+
+### From Parker (DevOps)
+- ✅ Obico ML Docker service ready
+- Service orchestration complete for Feature #1
+- **Note:** Obico failure alerts may surface in Notification Center
+
+### From Dallas (Lead)
+- ✅ Five-Feature Workplan approved
+- Feature #3 (Cost Tracking Dashboard) is your primary Wave 2 task
+- **Dependencies:** Lambert's cost API endpoints (ready), Kane's test suite
+- **Opportunity:** Your notification hooks (Bell + Drawer) integrate naturally with cost alerts
+
+**Wave 2:** Build Cost Dashboard consuming Lambert's API, integrate with notification center
+**Status:** Ready to launch cost dashboard UI work

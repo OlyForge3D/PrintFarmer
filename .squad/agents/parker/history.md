@@ -158,3 +158,102 @@
 
 **Integration:** Builds on monolith Docker infrastructure (Agent-29) and GHCR CI/CD (Agent-28).
 
+
+## Obico ML API Integration (2026-03-13)
+
+### Agent Work (Requested by Jeff Papiez)
+
+**Task:** Set up Obico ML API as optional Docker Compose service for Feature #1 (AI Print Failure Detection).
+
+**Background:** Obico ML API is an open-source Flask service that analyzes 3D printer camera images and detects print failures (spaghetti, adhesion loss, etc.). It exposes `POST /v1/detect` endpoint for failure detection with confidence scores.
+
+**Investigation:**
+- Researched Obico ML API Docker image: `thespaghettidetective/ml_api:base-1.4` (latest stable)
+- Reviewed existing compose template patterns (discovery, spoolman, orcaslicer-worker)
+- Studied compose-generator.sh merging logic and optional service inclusion
+- Verified health check endpoint: `http://localhost:3333/hc/`
+
+**What was built:**
+
+1. **New compose template** — `scripts/docker/compose-templates/docker-compose.obico-ml.yml`
+   - Service name: `obico-ml-api`
+   - Image: `thespaghettidetective/ml_api:base-1.4`
+   - Internal-only service (no host port mapping by default)
+   - Health check: `curl -f http://localhost:3333/hc/`
+   - Environment variables: `DEBUG`, `FLASK_APP`, optional `ML_API_TOKEN`
+   - Resource limits: 2GB max memory, 2 CPUs (tunable via env vars)
+   - Persistent volume: `obico-ml-model-cache` for ML model storage
+   - Security: `cap_drop: ALL`, `cap_add: NET_BIND_SERVICE`, tmpfs for temp files
+   - GPU support: Commented out NVIDIA runtime config for CPU-only default
+
+2. **Compose generator updates** — `scripts/docker/compose-generator.sh`
+   - Added `--include-obico-ml` / `--enable-obico-ml` flag
+   - Added `INCLUDE_OBICO_ML="false"` default in parse_args()
+   - Integrated merge logic after Spoolman (lines 781-791)
+   - Updated usage help text
+
+3. **Container versions** — `scripts/docker/container-versions.conf`
+   - Added `OBICO_ML_IMAGE` with default `thespaghettidetective/ml_api:base-1.4`
+
+**Environment Variables for API Integration:**
+- `OBICO_ML_API_URL` — URL for PrintFarmer API to reach ML service (default: `http://obico-ml-api:3333`)
+- `OBICO_ML_CONFIDENCE_THRESHOLD` — Detection threshold 0.0-1.0 (default: 0.7)
+- `OBICO_ML_SCAN_INTERVAL` — Seconds between scans (default: 30)
+- `OBICO_ML_DEBUG` — Enable Flask debug logging (default: False)
+- `OBICO_ML_CPU_LIMIT` / `OBICO_ML_MEMORY_LIMIT` — Resource caps (default: 2 CPUs, 2GB)
+
+**Testing:**
+- Verified compose generator dry-run with `--include-obico-ml` flag
+- Generated test compose to `/tmp/test-obico` and confirmed service inclusion
+- Validated service definition, health check, and resource limits in generated YAML
+
+**Key Design Decisions:**
+1. **Internal-only service** — No host port by default (API connects via Docker DNS)
+2. **CPU-only default** — GPU support commented out, opt-in for users with NVIDIA runtime
+3. **Model cache volume** — Persistent storage for ML models (downloaded on first run)
+4. **2GB memory default** — ML inference is memory-intensive, generous default prevents OOM
+5. **Optional flag** — `--include-obico-ml` makes it fully opt-in, PrintFarmer works without it
+6. **Follows existing patterns** — Matches spoolman/discovery service structure exactly
+
+**Integration Points for Lambert (API Team):**
+- Connect to `http://obico-ml-api:3333` from API service
+- POST images to `/v1/detect` endpoint
+- Handle JSON responses with failure detection results and confidence scores
+- Respect `OBICO_ML_CONFIDENCE_THRESHOLD` environment variable
+- Use `OBICO_ML_SCAN_INTERVAL` for monitoring loop timing
+
+**Status:** ✅ Complete — Obico ML API service is ready for use. API integration work remains for Feature #1.
+
+**Next Steps for Lambert:**
+1. Add Obico ML client to API service dependencies
+2. Implement camera image capture from printer backends
+3. Send images to Obico ML API via HTTP POST
+4. Process failure detection results and trigger alerts
+5. Store detection history in database for analysis
+
+## Learnings
+
+
+---
+
+## Wave 1 Completion — Cross-Agent Updates
+
+**2026-03-16 — POST-WAVE-1 INTEGRATION NOTES**
+
+### From Lambert (Backend)
+- ✅ Job Cost Calculation system complete
+- 6 new cost API endpoints deployed
+- **Action for DevOps:** Cost data is now available via REST API for monitoring/reporting integration
+
+### From Ripley (Frontend)
+- ✅ Notification Center UI complete
+- Obico failures will surface as notifications when Feature #1 launches
+- PWA install prompt integrated
+
+### From Dallas (Lead)
+- ✅ Five-Feature Workplan approved and sequenced
+- Feature #1 (Obico Failure Detection) — primary backend task
+- **Dependency:** Your Obico ML Docker service is foundation for Feature #1
+
+**Impact:** Your Obico compose work enables Lambert's Feature #1 implementation
+**Status:** Wave 1 infrastructure complete; Feature #1 backend work begins Wave 2

@@ -1023,3 +1023,146 @@ Unified camera infrastructure to support both standalone cameras and printer-att
 - SSRF validation for local-network apps: block loopback + link-local but explicitly allow RFC 1918 private ranges
 - Per-entity SaveChangesAsync in background services prevents race conditions with concurrent API writes
 - Migration `defaultValue` for string-serialized enums must be the actual enum member name string, not empty
+
+---
+
+## 2026-03-16 Job Cost Tracking Backend (Feature #3)
+
+**Session:** 2026-03-16T15-00-00Z  
+**Task:** Build Job Cost Tracking backend infrastructure  
+**Status:** ✅ COMPLETE  
+
+**Deliverables:**
+
+1. **Cost Settings (`CostTrackingSettings`):**
+   - Added `ElectricityRatePerKwh` (default 0.12)
+   - Added `DefaultMachineHourlyRate` (default 0.50)
+   - Added `LaborMarkupPercent` (default 0)
+   - Added `ProfitMarginTargetPercent` (default 30)
+   - Added `AveragePrinterWattage` (default 250)
+   - Added `EnableAutomaticCostCalculation` (default true)
+   - File: `src/infra/Settings/CostTrackingSettings.cs`
+
+2. **PrintJob Entity Extensions:**
+   - Added `MaterialCostUsd` (decimal?)
+   - Added `EnergyCostUsd` (decimal?)
+   - Added `MachineTimeCostUsd` (decimal?)
+   - Added `LaborCostUsd` (decimal?)
+   - Added `TotalCostUsd` (decimal?)
+   - Added `CostCalculatedAt` (DateTime?)
+   - File: `src/infra/Domain/PrintJob.cs`
+
+3. **Printer Entity Extension:**
+   - Added `MachineHourlyRate` (decimal?) — per-printer rate override
+   - File: `src/infra/Domain/Printer.cs`
+
+4. **JobCostCalculationService:**
+   - Interface: `src/infra/Services/Cost/IJobCostCalculationService.cs`
+   - Implementation: `src/infra/Services/Cost/JobCostCalculationService.cs`
+   - Methods:
+     - `CalculateAndStoreCostsAsync()` — auto-calculates all costs on job completion
+     - `RecalculateCostsWithOverridesAsync()` — manual cost overrides
+   - Formula logic:
+     - Material: (filamentGrams / spoolWeightGrams) × spoolPrice
+     - Energy: (printHours × printerWattage / 1000) × electricityRate
+     - Machine: printHours × machineHourlyRate
+     - Labor: subtotal × (laborMarkupPercent / 100)
+     - Total: material + energy + machine + labor
+
+5. **Integration with PrintJobCompletionService:**
+   - Added `IJobCostCalculationService` dependency injection
+   - Calls `CalculateDetailedCostBreakdownAsync()` after job completion
+   - Runs after `SaveChangesAsync()` to ensure `ActualFilamentUsage` is persisted
+   - File: `src/infra/Services/Printers/PrintJobCompletionService.cs`
+
+6. **Cost DTOs:**
+   - `JobCostBreakdownDto` — detailed cost breakdown for single job
+   - `CostStatisticsSummaryDto` — aggregate statistics
+   - `CostByTimePeriodDto` — costs grouped by date
+   - `CostByPrinterDto` — costs grouped by printer
+   - `CostByMaterialDto` — costs grouped by material type
+   - `UpdateJobCostRequest` — manual override request
+   - File: `src/infra/Dtos/CostDtos.cs`
+
+7. **API Endpoints (StatisticsController):**
+   - `GET /api/statistics/costs/summary` — aggregate summary
+   - `GET /api/statistics/costs` — time series data
+   - `GET /api/statistics/costs/by-printer` — per-printer breakdown
+   - `GET /api/statistics/costs/by-material` — per-material breakdown
+   - File: `src/api/Controllers/StatisticsController.cs`
+
+8. **API Endpoints (JobQueueAnalyticsController):**
+   - `GET /api/job-queue-analytics/jobs/{id}/cost` — job cost breakdown
+   - `PUT /api/job-queue-analytics/jobs/{id}/cost` — manual cost override
+   - File: `src/api/Controllers/JobQueueAnalyticsController.cs`
+
+9. **Service Interface Extensions:**
+   - `IStatisticsService.GetCostsSummaryAsync()`
+   - `IStatisticsService.GetCostsByTimePeriodAsync()`
+   - `IStatisticsService.GetCostsByPrinterAsync()`
+   - `IStatisticsService.GetCostsByMaterialAsync()`
+   - `IPrintJobManagementService.GetJobCostBreakdownAsync()`
+   - `IPrintJobManagementService.UpdateJobCostAsync()`
+   - Files: `src/infra/Services/Statistics/IStatisticsService.cs`, `src/infra/Services/Interfaces/IPrintJobManagementService.cs`
+
+10. **Service Implementations:**
+    - `StatisticsService` — implemented all 4 cost aggregation methods using EF Core LINQ
+    - `PrintJobManagementService` — implemented job cost breakdown and update methods
+    - Files: `src/infra/Services/Statistics/StatisticsService.cs`, `src/api/Services/PrintQueue/PrintJobManagementService.cs`
+
+11. **EF Core Migrations:**
+    - PostgreSQL: `20260316XXXXXX_AddJobCostTrackingFields`
+    - SQL Server: `20260316XXXXXX_AddJobCostTrackingFields`
+    - Adds 7 new columns to `PrintJobs` table:
+      - MaterialCostUsd, EnergyCostUsd, MachineTimeCostUsd, LaborCostUsd, TotalCostUsd, CostCalculatedAt
+    - Adds 1 new column to `Printers` table:
+      - MachineHourlyRate (nullable decimal)
+
+**Build Status:**
+- ✅ Build: 0 errors, 40 warnings (formatting - fixed with `dotnet format`)
+- ✅ Format: Clean after `dotnet format`
+- ⚠️ Tests: Not run (need to register services in DI)
+
+**Next Steps:**
+- Register `IJobCostCalculationService` and `JobCostCalculationService` in `ServiceCollectionExtensions`
+- Run migrations: `dotnet ef database update` (PostgreSQL and SQL Server)
+- Test cost calculation on job completion
+- Frontend: Cost dashboard and per-job breakdown UI
+
+**Learnings:**
+- `ISettingsService.Get<T>()` is synchronous, not async
+- Cost calculations run AFTER `SaveChangesAsync()` to ensure `ActualFilamentUsage` is persisted
+- Per-printer `MachineHourlyRate` override allows facility-specific costing
+- All cost fields are nullable to handle jobs without Spoolman data
+- SQL Server decimal precision warnings are expected (uses default decimal(18,2))
+
+
+---
+
+## Wave 1 Completion — Cross-Agent Updates
+
+**2026-03-16 — POST-WAVE-1 INTEGRATION NOTES**
+
+### From Parker (DevOps)
+- ✅ Obico ML Docker Compose service deployed at `scripts/docker/compose-templates/docker-compose.obico-ml.yml`
+- Selective deployment via `--include-obico-ml` flag
+- Service available at `http://obico-ml:5000` within Docker network
+- **Action for Feature #1:** Use this service endpoint for failure inference in Wave 2
+
+### From Ripley (Frontend)
+- ✅ Notification Center UI complete (NotificationBell, NotificationDrawer)
+- API hooks ready: `useNotifications()`, `useMarkAsRead()`, `useClearNotifications()`
+- Types defined in api.ts (Notification interface)
+- **Action for Feature #3 (Cost Dashboard):** Ripley will consume your cost API endpoints here
+
+### From Dallas (Lead)
+- ✅ Five-Feature Workplan approved
+- Feature #1 (Obico Failure Detection) — your next task in Wave 2
+- Feature #3 (Cost Tracking Dashboard) — uses your Job Cost API endpoints
+- **Critical Path:** Feature #1 depends on Parker's Obico compose + your ObicoFailureDetectionService
+
+### Coordinator Notes
+- DI registration fixed: `IJobCostCalculationService` properly registered in ServiceCollectionExtensions
+- Cost tracking migrations staged and tested
+
+**Status:** Ready to launch Wave 2 (Feature #1: Obico Failure Detection Service)

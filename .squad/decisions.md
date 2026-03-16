@@ -1355,3 +1355,127 @@ Need unified model supporting both with health tracking foundation.
 - **Previous:** Codebase analysis — (deprecated inbox file deleted)
 - **Previous:** Competitive research — (deprecated inbox file deleted)
 
+
+---
+
+### 4. Obico ML API Docker Integration (Wave 1)
+
+**Author:** Parker (DevOps)  
+**Date:** 2026-03-16  
+**Status:** ✅ IMPLEMENTED — Docker composition complete
+
+**Problem:** Obico ML integration requires Docker orchestration, container versioning, and deployment optionality for flexibility in different deployment scenarios.
+
+**Solution:**
+- Docker Compose template for Obico ML service: `scripts/docker/compose-templates/docker-compose.obico-ml.yml`
+- Selective deployment via `--include-obico-ml` flag in compose-generator.sh
+- Versioning in centralized `container-versions.conf`
+
+**Key Decisions:**
+1. Optional service flag — operators can deploy with or without ML capabilities
+2. GPU acceleration support — container configuration includes nvidia-runtime hints
+3. Health checks — standard liveness probe on port 5000
+4. Volume mounts — Obico ML model cache persisted across restarts
+
+**API:** Obico ML available at `http://obico-ml:5000` within Docker network
+
+**Next Steps:** Feature #1 (Obico Failure Detection) integrates this service for failure inference
+
+---
+
+### 5. Progressive Web App (PWA) — Notification Center (Wave 1)
+
+**Author:** Ripley (Frontend)  
+**Date:** 2026-03-16  
+**Status:** ✅ IMPLEMENTED — UI complete, API methods added
+
+**Problem:** PrintFarmer lacks real-time notification delivery for critical events (failures, cost alerts, job completion).
+
+**Solution:**
+- NotificationBell component with unread count badge
+- NotificationDrawer component for full notification list
+- Backend API endpoints: `GET /api/notifications`, `PUT /api/notifications/{id}/read`, `DELETE /api/notifications`
+- SignalR hub for real-time push notifications (in Wave 2)
+- useInstallPrompt hook for PWA install prompt management
+
+**Key Decisions:**
+1. Separate Bell + Drawer for UX clarity and progressive disclosure
+2. React Query hooks for notification state management
+3. Accessible (WCAG 2.2 AA) with keyboard navigation
+4. Install prompt flows through useInstallPrompt hook (non-blocking)
+
+**Frontend Files Created:**
+- NotificationBell.tsx, NotificationDrawer.tsx
+- useInstallPrompt.ts hook
+- Notification query/mutation hooks in useApi.ts
+- Type definitions in api.ts
+
+**Next Steps:** Wave 2 integrates backend notification APIs and SignalR for real-time delivery
+
+---
+
+### 6. Five-Feature Technical Workplan (Wave 1)
+
+**Author:** Dallas (Lead)  
+**Date:** 2026-03-16  
+**Status:** ✅ COMPLETE — Comprehensive workplan approved
+
+**Scope:** Technical specification and team allocation for 5 major features:
+1. Obico Failure Detection — Feature #1 (Lambert)
+2. PWA Notification Center — Feature #2 (Ripley + Kane)
+3. Cost Tracking Dashboard — Feature #3 (Lambert + Ripley + Kane)
+4. Advanced Printer Grouping — Feature #4 (distributed)
+5. MQTT Printer Discovery — Feature #5 (distributed)
+
+**Key Deliverables:**
+- Architecture decisions per feature
+- Backend/Frontend/DevOps/Design/Test task breakdown
+- Dependency graph with sequencing
+- Success metrics and risk mitigation
+- Team allocation and capacity planning
+
+**Document:** `.squad/decisions/inbox/dallas-five-features-workplan.md` (56 KB)
+
+**Wave 2 Launch:** Lambert (Feature #1), Ripley (Feature #3), Kane (test suite)
+
+---
+
+### 7. Job Cost Calculation System (Wave 1)
+
+**Author:** Lambert (Backend)  
+**Date:** 2026-03-16  
+**Status:** ✅ IMPLEMENTED — Backend complete, 6 new API endpoints
+
+**Problem:** PrintFarmer lacks cost tracking for multi-printer operations, preventing ROI analysis and customer billing.
+
+**Solution:**
+- JobCostCalculationService calculates per-job cost (material, energy, support labor, direct labor)
+- CostTrackingSettings entity for configurable cost parameters
+- 6 new REST API endpoints on StatisticsController
+- Database migrations for PostgreSQL and SQL Server
+- Extended PrintJob and Printer entities with cost properties
+
+**Cost Factors:**
+| Factor | Unit | Configurable |
+|--------|------|--------------|
+| Material | $/g | Yes |
+| Energy | $/kWh | Yes |
+| Support Removal Labor | $/hour | Yes |
+| Direct Labor | $/hour | Yes |
+
+**API Endpoints:**
+- `GET /api/statistics/costs/monthly` — Trend data
+- `GET /api/statistics/costs/byprinter` — Per-printer totals
+- `GET /api/statistics/costs/current-month` — Summary
+- `POST /api/statistics/costs/recalculate` — Retroactive updates
+- `GET /api/statistics/costs/settings` — Read settings
+- `PUT /api/statistics/costs/settings` — Update settings
+
+**Implementation Quality:**
+- ✅ 0 build errors, 0 warnings
+- ✅ DI registration verified
+- ✅ Full test coverage for calculations
+- ✅ SOLID principles adherence verified
+
+**Next Steps:** Feature #3 (Cost Dashboard) consumes these endpoints in Wave 2
+

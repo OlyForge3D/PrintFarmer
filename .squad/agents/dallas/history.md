@@ -483,3 +483,133 @@ Architected 4 parallel analytics features based on competitive analysis:
 
 **Decision Record:** `.squad/decisions.md` #17 — Camera Management Phase A  
 **Status:** Ready for Phase A.1 (migrations) and Phase B (health monitoring)
+
+### 2026-01-21: Five-Feature Implementation Work Breakdown
+
+**Task:** Create detailed, actionable implementation specs for 5 major features prioritized by product direction.
+
+**Investigation Summary:**
+- **Notification System:** Fully implemented with SignalR real-time events, NotificationsController, preferences, multi-user broadcast
+- **Job Scheduling:** Complete backend (`JobSchedulingService`) with timezone support, recurrence patterns, execution history, API endpoints
+- **Auto-Print/Ready-Gate:** Full state machine implemented (`AutoPrintService`) with backend orchestration, SignalR events, filament pre-flight checks, API endpoints
+- **Camera Infrastructure:** Complete `ICameraService` with standalone + printer-attached cameras, multi-camera aggregation, CRUD operations
+- **Cost Infrastructure:** `PrintJob` has `EstimatedCost`/`ActualCost` fields, `PrintCostCalculator` service (material only), Spoolman integration
+- **Statistics/Export:** `StatisticsService` with CSV/PDF export, comprehensive reporting, API endpoints
+
+**Key Findings:**
+- **Features 4 & 5 (Scheduling, Auto-Print):** Backend is 100% complete — pure frontend work
+- **Feature 3 (Cost Tracking):** Material cost calculator exists, need to extend for energy/machine/labor costs
+- **Feature 2 (PWA):** Basic manual SW exists (`sw.js`), needs Workbox upgrade + Web Push API
+- **Feature 1 (Obico ML):** Brand new integration, requires Docker service + backend service + frontend UI
+
+**Architecture Patterns Identified:**
+- **Backend Completeness:** Features 4 & 5 have no backend dependencies (controllers, services, entities, SignalR events all exist)
+- **Incremental Enhancement:** Feature 3 extends existing `PrintCostCalculator` rather than replacing
+- **Infrastructure Reuse:** Feature 2 leverages existing notification system + SignalR for push notifications
+- **Standalone Integration:** Feature 1 is independent (Obico ML as Docker sidecar, no tight coupling)
+
+**5 Feature Priorities:**
+1. **AI-Powered Print Failure Detection via Obico ML API** (CRITICAL — market differentiator, 4-5 weeks)
+2. **Production-Grade PWA with Push Notifications** (HIGH — user retention, 3-4 weeks)
+3. **Job Cost Tracking & Profitability Dashboard** (HIGH — business value, 2-3 weeks)
+4. **Print Job Scheduling Calendar** (MEDIUM — frontend-only, 2-3 weeks)
+5. **Smart Auto-Print Ready-Gate Dashboard** (MEDIUM — frontend-only, 2-3 weeks)
+
+**Technical Specifications:**
+- **Feature 1 (Obico ML):**
+  - Backend: `ObicoFailureDetectionService` (background), `ObicoMlClient`, `ObicoSettings` entity, new controller, migration
+  - Frontend: Settings page, failure alert banner, detection history table, confidence indicators
+  - DevOps: Docker compose template for `obico-ml-api` service, health checks
+  - Integration: Hook into existing `PrintJobCompletionService` + camera snapshot infrastructure
+
+- **Feature 2 (PWA):**
+  - Backend: `WebPushService`, `WebPushSubscription` entity, VAPID key generation, new controller, migration
+  - Frontend: Workbox service worker (replace manual), notification center (bell icon + drawer), mobile bottom nav, install prompt banner
+  - Dependencies: `vite-plugin-pwa`, `workbox-*` packages, `WebPush` NuGet package
+  - Integration: Hook into existing `NotificationService` to also send web push
+
+- **Feature 3 (Cost Tracking):**
+  - Backend: Extend `PrintCostCalculator` with energy/machine/labor methods, `CostSettings` entity, extend `PrintJob` with cost breakdown fields, migrations
+  - Frontend: Cost settings page, cost breakdown card, costs tab in statistics page with charts (pie, line, bar)
+  - Integration: Hook into `PrintJobCompletionService` to calculate full costs on completion
+
+- **Feature 4 (Scheduling Calendar):**
+  - Backend: ✅ COMPLETE (no work needed)
+  - Frontend: Calendar view component (FullCalendar or custom), schedule job modal, recurring job config, Gantt view, scheduled jobs list
+  - Dependencies: `@fullcalendar/react` packages
+  - Integration: Use existing `JobSchedulingController` endpoints
+
+- **Feature 5 (Auto-Print Dashboard):**
+  - Backend: ✅ COMPLETE (no work needed)
+  - Frontend: Ready-gate status cards, pipeline visualization, auto-dispatch activity feed, per-printer config modal
+  - Dependencies: None (pure React + existing components)
+  - Integration: Use existing `AutoPrintController` + SignalR `autoPrintStatusChanged` events
+
+**Team Allocation Strategy:**
+- Lambert (Backend): Feature 1 (weeks 1-4), Feature 2 (weeks 5-7), Feature 3 (weeks 8-10)
+- Ripley (Frontend): Feature 2 (weeks 1-3, parallel), Feature 1 (weeks 4-5), Feature 3 (weeks 6-8), Feature 4 (weeks 9-11), Feature 5 (weeks 12-14)
+- Parker (DevOps): Feature 1 Docker (week 1), Feature 2 PWA config (week 2), documentation (week 8)
+- Newt (Design): All features as needed (mockups, design system integration)
+- Kane (Testing): Continuous testing across all features, E2E suite (weeks 12-14)
+
+**Parallelization Opportunities:**
+- Features 3, 4, 5 are independent and can be developed in parallel
+- Feature 2 (PWA) can start immediately (SW work doesn't block on Feature 1)
+- Obico ML (Feature 1) blocks PWA push notifications (Feature 2), but only for failure detection alerts
+
+**Dependencies:**
+- Feature 1 → None (standalone)
+- Feature 2 → Feature 1 (optional: failure push notifications)
+- Feature 3 → None (standalone)
+- Feature 4 → None (backend complete)
+- Feature 5 → None (backend complete)
+
+**Key File Paths:**
+- Notification Service: `src/infra/Services/Notifications/NotificationService.cs`, `src/api/Controllers/NotificationsController.cs`
+- Job Scheduling: `src/infra/Services/JobSchedulingService.cs`, `src/api/Controllers/JobSchedulingController.cs`
+- Auto-Print: `src/infra/Services/AutoPrint/AutoPrintService.cs`, `src/api/Controllers/AutoPrintController.cs`
+- Camera Service: `src/infra/Services/Cameras/ICameraService.cs`, `src/infra/Services/Cameras/CameraService.cs`
+- Cost Calculator: `src/infra/Services/Printers/PrintCostCalculator.cs`
+- Statistics: `src/infra/Services/Statistics/StatisticsService.cs`, `src/api/Controllers/StatisticsController.cs`
+- Frontend API client: `src/Web/ReactApp/src/services/api.ts` (3,458 lines)
+- Frontend hooks: `src/Web/ReactApp/src/common/hooks/useApi.ts`
+
+**Document Location:** `.squad/decisions/inbox/dallas-five-features-workplan.md` (56KB, comprehensive spec)
+
+**Success Metrics:**
+- Feature 1: 90%+ prints monitored, <5% false positives, <60s auto-pause
+- Feature 2: 50%+ mobile installs, 70%+ push enabled, 100% offline loads
+- Feature 3: 100% jobs costed, 30%+ export reports, 80%+ config settings
+- Feature 4: 20%+ scheduled jobs, 10%+ recurring, 50%+ calendar usage
+- Feature 5: 40%+ auto-print enabled, 50% intervention reduction
+
+**Execution Timeline:** 6-8 sprints (12-16 weeks) with continuous testing and integration.
+
+---
+
+## Wave 1 Completion — Cross-Agent Updates
+
+**2026-03-16 — POST-WAVE-1 INTEGRATION NOTES**
+
+### Wave 1 Agents Delivered
+✅ **Parker (DevOps):** Obico ML Docker integration complete
+✅ **Lambert (Backend):** Job Cost Calculation system complete (6 API endpoints)
+✅ **Ripley (Frontend):** Notification Center UI complete (components + hooks)
+✅ **Coordinator:** DI registration fixes applied
+
+### Wave 1 Quality Summary
+- Combined dev time: ~36.5 minutes
+- Build quality: 0 errors, 0 warnings (all agents)
+- Test status: 2052 tests passing (Lambert), WCAG 2.2 AA compliance (Ripley)
+- Dependencies: No blocking issues
+
+### Wave 2 Launch Ready
+- **Lambert:** Obico Failure Detection Service (Feature #1) — uses Parker's Docker infrastructure
+- **Ripley:** Cost Tracking Dashboard (Feature #3) — consumes Lambert's cost API endpoints
+- **Kane:** Test suite for notifications + cost tracking (Features #2, #3)
+
+### Critical Path
+Feature #1 depends on: Parker's Obico compose ✅ + Lambert's ObicoFailureDetectionService (starting Wave 2)
+Feature #3 depends on: Lambert's cost API endpoints ✅ + Ripley's dashboard UI (starting Wave 2)
+
+**Status:** Workplan approved, team allocated, no blockers. Wave 2 execution underway.
