@@ -34,6 +34,37 @@
 - Development workflow: Vite proxy still works with monolith mode
 - Cross-team alignment: Monolith decision drives Parker's Docker infrastructure + Ash's documentation
 
+## Wave 2 — Obico Failure Detection (2026-03-16)
+
+**Status:** ✅ Complete  
+**Duration:** ~9 minutes  
+**DI Scoping Bug:** Fixed
+
+### Deliverables
+- `IObicoFailureDetectionService` & `ObicoFailureDetectionService` — HTTP client for Obico ML API
+- `PrintFailureMonitorService` — Background worker, 30s scan cycles
+- `FailureDetectionController` — 3 endpoints (status, analyze, history)
+- `ObicoSettings` — Configuration entity, opt-in
+- `FailureDetectionDto` — Response DTO
+
+### Critical Fix: DI Scoping Bug
+**Problem:** Singleton `PrintFailureMonitorService` tried to resolve scoped `IObicoFailureDetectionService` directly → `InvalidOperationException`  
+**Solution:** Injected `IServiceScopeFactory`, created scope per scan cycle, resolved service from scope  
+**Learning:** Always use scope factories when singletons need to resolve scoped services
+
+### Architecture Decisions
+- No database persistence (events transient, broadcast via SignalR)
+- Uses `IPrinterStatusCacheReader` to avoid repeated EF queries
+- Auto-pause stubbed (requires `IBackendClientFactory` for future implementation)
+- Named HttpClient "ObicoML" with 15s timeout
+
+### Next Steps
+- Ripley: Implement SignalR listener for `FailureDetected` events
+- Parker: Add Obico ML API Docker service
+- Future: Auto-pause implementation
+
+---
+
 ### Sprint 2 Summary (2026-03-07)
 
 **Completed:**
@@ -1166,3 +1197,46 @@ Unified camera infrastructure to support both standalone cameras and printer-att
 - Cost tracking migrations staged and tested
 
 **Status:** Ready to launch Wave 2 (Feature #1: Obico Failure Detection Service)
+
+## 2025-01-11 - Obico Failure Detection Implementation
+
+**Context:** Built AI-powered print failure detection service using Obico ML API for real-time monitoring.
+
+**Implementation:**
+- Created `ObicoSettings` with configurable threshold, scan interval, auto-pause, enabled flag
+- Built `IObicoFailureDetectionService` + `ObicoFailureDetectionService` for image analysis
+- Implemented `PrintFailureMonitorService` background service that:
+  - Polls active printers with cameras every N seconds
+  - Filters to only printers actively printing (uses `IPrinterStatusCacheReader`)
+  - Submits camera snapshots to Obico ML API via multipart/form-data
+  - Broadcasts `FailureDetected` events via SignalR when confidence exceeds threshold
+- Added `FailureDetectionController` with endpoints: `/status`, `/analyze/{printerId}`, `/history` (501)
+- Registered services in DI container with named HttpClient for Obico ML API
+- Created `FailureDetectionDto` for SignalR events (includes confidence, timestamp, auto-pause flag)
+
+**Architecture Decisions:**
+- Stateless design — no database persistence for detection events (real-time SignalR only)
+- Uses printer status cache instead of database queries for active print detection
+- Auto-pause feature stubbed but requires backend client integration to actually pause jobs
+- HTTP client timeout 15s for image analysis, scan interval default 30s
+
+**Technical Details:**
+- Named HttpClient registration: `services.AddHttpClient("ObicoML")` with 15s timeout
+- API endpoint: `POST /p/` with JPEG multipart/form-data → `{"result": {"p": 0.85}}`
+- SignalR event: `FailureDetected` with `FailureDetectionDto` payload
+- Default settings: disabled, 0.7 confidence threshold, 30s scan interval, auto-pause enabled
+- Safety: validates snapshot URLs to prevent SSRF (no localhost, no link-local)
+
+**Key Files:**
+- `src/infra/Settings/ObicoSettings.cs`
+- `src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs`
+- `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs`
+- `src/infra/Dtos/FailureDetectionDto.cs`
+- `src/api/Controllers/FailureDetectionController.cs`
+
+**Learnings:**
+- Printer entity doesn't have `IsOnline`/`IsPrinting` — must use `IPrinterStatusCacheReader.GetStatus()`
+- DTOs must be in `Farm.Infrastructure` namespace or referenced project (not orphaned in shared/)
+- Background services need `IPrinterStatusCacheReader`, not direct EF queries, for real-time status
+- JSON deserializer models need `init` setters to avoid S3459/S1144 analyzer warnings
+

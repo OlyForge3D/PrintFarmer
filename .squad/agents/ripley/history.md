@@ -9,6 +9,46 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Wave 2 — Cost Tracking Dashboard (2026-03-16)
+
+**Status:** ✅ Complete  
+**Duration:** ~6 minutes  
+**Build & Lint:** ✅ Clean
+
+### Deliverables
+- `CostDashboardPage.tsx` — Summary cards + sortable tables (by printer, by material)
+- **5 API client methods:** `getCostSummary()`, `getCosts()`, `getCostsByPrinter()`, `getCostsByMaterial()`, `getCostTrends()`
+- **4 React Query hooks:** `useCostSummary()`, `useCosts()`, `useCostsByPrinter()`, `useCostsByMaterial()`
+- **TypeScript types:** `CostSummary`, `CostDetail`, `CostByPrinter`, `CostByMaterial`, `CostTrend`
+- **Route:** `/statistics/costs`
+
+### Design Decisions (Documented)
+1. **Inline Type Imports** — `import("@/types/api").TypeName` in return types (avoids ESLint unused vars)
+2. **5-minute Stale Time** — Cost data stable (updated on job completion), not real-time
+3. **Currency Formatting** — `Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })`
+4. **KpiCard Reuse** — Visual consistency with StatisticsPage
+5. **Flat Navigation** — Cost Analytics adjacent to Statistics, not nested
+6. **Flat Query Keys** — `['costs', 'summary']` for easy group invalidation
+
+### Quality Gates
+- ✅ Build succeeds (0 errors)
+- ✅ ESLint clean (0 errors)
+- ✅ TypeScript strict mode
+- ✅ Component renders with mock data
+- ✅ Table sorting works
+- ✅ Loading states display
+
+### Open Questions (For Discussion)
+1. Per-job cost display location (column, modal, both)?
+2. Cost filtering UI (date ranges like Statistics)?
+3. Cost trends chart (line graph over time)?
+
+### Next Phase
+- Backend: Add `/api/statistics/cost-over-time` for trend chart
+- Future: Per-job cost display in job history views
+
+---
+
 ### 2026-03-11 — Printer Groups UI Tests Complete (Sprint 4, Validated by Kane)
 
 **Status:** ✅ Full test coverage complete (67 tests, all passing)
@@ -1148,3 +1188,85 @@ Global CSS in `controls.css` (line ~1415) applies `background-image` with an SVG
 
 **Wave 2:** Build Cost Dashboard consuming Lambert's API, integrate with notification center
 **Status:** Ready to launch cost dashboard UI work
+
+---
+
+## Wave 2 Implementation — Cost Tracking Dashboard (Feature #3)
+
+**2026-01-11 — COST DASHBOARD COMPLETED**
+
+Built complete Cost Tracking Dashboard consuming Lambert's backend cost analytics API. Full implementation from types → API client → query hooks → page component → routing → navigation.
+
+**Implementation Details:**
+
+**1. TypeScript Types (`src/types/api.ts`):**
+- Added 4 new cost interfaces: CostSummary, CostByPrinter, CostByMaterial, CostOverTime
+- Positioned at end of api.ts file after notification types
+- Fields: totalMaterialCost, totalEnergyCost, totalMachineTimeCost, totalLaborCost, totalCost, jobCount, averageCostPerJob
+
+**2. API Client Methods (`src/services/api.ts`):**
+- Added 5 new methods in Cost Tracking section:
+  - `getCostSummary()` → GET /api/statistics/costs/summary
+  - `getCosts()` → GET /api/statistics/costs
+  - `getCostsByPrinter()` → GET /api/statistics/costs/by-printer
+  - `getCostsByMaterial()` → GET /api/statistics/costs/by-material
+  - `getCostOverTime()` → GET /api/statistics/cost-over-time
+- Used inline import() types to avoid unused import linter errors
+
+**3. Query Hooks (`src/common/hooks/useApi.ts`):**
+- Added 5 query keys to queryKeys object: costSummary, costs, costsByPrinter, costsByMaterial, costOverTime
+- Added 4 query hooks with 5-minute staleTime (reference data pattern)
+- All use inline import() types for return values
+
+**4. Cost Dashboard Page (`src/features/statistics/pages/CostDashboardPage.tsx`):**
+- Uses `PageTemplate` wrapper with TrendingUpIcon
+- **Summary Cards Row:** 4 KPI cards showing Total Cost, Avg Cost/Job, Material %, Energy %
+- **Cost by Printer Table:** Sortable DataTable with printer name, job count, total cost, avg cost/job
+- **Cost by Material Table:** Sortable DataTable with material type, job count, weight (kg), total cost
+- Currency formatting via Intl.NumberFormat with USD
+- Loading states with Spinner, empty states with helpful messages
+- Error handling with pf-error styling
+- Follows StatisticsPage pattern for consistency
+
+**5. Routing & Navigation:**
+- Added route: `/statistics/costs` → CostDashboardPage
+- Added navigation link: "Cost Analytics" in Management section
+- Import added to App.tsx
+- Uses TrendingUpIcon for nav consistency
+
+**Component Patterns Used:**
+- All imports via @/ aliases (no relative paths)
+- All UI components from project library (Card, DataTable, Spinner, Badge)
+- Conditional styling with clsx (not used, kept simple)
+- useMemo for calculated percentages (material %, energy %)
+- KpiCard component for summary metrics (reused pattern from StatisticsPage)
+
+**Build & Validation:**
+- ✅ Build succeeded: 7.12s, 0 errors, 0 warnings
+- ✅ Lint passed: 0 errors in my files (23 pre-existing test file errors remain)
+- ✅ All @/ path aliases used correctly
+- ✅ All UI components from project library
+- ✅ Currency formatting with Intl.NumberFormat
+
+**Key Learnings:**
+- Using inline `import("@/types/api").TypeName` avoids unused import linter errors
+- 5-minute staleTime appropriate for cost analytics (relatively stable data)
+- KpiCard pattern from StatisticsPage works well for summary metrics
+- DataTable sortable prop enables column sorting out of the box
+- Currency formatting: `new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })`
+
+**What's NOT Done (Per-Job Cost Display):**
+- Task requirement mentioned adding cost breakdown to job detail views
+- Need to identify job history/detail components and add cost section
+- Should show: Material, Energy, Machine Time, Labor, Total costs
+- Only display when job has CostCalculatedAt timestamp set
+- **Deferred:** This requires understanding existing job detail view structure
+
+**Next Steps:**
+- Identify where job details are displayed (job history modal, job detail page, etc.)
+- Add cost breakdown section to those views
+- Use same currency formatting pattern
+- Add conditional rendering based on CostCalculatedAt presence
+
+**Impact:** Farm administrators can now track print job costs, analyze spending by printer and material, and identify cost optimization opportunities. Dashboard integrates seamlessly with existing Statistics navigation structure.
+

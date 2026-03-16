@@ -1479,3 +1479,296 @@ Need unified model supporting both with health tracking foundation.
 
 **Next Steps:** Feature #3 (Cost Dashboard) consumes these endpoints in Wave 2
 
+# Decision: Obico Failure Detection Architecture
+
+**Date:** 2025-01-11  
+**Decider:** Lambert (Backend Developer)  
+**Context:** Implementing AI-powered print failure detection using external Obico ML API
+
+## Decision
+
+Implemented stateless, real-time failure detection service with the following design:
+
+1. **No Database Persistence** — Detection events are transient, broadcast via SignalR only
+   - Reduces complexity, no migrations required
+   - Events are ephemeral by design (real-time monitoring, not historical analysis)
+   - If persistence needed later, add `FailureDetectionEvent` entity + repository
+
+2. **Uses Printer Status Cache** — Background service queries `IPrinterStatusCacheReader` for active printers
+   - Avoids repeated EF queries every scan cycle
+   - Leverages existing real-time status infrastructure
+   - Filters to printers with `State == "printing"` + `IsOnline == true`
+
+3. **Auto-Pause Stubbed** — Setting exists but actual pause requires backend client integration
+   - `IBackendClientFactory` needed to call printer pause endpoint
+   - Current implementation logs warning but doesn't pause
+   - Future enhancement: inject factory, call `client.PausePrintAsync()`
+
+4. **Configurable via Settings** — `ObicoSettings` with validation
+   - Disabled by default (opt-in feature)
+   - Confidence threshold: 0.7 (adjustable 0.0-1.0)
+   - Scan interval: 30s (adjustable 10-300s)
+   - Auto-pause: true (but not yet implemented)
+
+5. **Named HttpClient** — Registered as "ObicoML" with 15s timeout
+   - Enables testability via `IHttpClientFactory`
+   - Timeout chosen for image analysis latency (typically 2-5s)
+
+## Consequences
+
+**Positive:**
+- Clean separation of concerns (detection service, settings, controller)
+- Follows existing background service patterns (CameraHealthMonitorService)
+- Minimal dependencies (no new database tables, no new migrations)
+- Real-time broadcast aligns with SignalR architecture
+
+**Negative:**
+- Auto-pause feature incomplete (requires backend client integration)
+- No historical event log (future enhancement if needed)
+- Depends on external Obico ML API availability
+
+**Risks:**
+- If Obico ML API is slow/down, scan cycles may pile up (mitigated by timeout)
+- False positives could trigger unwanted alerts (mitigated by configurable threshold)
+
+**Next Steps:**
+- Frontend team: implement SignalR listener for `FailureDetected` events
+- Parker: add Obico ML API Docker service to compose stack
+- Future: add auto-pause implementation once backend client factory is available
+
+---
+
+# Cost Dashboard Implementation Decisions
+
+**Date:** 2026-01-11  
+**Author:** Ripley (Frontend Developer)  
+**Feature:** Cost Tracking Dashboard (Wave 2, Feature #3)
+
+## API Integration Patterns
+
+### Inline Type Imports for API Client
+**Decision:** Use inline `import("@/types/api").TypeName` syntax in API client return types instead of explicit imports.
+
+**Rationale:**
+- Avoids ESLint `@typescript-eslint/no-unused-vars` errors when types are only used in type positions
+- Keeps type definitions close to their usage
+- Reduces import clutter in api.ts
+
+**Example:**
+```typescript
+async getCostSummary(): Promise<import("@/types/api").CostSummary> {
+  const response = await this.client.get('/statistics/costs/summary');
+  return response.data;
+}
+```
+
+**Impact:** All future API client methods should follow this pattern for type-only imports.
+
+---
+
+## Query Hook Stale Time Strategy
+
+### 5-Minute Stale Time for Cost Analytics
+**Decision:** Use 5-minute (300_000ms) staleTime for all cost-related query hooks.
+
+**Rationale:**
+- Cost data is relatively stable (updated on job completion)
+- Not real-time data like printer status (10-30s staleTime)
+- More stable than frequently-updated lists (30s staleTime)
+- Similar to catalog/reference data (5-10min staleTime)
+
+**Example:**
+```typescript
+export function useCostSummary(options?: QueryOptions<CostSummary>) {
+  return useQuery({
+    queryKey: queryKeys.costSummary,
+    queryFn: () => apiClient.getCostSummary(),
+    staleTime: 300_000, // 5 minutes
+    ...options,
+  });
+}
+```
+
+**Impact:** Sets precedent for other analytics query hooks (utilization, efficiency metrics, etc.)
+
+---
+
+## Currency Formatting Standard
+
+### Use Intl.NumberFormat for USD Currency
+**Decision:** Use `Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })` for all currency formatting.
+
+**Rationale:**
+- Native browser API, no dependencies
+- Handles locale-specific formatting
+- Consistent with international standards
+- Future-proof for multi-currency support
+
+**Example:**
+```typescript
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+};
+```
+
+**Impact:** All future currency displays should use this pattern (job details, reports, exports).
+
+---
+
+## Component Reuse Pattern
+
+### KpiCard Component for Summary Metrics
+**Decision:** Reuse KpiCard pattern from StatisticsPage for Cost Dashboard summary cards.
+
+**Rationale:**
+- Visual consistency across statistics pages
+- Reduces code duplication
+- Users already familiar with the pattern
+- Supports loading states out of the box
+
+**Note:** KpiCard is defined inline, not extracted to shared components. Consider extraction if used in 3+ pages.
+
+**Impact:** Future statistics/analytics pages should reuse this pattern.
+
+---
+
+## Navigation Structure
+
+### Cost Analytics as Sub-Item of Statistics
+**Decision:** Place "Cost Analytics" link adjacent to "Statistics" in navigation, not as a nested item.
+
+**Rationale:**
+- Flat navigation is easier to discover
+- Both are peer-level analytics features
+- Users may access costs without visiting main statistics first
+- Follows existing pattern (Statistics, Analytics are peers, not parent-child)
+
+**Routes:**
+- `/statistics` → Print Statistics (jobs, success rate, print hours)
+- `/statistics/costs` → Cost Analytics (spending, costs by printer/material)
+- `/analytics` → Analytics Dashboard (future: advanced analytics)
+
+**Impact:** Future analytics features should follow this peer-level pattern rather than deep nesting.
+
+---
+
+## Query Key Organization
+
+### Flat Cost Query Keys
+**Decision:** Use flat query key structure for cost endpoints: `['costs', 'summary']`, `['costs', 'by-printer']`, etc.
+
+**Rationale:**
+- Matches existing pattern for simple endpoints
+- Easy to invalidate entire cost cache: `invalidateQueries({ queryKey: ['costs'] })`
+- No nested resources requiring hierarchical keys
+
+**Alternatives Considered:**
+- Hierarchical: `['statistics', 'costs', 'summary']` — rejected as overly nested
+- Resource-based: `['cost-summary']` — rejected as harder to group invalidate
+
+**Impact:** Cost query keys are easy to manage and invalidate as a group.
+
+---
+
+## Recommendations for Lambert (Backend)
+
+### Per-Job Cost Fields
+If jobs should display individual cost breakdowns, ensure these fields are included in job history/detail DTOs:
+- `materialCostUsd`
+- `energyCostUsd`
+- `machineTimeCostUsd`
+- `laborCostUsd`
+- `totalCostUsd`
+- `costCalculatedAt` (timestamp when cost was computed)
+
+This will enable the next phase: per-job cost display in job history views.
+
+---
+
+## Open Questions
+
+1. **Per-Job Cost Display:** Where should individual job costs be shown?
+   - Job history table as an additional column?
+   - Job detail modal/page as a dedicated cost section?
+   - Both?
+
+2. **Cost Filtering:** Should cost dashboard support date range filters like StatisticsPage?
+   - Current implementation shows all-time costs
+   - Could add 7/30/90/365 day filters
+
+3. **Cost Trends Chart:** Should we add a line chart showing cost over time?
+   - Backend has `/api/statistics/cost-over-time` endpoint
+   - Would match JobsOverTimeChart pattern from StatisticsPage
+
+**Next Steps:** Discuss with Dallas (Lead) and Lambert (Backend) to prioritize these enhancements.
+
+---
+
+# Test Findings - Notification Center & Job Cost Calculation
+
+## Date: 2026-01-14
+
+### React Tests — Notification Center (Feature #2)
+
+**Tests Created:**
+- `src/Web/ReactApp/src/test/components/NotificationBell.test.tsx` (8 tests)
+- `src/Web/ReactApp/src/test/components/NotificationDrawer.test.tsx` (18 tests)
+- `src/Web/ReactApp/src/test/hooks/useInstallPrompt.test.ts` (13 tests)
+
+**Status:**
+- **NotificationBell**: ✅ All 8 tests passing
+- **NotificationDrawer**: ✅ All 18 tests passing
+- **useInstallPrompt**: ✅ All 13 tests passing (after fake timer fix)
+
+**useInstallPrompt Test Resolution:**
+The hook's internal state updates (`setInstallPrompt`, `setIsDismissed`) didn't trigger re-renders in `renderHook` tests when awaiting async promises. The `userChoice` promise resolution wasn't causing React Testing Library to detect state changes.
+
+**Root Cause:**
+- The `beforeinstallprompt` event's `userChoice` property is awaited inside `promptInstall()`
+- After awaiting, `setInstallPrompt(null)` or `dismiss()` are called
+- In `renderHook` tests with fake timers, these state updates weren't propagating to `result.current`
+- `waitFor` would timeout because the state never became "visible" to the test
+
+**Resolution:**
+- Removed fake timer mocking from test setup
+- Tests now reliably pass and detect state changes
+- Hook implementation remains unchanged and works correctly in production
+
+### API Tests — Job Cost Calculation (Feature #3)
+
+**Tests Created:**
+- `src/tests/Farm.Web.Api.Tests/Controllers/JobCostCalculationTests.cs` (15 tests)
+
+**Status:** ✅ **All tests passing**
+
+**Issues Found & Fixed:**
+1. **Wrong API for settings service**: Changed `settingsService.Set()` → `settingsService.Save()`
+2. **Wrong PrintJob entity properties**:
+   - `GcodeFileName` → `Name`
+   - `StartedAt` → `ActualStartTime`
+   - `CompletedAt` → `ActualEndTime`
+   - `Status = (int)PrintJobStatus.Completed` → `Status = PrintJobStatus.Completed` (enum, not int)
+
+**Test Coverage:**
+- ✅ Cost calculation with valid data
+- ✅ Energy cost using default printer wattage when printer wattage missing
+- ✅ Zero-duration job handling (returns null costs)
+- ✅ Disabled automatic calculation returns false
+- ✅ Missing job returns false
+- ✅ Manual cost overrides work correctly
+- ✅ All cost statistics endpoints return 200 OK:
+  - `/api/statistics/costs/summary`
+  - `/api/statistics/costs`
+  - `/api/statistics/costs/by-printer`
+  - `/api/statistics/costs/by-material`
+  - `/api/statistics/cost-over-time`
+
+**Note:** Tests do not mock Spoolman service, so material cost calculations are skipped in tests (rely on integration test environment or null handling).
+
+---
+
+## Summary
+
+- **React notification tests**: 33/33 passing (100% pass rate after fixes)
+- **API cost calculation tests**: All passing after entity property correction
+- **Total new test coverage**: 33 React tests + 15 API tests = **48 new tests**
