@@ -64,6 +64,9 @@ import {
   NotificationDto,
   AutoPrintGlobalStatus,
   AutoPrintStatus,
+  ObicoServer,
+  CreateObicoServerRequest,
+  UpdateObicoServerRequest,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -128,6 +131,8 @@ export const queryKeys = {
   scheduledJob: (jobId: string) => ['scheduled-jobs', jobId] as const,
   jobExecutions: (jobId: string) => ['scheduled-jobs', jobId, 'executions'] as const,
   timezones: ['timezones'] as const,
+  obicoServers: ['obico-servers'] as const,
+  obicoServer: (id: string) => ['obico-servers', id] as const,
 } as const;
 
 // ============ Printer Hooks ============
@@ -1824,5 +1829,61 @@ export function useSetAutoPrintGlobalEnabled() {
       toast.success(`Global auto-print ${enabled ? 'enabled' : 'disabled'}`);
     },
     onError: (err: ApiError) => toast.error(`Failed to update: ${err.message}`),
+  });
+}
+
+// ============ Obico ML Server Hooks ============
+
+export function useObicoServers(options?: QueryOptions<ObicoServer[]>) {
+  return useQuery({
+    queryKey: queryKeys.obicoServers,
+    queryFn: () => apiClient.getObicoServers(),
+    staleTime: 300_000, // 5 minutes - server list changes infrequently
+    ...options,
+  });
+}
+
+export function useCreateObicoServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateObicoServerRequest) => apiClient.createObicoServer(data),
+    onSuccess: (server) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.obicoServers });
+      toast.success(`Obico server "${server.name}" created`);
+    },
+    onError: (err: ApiError) => toast.error(`Failed to create server: ${err.message}`),
+  });
+}
+
+export function useUpdateObicoServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateObicoServerRequest }) => 
+      apiClient.updateObicoServer(id, data),
+    onSuccess: (server) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.obicoServers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.obicoServer(server.id) });
+      toast.success(`Obico server "${server.name}" updated`);
+    },
+    onError: (err: ApiError) => toast.error(`Failed to update server: ${err.message}`),
+  });
+}
+
+export function useDeleteObicoServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteObicoServer(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.obicoServers });
+      toast.success('Obico server deleted');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to delete server: ${err.message}`),
+  });
+}
+
+export function useTestObicoServerHealth() {
+  return useMutation({
+    mutationFn: (id: string) => apiClient.testObicoServerHealth(id),
+    onError: (err: ApiError) => toast.error(`Health test failed: ${err.message}`),
   });
 }

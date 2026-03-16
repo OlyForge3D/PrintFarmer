@@ -660,6 +660,8 @@ export interface UpdatePrinterDto {
   password?: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
+  /** Optional Obico ML server assignment. If null, uses global default. */
+  obicoServerId?: string | null;
   // Printer capabilities
   nozzleDiameter?: number;
   supportedMaterials?: string[];
@@ -1151,6 +1153,10 @@ export interface PrinterDetails {
   ipAddress?: string;
   backendPort?: number | null;
   frontendPort?: number | null;
+  /** Assigned Obico ML server ID. If null, uses global default. */
+  obicoServerId?: string | null;
+  /** Assigned Obico ML server name (for display). */
+  obicoServerName?: string | null;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
 }
@@ -3286,4 +3292,83 @@ export interface AutoPrintStatus {
 export interface AutoPrintGlobalStatus {
   globalEnabled: boolean;
   printers: AutoPrintStatus[];
+}
+
+// ============== Obico ML Server Management ==============
+
+/**
+ * Obico ML server configuration for failure detection
+ */
+export interface ObicoServer {
+  id: string;
+  name: string;
+  url: string;
+  isEnabled: boolean;
+  maxConcurrentAnalyses: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Request to create a new Obico server
+ */
+export interface CreateObicoServerRequest {
+  name: string;
+  url: string;
+  isEnabled?: boolean;
+  maxConcurrentAnalyses?: number;
+}
+
+/**
+ * Request to update an existing Obico server
+ */
+export interface UpdateObicoServerRequest {
+  name?: string;
+  url?: string;
+  isEnabled?: boolean;
+  maxConcurrentAnalyses?: number;
+}
+
+// ============ Obico ML Server Types ============
+
+/**
+ * Obico ML API server for AI-powered print failure detection.
+ */
+export interface ObicoServer {
+  id: string;
+  name: string;
+  url: string;
+  isEnabled: boolean;
+  maxConcurrentAnalyses: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * DTO for creating a new Obico ML server.
+ */
+export interface CreateObicoServerDto {
+  name: string;
+  url: string;
+  isEnabled?: boolean;
+  maxConcurrentAnalyses?: number;
+}
+
+/**
+ * DTO for updating an existing Obico ML server.
+ */
+export interface UpdateObicoServerDto {
+  name?: string;
+  url?: string;
+  isEnabled?: boolean;
+  maxConcurrentAnalyses?: number;
+}
+
+/**
+ * Health check result for an Obico server
+ */
+export interface ObicoServerHealthResponse {
+  healthy: boolean;
+  latencyMs: number;
+  errorMessage?: string;
 }

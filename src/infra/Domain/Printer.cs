@@ -245,6 +245,17 @@ public class Printer
     public PrinterStatistics? Statistics { get; set; }
 
     /// <summary>
+    /// Optional Obico ML server assignment for AI-powered failure detection.
+    /// If null, uses the global ObicoSettings.ObicoApiUrl as fallback.
+    /// </summary>
+    public Guid? ObicoServerId { get; set; }
+
+    /// <summary>
+    /// Navigation property to the assigned Obico ML server.
+    /// </summary>
+    public ObicoServer? ObicoServer { get; set; }
+
+    /// <summary>
     /// Tags assigned to this printer for categorization and filtering.
     /// Uses EF Core skip-navigation (many-to-many without explicit join entity).
     /// </summary>

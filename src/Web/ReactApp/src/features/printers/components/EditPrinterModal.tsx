@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
-import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
+import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels, useObicoServers } from '@/common/hooks/useApi';
 import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
@@ -34,6 +34,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const { data: extruderModels } = useExtruderModels();
   const { data: toolheadModels } = useToolheadModels();
   const { data: nozzleModels } = useNozzleModels();
+  
+  // Obico ML servers for failure detection
+  const { data: obicoServers = [] } = useObicoServers();
 
   const [formData, setFormData] = useState<UpdatePrinterDto | null>(null);
   const [originalFormData, setOriginalFormData] = useState<UpdatePrinterDto | null>(null);
@@ -91,6 +94,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         maxPrintSpeed: printerDetails.capabilities?.maxPrintSpeed,
         backendPort: printerDetails.backendPort ?? undefined,
         frontendPort: printerDetails.frontendPort ?? undefined,
+        obicoServerId: printerDetails.obicoServerId ?? undefined,
       };
       
       setFormData(initialFormData);
@@ -1063,6 +1067,29 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             </div>
+            
+            {/* Obico ML Server Assignment */}
+            <FormField 
+              label="Obico ML Server" 
+              htmlFor="obico-server"
+              helper="Select a server for AI-powered print failure detection. Leave empty to use global default."
+            >
+              <Select
+                id="obico-server"
+                value={formData.obicoServerId || ''}
+                onChange={e => handleInputChange('obicoServerId', e.target.value || undefined)}
+                title="Obico ML Server"
+              >
+                <option value="">Default (global setting)</option>
+                {obicoServers
+                  .filter(s => s.isEnabled)
+                  .map(server => (
+                    <option key={server.id} value={server.id}>
+                      {server.name} ({server.url})
+                    </option>
+                  ))}
+              </Select>
+            </FormField>
           </form>
 
           <CloneProfilesModal

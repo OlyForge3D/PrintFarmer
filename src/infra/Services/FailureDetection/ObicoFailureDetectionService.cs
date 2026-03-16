@@ -29,18 +29,29 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     }
 
     /// <inheritdoc/>
-    public async Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, CancellationToken ct = default)
+    public Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, CancellationToken ct = default)
+    {
+        return AnalyzeImageAsync(imageData, _settings.ObicoApiUrl, ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, string obicoServerUrl, CancellationToken ct = default)
     {
         if (imageData == null || imageData.Length == 0)
         {
             return FailureDetectionResult.Error("Image data is empty");
         }
 
+        if (string.IsNullOrWhiteSpace(obicoServerUrl))
+        {
+            return FailureDetectionResult.Error("Obico server URL is not configured");
+        }
+
         try
         {
             using HttpClient httpClient = _httpClientFactory.CreateClient("ObicoML");
             httpClient.Timeout = HttpTimeout;
-            httpClient.BaseAddress = new Uri(_settings.ObicoApiUrl);
+            httpClient.BaseAddress = new Uri(obicoServerUrl);
 
             using var content = new MultipartFormDataContent();
             using var imageContent = new ByteArrayContent(imageData);
@@ -49,7 +60,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
 
             _logger.LogDebug(
                 "[ObicoFailureDetection] Submitting {Size} byte image to {ApiUrl}/p/",
-                imageData.Length, _settings.ObicoApiUrl);
+                imageData.Length, obicoServerUrl);
 
             HttpResponseMessage response = await httpClient.PostAsync("/p/", content, ct);
 
@@ -106,11 +117,22 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     }
 
     /// <inheritdoc/>
-    public async Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, CancellationToken ct = default)
+    public Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, CancellationToken ct = default)
+    {
+        return AnalyzeImageFromUrlAsync(snapshotUrl, _settings.ObicoApiUrl, ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, string obicoServerUrl, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(snapshotUrl))
         {
             return FailureDetectionResult.Error("Snapshot URL is empty");
+        }
+
+        if (string.IsNullOrWhiteSpace(obicoServerUrl))
+        {
+            return FailureDetectionResult.Error("Obico server URL is not configured");
         }
 
         try
@@ -137,7 +159,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 return FailureDetectionResult.Error("Fetched image is empty");
             }
 
-            return await AnalyzeImageAsync(imageData, ct);
+            return await AnalyzeImageAsync(imageData, obicoServerUrl, ct);
         }
         catch (HttpRequestException ex)
         {
@@ -162,11 +184,11 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     /// </summary>
     private sealed class ObicoApiResponse
     {
-        public ObicoResult? Result { get; init; }
+        public ObicoResult? Result { get; }
     }
 
     private sealed class ObicoResult
     {
-        public double? P { get; init; }
+        public double? P { get; }
     }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -53,7 +53,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var content = await response.Content.ReadAsStringAsync();
         content.Should().NotBeNullOrEmpty();
     }
@@ -66,13 +66,13 @@ public class FailureDetectionControllerTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         var json = await response.Content.ReadAsStringAsync();
         var status = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
-        
+
         status.TryGetProperty("monitoringEnabled", out var monitoringEnabled).Should().BeTrue();
         monitoringEnabled.GetBoolean().Should().BeTrue();
-        
+
         status.TryGetProperty("message", out var message).Should().BeTrue();
         message.GetString().Should().NotBeNullOrEmpty();
     }
@@ -99,7 +99,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
 
         // Act
         var response = await _client!.PostAsync(
-            $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(invalidUrl)}", 
+            $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(invalidUrl)}",
             null);
 
         // Assert - Controller requires auth, so we get 401 before it checks parameters
@@ -115,7 +115,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
 
         // Act
         var response = await _client!.PostAsync(
-            $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(snapshotUrl)}", 
+            $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(snapshotUrl)}",
             null);
 
         // Assert - Unauthenticated will get 401. With proper auth (not configured in test),
@@ -132,10 +132,10 @@ public class FailureDetectionControllerTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotImplemented);
-        
+
         var json = await response.Content.ReadAsStringAsync();
         var result = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
-        
+
         result.TryGetProperty("message", out var message).Should().BeTrue();
         message.GetString().Should().Contain("not yet implemented");
     }
@@ -148,10 +148,10 @@ public class FailureDetectionControllerTests : IAsyncLifetime
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotImplemented);
-        
+
         var json = await response.Content.ReadAsStringAsync();
         var result = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
-        
+
         result.TryGetProperty("feature", out var feature).Should().BeTrue();
         feature.GetString().Should().Be("event_persistence");
     }
@@ -162,7 +162,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         // Act & Assert - Test factory automatically provides auth, so status endpoint succeeds
         // In production without auth, this would return 401
         var statusResponse = await _client!.GetAsync("/api/failure-detection/status");
-        
+
         // The test factory provides authentication, so we get 200
         // This verifies the endpoint is accessible when properly authenticated
         statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -173,18 +173,18 @@ public class FailureDetectionControllerTests : IAsyncLifetime
     {
         // Note: In normal operation, the system should be ready after startup
         // This test verifies the endpoint responds correctly
-        
+
         // Act
         var response = await _client!.GetAsync("/api/failure-detection/status");
 
         // Assert
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.ServiceUnavailable);
-        
+
         if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
         {
             var json = await response.Content.ReadAsStringAsync();
             var result = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
-            
+
             result.TryGetProperty("message", out var message).Should().BeTrue();
             message.GetString().Should().Contain("initializing");
         }
@@ -199,7 +199,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
 
         // Act
         var response = await _client!.PostAsync(
-            $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(snapshotUrl)}", 
+            $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(snapshotUrl)}",
             null);
 
         // Assert - Controller requires authentication, so validation happens after auth

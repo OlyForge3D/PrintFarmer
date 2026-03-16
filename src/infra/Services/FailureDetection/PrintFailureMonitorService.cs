@@ -98,6 +98,11 @@ public sealed class PrintFailureMonitorService : BackgroundService
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var failureDetectionService = scope.ServiceProvider.GetRequiredService<IObicoFailureDetectionService>();
 
+            // Load ObicoServers once per cycle for efficient lookups
+            Dictionary<Guid, ObicoServer> obicoServers = await dbContext.ObicoServers
+                .Where(s => s.IsEnabled)
+                .ToDictionaryAsync(s => s.Id, cancellationToken);
+
             // Find all printers with cameras configured
             List<Printer> printersWithCameras = await dbContext.Printers
                 .Include(p => p.Cameras.Where(c => c.IsEnabled && !string.IsNullOrEmpty(c.SnapshotUrl)))
@@ -138,8 +143,32 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         continue;
                     }
 
+                    // Determine which Obico server to use
+                    string obicoServerUrl;
+                    if (printer.ObicoServerId.HasValue && obicoServers.TryGetValue(printer.ObicoServerId.Value, out ObicoServer? assignedServer))
+                    {
+                        obicoServerUrl = assignedServer.Url;
+                        _logger.LogDebug(
+                            "[PrintFailureMonitor] Using assigned Obico server '{ServerName}' ({ServerUrl}) for printer {PrinterId} ({PrinterName})",
+                            assignedServer.Name,
+                            obicoServerUrl,
+                            printer.Id,
+                            printer.Name);
+                    }
+                    else
+                    {
+                        // Fallback to global settings URL for backward compatibility
+                        obicoServerUrl = _settings.ObicoApiUrl;
+                        _logger.LogDebug(
+                            "[PrintFailureMonitor] Using default Obico server ({ServerUrl}) for printer {PrinterId} ({PrinterName})",
+                            obicoServerUrl,
+                            printer.Id,
+                            printer.Name);
+                    }
+
                     FailureDetectionResult result = await failureDetectionService.AnalyzeImageFromUrlAsync(
                         camera.SnapshotUrl,
+                        obicoServerUrl,
                         cancellationToken);
 
                     checkedCount++;

@@ -103,6 +103,10 @@ import {
   ScheduleJobRequest,
   AutoPrintGlobalStatus,
   AutoPrintStatus,
+  ObicoServer,
+  CreateObicoServerRequest,
+  UpdateObicoServerRequest,
+  ObicoServerHealthResponse,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -3767,6 +3771,47 @@ export class ApiClient {
   async getTimezones(): Promise<string[]> {
     const response = await this.client.get('/job-scheduling/timezones');
     return response.data || [];
+  }
+
+  // ============ Obico ML Server Management API methods ============
+  
+  /**
+   * Get all configured Obico ML servers
+   */
+  async getObicoServers(): Promise<ObicoServer[]> {
+    const response = await this.client.get('/obico-servers');
+    return response.data || [];
+  }
+
+  /**
+   * Create a new Obico ML server
+   */
+  async createObicoServer(data: CreateObicoServerRequest): Promise<ObicoServer> {
+    const response = await this.client.post<ObicoServer>('/obico-servers', data);
+    return response.data;
+  }
+
+  /**
+   * Update an existing Obico ML server
+   */
+  async updateObicoServer(id: string, data: UpdateObicoServerRequest): Promise<ObicoServer> {
+    const response = await this.client.put<ObicoServer>(`/obico-servers/${id}`, data);
+    return response.data;
+  }
+
+  /**
+   * Delete an Obico ML server
+   */
+  async deleteObicoServer(id: string): Promise<void> {
+    await this.client.delete(`/obico-servers/${id}`);
+  }
+
+  /**
+   * Test connectivity and health of an Obico ML server
+   */
+  async testObicoServerHealth(id: string): Promise<ObicoServerHealthResponse> {
+    const response = await this.client.get<ObicoServerHealthResponse>(`/obico-servers/${id}/health`);
+    return response.data;
   }
 }
 
