@@ -613,3 +613,152 @@ Feature #1 depends on: Parker's Obico compose ✅ + Lambert's ObicoFailureDetect
 Feature #3 depends on: Lambert's cost API endpoints ✅ + Ripley's dashboard UI (starting Wave 2)
 
 **Status:** Workplan approved, team allocated, no blockers. Wave 2 execution underway.
+
+---
+
+### 2026-03-16: Auto-Print Ready-Gate Dashboard Implementation (Feature #5)
+
+**Task:** Build the Smart Auto-Print Ready-Gate Dashboard frontend page, integrating with existing backend API endpoints.
+
+**Context:**
+- Backend auto-print API already exists at `/api/auto-print` with 7 endpoints (status, mark ready, skip, cancel, enable/disable)
+- Feature #5 from 5 Features Workplan: automated queue management with ready-gate validation
+- Implementation was pure frontend work — no backend changes required
+
+**Implementation:**
+1. **Types Added** (`src/Web/ReactApp/src/types/api.ts`):
+   - `ReadyGateCheck` — individual check result (name, passed, message, checkedAt)
+   - `AutoPrintStatus` — per-printer status with ready-gate checks array
+   - `AutoPrintGlobalStatus` — global enabled flag + array of printer statuses
+
+2. **API Client Methods** (`src/Web/ReactApp/src/services/api.ts`):
+   - `getAutoPrintStatus()` — GET /api/auto-print/status (all printers)
+   - `getAutoPrintPrinterStatus(printerId)` — GET /api/auto-print/{printerId}/status
+   - `markPrinterReady(printerId)` — POST /api/auto-print/{printerId}/ready
+   - `skipAutoPrintJob(printerId)` — POST /api/auto-print/{printerId}/skip
+   - `cancelAutoPrint(printerId)` — POST /api/auto-print/{printerId}/cancel
+   - `setAutoPrintEnabled(printerId, enabled)` — PUT /api/auto-print/{printerId}/enabled
+   - `setAutoPrintGlobalEnabled(enabled)` — PUT /api/auto-print/enabled
+
+3. **Query Hooks** (`src/Web/ReactApp/src/common/hooks/useApi.ts`):
+   - `useAutoPrintStatus()` — 10s staleTime + refetchInterval for real-time data
+   - `useAutoPrintPrinterStatus(printerId)` — per-printer status hook
+   - `useMarkPrinterReady()`, `useSkipAutoPrintJob()`, `useCancelAutoPrint()` — mutation hooks with optimistic invalidation
+   - `useSetAutoPrintEnabled()`, `useSetAutoPrintGlobalEnabled()` — toggle mutations
+
+4. **Dashboard Page** (`src/features/auto-print/pages/AutoPrintDashboardPage.tsx`):
+   - Global toggle for enabling/disabling auto-print system-wide
+   - Grid of printer status cards (responsive: 1/2/3 columns)
+   - Each card shows:
+     - Printer name + online status badge (Ready/Not Ready/Disabled)
+     - Queue depth display
+     - Current job name (if active)
+     - Ready-gate checks as checklist with ✅/✕ icons
+     - Action buttons: Mark Ready, Skip, Cancel (disabled based on state)
+     - Per-printer enable/disable toggle
+   - Loading states with Spinner, error states with pf-error styling
+
+5. **Route & Navigation:**
+   - Added `/auto-print` route to App.tsx
+   - Added "Auto-Print" navigation item to Layout.tsx (Operations section, after Print Queue)
+   - Uses PlayIcon from MDI icon set
+
+**Ripley Frontend Patterns Followed:**
+- All UI components from `@/common/components/ui` (Button, Card, Badge, Toggle, Spinner)
+- All imports use `@/` path aliases (no relative `../` paths)
+- All API calls through `apiClient` singleton (no raw fetch/axios)
+- Tailwind CSS with `pf-` design tokens (pf-text-primary, pf-error, pf-success, pf-bg-0, pf-border)
+- Toast notifications via `sonner` for all user feedback
+- Controlled forms with `useState` (no react-hook-form)
+- `clsx` for conditional class composition
+- Query invalidation on all mutations with toast feedback
+
+**Build Verification:**
+- ✅ Build succeeded: `npm run build` — 0 TypeScript errors (6.44s build time)
+- ✅ Linting passed: `npm run lint` — 0 new errors (only pre-existing test file warnings)
+- ✅ All types properly exported and imported
+
+**Files Created:**
+- `src/Web/ReactApp/src/features/auto-print/pages/AutoPrintDashboardPage.tsx` (185 lines)
+
+**Files Modified:**
+- `src/Web/ReactApp/src/types/api.ts` — added 3 auto-print interfaces
+- `src/Web/ReactApp/src/services/api.ts` — added 7 API client methods + imports
+- `src/Web/ReactApp/src/common/hooks/useApi.ts` — added query keys + 6 hooks
+- `src/Web/ReactApp/src/App.tsx` — added route + import
+- `src/Web/ReactApp/src/common/components/Layout.tsx` — added navigation item + PlayIcon import
+
+**Testing Notes:**
+- Backend endpoints already verified working by backend team
+- Frontend component follows existing patterns (MonitoringPage, CostDashboardPage)
+- Real-time updates via 10s polling (staleTime + refetchInterval)
+- Optimistic UI updates with immediate query invalidation on mutations
+
+**Success:** Feature #5 frontend complete and ready for integration testing with backend auto-print service.
+
+## 2026-03-16: Wave 3 — Auto-Print Ready-Gate Dashboard Feature Completion
+
+**Feature:** Auto-Print Ready-Gate Dashboard (Feature #5)  
+**Status:** ✅ Complete and deployed to staging  
+**Duration:** ~6.5 minutes  
+**Quality:** Build ✅ Clean (0 TypeScript errors) | Lint ✅ Clean | Patterns ✅ Consistent
+
+### Work Summary
+- Built complete auto-print ready-gate dashboard using existing backend API
+- 10s polling for real-time status updates (sufficient for operator UX)
+- Per-printer status cards with ready-gate checks, action buttons, state-based disabling
+- Global enable/disable toggle + per-printer toggles
+- Zero backend changes required; pure frontend integration
+
+### Components & Code
+**New Component:**
+- `AutoPrintDashboardPage.tsx` — Dashboard with printer cards, ready-gate checklists, operator controls
+
+**Types Added (3 total):**
+- `ReadyGateCheck` — individual check result
+- `AutoPrintStatus` — per-printer status with checks array
+- `AutoPrintGlobalStatus` — global settings + printer array
+
+**API Methods (7 total):**
+- Query: `getAutoPrintStatus()`, `getAutoPrintPrinterStatus(printerId)`
+- Mutation: `markPrinterReady()`, `skipAutoPrintJob()`, `cancelAutoPrint()`, `setAutoPrintEnabled()`, `setAutoPrintGlobalEnabled()`
+
+**Query Hooks (6 total):**
+- `useAutoPrintStatus()` — 10s polling
+- `useAutoPrintPrinterStatus()` — per-printer polling
+- Mutation hooks with automatic invalidation + toast feedback
+
+**Navigation:**
+- Route: `/auto-print`
+- Nav Link: "Auto-Print" in Operations section (after Print Queue)
+
+### Key Design Decisions
+1. **10s Polling** — Real-time updates without SignalR complexity; backend already works
+2. **Card Grid UI** — Provides better multi-printer overview than modal approach
+3. **Ripley's Patterns Exactly** — All conventions followed (UI lib, path aliases, apiClient, toast)
+4. **Operator-Focused UX** — Action buttons contextually disabled; ready-gate checks guide decisions
+5. **Zero Backend Coupling** — Existing `/api/auto-print` endpoints; no API changes needed
+
+### Quality Validation
+✅ TypeScript strict mode passing (0 errors)  
+✅ ESLint clean (0 new errors)  
+✅ All API calls via apiClient singleton  
+✅ All components use project UI library  
+✅ All imports use @/ path aliases  
+✅ Toast feedback on all mutations  
+✅ Query invalidation on state changes  
+
+### Orchestration Log
+Created: `.squad/orchestration-log/2026-03-16T23-12-05Z-dallas.md`
+
+### Next Steps
+- Integration testing with deployed backend auto-print service
+- Playwright E2E tests for operator workflow (Kane assigned)
+- Documentation updates
+- Performance monitoring for polling overhead
+
+### Notes
+- Feature ready for integration testing
+- No breaking changes; fully backward compatible
+- All patterns follow project conventions
+- Global toggle automatically updates all printer states

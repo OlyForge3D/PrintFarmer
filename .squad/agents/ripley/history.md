@@ -1270,3 +1270,73 @@ Built complete Cost Tracking Dashboard consuming Lambert's backend cost analytic
 
 **Impact:** Farm administrators can now track print job costs, analyze spending by printer and material, and identify cost optimization opportunities. Dashboard integrates seamlessly with existing Statistics navigation structure.
 
+
+## Learnings
+
+### 2025-01-11: Job Scheduling Calendar Implementation
+- Built complete Print Job Scheduling Calendar page (Feature #4)
+- Backend endpoints already existed - pure frontend work
+- Added comprehensive scheduling types to api.ts: ScheduledJob, JobExecution, ScheduleJobRequest, RecurrenceType, ScheduleStatus
+- Extended apiClient with 8 scheduling endpoints: getScheduledJobs, scheduleJob, rescheduleJob, cancelSchedule, pauseSchedule, resumeSchedule, getJobExecutions, getTimezones
+- Added query hooks to useApi.ts with proper staleTime (30s for jobs, 10min for timezones)
+- Created custom MonthCalendar component using CSS grid (no external deps) with job badges on dates
+- Built ScheduleModal for scheduling/rescheduling with date/time pickers, timezone selector, recurrence config
+- Added /scheduling route and "Scheduling" nav link with CalendarIcon
+- Used DataTable for job list with status badges and action buttons (pause/resume/cancel)
+- Build and lint pass with 0 errors in new code
+- Pattern: Custom calendar grid with CSS, project UI components (Button variant="unstyled" for calendar nav), controlled forms with useState
+
+## 2026-03-16: Wave 3 — Scheduling Calendar Feature Completion
+
+**Feature:** Print Job Scheduling Calendar (Feature #4)  
+**Status:** ✅ Complete and deployed to staging  
+**Duration:** ~7 minutes  
+**Quality:** Build ✅ Clean | Lint ✅ Clean | TypeScript ✅ Strict
+
+### Work Summary
+- Built complete scheduling calendar page with custom CSS Grid monthly view
+- No external calendar library (constraint: no new npm dependencies)
+- Integrated with existing backend job scheduling API (`/api/job-scheduling/*`)
+- Added 8 API client methods, 6 React Query hooks, 3 TypeScript interfaces
+- Route `/scheduling` added with nav link in "Scheduling" section
+- Full CRUD operations: schedule, reschedule, pause, resume, cancel jobs
+
+### Components & Code
+**New Components:**
+- `SchedulingPage.tsx` — Main page with calendar + job list
+- `MonthCalendar.tsx` — Custom CSS Grid calendar (7 cols, date buttons, job badges)
+- `ScheduleModal.tsx` — Create/reschedule form with recurrence config
+
+**Types Added:**
+- `ScheduledJob`, `JobExecution`, `ScheduleJobRequest`, `RecurrenceType`, `ScheduleStatus`
+
+**API Methods:**
+- Query: `getScheduledJobs()`, `getJobExecutions()`, `getTimezones()`
+- Mutation: `scheduleJob()`, `rescheduleJob()`, `pauseSchedule()`, `resumeSchedule()`, `cancelSchedule()`
+
+**Query Hooks:**
+- `useScheduledJobs()` (30s stale), `useJobExecutions()`, `useTimezones()` (10min stale)
+- Mutation hooks with automatic invalidation + toast feedback
+
+### Key Design Decisions
+1. **Custom CSS Grid Calendar** — Avoided FullCalendar dependency
+2. **Timezone Browser Default** — Reduces friction for common case
+3. **Conditional Recurrence Field** — Progressive disclosure (only when recurrence ≠ "once")
+4. **Job ID Text Input** — Users copy-paste IDs; no dropdown needed
+5. **Color-Coded Status Badges** — active=green, paused=yellow, cancelled=red, completed=gray
+
+### Quality Validation
+✅ TypeScript strict mode passing  
+✅ All API calls via apiClient singleton  
+✅ All components use project UI library (Button, Badge, Modal, FormField, DataTable)  
+✅ All imports use @/ path aliases  
+✅ Query stale times appropriate for data volatility  
+✅ Toast feedback on all mutations  
+
+### Orchestration Log
+Created: `.squad/orchestration-log/2026-03-16T23-12-05Z-ripley.md`
+
+### Notes
+- Feature ready for integration testing
+- Future enhancement: typeahead for job ID input based on user feedback
+- No breaking changes; all patterns follow project conventions

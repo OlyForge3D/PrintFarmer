@@ -1772,3 +1772,116 @@ The hook's internal state updates (`setInstallPrompt`, `setIsDismissed`) didn't 
 - **React notification tests**: 33/33 passing (100% pass rate after fixes)
 - **API cost calculation tests**: All passing after entity property correction
 - **Total new test coverage**: 33 React tests + 15 API tests = **48 new tests**
+
+---
+
+## 2. Job Scheduling Calendar — UI Design (Approved)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-16  
+**Status:** APPROVED — Feature #4 complete
+
+### Problem
+Users need a calendar interface to schedule print jobs with recurrence patterns, view scheduled jobs, and manage job status (pause/resume/cancel).
+
+### Solution
+**Approach: Custom CSS Grid Calendar + React Modal**
+- Built calendar from scratch using CSS Grid (no new npm dependencies)
+- Monthly view with 7-column day grid
+- Job badges displayed inline on dates with "+N more" overflow handling
+- ScheduleModal for creating/rescheduling with recurrence config
+- DataTable for viewing all scheduled jobs with pagination/filtering
+
+### Key Design Decisions
+1. **No External Calendar Library** — CSS Grid sufficient for monthly view; avoids FullCalendar complexity
+2. **Status Color Mapping** — active=green, paused=yellow, cancelled=red, completed=gray
+3. **Browser Timezone Default** — Pre-populate selector with `Intl.DateTimeFormat().resolvedOptions().timeZone`
+4. **Recurrence Interval Conditional** — Only show interval field when recurrence type ≠ "once"
+5. **Job ID Text Input** — Users copy-paste IDs; dropdown unnecessary complexity
+6. **Query Stale Times** — 30s for scheduled jobs (frequent changes), 10min for timezones (static)
+
+### Implementation
+**Files Created:**
+- `src/features/scheduling/pages/SchedulingPage.tsx`
+- `src/features/scheduling/components/MonthCalendar.tsx`
+- `src/features/scheduling/components/ScheduleModal.tsx`
+
+**API Methods (8 total):**
+- `getScheduledJobs()`, `getJobExecutions()`, `getTimezones()`
+- `scheduleJob()`, `rescheduleJob()`, `pauseSchedule()`, `resumeSchedule()`, `cancelSchedule()`
+
+**React Query Hooks (6 total):**
+- `useScheduledJobs()`, `useJobExecutions()`, `useTimezones()`
+- Mutation hooks with automatic invalidation + toast feedback
+
+### Quality Gates
+✅ Build clean (0 errors)  
+✅ Lint clean (0 new errors)  
+✅ TypeScript strict mode passing  
+✅ All API calls through apiClient singleton  
+✅ All components use project library (Button, Badge, Modal, DataTable, FormField)  
+
+### Future Enhancements
+- Typeahead/autocomplete for job ID input based on user feedback
+- Integration with dispatch scoring (location-based scheduling)
+- Bulk job scheduling
+
+---
+
+## 3. Auto-Print Ready-Gate Dashboard — UI Design (Approved)
+
+**Author:** Dallas (Lead/Frontend)  
+**Date:** 2026-03-16  
+**Status:** APPROVED — Feature #5 complete
+
+### Problem
+Operators need a dashboard to monitor auto-print ready-gate status across multiple printers, toggle auto-print globally and per-printer, and perform quick actions (mark ready, skip, cancel).
+
+### Solution
+**Approach: Polling-Based Realtime Dashboard with Card Grid UI**
+- 10s polling for real-time status updates (sufficient for operator dashboard)
+- Responsive card grid showing all printers with ready-gate checks
+- Global enable/disable toggle (top-right)
+- Per-printer toggles and contextual action buttons
+- Visual checklist display (✅/✕ icons) for ready-gate checks
+
+### Key Design Decisions
+1. **10s Polling vs SignalR** — Polling sufficient; avoids backend changes + WebSocket complexity
+2. **Card Grid UI** — Better multi-printer overview than modal-based approach
+3. **Ripley's Patterns Exactly** — Followed all existing conventions (UI lib, path aliases, apiClient, toast)
+4. **Zero Backend Changes** — Pure frontend integration with existing `/api/auto-print` endpoints
+5. **Operator-Focused UX** — Action buttons disabled based on state; ready-gate checks guide operator decisions
+
+### Implementation
+**Component Created:**
+- `src/features/auto-print/pages/AutoPrintDashboardPage.tsx`
+
+**Types Added (3 total):**
+- `ReadyGateCheck`, `AutoPrintStatus`, `AutoPrintGlobalStatus`
+
+**API Methods (7 total):**
+- `getAutoPrintStatus()`, `getAutoPrintPrinterStatus(printerId)`
+- `markPrinterReady()`, `skipAutoPrintJob()`, `cancelAutoPrint()`
+- `setAutoPrintEnabled()`, `setAutoPrintGlobalEnabled()`
+
+**React Query Hooks (6 total):**
+- `useAutoPrintStatus()`, `useAutoPrintPrinterStatus()`
+- Mutation hooks with automatic invalidation + toast feedback
+
+### Quality Gates
+✅ Build clean (0 TypeScript errors)  
+✅ Lint clean (0 new errors)  
+✅ All patterns consistent with project standards  
+✅ All API calls through apiClient singleton  
+✅ Toast feedback on all mutations  
+
+### Integration Testing Required
+- Verify backend auto-print endpoints deployed
+- Test ready-gate checks with various pass/fail states
+- Validate global toggle affects all printers
+- Monitor polling network overhead
+
+### Future Work
+- Playwright E2E tests for operator workflow
+- Documentation updates
+- Performance optimization if polling overhead detected
