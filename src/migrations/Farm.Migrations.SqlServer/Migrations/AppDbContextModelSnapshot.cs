@@ -569,6 +569,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double?>("BedTemperature")
                         .HasColumnType("float");
 
+                    b.Property<int?>("BottomSolidLayers")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -605,6 +608,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<long>("FileSizeBytes")
                         .HasColumnType("bigint");
 
+                    b.Property<double?>("FirstLayerHeight")
+                        .HasColumnType("float");
+
                     b.Property<Guid>("FolderId")
                         .HasColumnType("uniqueidentifier");
 
@@ -615,6 +621,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<double?>("InfillPercentage")
                         .HasColumnType("float");
+
+                    b.Property<bool?>("IroningEnabled")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime?>("LastHealthCheckDate")
                         .HasColumnType("datetime2");
@@ -628,9 +637,24 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double?>("LayerHeight")
                         .HasColumnType("float");
 
+                    b.Property<double?>("MaxVolumetricSpeed")
+                        .HasColumnType("float");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("ObjectCount")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("ObjectDimensionX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("ObjectDimensionY")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("ObjectDimensionZ")
+                        .HasColumnType("float");
 
                     b.Property<string>("OriginalPrinterPath")
                         .HasColumnType("nvarchar(max)");
@@ -660,6 +684,12 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double?>("RequiredNozzleDiameter")
                         .HasColumnType("float");
 
+                    b.Property<double?>("RetractionLength")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("RetractionSpeed")
+                        .HasColumnType("float");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -679,9 +709,21 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("SourcePrinterId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool?>("SupportEnabled")
+                        .HasColumnType("bit");
+
                     b.Property<string>("ThumbnailFileName")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
+
+                    b.Property<int?>("ToolChangesCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TopSolidLayers")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TotalLayers")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
