@@ -3336,7 +3336,7 @@ export class ApiClient {
    * Bulk cancel multiple print jobs
    */
   async bulkCancelJobs(request: unknown): Promise<unknown> {
-    const response = await this.client.post(`/job-queue/bulk/cancel`, request);
+    const response = await this.client.post(`/job-queue-analytics/bulk/cancel`, request);
     return response.data;
   }
 
@@ -3382,7 +3382,7 @@ export class ApiClient {
    * Update job notes only
    */
   async updateJobNotes(jobId: string, notes: string): Promise<void> {
-    await this.client.put(`/job-queue/${jobId}/notes`, {
+    await this.client.put(`/job-queue-analytics/jobs/${jobId}/notes`, {
       notes: notes || null,
     });
   }
