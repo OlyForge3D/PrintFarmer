@@ -160,6 +160,9 @@ public static class ServiceCollectionExtensions
         RegisterImportingServices(services);
         RegisterCatalogServices(services);
 
+        // Cost tracking
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cost.IJobCostCalculationService, Farm.Infrastructure.Services.Cost.JobCostCalculationService>();
+
         // Statistics services (depends on database)
         _ = services.AddScoped<Farm.Infrastructure.Services.Statistics.IStatisticsService, Farm.Infrastructure.Services.Statistics.StatisticsService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Statistics.IReportExportService, Farm.Infrastructure.Services.Statistics.ReportExportService>();
@@ -527,6 +530,9 @@ public static class ServiceCollectionExtensions
         // Register CameraService from Infrastructure layer - standalone camera management service
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
 
+        // Register Obico failure detection service - AI-powered print failure detection
+        _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
+
         // Register NfcDeviceService from Infrastructure layer - NFC reader device management
         _ = services.AddScoped<Farm.Infrastructure.Services.NfcDevices.INfcDeviceService, Farm.Infrastructure.Services.NfcDevices.NfcDeviceService>();
 
@@ -622,6 +628,12 @@ public static class ServiceCollectionExtensions
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
+
+        // Obico ML API HTTP client (15s timeout for image analysis)
+        _ = services.AddHttpClient("ObicoML", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
     }
 
     #endregion
@@ -647,6 +659,9 @@ public static class ServiceCollectionExtensions
 
             // Camera health monitor - periodic HTTP probes of camera snapshot URLs
             _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();
+
+            // Print failure monitor - AI-powered failure detection using Obico ML API
+            _ = services.AddHostedService<Farm.Infrastructure.Services.FailureDetection.PrintFailureMonitorService>();
 
             // Slicer hosted services (WorkerHealthMonitor, JobDispatching,
             // JobTimeoutScanner, StaleWorkerCleanup) are now registered by

@@ -147,6 +147,7 @@ OPTIONS:
     --include-security      Include security configurations  
     --include-registry      Include local registry
     --include-discovery     Include printer discovery service
+    --include-obico-ml      Include Obico ML API for AI print failure detection
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
     --enable-pgadmin            Enable pgAdmin web UI (PostgreSQL only)
 
@@ -217,6 +218,7 @@ parse_args() {
     INCLUDE_REGISTRY="false"
     INCLUDE_DISCOVERY="false"
     INCLUDE_SPOOLMAN="false"
+    INCLUDE_OBICO_ML="false"
     ENABLE_ORCA_WORKER=""
     ENABLE_PGADMIN="false"
     API_PORT=""
@@ -251,6 +253,8 @@ parse_args() {
                 INCLUDE_DISCOVERY="true"; shift ;;
             --include-spoolman)
                 INCLUDE_SPOOLMAN="true"; shift ;;
+            --include-obico-ml|--enable-obico-ml)
+                INCLUDE_OBICO_ML="true"; shift ;;
             --enable-orca-worker)
                 ENABLE_ORCA_WORKER="$2"; shift 2 ;;
             --enable-pgadmin)
@@ -777,6 +781,16 @@ generate_compose() {
             addons_merged=true
         else
             log_warning "Failed to merge Spoolman service, continuing without it"
+        fi
+    fi
+    
+    # Conditionally merge Obico ML API addon if enabled (AI print failure detection)
+    if [[ "$INCLUDE_OBICO_ML" == "true" ]]; then
+        if merge_addon_services "$compose_file" "obico-ml"; then
+            log_info "Merged Obico ML API service (AI print failure detection)"
+            addons_merged=true
+        else
+            log_warning "Failed to merge Obico ML API service, continuing without it"
         fi
     fi
     

@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos.PrintQueue;
+﻿using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Dtos.PrintQueue;
 
 namespace Farm.Infrastructure.Services.Interfaces;
 
@@ -266,6 +267,30 @@ public interface IPrintJobManagementService
         string? printerId = null,
         DateTime? dateFrom = null,
         DateTime? dateTo = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get detailed cost breakdown for a specific job.
+    /// </summary>
+    /// <param name="jobId">Job ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<JobCostBreakdownDto?> GetJobCostBreakdownAsync(Guid jobId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update job cost with manual overrides.
+    /// </summary>
+    /// <param name="jobId">Job ID.</param>
+    /// <param name="materialCost">Manual material cost override.</param>
+    /// <param name="energyCost">Manual energy cost override.</param>
+    /// <param name="machineTimeCost">Manual machine time cost override.</param>
+    /// <param name="laborCost">Manual labor cost override.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<JobCostBreakdownDto?> UpdateJobCostAsync(
+        Guid jobId,
+        decimal? materialCost,
+        decimal? energyCost,
+        decimal? machineTimeCost,
+        decimal? laborCost,
         CancellationToken cancellationToken = default);
 
     // ============= HISTORY OPERATIONS (Phase 2) =============

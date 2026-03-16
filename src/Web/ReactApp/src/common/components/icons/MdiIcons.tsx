@@ -48,6 +48,7 @@ import {
   mdiFolder,
   mdiCube,
   mdiOpenInNew,
+  mdiBell,
   mdiCamera,
   mdiNfc,
   mdiMinus,
@@ -2976,6 +2977,32 @@ export function HelpCircleIcon({ className = 'w-4 h-4', ariaLabel = 'Help' }: Om
       role="img"
     >
       <path fill="currentColor" d={mdiHelpCircleOutline} />
+    </svg>
+  );
+}
+
+/**
+ * Bell icon
+ * 
+ * Material Design icon component for notifications.
+ * 
+ * @component
+ * @preview ![bell](https://unpkg.com/@mdi/svg@7.4.47/svg/bell.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/bell.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <BellIcon className="w-5 h-5" ariaLabel="Notifications" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function BellIcon({ className = 'w-4 h-4', ariaLabel = 'Notifications' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiBell} />
     </svg>
   );
 }

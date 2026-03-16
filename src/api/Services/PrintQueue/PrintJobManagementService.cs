@@ -1,8 +1,10 @@
 ﻿using System.Diagnostics;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
@@ -28,7 +30,8 @@ public class PrintJobManagementService(
     IPrinterStatusCacheReader printerStatusCache,
     INotificationService? notificationService = null,
     IRetryService? retryService = null,
-    IPrinterStatusRefreshService? printerStatusRefreshService = null) : IPrintJobManagementService
+    IPrinterStatusRefreshService? printerStatusRefreshService = null,
+    IJobCostCalculationService? jobCostCalculationService = null) : IPrintJobManagementService
 {
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -40,6 +43,7 @@ public class PrintJobManagementService(
     private readonly INotificationService? _notificationService = notificationService;
     private readonly IRetryService? _retryService = retryService;
     private readonly IPrinterStatusRefreshService? _printerStatusRefreshService = printerStatusRefreshService;
+    private readonly IJobCostCalculationService? _jobCostCalculationService = jobCostCalculationService;
 
     // ============= QUERY OPERATIONS =============
 
@@ -2433,5 +2437,64 @@ public class PrintJobManagementService(
     public async Task<IEnumerable<JobRetry>> GetDueRetriesAsync(CancellationToken cancellationToken = default)
     {
         return _retryService == null ? Enumerable.Empty<JobRetry>() : await _retryService.GetDueRetriesAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<JobCostBreakdownDto?> GetJobCostBreakdownAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        PrintJob? job = await _repository.GetByIdWithRelationsAsync(jobId, cancellationToken);
+
+        if (job == null)
+        {
+            return null;
+        }
+
+        return new JobCostBreakdownDto
+        {
+            JobId = job.Id,
+            JobName = job.Name ?? job.GcodeFile?.Name ?? "Unknown",
+            MaterialCostUsd = job.MaterialCostUsd,
+            EnergyCostUsd = job.EnergyCostUsd,
+            MachineTimeCostUsd = job.MachineTimeCostUsd,
+            LaborCostUsd = job.LaborCostUsd,
+            TotalCostUsd = job.TotalCostUsd,
+            CostCalculatedAt = job.CostCalculatedAt,
+            PrintDuration = job.ActualPrintTime,
+            FilamentUsageGrams = job.ActualFilamentUsage,
+            FilamentName = job.FilamentName,
+            PrinterName = job.AssignedPrinter?.Name,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<JobCostBreakdownDto?> UpdateJobCostAsync(
+        Guid jobId,
+        decimal? materialCost,
+        decimal? energyCost,
+        decimal? machineTimeCost,
+        decimal? laborCost,
+        CancellationToken cancellationToken = default)
+    {
+        if (_jobCostCalculationService == null)
+        {
+            _logger.LogWarning("JobCostCalculationService is not available. Cannot update cost for job {JobId}.", jobId);
+            return await GetJobCostBreakdownAsync(jobId, cancellationToken);
+        }
+
+        bool updated = await _jobCostCalculationService.RecalculateCostsWithOverridesAsync(
+            jobId,
+            materialCost,
+            energyCost,
+            machineTimeCost,
+            laborCost,
+            cancellationToken);
+
+        if (!updated)
+        {
+            _logger.LogWarning("Failed to update cost for job {JobId}.", jobId);
+            return null;
+        }
+
+        return await GetJobCostBreakdownAsync(jobId, cancellationToken);
     }
 }

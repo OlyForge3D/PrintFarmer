@@ -193,4 +193,162 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
 
         return result;
     }
+
+    /// <inheritdoc />
+    public async Task<CostStatisticsSummaryDto> GetCostsSummaryAsync(int? days, CancellationToken ct = default)
+    {
+        DateTime? startDate = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : null;
+
+        var query = _db.PrintJobs
+            .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue);
+
+        if (startDate.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime >= startDate.Value);
+        }
+
+        var jobs = await query.ToListAsync(ct);
+
+        decimal totalCost = jobs.Sum(j => j.TotalCostUsd ?? 0m);
+        int jobCount = jobs.Count;
+        decimal totalMaterial = jobs.Sum(j => j.MaterialCostUsd ?? 0m);
+        decimal totalEnergy = jobs.Sum(j => j.EnergyCostUsd ?? 0m);
+        decimal totalMachine = jobs.Sum(j => j.MachineTimeCostUsd ?? 0m);
+        decimal totalLabor = jobs.Sum(j => j.LaborCostUsd ?? 0m);
+
+        var materialGroups = jobs
+            .Where(j => !string.IsNullOrEmpty(j.FilamentName) && j.TotalCostUsd.HasValue)
+            .GroupBy(j => j.FilamentName!)
+            .Select(g => new { Material = g.Key, Cost = g.Sum(j => j.TotalCostUsd!.Value) })
+            .OrderByDescending(g => g.Cost)
+            .FirstOrDefault();
+
+        return new CostStatisticsSummaryDto
+        {
+            TotalCostUsd = totalCost,
+            AverageCostPerJobUsd = jobCount > 0 ? totalCost / jobCount : 0m,
+            JobsWithCostData = jobCount,
+            TotalMaterialCostUsd = totalMaterial,
+            TotalEnergyCostUsd = totalEnergy,
+            TotalMachineTimeCostUsd = totalMachine,
+            TotalLaborCostUsd = totalLabor,
+            MostExpensiveMaterial = materialGroups?.Material,
+            MostExpensiveMaterialCost = materialGroups?.Cost ?? 0m,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<List<CostByTimePeriodDto>> GetCostsByTimePeriodAsync(int? days, CancellationToken ct = default)
+    {
+        DateTime startDate = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : DateTime.UtcNow.AddDays(-30);
+
+        var rows = await _db.PrintJobs
+            .Where(j => j.Status == PrintJobStatus.Completed && j.ActualEndTime >= startDate && j.TotalCostUsd.HasValue)
+            .GroupBy(j => j.ActualEndTime!.Value.Date)
+            .Select(g => new
+            {
+                Date = g.Key,
+                TotalCost = g.Sum(j => j.TotalCostUsd ?? 0m),
+                MaterialCost = g.Sum(j => j.MaterialCostUsd ?? 0m),
+                EnergyCost = g.Sum(j => j.EnergyCostUsd ?? 0m),
+                MachineCost = g.Sum(j => j.MachineTimeCostUsd ?? 0m),
+                LaborCost = g.Sum(j => j.LaborCostUsd ?? 0m),
+                JobCount = g.Count(),
+            })
+            .ToListAsync(ct);
+
+        return rows.Select(r => new CostByTimePeriodDto
+        {
+            Date = r.Date,
+            TotalCostUsd = r.TotalCost,
+            MaterialCostUsd = r.MaterialCost,
+            EnergyCostUsd = r.EnergyCost,
+            MachineTimeCostUsd = r.MachineCost,
+            LaborCostUsd = r.LaborCost,
+            JobCount = r.JobCount,
+        })
+        .OrderBy(r => r.Date)
+        .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<List<CostByPrinterDto>> GetCostsByPrinterAsync(int? days, CancellationToken ct = default)
+    {
+        DateTime? startDate = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : null;
+
+        var query = _db.PrintJobs
+            .Include(j => j.AssignedPrinter)
+            .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue && j.AssignedPrinterId != null);
+
+        if (startDate.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime >= startDate.Value);
+        }
+
+        var rows = await query
+            .GroupBy(j => new { j.AssignedPrinterId, PrinterName = j.AssignedPrinter!.Name })
+            .Select(g => new
+            {
+                PrinterId = g.Key.AssignedPrinterId!.Value,
+                PrinterName = g.Key.PrinterName,
+                TotalCost = g.Sum(j => j.TotalCostUsd ?? 0m),
+                JobCount = g.Count(),
+                MaterialCost = g.Sum(j => j.MaterialCostUsd ?? 0m),
+                EnergyCost = g.Sum(j => j.EnergyCostUsd ?? 0m),
+                MachineCost = g.Sum(j => j.MachineTimeCostUsd ?? 0m),
+                LaborCost = g.Sum(j => j.LaborCostUsd ?? 0m),
+            })
+            .ToListAsync(ct);
+
+        return rows.Select(r => new CostByPrinterDto
+        {
+            PrinterId = r.PrinterId,
+            PrinterName = r.PrinterName,
+            TotalCostUsd = r.TotalCost,
+            AverageCostPerJobUsd = r.JobCount > 0 ? r.TotalCost / r.JobCount : 0m,
+            JobCount = r.JobCount,
+            MaterialCostUsd = r.MaterialCost,
+            EnergyCostUsd = r.EnergyCost,
+            MachineTimeCostUsd = r.MachineCost,
+            LaborCostUsd = r.LaborCost,
+        })
+        .OrderByDescending(r => r.TotalCostUsd)
+        .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<List<CostByMaterialDto>> GetCostsByMaterialAsync(int? days, CancellationToken ct = default)
+    {
+        DateTime? startDate = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : null;
+
+        var query = _db.PrintJobs
+            .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue && !string.IsNullOrEmpty(j.FilamentName));
+
+        if (startDate.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime >= startDate.Value);
+        }
+
+        var rows = await query
+            .GroupBy(j => j.FilamentName!)
+            .Select(g => new
+            {
+                MaterialType = g.Key,
+                TotalCost = g.Sum(j => j.TotalCostUsd ?? 0m),
+                JobCount = g.Count(),
+                TotalFilamentUsage = g.Sum(j => j.ActualFilamentUsage ?? 0.0),
+            })
+            .ToListAsync(ct);
+
+        return rows.Select(r => new CostByMaterialDto
+        {
+            MaterialType = r.MaterialType,
+            TotalCostUsd = r.TotalCost,
+            AverageCostPerJobUsd = r.JobCount > 0 ? r.TotalCost / r.JobCount : 0m,
+            JobCount = r.JobCount,
+            TotalFilamentUsageGrams = r.TotalFilamentUsage,
+        })
+        .OrderByDescending(r => r.TotalCostUsd)
+        .ToList();
+    }
 }

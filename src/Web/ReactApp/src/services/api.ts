@@ -94,6 +94,15 @@ import {
   PagedResponse,
   SystemCapabilities,
   DispatchHistoryPageDto,
+  NotificationDto,
+  NotificationPreferencesDto,
+  UpdateNotificationPreferencesRequest,
+  UnreadCountResponse,
+  ScheduledJob,
+  JobExecution,
+  ScheduleJobRequest,
+  AutoPrintGlobalStatus,
+  AutoPrintStatus,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -3617,6 +3626,147 @@ export class ApiClient {
     const params = days ? `?days=${days}` : '';
     const response = await this.client.get(`/statistics/export/utilization-csv${params}`, { responseType: 'blob' });
     return response.data;
+  }
+
+  // ============ Cost Tracking API methods ============
+  async getCostSummary(): Promise<import("@/types/api").CostSummary> {
+    const response = await this.client.get('/statistics/costs/summary');
+    return response.data;
+  }
+
+  async getCosts(): Promise<import("@/types/api").CostSummary> {
+    const response = await this.client.get('/statistics/costs');
+    return response.data;
+  }
+
+  async getCostsByPrinter(): Promise<import("@/types/api").CostByPrinter[]> {
+    const response = await this.client.get('/statistics/costs/by-printer');
+    return response.data;
+  }
+
+  async getCostsByMaterial(): Promise<import("@/types/api").CostByMaterial[]> {
+    const response = await this.client.get('/statistics/costs/by-material');
+    return response.data;
+  }
+
+  async getCostOverTime(): Promise<import("@/types/api").CostOverTime[]> {
+    const response = await this.client.get('/statistics/cost-over-time');
+    return response.data;
+  }
+
+  // ============ Notification API methods ============
+  async getNotifications(limit?: number): Promise<NotificationDto[]> {
+    const params = limit ? `?limit=${limit}` : '';
+    const response = await this.client.get(`/notifications${params}`);
+    return response.data || [];
+  }
+
+  async getUnreadNotifications(): Promise<NotificationDto[]> {
+    const response = await this.client.get('/notifications/unread');
+    return response.data || [];
+  }
+
+  async getUnreadCount(): Promise<number> {
+    const response = await this.client.get<UnreadCountResponse>('/notifications/unread/count');
+    return response.data.unreadCount;
+  }
+
+  async markNotificationAsRead(notificationId: string): Promise<void> {
+    await this.client.put(`/notifications/${notificationId}/mark-read`);
+  }
+
+  async markMultipleNotificationsAsRead(notificationIds: string[]): Promise<void> {
+    await this.client.put('/notifications/mark-read-batch', { notificationIds });
+  }
+
+  async deleteNotification(notificationId: string): Promise<void> {
+    await this.client.delete(`/notifications/${notificationId}`);
+  }
+
+  async getNotificationPreferences(): Promise<NotificationPreferencesDto> {
+    const response = await this.client.get('/notifications/preferences');
+    return response.data;
+  }
+
+  async updateNotificationPreferences(preferences: UpdateNotificationPreferencesRequest): Promise<NotificationPreferencesDto> {
+    const response = await this.client.put('/notifications/preferences', preferences);
+    return response.data;
+  }
+
+  // ============ Auto-Print API methods ============
+  async getAutoPrintStatus(): Promise<AutoPrintGlobalStatus> {
+    const response = await this.client.get('/auto-print/status');
+    return response.data;
+  }
+
+  async getAutoPrintPrinterStatus(printerId: string): Promise<AutoPrintStatus> {
+    const response = await this.client.get(`/auto-print/${printerId}/status`);
+    return response.data;
+  }
+
+  async markPrinterReady(printerId: string): Promise<void> {
+    await this.client.post(`/auto-print/${printerId}/ready`);
+  }
+
+  async skipAutoPrintJob(printerId: string): Promise<void> {
+    await this.client.post(`/auto-print/${printerId}/skip`);
+  }
+
+  async cancelAutoPrint(printerId: string): Promise<void> {
+    await this.client.post(`/auto-print/${printerId}/cancel`);
+  }
+
+  async setAutoPrintEnabled(printerId: string, enabled: boolean): Promise<void> {
+    await this.client.put(`/auto-print/${printerId}/enabled`, { enabled });
+  }
+
+  async setAutoPrintGlobalEnabled(enabled: boolean): Promise<void> {
+    await this.client.put('/auto-print/enabled', { enabled });
+  }
+
+  // ============ Job Scheduling API methods ============
+  async getScheduledJobs(): Promise<ScheduledJob[]> {
+    const response = await this.client.get('/job-scheduling/scheduled');
+    return response.data || [];
+  }
+
+  async getScheduledJob(jobId: string): Promise<ScheduledJob> {
+    const response = await this.client.get(`/job-scheduling/${jobId}`);
+    return response.data;
+  }
+
+  async scheduleJob(jobId: string, request: ScheduleJobRequest): Promise<ScheduledJob> {
+    const response = await this.client.post(`/job-scheduling/${jobId}/schedule`, request);
+    return response.data;
+  }
+
+  async rescheduleJob(jobId: string, request: ScheduleJobRequest): Promise<ScheduledJob> {
+    const response = await this.client.put(`/job-scheduling/${jobId}/reschedule`, request);
+    return response.data;
+  }
+
+  async cancelSchedule(jobId: string): Promise<void> {
+    await this.client.delete(`/job-scheduling/${jobId}/schedule`);
+  }
+
+  async pauseSchedule(jobId: string): Promise<ScheduledJob> {
+    const response = await this.client.post(`/job-scheduling/${jobId}/pause`);
+    return response.data;
+  }
+
+  async resumeSchedule(jobId: string): Promise<ScheduledJob> {
+    const response = await this.client.post(`/job-scheduling/${jobId}/resume`);
+    return response.data;
+  }
+
+  async getJobExecutions(jobId: string): Promise<JobExecution[]> {
+    const response = await this.client.get(`/job-scheduling/${jobId}/executions`);
+    return response.data || [];
+  }
+
+  async getTimezones(): Promise<string[]> {
+    const response = await this.client.get('/job-scheduling/timezones');
+    return response.data || [];
   }
 }
 

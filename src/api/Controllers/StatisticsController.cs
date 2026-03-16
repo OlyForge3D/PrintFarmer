@@ -70,4 +70,48 @@ public class StatisticsController(IStatisticsService statisticsService) : Contro
         var result = await _statisticsService.GetPrinterUtilizationAsync(days, ct);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Returns aggregate cost statistics summary.
+    /// </summary>
+    [HttpGet("costs/summary")]
+    [ProducesResponseType(typeof(CostStatisticsSummaryDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCostsSummaryAsync([FromQuery] int? days, CancellationToken ct = default)
+    {
+        var result = await _statisticsService.GetCostsSummaryAsync(days, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Returns cost data grouped by time period.
+    /// </summary>
+    [HttpGet("costs")]
+    [ProducesResponseType(typeof(List<CostByTimePeriodDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCostsByTimePeriodAsync([FromQuery] int? days, CancellationToken ct = default)
+    {
+        var result = await _statisticsService.GetCostsByTimePeriodAsync(days, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Returns cost data grouped by printer.
+    /// </summary>
+    [HttpGet("costs/by-printer")]
+    [ProducesResponseType(typeof(List<CostByPrinterDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCostsByPrinterAsync([FromQuery] int? days, CancellationToken ct = default)
+    {
+        var result = await _statisticsService.GetCostsByPrinterAsync(days, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Returns cost data grouped by material type.
+    /// </summary>
+    [HttpGet("costs/by-material")]
+    [ProducesResponseType(typeof(List<CostByMaterialDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCostsByMaterialAsync([FromQuery] int? days, CancellationToken ct = default)
+    {
+        var result = await _statisticsService.GetCostsByMaterialAsync(days, ct);
+        return Ok(result);
+    }
 }

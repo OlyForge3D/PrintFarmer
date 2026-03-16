@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoPrint;
+using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
@@ -28,6 +29,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly ISpoolmanService? _spoolmanService;
     private readonly IAutoDispatchTrigger? _autoDispatchTrigger;
     private readonly IDiagnosticChannelService? _diagnostics;
+    private readonly IJobCostCalculationService? _jobCostCalculationService;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -87,7 +89,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         IBackendClientFactory? backendFactory = null,
         ISpoolmanService? spoolmanService = null,
         IAutoDispatchTrigger? autoDispatchTrigger = null,
-        IDiagnosticChannelService? diagnostics = null)
+        IDiagnosticChannelService? diagnostics = null,
+        IJobCostCalculationService? jobCostCalculationService = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -99,6 +102,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _spoolmanService = spoolmanService;
         _autoDispatchTrigger = autoDispatchTrigger;
         _diagnostics = diagnostics;
+        _jobCostCalculationService = jobCostCalculationService;
     }
 
     /// <summary>
@@ -204,6 +208,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
 
         await _db.SaveChangesAsync(ct);
+
+        // Calculate detailed cost breakdown (runs after SaveChanges to ensure ActualFilamentUsage is persisted)
+        await CalculateDetailedCostBreakdownAsync(primaryJob.Id, ct);
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Job {JobId} ({JobName}) marked as completed. Duration: {Duration}",
@@ -569,5 +576,25 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         }
 
         return syncedCount;
+    }
+
+    /// <summary>
+    /// Calculates detailed cost breakdown using the JobCostCalculationService if available.
+    /// </summary>
+    private async Task CalculateDetailedCostBreakdownAsync(Guid jobId, CancellationToken ct)
+    {
+        if (_jobCostCalculationService == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _jobCostCalculationService.CalculateAndStoreCostsAsync(jobId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to calculate detailed cost breakdown for job {JobId}", jobId);
+        }
     }
 }

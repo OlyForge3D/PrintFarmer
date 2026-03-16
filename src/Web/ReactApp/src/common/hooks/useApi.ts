@@ -61,6 +61,9 @@ import {
   UpdateNfcDeviceDto,
   NfcScanHistoryDto,
   PagedResponse,
+  NotificationDto,
+  AutoPrintGlobalStatus,
+  AutoPrintStatus,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -111,6 +114,20 @@ export const queryKeys = {
   nfcDevices: ['nfc-devices'] as const,
   nfcDevice: (id: string) => ['nfc-devices', id] as const,
   nfcDeviceHistory: (id: string) => ['nfc-devices', id, 'history'] as const,
+  notifications: ['notifications'] as const,
+  unreadCount: ['notifications', 'unread-count'] as const,
+  notificationPreferences: ['notifications', 'preferences'] as const,
+  costSummary: ['costs', 'summary'] as const,
+  costs: ['costs'] as const,
+  costsByPrinter: ['costs', 'by-printer'] as const,
+  costsByMaterial: ['costs', 'by-material'] as const,
+  costOverTime: ['costs', 'over-time'] as const,
+  autoPrintStatus: ['auto-print', 'status'] as const,
+  autoPrintPrinterStatus: (printerId: string) => ['auto-print', printerId, 'status'] as const,
+  scheduledJobs: ['scheduled-jobs'] as const,
+  scheduledJob: (jobId: string) => ['scheduled-jobs', jobId] as const,
+  jobExecutions: (jobId: string) => ['scheduled-jobs', jobId, 'executions'] as const,
+  timezones: ['timezones'] as const,
 } as const;
 
 // ============ Printer Hooks ============
@@ -1530,5 +1547,282 @@ export function useDeleteNfcDevice() {
       toast.success('NFC device removed');
     },
     onError: (err: ApiError) => toast.error(`Failed to remove device: ${err.message}`),
+  });
+}
+
+// ============ Notification Hooks ============
+
+export function useNotifications(options?: QueryOptions<NotificationDto[]> & { limit?: number }) {
+  const limit = options?.limit;
+  return useQuery({
+    queryKey: [...queryKeys.notifications, limit],
+    queryFn: () => apiClient.getNotifications(limit),
+    staleTime: 30_000, // 30s
+    ...options,
+  });
+}
+
+export function useUnreadCount(options?: QueryOptions<number>) {
+  return useQuery({
+    queryKey: queryKeys.unreadCount,
+    queryFn: () => apiClient.getUnreadCount(),
+    staleTime: 10_000, // 10s
+    ...options,
+  });
+}
+
+export function useMarkNotificationAsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (notificationId: string) => apiClient.markNotificationAsRead(notificationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
+      queryClient.invalidateQueries({ queryKey: queryKeys.unreadCount });
+    },
+    onError: (err: ApiError) => toast.error(`Failed to mark as read: ${err.message}`),
+  });
+}
+
+export function useMarkAllNotificationsAsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (notificationIds: string[]) => apiClient.markMultipleNotificationsAsRead(notificationIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
+      queryClient.invalidateQueries({ queryKey: queryKeys.unreadCount });
+      toast.success('All notifications marked as read');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to mark as read: ${err.message}`),
+  });
+}
+
+export function useDeleteNotification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (notificationId: string) => apiClient.deleteNotification(notificationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
+      queryClient.invalidateQueries({ queryKey: queryKeys.unreadCount });
+      toast.success('Notification deleted');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to delete: ${err.message}`),
+  });
+}
+
+// ============ Cost Tracking Hooks ============
+
+export function useCostSummary(options?: QueryOptions<import("@/types/api").CostSummary>) {
+  return useQuery({
+    queryKey: queryKeys.costSummary,
+    queryFn: () => apiClient.getCostSummary(),
+    staleTime: 300_000, // 5 minutes - cost data is relatively stable
+    ...options,
+  });
+}
+
+export function useCostsByPrinter(options?: QueryOptions<import("@/types/api").CostByPrinter[]>) {
+  return useQuery({
+    queryKey: queryKeys.costsByPrinter,
+    queryFn: () => apiClient.getCostsByPrinter(),
+    staleTime: 300_000, // 5 minutes
+    ...options,
+  });
+}
+
+export function useCostsByMaterial(options?: QueryOptions<import("@/types/api").CostByMaterial[]>) {
+  return useQuery({
+    queryKey: queryKeys.costsByMaterial,
+    queryFn: () => apiClient.getCostsByMaterial(),
+    staleTime: 300_000, // 5 minutes
+    ...options,
+  });
+}
+
+export function useCostOverTime(options?: QueryOptions<import("@/types/api").CostOverTime[]>) {
+  return useQuery({
+    queryKey: queryKeys.costOverTime,
+    queryFn: () => apiClient.getCostOverTime(),
+    staleTime: 300_000, // 5 minutes
+    ...options,
+  });
+}
+
+// ============ Job Scheduling Hooks ============
+
+export function useScheduledJobs(options?: QueryOptions<import("@/types/api").ScheduledJob[]>) {
+  return useQuery({
+    queryKey: queryKeys.scheduledJobs,
+    queryFn: () => apiClient.getScheduledJobs(),
+    staleTime: 30_000, // 30 seconds
+    ...options,
+  });
+}
+
+export function useScheduledJob(jobId: string, options?: QueryOptions<import("@/types/api").ScheduledJob>) {
+  return useQuery({
+    queryKey: queryKeys.scheduledJob(jobId),
+    queryFn: () => apiClient.getScheduledJob(jobId),
+    staleTime: 30_000,
+    enabled: !!jobId,
+    ...options,
+  });
+}
+
+export function useTimezones(options?: QueryOptions<string[]>) {
+  return useQuery({
+    queryKey: queryKeys.timezones,
+    queryFn: () => apiClient.getTimezones(),
+    staleTime: 600_000, // 10 minutes - timezones rarely change
+    ...options,
+  });
+}
+
+export function useScheduleJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, request }: { jobId: string; request: import("@/types/api").ScheduleJobRequest }) =>
+      apiClient.scheduleJob(jobId, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJobs });
+      toast.success('Job scheduled successfully');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to schedule job: ${err.message}`),
+  });
+}
+
+export function useRescheduleJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, request }: { jobId: string; request: import("@/types/api").ScheduleJobRequest }) =>
+      apiClient.rescheduleJob(jobId, request),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJobs });
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJob(variables.jobId) });
+      toast.success('Job rescheduled successfully');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to reschedule job: ${err.message}`),
+  });
+}
+
+export function useCancelSchedule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => apiClient.cancelSchedule(jobId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJobs });
+      toast.success('Schedule cancelled');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to cancel schedule: ${err.message}`),
+  });
+}
+
+export function usePauseSchedule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => apiClient.pauseSchedule(jobId),
+    onSuccess: (_, jobId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJobs });
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJob(jobId) });
+      toast.success('Schedule paused');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to pause schedule: ${err.message}`),
+  });
+}
+
+export function useResumeSchedule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => apiClient.resumeSchedule(jobId),
+    onSuccess: (_, jobId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJobs });
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJob(jobId) });
+      toast.success('Schedule resumed');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to resume schedule: ${err.message}`),
+  });
+}
+
+
+// ============ Auto-Print Hooks ============
+
+export function useAutoPrintStatus(options?: QueryOptions<AutoPrintGlobalStatus>) {
+  return useQuery({
+    queryKey: queryKeys.autoPrintStatus,
+    queryFn: () => apiClient.getAutoPrintStatus(),
+    staleTime: 10_000, // 10 seconds - real-time data
+    refetchInterval: 10_000,
+    ...options,
+  });
+}
+
+export function useAutoPrintPrinterStatus(printerId: string, options?: QueryOptions<AutoPrintStatus>) {
+  return useQuery({
+    queryKey: queryKeys.autoPrintPrinterStatus(printerId),
+    queryFn: () => apiClient.getAutoPrintPrinterStatus(printerId),
+    staleTime: 10_000, // 10 seconds - real-time data
+    refetchInterval: 10_000,
+    enabled: !!printerId,
+    ...options,
+  });
+}
+
+export function useMarkPrinterReady() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (printerId: string) => apiClient.markPrinterReady(printerId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
+      toast.success('Printer marked as ready');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to mark ready: ${err.message}`),
+  });
+}
+
+export function useSkipAutoPrintJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (printerId: string) => apiClient.skipAutoPrintJob(printerId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
+      toast.success('Job skipped');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to skip job: ${err.message}`),
+  });
+}
+
+export function useCancelAutoPrint() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (printerId: string) => apiClient.cancelAutoPrint(printerId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
+      toast.success('Auto-print cancelled');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to cancel: ${err.message}`),
+  });
+}
+
+export function useSetAutoPrintEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ printerId, enabled }: { printerId: string; enabled: boolean }) => 
+      apiClient.setAutoPrintEnabled(printerId, enabled),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
+      toast.success(`Auto-print ${vars.enabled ? 'enabled' : 'disabled'}`);
+    },
+    onError: (err: ApiError) => toast.error(`Failed to update: ${err.message}`),
+  });
+}
+
+export function useSetAutoPrintGlobalEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => apiClient.setAutoPrintGlobalEnabled(enabled),
+    onSuccess: (_data, enabled) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
+      toast.success(`Global auto-print ${enabled ? 'enabled' : 'disabled'}`);
+    },
+    onError: (err: ApiError) => toast.error(`Failed to update: ${err.message}`),
   });
 }

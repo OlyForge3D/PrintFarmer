@@ -1,0 +1,77 @@
+# Obico ML API Service
+# AI-powered print failure detection for 3D printers
+# Analyzes camera images to detect print failures (spaghetti, adhesion loss, etc.)
+#
+# Architecture:
+#   - Runs on bridge network alongside other PrintFarmer services
+#   - API connects via Docker DNS (http://obico-ml-api:3333)
+#   - Internal service only — not exposed to host by default
+#
+# Environment Variables:
+#   OBICO_ML_API_URL            - URL for PrintFarmer API to reach ML service (default: http://obico-ml-api:3333)
+#   OBICO_ML_CONFIDENCE_THRESHOLD - Detection confidence threshold 0.0-1.0 (default: 0.7)
+#   OBICO_ML_SCAN_INTERVAL      - Seconds between scans when monitoring is enabled (default: 30)
+#   OBICO_ML_DEBUG              - Enable debug logging (default: False)
+#
+# GPU Support:
+#   - Uncomment 'deploy.resources.reservations.devices' section below to enable GPU acceleration
+#   - Requires NVIDIA Docker runtime and compatible GPU
+#   - CPU-only mode is default and works well for most use cases
+
+services:
+  obico-ml-api:
+    image: ${OBICO_ML_IMAGE:-thespaghettidetective/ml_api:base-1.4}
+    container_name: printfarmer-obico-ml-api
+    restart: unless-stopped
+    networks:
+      - printfarmer-network
+    environment:
+      - DEBUG=${OBICO_ML_DEBUG:-False}
+      - FLASK_APP=server.py
+      # Optional: ML_API_TOKEN for authentication (not required for internal use)
+      # - ML_API_TOKEN=${OBICO_ML_API_TOKEN:-}
+    # Internal port only - API server connects via Docker DNS
+    # Uncomment to expose for debugging:
+    # ports:
+    #   - "${OBICO_ML_PORT:-3333}:3333"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3333/hc/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Model cache volume for persistence
+    volumes:
+      - obico-ml-model-cache:/model_cache
+    # Resource limits - ML inference can be memory-intensive
+    deploy:
+      resources:
+        limits:
+          cpus: "${OBICO_ML_CPU_LIMIT:-2.0}"
+          memory: ${OBICO_ML_MEMORY_LIMIT:-2gb}
+        reservations:
+          cpus: "${OBICO_ML_CPU_REQUEST:-0.5}"
+          memory: ${OBICO_ML_MEMORY_REQUEST:-512m}
+          # Uncomment for GPU support (requires NVIDIA Docker runtime)
+          # devices:
+          #   - driver: nvidia
+          #     count: 1
+          #     capabilities: [gpu]
+    # Security hardening
+    read_only: false  # ML API needs to write temp files
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+# Network and volume definitions
+networks:
+  printfarmer-network:
+    name: printfarmer-network
+    driver: bridge
+
+volumes:
+  obico-ml-model-cache:
+    driver: local

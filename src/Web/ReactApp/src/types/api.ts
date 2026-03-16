@@ -3128,3 +3128,162 @@ export interface DispatchHistoryPageDto {
   page: number;
   pageSize: number;
 }
+
+// ============ Notification Types ============
+
+export enum NotificationType {
+  JobStarted = 'JobStarted',
+  JobCompleted = 'JobCompleted',
+  JobFailed = 'JobFailed',
+  JobPaused = 'JobPaused',
+  JobResumed = 'JobResumed',
+  QueueAlert = 'QueueAlert',
+  SystemAlert = 'SystemAlert'
+}
+
+export enum NotificationFrequency {
+  RealTime = 'RealTime',
+  Hourly = 'Hourly',
+  Daily = 'Daily',
+  Weekly = 'Weekly',
+  Never = 'Never'
+}
+
+export interface NotificationDto {
+  id: string;
+  userId: string;
+  jobId?: string;
+  type: NotificationType;
+  subject: string;
+  body: string;
+  isRead: boolean;
+  createdAt: string;
+  readAt?: string;
+  expiresAt?: string;
+}
+
+export interface NotificationPreferencesDto {
+  userId: string;
+  enableEmailNotifications: boolean;
+  enablePushNotifications: boolean;
+  enableInAppNotifications: boolean;
+  notifyOnCompletion: boolean;
+  notifyOnFailure: boolean;
+  notifyOnStart: boolean;
+  notifyOnPause: boolean;
+  frequency: NotificationFrequency;
+  retentionDays: number;
+}
+
+export interface UpdateNotificationPreferencesRequest {
+  enableEmailNotifications: boolean;
+  enablePushNotifications: boolean;
+  enableInAppNotifications: boolean;
+  notifyOnCompletion: boolean;
+  notifyOnFailure: boolean;
+  notifyOnStart: boolean;
+  notifyOnPause: boolean;
+  frequency: NotificationFrequency;
+  retentionDays?: number;
+}
+
+export interface UnreadCountResponse {
+  unreadCount: number;
+}
+
+// ============== Job Scheduling ==============
+
+export type RecurrenceType = 'once' | 'daily' | 'weekly' | 'monthly';
+export type ScheduleStatus = 'active' | 'paused' | 'completed' | 'cancelled';
+
+export interface ScheduledJob {
+  id: string;
+  jobId: string;
+  jobName: string;
+  printerName: string;
+  printerId: string;
+  scheduledTime: string;
+  recurrence?: RecurrenceType;
+  recurrenceInterval?: number;
+  status: ScheduleStatus;
+  nextExecution?: string;
+  lastExecution?: string;
+  createdAt: string;
+}
+
+export interface JobExecution {
+  id: string;
+  scheduledJobId: string;
+  startedAt: string;
+  completedAt?: string;
+  status: string;
+  errorMessage?: string;
+}
+
+export interface ScheduleJobRequest {
+  scheduledTime: string;
+  timezone: string;
+  recurrenceType: RecurrenceType;
+  recurrenceInterval?: number;
+}
+
+export interface MarkMultipleAsReadRequest {
+  notificationIds: string[];
+}
+
+// ============ Cost Tracking Types ============
+
+export interface CostSummary {
+  totalMaterialCost: number;
+  totalEnergyCost: number;
+  totalMachineTimeCost: number;
+  totalLaborCost: number;
+  totalCost: number;
+  jobCount: number;
+  averageCostPerJob: number;
+}
+
+export interface CostByPrinter {
+  printerId: string;
+  printerName: string;
+  totalCost: number;
+  jobCount: number;
+}
+
+export interface CostByMaterial {
+  materialType: string;
+  totalCost: number;
+  totalWeight: number;
+  jobCount: number;
+}
+
+export interface CostOverTime {
+  date: string;
+  totalCost: number;
+  jobCount: number;
+}
+
+// ============ Auto-Print Types ============
+
+export interface ReadyGateCheck {
+  name: string;
+  passed: boolean;
+  message: string;
+  checkedAt: string;
+}
+
+export interface AutoPrintStatus {
+  printerId: string;
+  printerName: string;
+  enabled: boolean;
+  isReady: boolean;
+  currentJobName?: string;
+  queueDepth: number;
+  readyGateChecks: ReadyGateCheck[];
+  lastActivity?: string;
+}
+
+export interface AutoPrintGlobalStatus {
+  globalEnabled: boolean;
+  printers: AutoPrintStatus[];
+}

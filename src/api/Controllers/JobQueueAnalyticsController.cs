@@ -794,4 +794,80 @@ public class JobQueueAnalyticsController(
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve analytics" });
         }
     }
+
+    /// <summary>
+    /// Get detailed cost breakdown for a specific job
+    /// </summary>
+    /// <param name="id">Job ID</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    [HttpGet("jobs/{id}/cost")]
+    [ProducesResponseType(typeof(JobCostBreakdownDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetJobCostBreakdownAsync(
+        [FromRoute] Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var job = await _printJobManagementService.GetJobCostBreakdownAsync(id, cancellationToken);
+
+            if (job == null)
+            {
+                return NotFound(new { error = $"Job {id} not found" });
+            }
+
+            return Ok(job);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving cost breakdown for job {JobId}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve cost breakdown" });
+        }
+    }
+
+    /// <summary>
+    /// Update job cost with manual overrides
+    /// </summary>
+    /// <param name="id">Job ID</param>
+    /// <param name="request">Cost override values</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    [HttpPut("jobs/{id}/cost")]
+    [ProducesResponseType(typeof(JobCostBreakdownDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> UpdateJobCostAsync(
+        [FromRoute] Guid id,
+        [FromBody] UpdateJobCostRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (request == null)
+            {
+                return BadRequest(new { error = "Request body is required" });
+            }
+
+            var updated = await _printJobManagementService.UpdateJobCostAsync(
+                id,
+                request.MaterialCostUsd,
+                request.EnergyCostUsd,
+                request.MachineTimeCostUsd,
+                request.LaborCostUsd,
+                cancellationToken);
+
+            if (updated == null)
+            {
+                return NotFound(new { error = $"Job {id} not found" });
+            }
+
+            return Ok(updated);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating cost for job {JobId}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update cost" });
+        }
+    }
 }

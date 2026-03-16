@@ -53,9 +53,12 @@ import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMain
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
+import { CostDashboardPage } from '@/features/statistics/pages/CostDashboardPage';
 import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDashboardPage';
 import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
+import { AutoPrintDashboardPage } from '@/features/auto-print/pages/AutoPrintDashboardPage';
+import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
 import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
@@ -211,8 +214,11 @@ function AuthenticatedAppRoutes() {
         <Route path="cameras/:tabId" element={<CamerasPage />} />
         <Route path="nfc-devices" element={<NfcDevicesPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
+        <Route path="auto-print" element={<AutoPrintDashboardPage />} />
         <Route path="statistics" element={<StatisticsPage />} />
+        <Route path="statistics/costs" element={<CostDashboardPage />} />
         <Route path="analytics" element={<AnalyticsDashboardPage />} />
+        <Route path="scheduling" element={<SchedulingPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="locations/dashboard" element={<LocationDashboardPage />} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />

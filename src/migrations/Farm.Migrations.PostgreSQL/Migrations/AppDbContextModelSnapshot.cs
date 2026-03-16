@@ -2234,6 +2234,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(1);
 
+                    b.Property<DateTime?>("CostCalculatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2245,6 +2248,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<DateTime?>("DispatchedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("EnergyCostUsd")
+                        .HasColumnType("numeric");
 
                     b.Property<decimal?>("EstimatedCost")
                         .HasColumnType("numeric");
@@ -2279,6 +2285,15 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal?>("LaborCostUsd")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("MachineTimeCostUsd")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("MaterialCostUsd")
+                        .HasColumnType("numeric");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -2334,6 +2349,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
+
+                    b.Property<decimal?>("TotalCostUsd")
+                        .HasColumnType("numeric");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -2737,6 +2755,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal?>("MachineHourlyRate")
+                        .HasColumnType("numeric");
 
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("uuid");

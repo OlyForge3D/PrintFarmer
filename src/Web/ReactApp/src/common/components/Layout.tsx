@@ -2,6 +2,8 @@ import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
 import { TasksBadge } from '@/features/tasks';
+import { NotificationBell } from '@/common/components/NotificationBell';
+import { InstallBanner } from '@/common/components/InstallBanner';
 import { useTheme, Theme } from '@/contexts/ThemeContext';
 import { Button } from '@/common/components/ui';
 import { 
@@ -32,6 +34,8 @@ import {
   ExternalLinkIcon,
   AlertIcon,
   ClipboardListIcon,
+  PlayIcon,
+  CalendarIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -115,6 +119,12 @@ const navigation: NavigationElement[] = [
     icon: HistoryIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
   },
+  {
+    name: 'Auto-Print',
+    href: '/auto-print',
+    icon: PlayIcon,
+    requiredPermission: { resource: 'printers', action: 'read' }
+  },
 
   // — Hardware —
   { name: 'Hardware', isSectionHeader: true },
@@ -148,9 +158,19 @@ const navigation: NavigationElement[] = [
     icon: ChartIcon,
   },
   {
+    name: 'Cost Analytics',
+    href: '/statistics/costs',
+    icon: TrendingUpIcon,
+  },
+  {
     name: 'Analytics',
     href: '/analytics',
     icon: TrendingUpIcon,
+  },
+  {
+    name: 'Scheduling',
+    href: '/scheduling',
+    icon: CalendarIcon,
   },
   {
     name: 'API Keys',
@@ -512,6 +532,9 @@ export function Layout() {
 
             {/* Pending Tasks Badge */}
             {isAuthenticated && <TasksBadge />}
+
+            {/* Notification Bell */}
+            {isAuthenticated && <NotificationBell />}
 
             {/* User menu */}
             <div className="relative">
@@ -887,6 +910,7 @@ export function Layout() {
         <main className="flex-1 overflow-y-auto min-h-0">
           <EmailConfirmationBanner />
           <PlatformBanner />
+          <InstallBanner />
           <div className="pt-2 pr-2 pl-2">
             <Outlet />
           </div>

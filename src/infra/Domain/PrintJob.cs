@@ -70,6 +70,36 @@ public class PrintJob
     /// </summary>
     public decimal? ActualCost { get; set; }
 
+    /// <summary>
+    /// Material cost in USD (filament usage × price per gram). Calculated on job completion.
+    /// </summary>
+    public decimal? MaterialCostUsd { get; set; }
+
+    /// <summary>
+    /// Energy cost in USD (print duration × printer wattage × electricity rate). Calculated on job completion.
+    /// </summary>
+    public decimal? EnergyCostUsd { get; set; }
+
+    /// <summary>
+    /// Machine time cost in USD (print duration × machine hourly rate). Calculated on job completion.
+    /// </summary>
+    public decimal? MachineTimeCostUsd { get; set; }
+
+    /// <summary>
+    /// Labor cost in USD (subtotal × labor markup percent). Calculated on job completion.
+    /// </summary>
+    public decimal? LaborCostUsd { get; set; }
+
+    /// <summary>
+    /// Total cost in USD (material + energy + machine time + labor). Calculated on job completion.
+    /// </summary>
+    public decimal? TotalCostUsd { get; set; }
+
+    /// <summary>
+    /// UTC timestamp when cost was calculated for this job.
+    /// </summary>
+    public DateTime? CostCalculatedAt { get; set; }
+
     public string? FailureReason { get; set; }
 
     public Guid[]? PreferredPrinterIds { get; set; } // JSON array of preferred printer IDs

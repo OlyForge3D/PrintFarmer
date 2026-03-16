@@ -219,6 +219,12 @@ public class Printer
 
     public DateTime LastCapabilityUpdate { get; set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Per-printer machine hourly rate override for cost tracking.
+    /// If null, uses the default rate from CostTrackingSettings.
+    /// </summary>
+    public decimal? MachineHourlyRate { get; set; }
+
     // Multi-toolhead support (one-to-many with Toolhead)
 
     /// <summary>

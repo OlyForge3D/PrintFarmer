@@ -41,4 +41,32 @@ public interface IStatisticsService
     /// <param name="days">Optional number of days to filter. If null, returns all-time stats.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<List<PrinterUtilizationDto>> GetPrinterUtilizationAsync(int? days, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns aggregate cost statistics summary.
+    /// </summary>
+    /// <param name="days">Optional number of days to filter. If null, returns all-time stats.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<CostStatisticsSummaryDto> GetCostsSummaryAsync(int? days, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns cost data grouped by time period.
+    /// </summary>
+    /// <param name="days">Optional number of days to filter. If null, returns all-time stats.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<CostByTimePeriodDto>> GetCostsByTimePeriodAsync(int? days, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns cost data grouped by printer.
+    /// </summary>
+    /// <param name="days">Optional number of days to filter. If null, returns all-time stats.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<CostByPrinterDto>> GetCostsByPrinterAsync(int? days, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns cost data grouped by material type.
+    /// </summary>
+    /// <param name="days">Optional number of days to filter. If null, returns all-time stats.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<CostByMaterialDto>> GetCostsByMaterialAsync(int? days, CancellationToken ct = default);
 }
