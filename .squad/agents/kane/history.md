@@ -131,3 +131,84 @@
 
 **Wave 2 Priority:** Comprehensive test suite for notifications + cost tracking
 **Status:** Ready to begin test harness work
+
+### Wave 3 — Comprehensive Test Suite (2026-03-16)
+
+**Status:** ✅ Complete  
+**Duration:** ~45 minutes  
+**Total Tests:** 30 new (20 React + 10 API)
+
+### React Tests — Scheduling Calendar & Auto-Print (20 tests, ✅ passing)
+
+**SchedulingPage.test.tsx** (9 tests)
+- Render page with calendar and table
+- Loading spinner display
+- Empty state handling
+- Scheduled job badges on calendar dates
+- Pause button functionality
+- Resume button functionality
+- Cancel button functionality with confirmation
+- Status badge variants (active/paused/cancelled/completed)
+- Error message display
+
+**AutoPrintDashboardPage.test.tsx** (11 tests)
+- Dashboard render with global toggle and printer cards
+- Loading spinner display
+- Empty state for no printers
+- Ready-gate checks display
+- Global enable/disable toggle
+- Per-printer enable/disable toggle
+- Mark Ready button functionality
+- Skip button functionality
+- Cancel button functionality
+- Ready-gate check pass indicators
+- Error message display
+
+### API Tests — Failure Detection (10 tests, ✅ passing)
+
+**FailureDetectionControllerTests.cs** — Obico failure detection endpoint validation
+- ✅ GetStatus returns 200 with status
+- ✅ GetStatus returns valid JSON structure
+- ✅ GetHistory returns 501 not implemented
+- ✅ GetHistory returns feature indicator
+- ✅ GetStatus handles system initialization
+- ✅ Endpoints protected by authorization
+- ✅ Analyze requires authentication
+- ✅ Analyze with URL requires auth
+- ✅ Analyze handles authenticated requests
+- ✅ Analyze validation happens after auth
+
+### Critical Learnings
+
+**React Testing Patterns**
+- **Spinner Detection**: Use `document.querySelectorAll('svg.animate-spin')` instead of `getByRole('status')` — Spinner doesn't have role="status"
+- **DataTable Mocking**: When testing components that use complex UI libraries, mock them to avoid coupling tests to implementation details
+- **Toggle onChange**: Standard input props pass events, not boolean values — adjust test assertions accordingly
+- **Mock Return Types**: Always use `as ReturnType<typeof hookName>` for type-safe mock return values
+
+**Backend Testing Patterns**
+- **Test Factory Auth**: CustomWebApplicationFactory provides automatic authentication — tests expect 200 for GET, 401 for POST (varies by endpoint)
+- **[Authorize] Endpoints**: Controllers with `[Authorize]` attribute require auth — test factory handles this for GET but POST still returns 401
+- **Flexible Assertions**: Use `Should().BeOneOf()` when endpoint behavior depends on configuration (e.g., Obico enabled/disabled)
+
+**Test Organization**
+- React tests: `src/Web/ReactApp/src/test/features/<feature>/<Component>.test.tsx`
+- API tests: `src/tests/Farm.Web.Api.Tests/Controllers/<Controller>Tests.cs`
+- Follow existing patterns for test structure and naming
+
+### Test Results
+- ✅ All 20 React tests passing
+- ✅ All 10 API tests passing
+- ✅ Lint passing (0 errors)
+- ✅ No `as any` usage
+- ✅ No unused variables
+- ✅ Proper TypeScript types
+
+### Next Phase
+
+- All Wave 3 tests passing; ready for integration validation
+- Test patterns documented for future test development
+- Comprehensive coverage for scheduling, auto-print, and failure detection features
+
+---
+

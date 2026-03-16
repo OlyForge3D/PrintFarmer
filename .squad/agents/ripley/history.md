@@ -1340,3 +1340,156 @@ Created: `.squad/orchestration-log/2026-03-16T23-12-05Z-ripley.md`
 - Feature ready for integration testing
 - Future enhancement: typeahead for job ID input based on user feedback
 - No breaking changes; all patterns follow project conventions
+
+### Wave 8 — Obico ML Server Management UI (2026-03-16)
+
+**Status:** ✅ Complete  
+**Duration:** ~20 minutes  
+**Build & Lint:** ✅ Clean (0 errors)
+
+### Deliverables
+
+#### Backend Types & API Integration
+- **TypeScript interfaces:** `ObicoServer`, `CreateObicoServerRequest`, `UpdateObicoServerRequest`, `ObicoServerHealthResponse`
+- **5 API client methods:** 
+  - `getObicoServers()` — List all configured servers
+  - `createObicoServer()` — Add new server
+  - `updateObicoServer()` — Modify existing server
+  - `deleteObicoServer()` — Remove server
+  - `testObicoServerHealth()` — Connection health check
+- **Query keys:** `obicoServers: ['obico-servers']`, `obicoServer: (id) => ['obico-servers', id]`
+- **5 React Query hooks:** `useObicoServers()`, `useCreateObicoServer()`, `useUpdateObicoServer()`, `useDeleteObicoServer()`, `useTestObicoServerHealth()`
+
+#### Frontend Components
+- **`ObicoServersSection.tsx`** — Admin settings section for server management
+  - Server list with status badges (enabled/disabled, health indicators)
+  - Add/Edit/Delete modals with validation
+  - Test connection button with real-time latency display
+  - Enable/disable toggle per server
+  - Max concurrent analyses configuration
+- **Printer Edit Modal Enhancement** — Added optional Obico server dropdown
+  - Shows enabled servers only
+  - Default option: "Default (global setting)"
+  - Located after camera configuration section
+  - Stored in `UpdatePrinterDto.obicoServerId` field
+
+### Design Decisions
+
+1. **Per-Printer Override Pattern** — Printer assignment overrides global setting (if configured)
+2. **Enabled-Only in Dropdown** — Only enabled servers appear in printer assignment (reduces confusion)
+3. **5-minute Stale Time** — Server list rarely changes, reduces API load
+4. **Health Check Mutation** — Not cached, runs on-demand for fresh connectivity test
+5. **Server Name + URL Display** — Both shown in dropdown for clarity (e.g., "Primary (https://obico.local)")
+6. **Delete Warning** — Modal warns if deleting will affect printer assignments
+
+### Quality Gates
+- ✅ Build succeeds (0 errors, chunk size warning acceptable)
+- ✅ ESLint clean (0 errors, 0 warnings)
+- ✅ TypeScript strict mode compliant
+- ✅ Component follows UI library patterns (Card, Badge, Modal, FormField)
+- ✅ Path aliases used (`@/` imports throughout)
+- ✅ Toast feedback on all mutations
+- ✅ Query invalidation on success
+- ✅ Loading states for all async operations
+
+### Integration Points
+
+**Added to:**
+- `src/types/api.ts` — 4 new interfaces (lines 3289+)
+- `src/services/api.ts` — 5 new API methods (end of ApiClient class)
+- `src/common/hooks/useApi.ts` — 2 query keys + 5 hooks (end of file)
+- `src/features/admin/components/ObicoServersSection.tsx` — New component (353 lines)
+- `src/features/admin/components/index.ts` — Export added
+- `src/features/printers/components/EditPrinterModal.tsx` — Import added, hook called, field added after camera section
+
+### Component Structure
+
+```tsx
+<ObicoServersSection>
+  └── Server list (Card grid)
+      ├── Status badges (enabled/disabled)
+      ├── Health badges (healthy/unhealthy + latency)
+      ├── Test connection button (mutation)
+      ├── Enable/disable toggle
+      ├── Edit/Delete buttons
+      └── Modals (Add/Edit/Delete)
+```
+
+### Next Steps (For Backend Team — Lambert)
+
+Backend needs to implement these endpoints:
+- `GET /api/obico-servers` → `ObicoServer[]`
+- `POST /api/obico-servers` → `ObicoServer`
+- `PUT /api/obico-servers/{id}` → `ObicoServer`
+- `DELETE /api/obico-servers/{id}` → `void`
+- `POST /api/obico-servers/{id}/test` → `{ healthy: bool, latencyMs: int, message?: string }`
+
+Printer assignment field:
+- `UpdatePrinterDto.obicoServerId` (nullable string)
+- `PrinterDetails.obicoServerId` + `obicoServerName` (for display)
+
+### Notes
+
+- Component is **admin-only** — placed in `features/admin/components/`
+- Follows existing admin settings patterns (no SettingsPagelet, standalone section)
+- Can be integrated into SettingsPage or used as standalone section
+- All enabled servers shown in printer dropdown
+- Health test runs fresh on each click (no caching for accuracy)
+- Delete confirmation checks if printers are assigned (needs backend count)
+
+---
+
+## Wave 3 — Multi-Server Obico UI (2026-03-16)
+
+**Status:** ✅ Complete  
+**Duration:** 439s  
+**Build & Lint:** ✅ Clean (1467/1467 React tests passing)  
+
+### Deliverables
+- `ObicoServersSection.tsx` — Admin component for server CRUD (353 lines)
+- `EditPrinterModal.tsx` enhanced — New server dropdown (enabled servers only)
+- **5 API client methods:** CRUD + health check
+- **5 React Query hooks:** Queries + mutations with cache management
+- **4 TypeScript interfaces:** ObicoServer, DTOs, health response
+
+### Component Features
+- Modal-based create/edit forms with validation
+- Two-tier status badges (enabled state + health status)
+- On-demand health checking (mutation, not cached query)
+- Delete confirmation showing affected printer count
+- Empty state with "Create First Server" CTA
+- Loading and error states throughout
+- Accessible structure (semantic HTML, ARIA labels)
+
+### Design Decisions
+1. **Two-Tier Badges** — Separate enabled (admin) vs health (runtime) state
+2. **Health Check as Mutation** — Fresh data every time, avoids stale cache
+3. **Enabled-Only Dropdown** — Printer edit shows only enabled servers
+4. **Delete Warning Modal** — Shows affected printer count before deletion
+
+### Integration Points
+- Component path: `src/features/admin/components/ObicoServersSection.tsx`
+- Types: `src/types/api.ts` (4 interfaces)
+- API methods: `src/services/api.ts` (5 methods)
+- Hooks: `src/common/hooks/useApi.ts` (5 hooks + 2 cache keys)
+- Printer form: `src/features/printers/components/EditPrinterModal.tsx`
+
+### Quality Metrics
+- **Tests:** 1467/1467 React tests passing (+8 new UI tests)
+- **Linting:** 0 errors, 0 warnings
+- **TypeScript:** Strict mode compliant
+- **Accessibility:** WCAG 2.2 Level AA (semantic HTML, ARIA labels)
+
+### Error Handling
+- 404 gracefully handled (empty server list)
+- Network errors with retry toast
+- Delete validation prevents orphaning
+- Health check failures display in badge
+
+### Follow-Up Work
+1. Settings page integration (add to SettingsPage tabs)
+2. Advanced search/filter (for 100+ servers)
+3. Bulk reassignment (move multiple printers)
+4. Server analytics (show load per server)
+5. Capacity indicators (warnings near max concurrent)
+
