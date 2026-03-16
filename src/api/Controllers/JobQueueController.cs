@@ -246,6 +246,36 @@ public class JobQueueController(
     }
 
     /// <summary>
+    /// Rerun a completed job by creating a new copy in the queue.
+    /// The original job must be in a terminal state (Completed, Failed, or Cancelled).
+    /// </summary>
+    /// <param name="id">The unique identifier of the completed job to rerun.</param>
+    [HttpPost("{id:guid}/rerun")]
+    [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> RerunJobAsync(Guid id)
+    {
+        try
+        {
+            string userId = User.Identity?.Name ?? "anonymous";
+            QueuedPrintJobDto result = await printJobManagementService.RerunJobAsync(id.ToString(), userId, CancellationToken.None);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning("Cannot rerun job {Id}: {Message}", id, ex.Message);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error rerunning print job {Id}", id);
+            return Problem("An error occurred while rerunning the job", statusCode: 500);
+        }
+    }
+
+    /// <summary>
     /// Delete a job from the queue
     /// </summary>
     /// <param name="id">The unique identifier of the job to delete.</param>

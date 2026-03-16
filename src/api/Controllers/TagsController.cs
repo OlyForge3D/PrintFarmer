@@ -391,6 +391,37 @@ public class TagsController(
     }
 
     /// <summary>
+    /// Bulk assigns tags to multiple objects.
+    /// </summary>
+    /// <param name="request">Bulk assignment request with model IDs and tag IDs</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result of the bulk assignment</returns>
+    [HttpPost("bulk-assign")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> BulkAssignTagsAsync(
+        [FromBody] BulkAssignTagsDto request,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (request is null || request.ModelIds.Length == 0 || request.TagIds.Length == 0)
+            {
+                return BadRequest(new { error = "modelIds and tagIds are required" });
+            }
+
+            await _tagService.BulkAssignTagsAsync(request.ModelIds, request.TagIds, "Model3D", ct);
+            return Ok(new { success = true, assignedCount = request.ModelIds.Length * request.TagIds.Length });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[TagsController] BulkAssignTagsAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to bulk assign tags" });
+        }
+    }
+
+    /// <summary>
     /// Gets all tags assigned to a specific object.
     /// </summary>
     /// <param name="objectId">Unique object identifier</param>

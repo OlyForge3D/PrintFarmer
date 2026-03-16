@@ -22,6 +22,16 @@ public class ConnectionDiagnosticsController(
     private readonly ILogger<ConnectionDiagnosticsController> _logger = logger;
 
     /// <summary>
+    /// Gets a summary of connection health across all printers.
+    /// </summary>
+    [HttpGet("summary")]
+    [ProducesResponseType(typeof(ConnectionDiagnosticsResponse), 200)]
+    public IActionResult GetConnectionHealthSummary()
+    {
+        return GetConnectionHealth();
+    }
+
+    /// <summary>
     /// Gets connection health data for all printers across all backends.
     /// </summary>
     [HttpGet("connections")]
