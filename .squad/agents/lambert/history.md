@@ -1489,3 +1489,8 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 - Tests: 2087 passing (0 failures)
 - Format: No changes needed (already compliant with dotnet format)
 
+
+### Docker Publish Workflow — Release Branch Support (2025-07-25)
+- Added `release` branch to `on.push.branches` in `docker-publish.yml`
+- Added release-specific tags: `release` (mutable) and `release-sha-{short}` (immutable per commit)
+- `containers.yml` left unchanged — it's a scheduled optimization build, not a push-triggered release pipeline. Adding release triggers there would duplicate work already handled by `docker-publish.yml`.

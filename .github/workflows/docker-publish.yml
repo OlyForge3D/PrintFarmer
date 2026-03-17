@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - release
     tags:
       - 'v*'
   workflow_dispatch:
@@ -86,6 +87,10 @@ jobs:
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
             # Tag with short SHA on main branch
             type=sha,format=short,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}
+            # Tag with 'release' on release branch pushes
+            type=raw,value=release,enable=${{ github.ref == 'refs/heads/release' }}
+            # Tag with short SHA on release branch
+            type=sha,format=short,prefix=release-sha-,enable=${{ github.ref == 'refs/heads/release' }}
             # Tag with 'manual' prefix on workflow_dispatch
             type=raw,value=manual-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
           labels: |
