@@ -330,6 +330,14 @@ We welcome contributions! See **[Contributing Guide](./CONTRIBUTING.md)** for:
 - Git workflow and commits
 - PR process
 
+### Git Hooks (Optional)
+
+```bash
+./.githooks/setup.sh
+```
+
+This installs pre-commit hooks for local linting (ShellCheck, yamllint, path casing, ESLint, dotnet format). Checks run only on staged files for speed. CI workflows remain the server-side enforcement.
+
 ## 📊 Project Status
 
 | Component | Status |
