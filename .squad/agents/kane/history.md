@@ -212,3 +212,38 @@
 
 ---
 
+
+### Bed Pre-Clear + Obico ML Badge Testing (2026-03-17)
+
+**Status:** ✅ Complete
+**Tests Written:** 15 total (6 API + 9 React)
+
+#### API Tests — Bed Pre-Clear (6 tests, ✅ all passing)
+
+**File:** `src/tests/Farm.Web.Api.Tests/Controllers/AutoPrintPreClearTests.cs`
+
+- `PreClear_ValidPrinterWithAutoPrintEnabled_Returns200`
+- `PreClear_NonExistentPrinter_Returns400WithNotFoundMessage`
+- `PreClear_AutoPrintDisabled_Returns400`
+- `GetStatus_AfterPreClear_ShowsBedPreConfirmedTrue`
+- `GetStatus_DefaultPrinter_BedPreConfirmedIsFalse`
+- `PreClear_AlreadyPreCleared_SucceedsIdempotently`
+
+**Patterns used:** `CustomWebApplicationFactory` integration tests, `CreateAuthenticatedClientAsync` (controller has `[Authorize]`), camelCase JSON deserialization, `IAsyncLifetime` with `ResetDatabaseAsync`.
+
+**Bug found:** `AutoPrintController.MarkPreClearAsync` declares `ProducesResponseType(Status404NotFound)` in swagger but never returns 404 — all `InvalidOperationException` errors (including "not found") map to `BadRequest(400)`. Filed in decisions inbox.
+
+#### React Tests — Obico ML Badge (9 tests, ✅ all passing)
+
+**File:** `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx`
+
+- `FailureDetectionEvent` type shape verification (2 tests)
+- `ShieldIcon` renders + custom aria-label (2 tests)
+- `CompactPrinterCard` ML badge: shows when obicoServerId + printing, hidden when no server, hidden when idle (3 tests)
+- `DetailedPrinterCard` ML badge: shows when conditions met, hidden when no server (2 tests)
+
+**Key mocking:** Heavy mock set required for printer cards — `useAutoDispatchStatus`, `useJobQueue`, `apiClient`, `sonner`, child components (`BedClearBanner`, `PrintProgressBar`, etc.).
+
+#### Full Suite Verification
+- **API Tests:** 1645/1645 PASS (0 failures)
+- **React Tests:** 1480/1480 PASS (12 skipped — pre-existing)

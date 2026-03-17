@@ -170,11 +170,12 @@ public sealed class AutoDispatchBackgroundService(
         }
 
         // Respect the auto-print bed-clear gate: if auto-print is enabled,
-        // only dispatch when the operator has confirmed the bed is clear (Ready state).
-        if (printer.AutoPrintEnabled && printer.AutoPrintState != AutoPrintState.Ready)
+        // only dispatch when the operator has confirmed the bed is clear (Ready state)
+        // OR when they've pre-confirmed the bed is clear (BedPreConfirmed = true).
+        if (printer.AutoPrintEnabled && printer.AutoPrintState != AutoPrintState.Ready && !printer.BedPreConfirmed)
         {
             logger.LogDebug(
-                "[AutoDispatch] Printer {PrinterId} has auto-print enabled but state is {State} — waiting for operator confirmation",
+                "[AutoDispatch] Printer {PrinterId} has auto-print enabled but state is {State} and bed not pre-confirmed — waiting for operator confirmation",
                 printerId, printer.AutoPrintState);
             return;
         }
@@ -289,6 +290,7 @@ public sealed class AutoDispatchBackgroundService(
                 if (printerToUpdate is not null)
                 {
                     printerToUpdate.AutoPrintState = AutoPrintState.None;
+                    printerToUpdate.BedPreConfirmed = false; // Reset pre-clear flag after dispatch
                 }
             }
 

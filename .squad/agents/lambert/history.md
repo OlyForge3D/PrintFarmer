@@ -1437,3 +1437,55 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 - Migrations: PostgreSQL + SqlServer AddObicoServerApiKey
 
 **Validation:** Build 0 errors/0 warnings, 2087 tests passing (1639 API + 448 slicer), format clean.
+
+## Wave 3 — Bed Pre-Clear Feature (2026-03-20)
+
+**Status:** ✅ Complete  
+**Duration:** ~15 minutes  
+**Test Results:** All 2087 tests passing (1639 API + 448 Slicer)
+
+### Deliverables
+- `BedPreConfirmed` property added to `Printer` entity
+- EF Core migrations created for both PostgreSQL and SQL Server providers
+- `MarkPreClearAsync` method added to `AutoPrintService` — validates printer state, sets flag
+- `bedPreConfirmed` field added to `AutoPrintStatusDto` for frontend visibility
+- `POST /api/auto-print/{printerId:guid}/pre-clear` endpoint in `AutoPrintController`
+- `TransitionToPendingReadyAsync` updated to skip PendingReady state when bed pre-confirmed
+- `AutoDispatchBackgroundService` dispatch guard updated to allow immediate dispatch with pre-clear
+- `BedPreConfirmed` flag automatically reset after job dispatch
+
+### Learnings
+1. **Feature Pattern:** Pre-confirmation flag = zero-friction dispatch for ready printers
+   - Eliminates waiting for PendingReady confirmation when operator knows bed is clear
+   - Automatically resets flag after use (dispatch or transition through PendingReady)
+   - Guards prevent misuse: auto-print must be enabled, printer must be idle
+
+2. **Migration Strategy:** Always create migrations for BOTH providers (PostgreSQL + SQL Server)
+   - Use `DB_PROVIDER=postgres` environment variable for PostgreSQL migrations
+   - Default SQL Server migrations run without environment variable
+   - Both migrations must be created before any schema changes are used
+
+3. **State Management:** Flag integrates seamlessly with existing auto-print workflow
+   - If `BedPreConfirmed == true` at job completion → skip PendingReady, go straight to Ready
+   - Dispatch guard checks: `AutoPrintState == Ready OR BedPreConfirmed == true`
+   - Flag reset ensures single-use behavior (prevents perpetual pre-clear state)
+
+4. **Validation Guards:** Multiple safety checks prevent invalid pre-clear operations
+   - Auto-print must be enabled
+   - Printer must not be actively printing (Starting or Printing status)
+   - Prevents race conditions with ongoing jobs
+
+5. **SignalR Integration:** State changes broadcast via `autoprintstatechanged` event
+   - Frontend can display pre-clear status in real-time
+   - Webhook integration via `printer.bed_pre_confirmed` event
+
+### API Surface Changes
+- **New Endpoint:** `POST /api/auto-print/{printerId}/pre-clear` (follows kebab-case convention)
+- **DTO Update:** `AutoPrintStatusDto` now includes `bedPreConfirmed: bool`
+- **Route Pattern:** Follows existing controller pattern (`:guid` route constraint, async/await, cancellation token)
+
+### Code Quality
+- Build: Clean (0 warnings, 0 errors)
+- Tests: 2087 passing (0 failures)
+- Format: No changes needed (already compliant with dotnet format)
+

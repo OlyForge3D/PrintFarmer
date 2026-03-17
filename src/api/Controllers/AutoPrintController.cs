@@ -100,6 +100,28 @@ public class AutoPrintController(
     }
 
     /// <summary>
+    /// Pre-confirm the bed is clear. Allows the next queued job to dispatch
+    /// immediately without waiting for PendingReady confirmation.
+    /// </summary>
+    [HttpPost("{printerId:guid}/pre-clear")]
+    [ProducesResponseType(typeof(AutoPrintStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AutoPrintStatusDto>> MarkPreClearAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            var status = await autoPrintService.MarkPreClearAsync(printerId, ct);
+            return Ok(status);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning("[AutoPrint] PreClear failed for printer {PrinterId}: {Error}", printerId, ex.Message);
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Enable or disable auto-print for a printer.
     /// </summary>
     [HttpPut("{printerId:guid}/enabled")]

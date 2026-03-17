@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import type { AutoDispatchStatus, AutoDispatchReadyResult } from '@/types/api';
 
@@ -118,5 +119,21 @@ export function useCancelAutoDispatch() {
       qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
       qc.invalidateQueries({ queryKey: KEYS.allStatuses });
     },
+  });
+}
+
+export function usePreClearBed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (printerId: string) => {
+      const res = await apiClient.post(`/auto-print/${printerId}/pre-clear`);
+      return res.data as AutoDispatchStatus;
+    },
+    onSuccess: (_data, printerId) => {
+      qc.invalidateQueries({ queryKey: KEYS.status(printerId) });
+      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
+      toast.success('Bed pre-cleared — ready for immediate dispatch');
+    },
+    onError: () => toast.error('Failed to pre-clear bed'),
   });
 }

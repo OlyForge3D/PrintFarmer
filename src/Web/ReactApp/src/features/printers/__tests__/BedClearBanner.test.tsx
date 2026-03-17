@@ -62,25 +62,25 @@ function createWrapper() {
 
 const baseStatus: AutoDispatchStatus = {
   printerId: 'printer-1',
-  autoPrintEnabled: true,
+  enabled: true,
   state: 'PendingReady',
-  queuedJobCount: 2,
+  queueDepth: 2,
 };
 
 const readyResultWithJob = {
-  status: { printerId: 'printer-1', autoPrintEnabled: true, state: 'Ready', queuedJobCount: 1 },
+  status: { printerId: 'printer-1', enabled: true, state: 'Ready', queueDepth: 1 },
   nextJob: { id: 'job-1', name: 'benchy.gcode', estimatedFilamentUsageG: 10 },
   filamentCheck: { sufficient: true, materialMismatch: false },
 };
 
 const readyResultNoJob = {
-  status: { printerId: 'printer-1', autoPrintEnabled: true, state: 'None', queuedJobCount: 0 },
+  status: { printerId: 'printer-1', enabled: true, state: 'None', queueDepth: 0 },
   nextJob: null,
   filamentCheck: null,
 };
 
 const readyResultMaterialMismatch = {
-  status: { printerId: 'printer-1', autoPrintEnabled: true, state: 'Ready', queuedJobCount: 1 },
+  status: { printerId: 'printer-1', enabled: true, state: 'Ready', queueDepth: 1 },
   nextJob: { id: 'job-2', name: 'part.gcode' },
   filamentCheck: {
     sufficient: true,
@@ -91,7 +91,7 @@ const readyResultMaterialMismatch = {
 };
 
 const readyResultInsufficientFilament = {
-  status: { printerId: 'printer-1', autoPrintEnabled: true, state: 'Ready', queuedJobCount: 1 },
+  status: { printerId: 'printer-1', enabled: true, state: 'Ready', queueDepth: 1 },
   nextJob: { id: 'job-3', name: 'big-part.gcode' },
   filamentCheck: {
     sufficient: false,
@@ -133,8 +133,8 @@ describe('BedClearBanner', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('shows singular "job" when queuedJobCount is 1', () => {
-    const status = { ...baseStatus, queuedJobCount: 1 };
+  it('shows singular "job" when queueDepth is 1', () => {
+    const status = { ...baseStatus, queueDepth: 1 };
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={status} />,
       { wrapper: createWrapper() },

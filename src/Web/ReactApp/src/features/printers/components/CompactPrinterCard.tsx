@@ -10,6 +10,7 @@ import {
   VideoIcon,
   MoreVerticalIcon,
   TagIcon,
+  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
@@ -93,7 +94,7 @@ export function CompactPrinterCard({
   );
 
   const handleAutoDispatchToggle = async () => {
-    const newEnabled = !(autoDispatchStatus?.autoPrintEnabled ?? false);
+    const newEnabled = !(autoDispatchStatus?.enabled ?? false);
     try {
       await setAutoDispatchEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
       toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
@@ -136,6 +137,9 @@ export function CompactPrinterCard({
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
+  // Show Obico ML monitoring badge when printer has an Obico server assigned and is printing
+  const showObicoMonitoringBadge = !!printer.obicoServerId && isPrinting;
+
   return (
     <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
       {/* Bed clear banner — overlay on top of card */}
@@ -152,7 +156,7 @@ export function CompactPrinterCard({
       )}
       {/* Colored header — background tinted by printer state */}
       <div style={headerStyle} className="px-3 pt-3 pb-2 rounded-t-xl">
-        {/* Top row: Name + Status Pill */}
+        {/* Top row: Name + Status Pill + ML Badge */}
         <div className="flex items-center gap-2">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
             {printer.name}
@@ -162,6 +166,12 @@ export function CompactPrinterCard({
               {isOnline ? toCamelCase(state) : 'Offline'}
             </span>
           </div>
+          {showObicoMonitoringBadge && (
+            <div className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium shrink-0 bg-pf-accent-bg/20 border border-pf-accent/30 text-pf-accent">
+              <ShieldIcon className="h-3 w-3 mr-0.5" ariaLabel="ML Monitoring Active" />
+              <span>ML</span>
+            </div>
+          )}
         </div>
         {/* Tags row */}
         {printerTags.length > 0 && (
@@ -285,14 +295,14 @@ export function CompactPrinterCard({
             onClick={handleAutoDispatchToggle}
             disabled={setAutoDispatchEnabled.isPending}
             className={`h-8 w-8 p-0 rounded transition-colors inline-flex items-center justify-center ${
-              autoDispatchStatus?.autoPrintEnabled
+              autoDispatchStatus?.enabled
                 ? 'text-pf-accent'
                 : 'text-pf-text-secondary hover:text-pf-text-primary'
             } disabled:opacity-50`}
             aria-label={`Toggle auto-dispatch for ${printer.name}`}
-            aria-pressed={autoDispatchStatus?.autoPrintEnabled ?? false}
-            title={autoDispatchStatus?.autoPrintEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
-            iconCenter={<Zap className="w-4 h-4" fill={autoDispatchStatus?.autoPrintEnabled ? 'currentColor' : 'none'} />}
+            aria-pressed={autoDispatchStatus?.enabled ?? false}
+            title={autoDispatchStatus?.enabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
+            iconCenter={<Zap className="w-4 h-4" fill={autoDispatchStatus?.enabled ? 'currentColor' : 'none'} />}
           />
         </div>
       </div>

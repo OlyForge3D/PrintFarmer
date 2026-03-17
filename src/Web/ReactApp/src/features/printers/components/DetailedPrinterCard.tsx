@@ -24,6 +24,7 @@ import {
   FileIcon,
   FilamentChangeIcon,
   EjectIcon,
+  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
@@ -95,7 +96,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
 
   const handleAutoDispatchToggle = async () => {
-    const newEnabled = !(autoDispatchStatus?.autoPrintEnabled ?? false);
+    const newEnabled = !(autoDispatchStatus?.enabled ?? false);
     try {
       await setAutoDispatchEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
       toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
@@ -144,6 +145,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const toCamelCase = (str: string): string => {
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
+
+  // Show Obico ML monitoring badge when printer has an Obico server assigned and is printing
+  const showObicoMonitoringBadge = !!apiPrinter.obicoServerId && isPrinting;
 
   // Camera URL handling
   const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
@@ -410,6 +414,12 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               {isOnline ? toCamelCase(state) : 'Offline'}
             </span>
           </div>
+          {showObicoMonitoringBadge && (
+            <div className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium shrink-0 bg-pf-accent-bg/20 border border-pf-accent/30 text-pf-accent">
+              <ShieldIcon className="h-3 w-3 mr-0.5" ariaLabel="ML Monitoring Active" />
+              <span>ML</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -479,15 +489,15 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               onClick={handleAutoDispatchToggle}
               disabled={setAutoDispatchEnabled.isPending}
               className={`h-8 w-8 p-0 rounded transition-colors ${
-                autoDispatchStatus?.autoPrintEnabled
+                autoDispatchStatus?.enabled
                   ? 'text-pf-accent bg-pf-accent-bg'
                   : 'text-pf-text-secondary hover:text-pf-text-primary'
               } disabled:opacity-50 inline-flex items-center justify-center`}
               aria-label={`Toggle auto-dispatch for ${printer.name}`}
-              aria-pressed={autoDispatchStatus?.autoPrintEnabled ?? false}
-              title={autoDispatchStatus?.autoPrintEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
+              aria-pressed={autoDispatchStatus?.enabled ?? false}
+              title={autoDispatchStatus?.enabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
             >
-              <Zap className="h-4 w-4" fill={autoDispatchStatus?.autoPrintEnabled ? 'currentColor' : 'none'} />
+              <Zap className="h-4 w-4" fill={autoDispatchStatus?.enabled ? 'currentColor' : 'none'} />
             </Button>
             <Button
               type="button"

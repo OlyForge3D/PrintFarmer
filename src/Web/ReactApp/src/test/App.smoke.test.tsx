@@ -25,7 +25,12 @@ vi.mock('@/services/assetService', () => ({
     getPrintersByManufacturer: vi.fn(),
   },
 }));
-vi.mock('@/services/printer-signalr', () => ({ printerSignalRService: { connect: vi.fn().mockResolvedValue(undefined) } }));
+vi.mock('@/services/printer-signalr', () => ({ 
+  printerSignalRService: { 
+    connect: vi.fn().mockResolvedValue(undefined),
+    onFailureDetected: vi.fn(() => vi.fn()), // Returns unsubscribe function
+  } 
+}));
 vi.mock('@/services/harvest-signalr', () => ({ signalRService: { connect: vi.fn().mockResolvedValue(undefined) } }));
 
 // Mock API helpers to keep network calls predictable

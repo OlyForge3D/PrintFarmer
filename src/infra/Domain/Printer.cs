@@ -287,4 +287,11 @@ public class Printer
     /// Ready = operator confirmed, next queued job will be dispatched.
     /// </summary>
     public AutoPrintState AutoPrintState { get; set; } = AutoPrintState.None;
+
+    /// <summary>
+    /// Indicates the operator has pre-confirmed the bed is clear.
+    /// When true, the next queued job will dispatch immediately without waiting for PendingReady confirmation.
+    /// Automatically reset to false after the job is dispatched or when transitioning through PendingReady.
+    /// </summary>
+    public bool BedPreConfirmed { get; set; }
 }

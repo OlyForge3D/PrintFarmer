@@ -66,7 +66,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
 
@@ -287,6 +287,20 @@ function App() {
         error: err instanceof Error ? err.message : String(err)
       });
     });
+
+    // Listen for Obico ML failure detection events
+    const unsubscribe = printerSignalRService.onFailureDetected((event) => {
+      const confidenceStr = event.confidence.toFixed(0);
+      const pauseMsg = event.autoPaused ? ' (print auto-paused)' : '';
+      toast.warning(
+        `⚠️ Failure detected on ${event.printerName} (confidence: ${confidenceStr}%)${pauseMsg}`,
+        { duration: 8000 }
+      );
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [logger]);
 
   useEffect(() => {

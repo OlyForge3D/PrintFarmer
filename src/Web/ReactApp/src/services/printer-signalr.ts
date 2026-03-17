@@ -11,6 +11,7 @@ import {
   DiscoveryPrinterFoundDto,
   DiscoveryCompletedDto,
   DispatchUploadProgressDto,
+  FailureDetectionEvent,
 } from "@/types/api";
 import { apiClient } from "@/services/api";
 import { getHubUrl } from "@/common/utils/apiUrlHelpers";
@@ -23,6 +24,7 @@ type DiscoveryPrinterFoundCallback = (found: DiscoveryPrinterFoundDto) => void;
 type DiscoveryCompletedCallback = (completed: DiscoveryCompletedDto) => void;
 type PrinterImportProgressCallback = (progress: unknown) => void;
 type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => void;
+type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
 
 export class PrinterSignalRService {
   // Keep a local cache of last statuses for debugging
@@ -245,6 +247,23 @@ export class PrinterSignalRService {
       }
     );
 
+    // Failure detection event
+    this.connection.on(
+      "failuredetected",
+      (event: FailureDetectionEvent) => {
+        if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
+          console.log("[printerSignalR] FailureDetected event received", event);
+        }
+        this.failureDetectionCallbacks.forEach((cb) => {
+          try {
+            cb(event);
+          } catch (e) {
+            console.error("Failure detection cb error:", e);
+          }
+        });
+      }
+    );
+
     this.connection.onclose(() => this.notifyConnectionState(false));
     this.connection.onreconnecting(() => this.notifyConnectionState(false));
     this.connection.onreconnected(() => {
@@ -285,6 +304,7 @@ export class PrinterSignalRService {
   private discoveryCompletedCallbacks: DiscoveryCompletedCallback[] = [];
   private printerImportProgressCallbacks: PrinterImportProgressCallback[] = [];
   private dispatchUploadProgressCallbacks: DispatchUploadProgressCallback[] = [];
+  private failureDetectionCallbacks: FailureDetectionCallback[] = [];
 
   constructor() {
     this.loadSettings().then(() => {
@@ -563,6 +583,14 @@ export class PrinterSignalRService {
     return () => {
       const idx = this.dispatchUploadProgressCallbacks.indexOf(callback);
       if (idx > -1) this.dispatchUploadProgressCallbacks.splice(idx, 1);
+    };
+  }
+
+  onFailureDetected(callback: FailureDetectionCallback): () => void {
+    this.failureDetectionCallbacks.push(callback);
+    return () => {
+      const idx = this.failureDetectionCallbacks.indexOf(callback);
+      if (idx > -1) this.failureDetectionCallbacks.splice(idx, 1);
     };
   }
 

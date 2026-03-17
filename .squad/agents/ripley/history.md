@@ -1521,3 +1521,92 @@ Also fixed hardcoded paths outside `api.ts`:
 - Button visibility logic: Mark Ready → only in PendingReady & not printing; Skip → only in PendingReady with queued jobs; Cancel → only when actively printing
 - Status badges now show: Disabled, Printing, Ready, Awaiting Bed Clear, or Idle based on state + currentJobName
 - Key files: `src/features/auto-print/pages/AutoPrintDashboardPage.tsx`, `src/types/api.ts` (AutoPrintStatus interface), `src/infra/Domain/AutoPrintState.cs` (backend enum)
+
+## Learnings
+
+### 2026-03-17: Compact Printer Card Auto-Dispatch Icon Fix + Pre-Clear Feature
+
+**Root Cause:** Backend `AutoPrintStatusDto` uses `Enabled` (PascalCase), which JSON serializes to `enabled` (camelCase), but frontend `AutoDispatchStatus` type declared `autoPrintEnabled`. Similarly, backend `QueueDepth` → `queueDepth` but frontend had `queuedJobCount`.
+
+**Fix:**
+1. Updated `AutoDispatchStatus` type to match backend:
+   - `autoPrintEnabled` → `enabled`
+   - `queuedJobCount` → `queueDepth`
+   - Added optional fields from backend DTO: `printerName`, `isReady`, `currentJobName`, `lastActivity`, `bedPreConfirmed`
+2. Updated all component references:
+   - `CompactPrinterCard.tsx` — 5 references
+   - `DetailedPrinterCard.tsx` — 5 references  
+   - `BedClearBanner.tsx` — 2 references
+   - Test file `BedClearBanner.test.tsx` — 5 references
+3. Added `usePreClearBed` hook to `useAutoDispatch.ts`:
+   - POST to `/auto-print/{printerId}/pre-clear`
+   - Returns `AutoDispatchStatus` with `bedPreConfirmed: true`
+   - Toast success/error feedback
+   - Invalidates status queries
+4. Added Pre-Clear UI to Auto-Print Dashboard:
+   - Shows "Pre-Clear Bed" button when idle, enabled, not pre-confirmed
+   - Shows "✓ Pre-Cleared" (disabled) when `bedPreConfirmed === true`
+   - Only shows when printer is in idle state (not printing, not pending ready)
+
+**Lesson:** Always verify the actual backend DTO shape and JSON serialization. Backend uses PascalCase C# properties that serialize to camelCase JSON, but property names must match exactly. The per-printer status endpoint `GET /api/auto-print/{printerId}/status` returns unwrapped `AutoPrintStatusDto`, while the bulk endpoint `GET /api/auto-print/status` returns `{ globalEnabled, printers: [...] }` (wrapped).
+
+**Test Results:**
+- ✅ 1471/1471 tests passing (all React tests)
+- ✅ 0 lint errors
+- ✅ Build succeeded (8.39s)
+
+**Key Files:**
+- `src/types/api.ts` — AutoDispatchStatus interface
+- `src/features/printers/hooks/useAutoDispatch.ts` — usePreClearBed hook
+- `src/features/printers/components/CompactPrinterCard.tsx`
+- `src/features/printers/components/DetailedPrinterCard.tsx`
+- `src/features/auto-print/pages/AutoPrintDashboardPage.tsx`
+- Backend: `src/infra/Services/AutoPrint/AutoPrintService.cs` (AutoPrintStatusDto)
+
+### Wave 3 — Obico ML Monitoring UI Indicators (2026-03-17)
+
+**Status:** ✅ Complete  
+**Duration:** ~25 minutes  
+**Build & Lint:** ✅ Clean (all 1471 tests pass)
+
+### Deliverables
+- **SignalR Event Handler** — `FailureDetected` event listener in App.tsx with toast notifications
+- **ML Badge Component** — Shield icon badge on both CompactPrinterCard and DetailedPrinterCard
+- **TypeScript Type** — `FailureDetectionEvent` interface in api.ts
+- **ShieldIcon Component** — New MDI icon component in MdiIcons.tsx
+
+### Implementation Details
+1. **SignalR Listener** — Registered in App.tsx useEffect, shows warning toast with confidence % and auto-pause status
+2. **Badge Logic** — Shows when `printer.obicoServerId` is set AND printer is currently printing
+3. **Visual Design** — Subtle accent-colored badge with shield icon + "ML" text, positioned after status pill
+4. **Toast Format** — `⚠️ Failure detected on {printerName} (confidence: {X}%) (print auto-paused)`
+
+### Files Changed
+- `src/Web/ReactApp/src/types/api.ts` — Added `FailureDetectionEvent` interface
+- `src/Web/ReactApp/src/services/printer-signalr.ts` — Added callback type, handler registration, subscription method
+- `src/Web/ReactApp/src/common/components/icons/MdiIcons.tsx` — Added ShieldIcon component with mdiShield import
+- `src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx` — Added ML badge to header
+- `src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx` — Added ML badge to header
+- `src/Web/ReactApp/src/App.tsx` — Added failure detection listener and toast handler
+- `src/Web/ReactApp/src/test/App.smoke.test.tsx` — Updated mock to include onFailureDetected
+
+### Design Decisions
+1. **Conditional Visibility** — Badge only shows during active prints (when monitoring is actively checking frames)
+2. **Real-time Feedback** — Toast appears immediately via SignalR, no polling needed
+3. **8-second Toast Duration** — Longer than default to ensure user sees critical warning
+4. **Badge Position** — Header placement for maximum visibility without cluttering action buttons
+5. **Icon Choice** — Shield icon (mdiShield) conveys protection/monitoring clearly
+
+### Quality Gates
+- ✅ All 1471 tests pass (fixed App.smoke.test.tsx mock)
+- ✅ ESLint clean (0 errors)
+- ✅ Build succeeds (7.38s)
+- ✅ TypeScript strict mode
+- ✅ SignalR event handler follows existing patterns
+
+### Backend Integration Points (Already Complete)
+- Backend sends `FailureDetected` event via SignalR with camelCase JSON
+- Printer DTO includes `obicoServerId` field
+- Event payload matches `FailureDetectionEvent` interface
+
+---

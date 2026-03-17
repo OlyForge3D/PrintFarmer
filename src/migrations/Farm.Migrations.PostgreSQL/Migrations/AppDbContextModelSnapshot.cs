@@ -2751,6 +2751,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int>("BackendPort")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("BedPreConfirmed")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("CameraSnapshotUrl")
                         .HasColumnType("text");
 

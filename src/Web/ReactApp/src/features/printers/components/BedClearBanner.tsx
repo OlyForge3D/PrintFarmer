@@ -98,9 +98,9 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
       <p className="text-xs font-medium text-pf-warning mb-0.5">
         Print complete — confirm bed is clear
       </p>
-      {autoDispatchStatus.queuedJobCount > 0 && (
+      {autoDispatchStatus.queueDepth > 0 && (
         <p className="text-[10px] text-pf-text-secondary mb-2">
-          {autoDispatchStatus.queuedJobCount} job{autoDispatchStatus.queuedJobCount !== 1 ? 's' : ''} queued
+          {autoDispatchStatus.queueDepth} job{autoDispatchStatus.queueDepth !== 1 ? 's' : ''} queued
         </p>
       )}
       <div className="flex gap-2">

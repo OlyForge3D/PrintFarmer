@@ -40,6 +40,12 @@ public interface IAutoPrintService
     Task<AutoPrintStatusDto> CancelAutoAsync(Guid printerId, CancellationToken ct = default);
 
     /// <summary>
+    /// Pre-confirms that the printer bed is clear, allowing immediate job dispatch
+    /// when the next job is queued without waiting for PendingReady confirmation.
+    /// </summary>
+    Task<AutoPrintStatusDto> MarkPreClearAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets the current auto-print status for a printer.
     /// </summary>
     Task<AutoPrintStatusDto> GetStatusAsync(Guid printerId, CancellationToken ct = default);
@@ -127,6 +133,8 @@ public class AutoPrintStatusDto
     public string? LastActivity { get; set; }
 
     public string State { get; set; } = "None";
+
+    public bool BedPreConfirmed { get; set; }
 }
 
 public class ReadyGateCheckDto
@@ -191,7 +199,28 @@ public class AutoPrintService(
         {
             logger.LogDebug("[AutoPrint] No queued jobs for printer {PrinterId}, staying in None state", printerId);
             printer.AutoPrintState = AutoPrintState.None;
+            printer.BedPreConfirmed = false; // Reset pre-clear flag
             await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        // If bed was pre-confirmed, skip PendingReady and go straight to Ready
+        if (printer.BedPreConfirmed)
+        {
+            logger.LogInformation(
+                "[AutoPrint] Printer {PrinterId} ({Name}) bed was pre-confirmed — skipping PendingReady, going straight to Ready",
+                printerId, printer.Name);
+            printer.AutoPrintState = AutoPrintState.Ready;
+            printer.BedPreConfirmed = false; // Reset the flag after using it
+            await db.SaveChangesAsync(ct);
+
+            var readyStatus = await BuildStatusDtoAsync(printer, ct);
+            await hub.Clients.All.SendAsync("autoprintstatechanged", readyStatus, ct);
+
+            // Trigger immediate dispatch
+            dispatchTrigger?.NotifyJobQueued(printerId);
+
+            webhookService?.Enqueue("printer.autoprint_ready", new { printerId, printerName = printer.Name });
             return;
         }
 
@@ -343,6 +372,44 @@ public class AutoPrintService(
         return status;
     }
 
+    public async Task<AutoPrintStatusDto> MarkPreClearAsync(Guid printerId, CancellationToken ct = default)
+    {
+        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        if (printer is null)
+        {
+            throw new InvalidOperationException($"Printer {printerId} not found");
+        }
+
+        if (!printer.AutoPrintEnabled)
+        {
+            throw new InvalidOperationException($"Auto-print is not enabled for printer {printer.Name}");
+        }
+
+        // Guard: printer must be idle (not actively printing)
+        bool hasActiveJob = await db.PrintJobs
+            .AnyAsync(
+                j => j.AssignedPrinterId == printerId
+                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                ct);
+
+        if (hasActiveJob)
+        {
+            throw new InvalidOperationException($"Cannot pre-clear bed while printer {printer.Name} is actively printing");
+        }
+
+        printer.BedPreConfirmed = true;
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("[AutoPrint] Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
+
+        var status = await BuildStatusDtoAsync(printer, ct);
+        await hub.Clients.All.SendAsync("autoprintstatechanged", status, ct);
+
+        webhookService?.Enqueue("printer.bed_pre_confirmed", new { printerId, printerName = printer.Name });
+
+        return status;
+    }
+
     public async Task<AutoPrintStatusDto> GetStatusAsync(Guid printerId, CancellationToken ct = default)
     {
         Printer? printer = await db.Printers
@@ -450,6 +517,7 @@ public class AutoPrintService(
             QueueDepth = queuedJobCount,
             ReadyGateChecks = gateChecks,
             State = printer.AutoPrintState.ToString(),
+            BedPreConfirmed = printer.BedPreConfirmed,
         };
     }
 

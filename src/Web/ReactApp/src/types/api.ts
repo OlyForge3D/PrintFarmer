@@ -3019,9 +3019,14 @@ export type AutoDispatchState = 'None' | 'PendingReady' | 'Ready';
 
 export interface AutoDispatchStatus {
   printerId: string;
-  autoPrintEnabled: boolean;
+  enabled: boolean;
   state: AutoDispatchState;
-  queuedJobCount: number;
+  queueDepth: number;
+  printerName?: string;
+  isReady?: boolean;
+  currentJobName?: string;
+  lastActivity?: string;
+  bedPreConfirmed?: boolean;
 }
 
 export interface AutoDispatchNextJob {
@@ -3379,4 +3384,23 @@ export interface ObicoServerHealthResponse {
   healthy: boolean;
   latencyMs: number;
   errorMessage?: string;
+}
+
+/**
+ * SignalR event payload for print failure detection.
+ * Broadcast when Obico ML detects a potential print failure.
+ */
+export interface FailureDetectionEvent {
+  /** Printer ID where failure was detected */
+  printerId: string;
+  /** Printer name for display */
+  printerName: string;
+  /** Job ID if available */
+  jobId?: string;
+  /** Confidence percentage (0-100) */
+  confidence: number;
+  /** Detection timestamp (ISO 8601) */
+  detectedAt: string;
+  /** Whether the print was automatically paused */
+  autoPaused: boolean;
 }

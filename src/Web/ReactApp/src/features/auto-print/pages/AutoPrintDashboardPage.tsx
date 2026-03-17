@@ -1,6 +1,6 @@
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Card, Spinner, Badge, Button, Toggle } from '@/common/components/ui';
-import { PlayIcon, CheckIcon, SkipForwardIcon, StopIcon } from '@/common/components/icons/MdiIcons';
+import { PlayIcon, CheckIcon, SkipForwardIcon, StopIcon, CheckCircleIcon } from '@/common/components/icons/MdiIcons';
 import {
   useAutoPrintStatus,
   useMarkPrinterReady,
@@ -9,6 +9,7 @@ import {
   useSetAutoPrintEnabled,
   useSetAutoPrintGlobalEnabled,
 } from '@/common/hooks/useApi';
+import { usePreClearBed } from '@/features/printers/hooks/useAutoDispatch';
 import type { AutoPrintStatus } from '@/types/api';
 import clsx from 'clsx';
 
@@ -19,6 +20,7 @@ export function AutoPrintDashboardPage() {
   const cancelMutation = useCancelAutoPrint();
   const setEnabledMutation = useSetAutoPrintEnabled();
   const setGlobalEnabledMutation = useSetAutoPrintGlobalEnabled();
+  const preClearMutation = usePreClearBed();
 
   const handleGlobalToggle = (enabled: boolean) => {
     setGlobalEnabledMutation.mutate(enabled);
@@ -38,6 +40,10 @@ export function AutoPrintDashboardPage() {
 
   const handleCancel = (printerId: string) => {
     cancelMutation.mutate(printerId);
+  };
+
+  const handlePreClear = (printerId: string) => {
+    preClearMutation.mutate(printerId);
   };
 
   if (isLoading) {
@@ -93,11 +99,13 @@ export function AutoPrintDashboardPage() {
               onMarkReady={handleMarkReady}
               onSkip={handleSkip}
               onCancel={handleCancel}
+              onPreClear={handlePreClear}
               isPending={
                 markReadyMutation.isPending ||
                 skipMutation.isPending ||
                 cancelMutation.isPending ||
-                setEnabledMutation.isPending
+                setEnabledMutation.isPending ||
+                preClearMutation.isPending
               }
             />
           ))}
@@ -113,6 +121,7 @@ interface PrinterStatusCardProps {
   onMarkReady: (printerId: string) => void;
   onSkip: (printerId: string) => void;
   onCancel: (printerId: string) => void;
+  onPreClear: (printerId: string) => void;
   isPending: boolean;
 }
 
@@ -122,10 +131,12 @@ function PrinterStatusCard({
   onMarkReady,
   onSkip,
   onCancel,
+  onPreClear,
   isPending,
 }: PrinterStatusCardProps) {
   const isPrinting = !!printer.currentJobName;
   const isPendingReady = printer.state === 'PendingReady';
+  const isIdle = !isPrinting && !isPendingReady;
 
   const getStatusBadge = () => {
     if (!printer.enabled) {
@@ -198,6 +209,27 @@ function PrinterStatusCard({
         )}
 
         <div className="flex gap-2 flex-wrap">
+          {isIdle && printer.enabled && !printer.bedPreConfirmed && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onPreClear(printer.printerId)}
+              disabled={isPending}
+              iconLeft={<CheckCircleIcon />}
+            >
+              Pre-Clear Bed
+            </Button>
+          )}
+          {isIdle && printer.bedPreConfirmed && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled
+              iconLeft={<CheckCircleIcon />}
+            >
+              ✓ Pre-Cleared
+            </Button>
+          )}
           {isPendingReady && !isPrinting && (
             <Button
               variant="success"

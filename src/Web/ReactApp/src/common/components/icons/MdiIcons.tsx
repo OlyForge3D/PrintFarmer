@@ -105,6 +105,7 @@ import {
   mdiSwapVertical,
   mdiEject,
   mdiClipboardListOutline,
+  mdiShield,
 } from '@mdi/js';
 
 interface IconProps {
@@ -3003,6 +3004,32 @@ export function BellIcon({ className = 'w-4 h-4', ariaLabel = 'Notifications' }:
       role="img"
     >
       <path fill="currentColor" d={mdiBell} />
+    </svg>
+  );
+}
+
+/**
+ * Shield icon
+ * 
+ * Material Design icon component for security/monitoring indicators.
+ * 
+ * @component
+ * @preview ![shield](https://unpkg.com/@mdi/svg@7.4.47/svg/shield.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/shield.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <ShieldIcon className="w-4 h-4" ariaLabel="ML Monitoring" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ShieldIcon({ className = 'w-4 h-4', ariaLabel = 'Protected' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiShield} />
     </svg>
   );
 }
