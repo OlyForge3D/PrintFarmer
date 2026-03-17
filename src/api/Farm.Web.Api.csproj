@@ -115,13 +115,13 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <!-- Include seed data YAML files in build output -->
-    <None Include="data/seed/**/*.yaml">
+    <None Include="Data/seed/**/*.yaml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="data/seed/**/*.yml">
+    <None Include="Data/seed/**/*.yml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="data/seed/**/*.md">
+    <None Include="Data/seed/**/*.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
