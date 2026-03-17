@@ -1494,3 +1494,26 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 - Added `release` branch to `on.push.branches` in `docker-publish.yml`
 - Added release-specific tags: `release` (mutable) and `release-sha-{short}` (immutable per commit)
 - `containers.yml` left unchanged — it's a scheduled optimization build, not a push-triggered release pipeline. Adding release triggers there would duplicate work already handled by `docker-publish.yml`.
+
+
+### Pre-Commit Git Hooks (2025-07-26)
+- Created `.githooks/pre-commit` — portable bash hook running 5 lint checks on staged files only
+- Created `.githooks/setup.sh` — idempotent setup script that sets `core.hooksPath` and checks tool availability
+- Updated `README.md` with Git Hooks section under Contributing
+
+### Hook Architecture
+- **ShellCheck** on `*.sh` files (mirrors `ci-lint.yml`)
+- **yamllint** on `*.yml`/`*.yaml` files (mirrors `yamllint.yml`)
+- **Path casing** via `scripts/check-path-casing.js` (mirrors `enforce-path-casing.yml`)
+- **ESLint** on `*.ts`/`*.tsx` via ReactApp's local eslint (mirrors React lint standards)
+- **dotnet format --verify-no-changes** on `*.cs` files (mirrors .NET formatting standards)
+- Each check is skippable if its tool isn't installed (yellow warning, no failure)
+- Uses `git diff --cached --name-only --diff-filter=ACM` for staged-only scope
+- Color-coded output: green ✅ pass, red ❌ fail, yellow ⚠️ skip
+- Pre-existing path casing mismatch found in `src/api/data/` vs `src/api/Data/` — hook correctly detects it
+
+### Learnings
+1. **Hook activation**: `git config --local core.hooksPath .githooks` is the modern portable approach (no symlinks needed)
+2. **Staged-only scope**: `git diff --cached --name-only --diff-filter=ACM` filters to Added/Copied/Modified staged files
+3. **ESLint from subdirectory**: ESLint must run from the ReactApp directory for config resolution, but accepts absolute file paths
+4. **dotnet format --include**: Accepts space-separated absolute paths to limit formatting check to specific files
