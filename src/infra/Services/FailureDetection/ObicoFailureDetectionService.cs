@@ -31,11 +31,11 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     /// <inheritdoc/>
     public Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, CancellationToken ct = default)
     {
-        return AnalyzeImageAsync(imageData, _settings.ObicoApiUrl, ct);
+        return AnalyzeImageAsync(imageData, _settings.ObicoApiUrl, apiKey: null, ct);
     }
 
     /// <inheritdoc/>
-    public async Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, string obicoServerUrl, CancellationToken ct = default)
+    public async Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, string obicoServerUrl, string? apiKey = null, CancellationToken ct = default)
     {
         if (imageData == null || imageData.Length == 0)
         {
@@ -52,6 +52,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             using HttpClient httpClient = _httpClientFactory.CreateClient("ObicoML");
             httpClient.Timeout = HttpTimeout;
             httpClient.BaseAddress = new Uri(obicoServerUrl);
+
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                httpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            }
 
             using var content = new MultipartFormDataContent();
             using var imageContent = new ByteArrayContent(imageData);
@@ -119,11 +125,11 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     /// <inheritdoc/>
     public Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, CancellationToken ct = default)
     {
-        return AnalyzeImageFromUrlAsync(snapshotUrl, _settings.ObicoApiUrl, ct);
+        return AnalyzeImageFromUrlAsync(snapshotUrl, _settings.ObicoApiUrl, apiKey: null, ct);
     }
 
     /// <inheritdoc/>
-    public async Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, string obicoServerUrl, CancellationToken ct = default)
+    public async Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, string obicoServerUrl, string? apiKey = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(snapshotUrl))
         {
@@ -159,7 +165,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 return FailureDetectionResult.Error("Fetched image is empty");
             }
 
-            return await AnalyzeImageAsync(imageData, obicoServerUrl, ct);
+            return await AnalyzeImageAsync(imageData, obicoServerUrl, apiKey, ct);
         }
         catch (HttpRequestException ex)
         {

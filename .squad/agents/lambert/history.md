@@ -1408,3 +1408,32 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 **Why:** The `[controller]` convention uses PascalCase class names without hyphens (e.g., `JobScheduling` not `job-scheduling`), which doesn't match the team's kebab-case standard. The frontend `api.ts` was already using kebab-case URLs — the backend routes were the mismatch.
 
 **Validation:** Build succeeded with 0 warnings, 0 errors. Format clean.
+
+### Obico Multi-Server API Key Support (2026-03-17)
+
+**Task:** Add API key/token authentication to ObicoServer entity for secured or cloud Obico instances.
+
+**What Already Existed:** Multi-server infrastructure was already complete — ObicoServer entity, CRUD controller, per-printer assignment via Printer.ObicoServerId FK, fallback to global ObicoSettings.ObicoApiUrl.
+
+**Gap Found:** No API key field anywhere. Self-hosted Obico ML doesn't require auth, but cloud or secured instances need Bearer token authentication.
+
+**Changes Made:**
+- Added `ApiKey` (nullable, MaxLength 500) to `ObicoServer` entity
+- Updated `IObicoFailureDetectionService` + `ObicoFailureDetectionService` to accept and send optional API key as Bearer token
+- Updated `PrintFailureMonitorService` to pass ApiKey from assigned server
+- Updated controller DTOs: `HasApiKey` (bool) in response DTO (never exposes actual key), `ApiKey` in create/update DTOs
+- Health check endpoint also sends Bearer token when configured
+- Created EF migrations for both PostgreSQL and SqlServer
+
+**Security Decision:** API key is write-only from the client perspective. The response DTO returns `hasApiKey: true/false` but never the actual key value. To clear a key, send an empty string in the update DTO.
+
+**Files Changed:**
+- `src/infra/Domain/ObicoServer.cs` — Added ApiKey property
+- `src/infra/Services/FailureDetection/IObicoFailureDetectionService.cs` — Added apiKey parameter
+- `src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs` — Bearer auth header
+- `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs` — Pass apiKey
+- `src/api/Controllers/ObicoServerController.cs` — DTOs and CRUD logic
+- `src/Web/ReactApp/src/types/api.ts` — Frontend type updates
+- Migrations: PostgreSQL + SqlServer AddObicoServerApiKey
+
+**Validation:** Build 0 errors/0 warnings, 2087 tests passing (1639 API + 448 slicer), format clean.

@@ -93,6 +93,7 @@ public class ObicoServerController : ControllerBase
             Id = Guid.NewGuid(),
             Name = dto.Name,
             Url = dto.Url,
+            ApiKey = string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim(),
             IsEnabled = dto.IsEnabled ?? true,
             MaxConcurrentAnalyses = dto.MaxConcurrentAnalyses ?? 4,
             CreatedAt = DateTime.UtcNow,
@@ -163,6 +164,12 @@ public class ObicoServerController : ControllerBase
         if (dto.MaxConcurrentAnalyses.HasValue)
         {
             server.MaxConcurrentAnalyses = dto.MaxConcurrentAnalyses.Value;
+        }
+
+        // ApiKey: null means "don't change", empty string means "clear it"
+        if (dto.ApiKey is not null)
+        {
+            server.ApiKey = string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim();
         }
 
         server.UpdatedAt = DateTime.UtcNow;
@@ -236,6 +243,12 @@ public class ObicoServerController : ControllerBase
             httpClient.Timeout = TimeSpan.FromSeconds(10);
             httpClient.BaseAddress = new Uri(server.Url);
 
+            if (!string.IsNullOrWhiteSpace(server.ApiKey))
+            {
+                httpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", server.ApiKey);
+            }
+
             // Test the /p/ endpoint with a simple HEAD request
             var request = new HttpRequestMessage(HttpMethod.Head, "/p/");
             HttpResponseMessage response = await httpClient.SendAsync(request, ct);
@@ -288,6 +301,7 @@ public class ObicoServerController : ControllerBase
             Name = server.Name,
             Url = server.Url,
             IsEnabled = server.IsEnabled,
+            HasApiKey = !string.IsNullOrEmpty(server.ApiKey),
             MaxConcurrentAnalyses = server.MaxConcurrentAnalyses,
             CreatedAt = server.CreatedAt,
             UpdatedAt = server.UpdatedAt
@@ -308,6 +322,11 @@ public sealed class ObicoServerDto
 
     public bool IsEnabled { get; init; }
 
+    /// <summary>
+    /// Whether this server has an API key configured (key value is never exposed).
+    /// </summary>
+    public bool HasApiKey { get; init; }
+
     public int MaxConcurrentAnalyses { get; init; }
 
     public DateTime CreatedAt { get; init; }
@@ -324,6 +343,11 @@ public sealed class CreateObicoServerDto
 
     public required string Url { get; init; }
 
+    /// <summary>
+    /// Optional API key for authenticating with this Obico server.
+    /// </summary>
+    public string? ApiKey { get; init; }
+
     public bool? IsEnabled { get; init; }
 
     public int? MaxConcurrentAnalyses { get; init; }
@@ -337,6 +361,12 @@ public sealed class UpdateObicoServerDto
     public string? Name { get; init; }
 
     public string? Url { get; init; }
+
+    /// <summary>
+    /// Optional API key for authenticating with this Obico server.
+    /// Set to empty string to clear the API key.
+    /// </summary>
+    public string? ApiKey { get; init; }
 
     public bool? IsEnabled { get; init; }
 

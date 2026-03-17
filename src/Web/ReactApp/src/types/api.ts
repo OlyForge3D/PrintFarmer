@@ -3287,6 +3287,8 @@ export interface AutoPrintStatus {
   queueDepth: number;
   readyGateChecks: ReadyGateCheck[];
   lastActivity?: string;
+  /** Auto-print workflow state: "None", "PendingReady", or "Ready" */
+  state: string;
 }
 
 export interface AutoPrintGlobalStatus {
@@ -3304,6 +3306,7 @@ export interface ObicoServer {
   name: string;
   url: string;
   isEnabled: boolean;
+  hasApiKey: boolean;
   maxConcurrentAnalyses: number;
   createdAt: string;
   updatedAt: string;
@@ -3315,6 +3318,7 @@ export interface ObicoServer {
 export interface CreateObicoServerRequest {
   name: string;
   url: string;
+  apiKey?: string;
   isEnabled?: boolean;
   maxConcurrentAnalyses?: number;
 }
@@ -3325,6 +3329,7 @@ export interface CreateObicoServerRequest {
 export interface UpdateObicoServerRequest {
   name?: string;
   url?: string;
+  apiKey?: string | null;
   isEnabled?: boolean;
   maxConcurrentAnalyses?: number;
 }
@@ -3334,11 +3339,12 @@ export interface UpdateObicoServerRequest {
 /**
  * Obico ML API server for AI-powered print failure detection.
  */
-export interface ObicoServer {
+export interface ObicoServerDto {
   id: string;
   name: string;
   url: string;
   isEnabled: boolean;
+  hasApiKey: boolean;
   maxConcurrentAnalyses: number;
   createdAt: string;
   updatedAt: string;
@@ -3350,6 +3356,7 @@ export interface ObicoServer {
 export interface CreateObicoServerDto {
   name: string;
   url: string;
+  apiKey?: string;
   isEnabled?: boolean;
   maxConcurrentAnalyses?: number;
 }
@@ -3360,6 +3367,7 @@ export interface CreateObicoServerDto {
 export interface UpdateObicoServerDto {
   name?: string;
   url?: string;
+  apiKey?: string | null;
   isEnabled?: boolean;
   maxConcurrentAnalyses?: number;
 }

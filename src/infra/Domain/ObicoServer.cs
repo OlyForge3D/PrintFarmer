@@ -30,6 +30,14 @@ public class ObicoServer
     public string Url { get; set; } = string.Empty;
 
     /// <summary>
+    /// Optional API key or token for authenticating with this Obico server.
+    /// Sent as a Bearer token in the Authorization header when present.
+    /// Self-hosted Obico ML servers may not require authentication.
+    /// </summary>
+    [MaxLength(500)]
+    public string? ApiKey { get; set; }
+
+    /// <summary>
     /// Whether this server is currently enabled for failure detection.
     /// Disabled servers are skipped during analysis.
     /// </summary>

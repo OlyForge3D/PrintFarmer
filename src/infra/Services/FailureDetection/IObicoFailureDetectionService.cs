@@ -18,9 +18,10 @@ public interface IObicoFailureDetectionService
     /// </summary>
     /// <param name="imageData">JPEG image bytes to analyze.</param>
     /// <param name="obicoServerUrl">URL of the Obico ML API server to use.</param>
+    /// <param name="apiKey">Optional API key for authenticating with the Obico server.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Failure detection result with confidence score.</returns>
-    Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, string obicoServerUrl, CancellationToken ct = default);
+    Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, string obicoServerUrl, string? apiKey = null, CancellationToken ct = default);
 
     /// <summary>
     /// Fetches an image from a URL and analyzes it for print failures using the default Obico server from settings.
@@ -35,7 +36,8 @@ public interface IObicoFailureDetectionService
     /// </summary>
     /// <param name="snapshotUrl">URL of the camera snapshot to analyze.</param>
     /// <param name="obicoServerUrl">URL of the Obico ML API server to use.</param>
+    /// <param name="apiKey">Optional API key for authenticating with the Obico server.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Failure detection result with confidence score.</returns>
-    Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, string obicoServerUrl, CancellationToken ct = default);
+    Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, string obicoServerUrl, string? apiKey = null, CancellationToken ct = default);
 }

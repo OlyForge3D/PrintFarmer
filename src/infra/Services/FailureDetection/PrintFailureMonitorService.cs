@@ -145,9 +145,11 @@ public sealed class PrintFailureMonitorService : BackgroundService
 
                     // Determine which Obico server to use
                     string obicoServerUrl;
+                    string? obicoApiKey = null;
                     if (printer.ObicoServerId.HasValue && obicoServers.TryGetValue(printer.ObicoServerId.Value, out ObicoServer? assignedServer))
                     {
                         obicoServerUrl = assignedServer.Url;
+                        obicoApiKey = assignedServer.ApiKey;
                         _logger.LogDebug(
                             "[PrintFailureMonitor] Using assigned Obico server '{ServerName}' ({ServerUrl}) for printer {PrinterId} ({PrinterName})",
                             assignedServer.Name,
@@ -169,6 +171,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     FailureDetectionResult result = await failureDetectionService.AnalyzeImageFromUrlAsync(
                         camera.SnapshotUrl,
                         obicoServerUrl,
+                        obicoApiKey,
                         cancellationToken);
 
                     checkedCount++;
