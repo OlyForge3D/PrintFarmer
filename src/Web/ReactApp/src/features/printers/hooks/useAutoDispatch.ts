@@ -42,7 +42,13 @@ export function useAllAutoDispatchStatuses() {
     queryKey: KEYS.allStatuses,
     queryFn: async () => {
       const res = await apiClient.get('/auto-print/status');
-      return res.data;
+      const payload = res.data;
+      // API returns { globalEnabled, printers: [...] } wrapper
+      if (payload && typeof payload === 'object' && Array.isArray(payload.printers)) {
+        return payload.printers;
+      }
+      // Fallback for flat array responses
+      return Array.isArray(payload) ? payload : [];
     },
     refetchInterval: 10_000,
   });
