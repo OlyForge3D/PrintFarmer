@@ -75,7 +75,17 @@ public class SettingsService : ISettingsService
     public SettingsService(IConfiguration config, IDbContextFactory<AppDbContext> dbContextFactory, ILogger<SettingsService> logger, Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository settingsRepo)
     {
         _settingTypes = AppDomain.CurrentDomain.GetAssemblies()
-            .SelectMany(a => a.GetTypes())
+            .SelectMany(a =>
+            {
+                try
+                {
+                    return a.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    return ex.Types.Where(t => t != null).Cast<Type>();
+                }
+            })
             .Where(t => t.GetCustomAttribute<AppSettingAttribute>() != null || t.GetCustomAttribute<SystemSettingAttribute>() != null)
             .ToList();
         _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));

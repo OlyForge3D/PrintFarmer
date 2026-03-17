@@ -88,7 +88,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _ = await _dbContext.SaveChangesAsync();
 
         // Act
-        HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/health/summary");
+        HttpResponseMessage response = await _client.GetAsync("/api/file-consistency/health/summary");
 
         // Assert
         _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -112,7 +112,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _ = await _slicerDbContext.SaveChangesAsync();
 
         // Act
-        HttpResponseMessage response = await _client.GetAsync($"/api/fileconsistency/model3d/{model.Id}/health");
+        HttpResponseMessage response = await _client.GetAsync($"/api/file-consistency/model3d/{model.Id}/health");
 
         // Assert
         _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -128,7 +128,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task GetGcodeFileHealth_WithNonexistentFile_Returns404()
     {
         // Act
-        HttpResponseMessage response = await _client.GetAsync($"/api/fileconsistency/gcode/{Guid.NewGuid()}/health");
+        HttpResponseMessage response = await _client.GetAsync($"/api/file-consistency/gcode/{Guid.NewGuid()}/health");
 
         // Assert
         _ = response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -173,7 +173,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _ = await _dbContext.SaveChangesAsync();
 
         // Act
-        HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/audits/history?pageSize=10");
+        HttpResponseMessage response = await _client.GetAsync("/api/file-consistency/audits/history?pageSize=10");
 
         // Assert
         _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -275,7 +275,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _ = await _dbContext.SaveChangesAsync();
 
         // Act
-        HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/health/summary");
+        HttpResponseMessage response = await _client.GetAsync("/api/file-consistency/health/summary");
 
         // Assert
         _ = response.StatusCode.Should().Be(HttpStatusCode.OK);

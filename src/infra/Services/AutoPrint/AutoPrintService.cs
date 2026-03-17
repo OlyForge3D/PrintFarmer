@@ -50,9 +50,9 @@ public interface IAutoPrintService
     Task<AutoPrintStatusDto> SetEnabledAsync(Guid printerId, bool enabled, CancellationToken ct = default);
 
     /// <summary>
-    /// Gets auto-print status for all printers.
+    /// Gets auto-print status for all printers, wrapped with global enabled state.
     /// </summary>
-    Task<List<AutoPrintStatusDto>> GetAllStatusAsync(CancellationToken ct = default);
+    Task<AutoPrintGlobalStatusDto> GetAllStatusAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Enables or disables auto-print for all printers at once.
@@ -112,11 +112,39 @@ public class AutoPrintStatusDto
 {
     public Guid PrinterId { get; set; }
 
-    public bool AutoPrintEnabled { get; set; }
+    public string PrinterName { get; set; } = string.Empty;
+
+    public bool Enabled { get; set; }
+
+    public bool IsReady { get; set; }
+
+    public string? CurrentJobName { get; set; }
+
+    public int QueueDepth { get; set; }
+
+    public List<ReadyGateCheckDto> ReadyGateChecks { get; set; } = [];
+
+    public string? LastActivity { get; set; }
 
     public string State { get; set; } = "None";
+}
 
-    public int QueuedJobCount { get; set; }
+public class ReadyGateCheckDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    public bool Passed { get; set; }
+
+    public string Message { get; set; } = string.Empty;
+
+    public string CheckedAt { get; set; } = DateTime.UtcNow.ToString("o");
+}
+
+public class AutoPrintGlobalStatusDto
+{
+    public bool GlobalEnabled { get; set; }
+
+    public List<AutoPrintStatusDto> Printers { get; set; } = [];
 }
 
 public class AutoPrintService(
@@ -352,11 +380,22 @@ public class AutoPrintService(
         return await BuildStatusDtoAsync(printer, ct);
     }
 
-    public async Task<List<AutoPrintStatusDto>> GetAllStatusAsync(CancellationToken ct = default)
+    public async Task<AutoPrintGlobalStatusDto> GetAllStatusAsync(CancellationToken ct = default)
     {
         List<Printer> printers = await db.Printers.ToListAsync(ct);
         Dictionary<Guid, int> queuedCounts = await GetQueuedCountsByPrinterAsync(printers.Select(p => p.Id), ct);
-        return printers.Select(p => BuildStatusDto(p, queuedCounts.GetValueOrDefault(p.Id))).ToList();
+        Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printers.Select(p => p.Id), ct);
+
+        bool globalEnabled = printers.Any(p => p.AutoPrintEnabled);
+
+        return new AutoPrintGlobalStatusDto
+        {
+            GlobalEnabled = globalEnabled,
+            Printers = printers.Select(p => BuildStatusDto(
+                p,
+                queuedCounts.GetValueOrDefault(p.Id),
+                currentJobs.GetValueOrDefault(p.Id))).ToList(),
+        };
     }
 
     public async Task<List<AutoPrintStatusDto>> SetAllEnabledAsync(bool enabled, CancellationToken ct = default)
@@ -379,7 +418,11 @@ public class AutoPrintService(
             printers.Count);
 
         Dictionary<Guid, int> queuedCounts = await GetQueuedCountsByPrinterAsync(printers.Select(p => p.Id), ct);
-        return printers.Select(p => BuildStatusDto(p, queuedCounts.GetValueOrDefault(p.Id))).ToList();
+        Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printers.Select(p => p.Id), ct);
+        return printers.Select(p => BuildStatusDto(
+            p,
+            queuedCounts.GetValueOrDefault(p.Id),
+            currentJobs.GetValueOrDefault(p.Id))).ToList();
     }
 
     private async Task<Dictionary<Guid, int>> GetQueuedCountsByPrinterAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
@@ -391,14 +434,22 @@ public class AutoPrintService(
             .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
     }
 
-    private static AutoPrintStatusDto BuildStatusDto(Printer printer, int queuedJobCount)
+    private static AutoPrintStatusDto BuildStatusDto(Printer printer, int queuedJobCount, string? currentJobName = null)
     {
+        string now = DateTime.UtcNow.ToString("o");
+        bool isReady = printer.AutoPrintEnabled && printer.AutoPrintState == AutoPrintState.Ready;
+        var gateChecks = BuildReadyGateChecks(printer, queuedJobCount, now);
+
         return new AutoPrintStatusDto
         {
             PrinterId = printer.Id,
-            AutoPrintEnabled = printer.AutoPrintEnabled,
+            PrinterName = printer.Name,
+            Enabled = printer.AutoPrintEnabled,
+            IsReady = isReady,
+            CurrentJobName = currentJobName,
+            QueueDepth = queuedJobCount,
+            ReadyGateChecks = gateChecks,
             State = printer.AutoPrintState.ToString(),
-            QueuedJobCount = queuedJobCount,
         };
     }
 
@@ -407,13 +458,76 @@ public class AutoPrintService(
         int queuedCount = await db.PrintJobs
             .CountAsync(j => j.AssignedPrinterId == printer.Id && j.Status == PrintJobStatus.Queued, ct);
 
-        return new AutoPrintStatusDto
+        string? currentJobName = await db.PrintJobs
+            .Where(j => j.AssignedPrinterId == printer.Id
+                && (j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting))
+            .Select(j => j.Name ?? j.GcodeFile!.Name)
+            .FirstOrDefaultAsync(ct);
+
+        return BuildStatusDto(printer, queuedCount, currentJobName);
+    }
+
+    private static List<ReadyGateCheckDto> BuildReadyGateChecks(Printer printer, int queuedJobCount, string checkedAt)
+    {
+        var checks = new List<ReadyGateCheckDto>
         {
-            PrinterId = printer.Id,
-            AutoPrintEnabled = printer.AutoPrintEnabled,
-            State = printer.AutoPrintState.ToString(),
-            QueuedJobCount = queuedCount,
+            new()
+            {
+                Name = "Auto-Print Enabled",
+                Passed = printer.AutoPrintEnabled,
+                Message = printer.AutoPrintEnabled ? "Auto-print is enabled" : "Auto-print is disabled for this printer",
+                CheckedAt = checkedAt,
+            },
+            new()
+            {
+                Name = "Printer Available",
+                Passed = printer.IsAvailable && !printer.InMaintenance,
+                Message = printer.InMaintenance
+                    ? "Printer is in maintenance mode"
+                    : printer.IsAvailable ? "Printer is available" : "Printer is not available",
+                CheckedAt = checkedAt,
+            },
+            new()
+            {
+                Name = "Jobs in Queue",
+                Passed = queuedJobCount > 0,
+                Message = queuedJobCount > 0
+                    ? $"{queuedJobCount} job{(queuedJobCount == 1 ? string.Empty : "s")} queued"
+                    : "No jobs queued for this printer",
+                CheckedAt = checkedAt,
+            },
         };
+
+        if (printer.AutoPrintEnabled)
+        {
+            checks.Add(new ReadyGateCheckDto
+            {
+                Name = "Bed Clear Confirmed",
+                Passed = printer.AutoPrintState == AutoPrintState.Ready,
+                Message = printer.AutoPrintState switch
+                {
+                    AutoPrintState.Ready => "Operator confirmed bed is clear",
+                    AutoPrintState.PendingReady => "Waiting for operator to confirm bed is clear",
+                    _ => "No confirmation needed yet",
+                },
+                CheckedAt = checkedAt,
+            });
+        }
+
+        return checks;
+    }
+
+    private async Task<Dictionary<Guid, string?>> GetCurrentJobNamesByPrinterAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+    {
+        List<Guid> ids = printerIds.ToList();
+        return await db.PrintJobs
+            .Where(j => ids.Contains(j.AssignedPrinterId!.Value)
+                && (j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting))
+            .GroupBy(j => j.AssignedPrinterId!.Value)
+            .ToDictionaryAsync(
+                g => g.Key,
+                g => g.OrderByDescending(j => j.ActualStartTime).Select(j => j.Name ?? j.GcodeFile!.Name).FirstOrDefault(),
+                ct);
     }
 
     private async Task<FilamentCheckResult> CheckFilamentAsync(Printer printer, PrintJob nextJob, CancellationToken ct)

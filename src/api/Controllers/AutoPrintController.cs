@@ -125,11 +125,11 @@ public class AutoPrintController(
     /// Get auto-print status for all printers.
     /// </summary>
     [HttpGet("status")]
-    [ProducesResponseType(typeof(List<AutoPrintStatusDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<AutoPrintStatusDto>>> GetAllStatusAsync(CancellationToken ct)
+    [ProducesResponseType(typeof(AutoPrintGlobalStatusDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AutoPrintGlobalStatusDto>> GetAllStatusAsync(CancellationToken ct)
     {
-        var statuses = await autoPrintService.GetAllStatusAsync(ct);
-        return Ok(statuses);
+        var status = await autoPrintService.GetAllStatusAsync(ct);
+        return Ok(status);
     }
 
     /// <summary>
