@@ -102,8 +102,21 @@ export function ObicoServersSection() {
       maxConcurrentAnalyses: parseInt(formData.maxConcurrentAnalyses, 10) || 5,
     };
 
-    await createMutation.mutateAsync(request);
+    const created = await createMutation.mutateAsync(request);
     handleCloseAddModal();
+
+    // Auto-verify connectivity after creation
+    try {
+      const result = await testHealthMutation.mutateAsync(created.id);
+      setHealthResults(prev => ({ ...prev, [created.id]: result }));
+      if (result.healthy) {
+        toast.success(`Server created and verified (${result.latencyMs}ms)`);
+      } else {
+        toast.warning(`Server created but unreachable: ${result.message || 'Connection failed'}. Check the URL and ensure the Obico ML API is running.`);
+      }
+    } catch {
+      toast.warning('Server created but connectivity check failed. Use the Test button to verify later.');
+    }
   };
 
   const handleUpdate = async () => {
@@ -121,6 +134,21 @@ export function ObicoServersSection() {
 
     await updateMutation.mutateAsync({ id: selectedServer.id, data: request });
     handleCloseEditModal();
+
+    // Auto-verify connectivity if URL changed
+    if (formData.url.trim() !== selectedServer.url) {
+      try {
+        const result = await testHealthMutation.mutateAsync(selectedServer.id);
+        setHealthResults(prev => ({ ...prev, [selectedServer.id]: result }));
+        if (result.healthy) {
+          toast.success(`Server updated and verified (${result.latencyMs}ms)`);
+        } else {
+          toast.warning(`Server updated but unreachable at new URL: ${result.message || 'Connection failed'}`);
+        }
+      } catch {
+        toast.warning('Server updated but connectivity check failed. Use the Test button to verify.');
+      }
+    }
   };
 
   const handleDelete = async () => {
@@ -145,11 +173,30 @@ export function ObicoServersSection() {
   };
 
   const handleToggleEnabled = async (server: ObicoServer) => {
+    const enabling = !server.isEnabled;
     await updateMutation.mutateAsync({
       id: server.id,
-      data: { isEnabled: !server.isEnabled },
+      data: { isEnabled: enabling },
     });
+
+    // Auto-verify when enabling a server
+    if (enabling) {
+      try {
+        const result = await testHealthMutation.mutateAsync(server.id);
+        setHealthResults(prev => ({ ...prev, [server.id]: result }));
+        if (!result.healthy) {
+          toast.warning(`Server enabled but unreachable: ${result.message || 'Connection failed'}. Print failure detection will not work until the server is reachable.`);
+        }
+      } catch {
+        toast.warning('Server enabled but connectivity check failed.');
+      }
+    }
   };
+
+  // Identify misconfigured servers: enabled but known-unhealthy
+  const misconfiguredServers = servers.filter(
+    s => s.isEnabled && healthResults[s.id] && !healthResults[s.id].healthy,
+  );
 
   if (isLoading) {
     return (
@@ -172,6 +219,14 @@ export function ObicoServersSection() {
           Add Server
         </Button>
       </div>
+
+      {misconfiguredServers.length > 0 && (
+        <Alert variant="warning" title="Obico server misconfiguration detected">
+          {misconfiguredServers.length === 1
+            ? `"${misconfiguredServers[0].name}" is enabled but unreachable. Print failure detection will not work for printers assigned to this server.`
+            : `${misconfiguredServers.length} servers are enabled but unreachable: ${misconfiguredServers.map(s => s.name).join(', ')}. Print failure detection will not work for printers assigned to these servers.`}
+        </Alert>
+      )}
 
       {servers.length === 0 ? (
         <Alert variant="info" title="No servers configured">

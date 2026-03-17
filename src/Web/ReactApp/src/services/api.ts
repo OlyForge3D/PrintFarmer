@@ -101,8 +101,8 @@ import {
   ScheduledJob,
   JobExecution,
   ScheduleJobRequest,
-  AutoPrintGlobalStatus,
-  AutoPrintStatus,
+  AutoDispatchGlobalStatus,
+  AutoDispatchDetailedStatus,
   ObicoServer,
   CreateObicoServerRequest,
   UpdateObicoServerRequest,
@@ -3697,13 +3697,13 @@ export class ApiClient {
     return response.data;
   }
 
-  // ============ Auto-Print API methods ============
-  async getAutoPrintStatus(): Promise<AutoPrintGlobalStatus> {
+  // ============ Auto-Dispatch API methods ============
+  async getAutoDispatchStatus(): Promise<AutoDispatchGlobalStatus> {
     const response = await this.client.get('/auto-print/status');
     return response.data;
   }
 
-  async getAutoPrintPrinterStatus(printerId: string): Promise<AutoPrintStatus> {
+  async getAutoDispatchPrinterStatus(printerId: string): Promise<AutoDispatchDetailedStatus> {
     const response = await this.client.get(`/auto-print/${printerId}/status`);
     return response.data;
   }
@@ -3712,19 +3712,19 @@ export class ApiClient {
     await this.client.post(`/auto-print/${printerId}/ready`);
   }
 
-  async skipAutoPrintJob(printerId: string): Promise<void> {
+  async skipAutoDispatchJob(printerId: string): Promise<void> {
     await this.client.post(`/auto-print/${printerId}/skip`);
   }
 
-  async cancelAutoPrint(printerId: string): Promise<void> {
+  async cancelAutoDispatch(printerId: string): Promise<void> {
     await this.client.post(`/auto-print/${printerId}/cancel`);
   }
 
-  async setAutoPrintEnabled(printerId: string, enabled: boolean): Promise<void> {
+  async setAutoDispatchEnabled(printerId: string, enabled: boolean): Promise<void> {
     await this.client.put(`/auto-print/${printerId}/enabled`, { enabled });
   }
 
-  async setAutoPrintGlobalEnabled(enabled: boolean): Promise<void> {
+  async setAutoDispatchGlobalEnabled(enabled: boolean): Promise<void> {
     await this.client.put('/auto-print/enabled', { enabled });
   }
 

@@ -3274,7 +3274,7 @@ export interface CostOverTime {
   jobCount: number;
 }
 
-// ============ Auto-Print Types ============
+// ============ Auto-Dispatch Dashboard Types ============
 
 export interface ReadyGateCheck {
   name: string;
@@ -3283,7 +3283,7 @@ export interface ReadyGateCheck {
   checkedAt: string;
 }
 
-export interface AutoPrintStatus {
+export interface AutoDispatchDetailedStatus {
   printerId: string;
   printerName: string;
   enabled: boolean;
@@ -3292,13 +3292,14 @@ export interface AutoPrintStatus {
   queueDepth: number;
   readyGateChecks: ReadyGateCheck[];
   lastActivity?: string;
-  /** Auto-print workflow state: "None", "PendingReady", or "Ready" */
+  /** Auto-dispatch workflow state: "None", "PendingReady", or "Ready" */
   state: string;
+  bedPreConfirmed?: boolean;
 }
 
-export interface AutoPrintGlobalStatus {
+export interface AutoDispatchGlobalStatus {
   globalEnabled: boolean;
-  printers: AutoPrintStatus[];
+  printers: AutoDispatchDetailedStatus[];
 }
 
 // ============== Obico ML Server Management ==============

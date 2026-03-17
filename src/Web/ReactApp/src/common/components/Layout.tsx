@@ -120,8 +120,8 @@ const navigation: NavigationElement[] = [
     requiredPermission: { resource: 'printers', action: 'read' }
   },
   {
-    name: 'Auto-Print',
-    href: '/auto-print',
+    name: 'Auto-Dispatch',
+    href: '/auto-dispatch',
     icon: PlayIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
   },

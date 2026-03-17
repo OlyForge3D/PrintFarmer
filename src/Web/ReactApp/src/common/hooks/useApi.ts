@@ -62,8 +62,6 @@ import {
   NfcScanHistoryDto,
   PagedResponse,
   NotificationDto,
-  AutoPrintGlobalStatus,
-  AutoPrintStatus,
   ObicoServer,
   CreateObicoServerRequest,
   UpdateObicoServerRequest,
@@ -125,8 +123,6 @@ export const queryKeys = {
   costsByPrinter: ['costs', 'by-printer'] as const,
   costsByMaterial: ['costs', 'by-material'] as const,
   costOverTime: ['costs', 'over-time'] as const,
-  autoPrintStatus: ['auto-print', 'status'] as const,
-  autoPrintPrinterStatus: (printerId: string) => ['auto-print', printerId, 'status'] as const,
   scheduledJobs: ['scheduled-jobs'] as const,
   scheduledJob: (jobId: string) => ['scheduled-jobs', jobId] as const,
   jobExecutions: (jobId: string) => ['scheduled-jobs', jobId, 'executions'] as const,
@@ -1747,90 +1743,6 @@ export function useResumeSchedule() {
   });
 }
 
-
-// ============ Auto-Print Hooks ============
-
-export function useAutoPrintStatus(options?: QueryOptions<AutoPrintGlobalStatus>) {
-  return useQuery({
-    queryKey: queryKeys.autoPrintStatus,
-    queryFn: () => apiClient.getAutoPrintStatus(),
-    staleTime: 10_000, // 10 seconds - real-time data
-    refetchInterval: 10_000,
-    ...options,
-  });
-}
-
-export function useAutoPrintPrinterStatus(printerId: string, options?: QueryOptions<AutoPrintStatus>) {
-  return useQuery({
-    queryKey: queryKeys.autoPrintPrinterStatus(printerId),
-    queryFn: () => apiClient.getAutoPrintPrinterStatus(printerId),
-    staleTime: 10_000, // 10 seconds - real-time data
-    refetchInterval: 10_000,
-    enabled: !!printerId,
-    ...options,
-  });
-}
-
-export function useMarkPrinterReady() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (printerId: string) => apiClient.markPrinterReady(printerId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
-      toast.success('Printer marked as ready');
-    },
-    onError: (err: ApiError) => toast.error(`Failed to mark ready: ${err.message}`),
-  });
-}
-
-export function useSkipAutoPrintJob() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (printerId: string) => apiClient.skipAutoPrintJob(printerId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
-      toast.success('Job skipped');
-    },
-    onError: (err: ApiError) => toast.error(`Failed to skip job: ${err.message}`),
-  });
-}
-
-export function useCancelAutoPrint() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (printerId: string) => apiClient.cancelAutoPrint(printerId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
-      toast.success('Auto-print cancelled');
-    },
-    onError: (err: ApiError) => toast.error(`Failed to cancel: ${err.message}`),
-  });
-}
-
-export function useSetAutoPrintEnabled() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ printerId, enabled }: { printerId: string; enabled: boolean }) => 
-      apiClient.setAutoPrintEnabled(printerId, enabled),
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
-      toast.success(`Auto-print ${vars.enabled ? 'enabled' : 'disabled'}`);
-    },
-    onError: (err: ApiError) => toast.error(`Failed to update: ${err.message}`),
-  });
-}
-
-export function useSetAutoPrintGlobalEnabled() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (enabled: boolean) => apiClient.setAutoPrintGlobalEnabled(enabled),
-    onSuccess: (_data, enabled) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.autoPrintStatus });
-      toast.success(`Global auto-print ${enabled ? 'enabled' : 'disabled'}`);
-    },
-    onError: (err: ApiError) => toast.error(`Failed to update: ${err.message}`),
-  });
-}
 
 // ============ Obico ML Server Hooks ============
 

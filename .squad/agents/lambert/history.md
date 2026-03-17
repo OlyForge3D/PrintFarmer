@@ -1517,3 +1517,11 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 2. **Staged-only scope**: `git diff --cached --name-only --diff-filter=ACM` filters to Added/Copied/Modified staged files
 3. **ESLint from subdirectory**: ESLint must run from the ReactApp directory for config resolution, but accepts absolute file paths
 4. **dotnet format --include**: Accepts space-separated absolute paths to limit formatting check to specific files
+
+
+### Removed Dead Farm.Importing Project (2025-07-26)
+- Deleted `src/import/` (Farm.Importing.csproj) and `src/tests/Farm.Importing.Tests/` — dead code superseded by PrintersService inline CSV/JSON parsing
+- Removed from solution, DI registration (`RegisterImportingServices`), and all ProjectReferences (Farm.Web.Api.csproj, Farm.Web.Api.Tests.csproj)
+- Deleted `src/tests/Farm.Web.Api.Tests/Importing/ImportServicesTests.cs` integration test file
+- Build: 0 errors, 0 warnings. Tests: 2091 passing (0 failures)
+- Net removal: 1 project, 1 test project, 1 integration test file, DI wiring, 2 ProjectReferences

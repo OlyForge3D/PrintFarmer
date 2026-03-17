@@ -157,7 +157,6 @@ public static class ServiceCollectionExtensions
         RegisterAuthenticationServices(services);
         RegisterEmailServices(services);
         RegisterRateLimitingServices(services);
-        RegisterImportingServices(services);
         RegisterCatalogServices(services);
 
         // Cost tracking
@@ -420,16 +419,6 @@ public static class ServiceCollectionExtensions
             return opts;
         });
         _ = services.AddSingleton<Farm.Infrastructure.Services.RateLimiting.IRateLimitService, Farm.Infrastructure.Services.RateLimiting.InMemoryRateLimitService>();
-    }
-
-    #endregion
-
-    #region Importing
-
-    private static void RegisterImportingServices(IServiceCollection services)
-    {
-        _ = services.AddScoped<Importing.Services.Import.IImportParserService, Importing.Services.Import.ImportParserService>();
-        _ = services.AddScoped<Importing.Services.Import.IImportProcessorService, Importing.Services.Import.ImportProcessorService>();
     }
 
     #endregion

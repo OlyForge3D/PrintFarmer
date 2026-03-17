@@ -837,3 +837,11 @@ Created: `.squad/orchestration-log/2026-03-16T23-12-05Z-dallas.md`
 - No breaking changes; fully backward compatible
 - All patterns follow project conventions
 - Global toggle automatically updates all printer states
+
+## Learnings
+
+### Git Path Casing on Case-Insensitive Filesystems (2025-07-18)
+- **Problem:** Git tracked `src/api/data/` (lowercase) but macOS filesystem had `src/api/Data/` (PascalCase). This doesn't break on macOS but fails on Linux CI/Docker and triggers the `enforce-path-casing.yml` workflow.
+- **Fix technique:** Two-step `git mv` — first move files to a temp path, then move back with correct casing. This is necessary because case-insensitive filesystems treat `data` and `Data` as the same directory, so a direct `git mv data/ Data/` is a no-op.
+- **Hidden blast radius:** The casing mismatch extended beyond just the git index — the `.csproj` Include paths and the C# runtime `Path.Combine()` call in `YamlSeedDataReader.cs` also used lowercase `"data"`. These would silently fail on Linux when files copy to `Data/` but code looks for `data/`.
+- **Lesson:** When fixing path casing, always grep the entire repo for string references to the old path — not just the git index.

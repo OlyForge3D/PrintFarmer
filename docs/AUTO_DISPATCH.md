@@ -139,7 +139,7 @@ A confirmation workflow that ensures operators clear the print bed before the ne
 4. Operator confirms bed is clear
 5. Next queued job is dispatched
 
-### 3. Auto-Print (Future Hardware Feature)
+### 3. Auto-Print (Future Hardware Feature — Bed Clearing)
 **Status:** Not yet implemented. Planned for future releases.
 
 A hardware-level feature where printers with automated bed-clearing mechanisms (e.g., self-ejecting beds, conveyor belts) can accept consecutive jobs without human intervention. Ready Gate would be bypassed for these printers.
@@ -214,7 +214,7 @@ None → PendingReady → Ready → (dispatch) → None
 - Marks printer as `Ready` when operator confirms bed is clear
 - Performs filament pre-flight checks (material match, sufficient weight)
 - Skips next queued job (cancels it) if operator requests
-- Cancels auto-print workflow (returns to `None` state)
+- Cancels auto-dispatch workflow (returns to `None` state)
 
 ### JobQueueService.cs
 **Purpose:** Manages print job queue operations and triggers auto-dispatch.
@@ -694,13 +694,13 @@ Updates auto-dispatch settings. **⚠️ Remember to set both `autoDispatchEnabl
 - `maxConcurrentDispatches` >= 1
 - `autoDispatchMode` must be `Manual`, `Suggest`, or `Auto`
 
-### Auto-Print (Ready Gate)
+### Auto-Dispatch (Ready Gate)
 
 **⚠️ API Naming Note:** These endpoints use `/autoprint/` paths, which match the backend property name `autoPrintEnabled`. The frontend code was renamed from `autoPrint` to `autoDispatch` (March 2025) for consistency with the system-level "Auto-Dispatch" terminology, but the API paths remain `/autoprint/` for backward compatibility. This is intentional and does not affect functionality.
 
 #### GET `/api/autoprint/{printerId}/status`
 
-Returns auto-print status for a specific printer.
+Returns auto-dispatch status for a specific printer.
 
 **Response:**
 ```json
@@ -768,7 +768,7 @@ Skips the next queued job (cancels it). If more jobs remain, stays in `PendingRe
 ```
 
 #### POST `/api/autoprint/{printerId}/cancel`
-Cancels the auto-print workflow. Returns printer to `None` state without affecting queued jobs.
+Cancels the auto-dispatch workflow. Returns printer to `None` state without affecting queued jobs.
 
 **Response:**
 ```json
@@ -781,7 +781,7 @@ Cancels the auto-print workflow. Returns printer to `None` state without affecti
 ```
 
 #### PUT `/api/autoprint/{printerId}/enabled`
-Enables or disables auto-print for a specific printer.
+Enables or disables auto-dispatch for a specific printer.
 
 **Request:**
 ```json
@@ -793,7 +793,7 @@ Enables or disables auto-print for a specific printer.
 **Response:** Same as GET `/api/autoprint/{printerId}/status`
 
 #### PUT `/api/autoprint/enabled`
-Enables or disables auto-print for ALL printers at once. Requires `farm_admin` role.
+Enables or disables auto-dispatch for ALL printers at once. Requires `farm_admin` role.
 
 **Request:**
 ```json
@@ -950,7 +950,7 @@ Fired when a printer's `AutoPrintState` changes (e.g., `None` → `PendingReady`
 ```
 
 **Frontend Handling:**
-- Invalidates auto-print status queries
+- Invalidates auto-dispatch status queries
 - Shows/hides Bed Clear Banner based on state
 - Updates printer card UI
 
@@ -1038,7 +1038,7 @@ Fired when a printer's `AutoPrintState` changes (e.g., `None` → `PendingReady`
    - Label: "Cancel"
    - Icon: Close
    - Action: POST `/api/autoprint/{printerId}/cancel`
-   - On Success: Exits auto-print workflow, shows info toast
+   - On Success: Exits auto-dispatch workflow, shows info toast
 
 **Visual Styling:**
 - Border: `border-pf-warning/30`
@@ -1090,7 +1090,7 @@ Fired when a printer's `AutoPrintState` changes (e.g., `None` → `PendingReady`
 
 **Alternative Rejected:** Fully lights-out operation with zero human interaction. This is unsafe for printers without automated bed clearing mechanisms (e.g., self-ejecting beds, conveyor belts).
 
-**Future:** When Auto-Print (hardware-level bed clearing) is implemented, Ready Gate can be disabled for those printers.
+**Future:** When Auto-Print hardware (bed clearing) is implemented, Ready Gate can be disabled for those printers.
 
 ### 4. SemaphoreSlim Prevents Job-Stealing Race Conditions
 
@@ -1182,7 +1182,7 @@ The Auto-Dispatch system is a sophisticated job routing engine that maximizes pr
 5. Monitor: Review dispatch history and statistics on the dashboard
 
 **Future Enhancements:**
-- Auto-Print (hardware-level bed clearing) to bypass Ready Gate for equipped printers
+- Auto-Print hardware (bed clearing) to bypass Ready Gate for equipped printers
 - Batch dispatch with load-balancing strategies (RoundRobin, LeastBusy)
 - Machine learning to improve scoring based on historical success/failure rates
 - Per-job dispatch constraints (e.g., "only use printers in Building A")

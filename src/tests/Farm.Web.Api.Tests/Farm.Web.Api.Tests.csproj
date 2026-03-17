@@ -46,7 +46,6 @@
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj" />
-    <ProjectReference Include="..\..\import\Farm.Importing.csproj" />
     <ProjectReference Include="..\..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Core\Farm.Backend.Plugin.Core.csproj" />
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Moonraker\Farm.Backend.Plugin.Moonraker.csproj" />
