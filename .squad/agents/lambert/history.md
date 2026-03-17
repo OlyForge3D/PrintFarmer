@@ -1373,3 +1373,26 @@ Unified camera infrastructure to support both standalone cameras and printer-att
 3. Server metrics tracking (Phase 2)
 4. Server groups for redundancy (Phase 3)
 
+
+## Learnings
+
+### Empty EF Migration Fix (2026-03-17)
+
+**Problem:** ObicoServer migrations for both PostgreSQL and SQL Server had empty `Up()` methods — table would never be created on existing deployments using EF migrations.
+
+**Root Cause:** Migrations were manually stubbed with "schema managed by EnsureCreated" comments, bypassing EF Core's migration scaffolding.
+
+**Fix:** Deleted empty migrations, regenerated using `dotnet ef migrations add` with proper `--startup-project` pointing to the migration project's own DesignTimeDbContextFactory (not the API project).
+
+**Key Pattern:** Migration projects in this repo are self-contained — each has its own DesignTimeDbContextFactory. Always use `--startup-project ./migrations/Farm.Migrations.<Provider>/` when generating migrations.
+
+**Commands:**
+```bash
+cd src
+DB_PROVIDER=postgres dotnet ef migrations add <Name> --project ./migrations/Farm.Migrations.PostgreSQL/ --startup-project ./migrations/Farm.Migrations.PostgreSQL/
+DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Farm.Migrations.SqlServer/ --startup-project ./migrations/Farm.Migrations.SqlServer/
+```
+
+**Generated Schema:** ObicoServers table (Id, Name, Url, IsEnabled, MaxConcurrentAnalyses, CreatedAt, UpdatedAt) + Printer.ObicoServerId nullable FK + index.
+
+**Validation:** Build succeeded with 0 warnings, 0 errors.

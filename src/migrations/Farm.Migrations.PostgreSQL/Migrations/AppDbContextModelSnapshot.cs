@@ -2053,6 +2053,39 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("NozzleModelDefinitions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ObicoServer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MaxConcurrentAnalyses")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ObicoServers");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PasswordPolicyEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -2791,6 +2824,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("ObicoServerId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("OriginalServerUrl")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
@@ -2827,6 +2863,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("ManufacturerId");
 
                     b.HasIndex("ModelId");
+
+                    b.HasIndex("ObicoServerId");
 
                     b.HasIndex("PrinterGroupId");
 
@@ -4570,6 +4608,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Farm.Infrastructure.Domain.ObicoServer", "ObicoServer")
+                        .WithMany("Printers")
+                        .HasForeignKey("ObicoServerId");
+
                     b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
                         .WithMany("Printers")
                         .HasForeignKey("PrinterGroupId")
@@ -4580,6 +4622,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Manufacturer");
 
                     b.Navigation("Model");
+
+                    b.Navigation("ObicoServer");
 
                     b.Navigation("PrinterGroup");
                 });
@@ -4952,6 +4996,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.Navigation("ScanHistory");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ObicoServer", b =>
+                {
+                    b.Navigation("Printers");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJob", b =>
