@@ -1513,3 +1513,11 @@ Also fixed hardcoded paths outside `api.ts`:
 
 ### Lesson
 `useAutoDispatch.ts` bypasses `apiClient` methods and calls `apiClient.get/post/put` directly with hardcoded paths. These need updating whenever routes change. Consider consolidating into `api.ts` methods.
+
+### 2025-07-25: Auto-Print Dashboard Mark Ready Button UX Fix
+- Backend `AutoPrintStatusDto` has a `state` field (string: "None", "PendingReady", "Ready") that was missing from the frontend TypeScript `AutoPrintStatus` type
+- `currentJobName` is populated only when a job has status `Printing` or `Starting` — it's a reliable indicator of actively printing
+- `AutoPrintState.PendingReady` = printer finished a job, waiting for bed clear confirmation — this is the ONLY state where "Mark Ready" makes sense
+- Button visibility logic: Mark Ready → only in PendingReady & not printing; Skip → only in PendingReady with queued jobs; Cancel → only when actively printing
+- Status badges now show: Disabled, Printing, Ready, Awaiting Bed Clear, or Idle based on state + currentJobName
+- Key files: `src/features/auto-print/pages/AutoPrintDashboardPage.tsx`, `src/types/api.ts` (AutoPrintStatus interface), `src/infra/Domain/AutoPrintState.cs` (backend enum)

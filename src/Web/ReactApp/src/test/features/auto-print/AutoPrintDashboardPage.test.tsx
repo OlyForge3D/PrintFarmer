@@ -54,7 +54,13 @@ describe('AutoPrintDashboardPage', () => {
       { name: 'Bed Clear', passed: false, message: 'Bed has objects', checkedAt: '2025-01-15T10:00:00Z' },
       { name: 'Temperature OK', passed: true, message: 'Temperature in range', checkedAt: '2025-01-15T10:00:00Z' },
     ],
+    state: 'PendingReady',
+  };
+
+  const mockPrintingStatus = {
+    ...mockPrinterStatus,
     currentJobName: 'test-print.gcode',
+    state: 'None',
   };
 
   const mockGlobalStatus = {
@@ -257,7 +263,7 @@ describe('AutoPrintDashboardPage', () => {
   it('cancel button calls cancel mutation', async () => {
     const user = userEvent.setup();
     vi.mocked(useAutoPrintStatus).mockReturnValue({
-      data: mockGlobalStatus,
+      data: { globalEnabled: true, printers: [mockPrintingStatus] },
       isLoading: false,
       error: null,
     } as ReturnType<typeof useAutoPrintStatus>);
@@ -308,5 +314,71 @@ describe('AutoPrintDashboardPage', () => {
     );
 
     expect(screen.getByText(/Failed to load auto-print status/)).toBeInTheDocument();
+  });
+
+  it('hides Mark Ready button when printer is actively printing', () => {
+    vi.mocked(useAutoPrintStatus).mockReturnValue({
+      data: { globalEnabled: true, printers: [mockPrintingStatus] },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoPrintStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoPrintDashboardPage />
+      </TestWrapper>
+    );
+
+    expect(screen.queryByText('Mark Ready')).not.toBeInTheDocument();
+    expect(screen.getByText('Cancel')).toBeInTheDocument();
+  });
+
+  it('hides Cancel button when printer is not printing', () => {
+    vi.mocked(useAutoPrintStatus).mockReturnValue({
+      data: mockGlobalStatus,
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoPrintStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoPrintDashboardPage />
+      </TestWrapper>
+    );
+
+    expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+    expect(screen.getByText('Mark Ready')).toBeInTheDocument();
+  });
+
+  it('shows Printing badge when printer is actively printing', () => {
+    vi.mocked(useAutoPrintStatus).mockReturnValue({
+      data: { globalEnabled: true, printers: [mockPrintingStatus] },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoPrintStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoPrintDashboardPage />
+      </TestWrapper>
+    );
+
+    expect(screen.getByText('Printing')).toBeInTheDocument();
+  });
+
+  it('shows Awaiting Bed Clear badge when in PendingReady state', () => {
+    vi.mocked(useAutoPrintStatus).mockReturnValue({
+      data: mockGlobalStatus,
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoPrintStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoPrintDashboardPage />
+      </TestWrapper>
+    );
+
+    expect(screen.getByText('Awaiting Bed Clear')).toBeInTheDocument();
   });
 });

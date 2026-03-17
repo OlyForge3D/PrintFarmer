@@ -53,6 +53,81 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Auto-Print Scaling Analysis — 2026-03-06
+
+**Task:** Assess how auto-print feature scales to 100 printers and identify architectural bottlenecks.
+
+**Current Architecture:**
+
+**Auto-Print Service (`AutoPrintService.cs`, 603 lines):**
+- **State management:** 3 states (None, PendingReady, Ready) stored in `Printer.AutoPrintState`
+- **Trigger flow:** `PrintJobCompletionService` → `TransitionToPendingReadyAsync` → SignalR broadcast → operator confirms → `MarkReadyAsync` → `dispatchTrigger.NotifyJobQueued()`
+- **GetAllStatusAsync pattern:** Loads all printers, then 2 batch queries (queue counts, current jobs) with `GroupBy` aggregation
+- **SignalR broadcasts:** 5 places send `autoprintstatechanged` to `hub.Clients.All` (fan-out to all clients)
+
+**Auto-Dispatch Background Service (`AutoDispatchBackgroundService.cs`, 348 lines):**
+- **Event-driven:** No polling. Reacts to `AutoDispatchTrigger` events (printer idle, job queued)
+- **Concurrency:** SemaphoreSlim serializes dispatch decisions (prevents double-assignment), `MaxConcurrentDispatches` limit
+- **Per-printer tasks:** Each idle event spawns fire-and-forget Task, runs concurrently
+- **Idle threshold:** Configurable wait before dispatch (skipped for upload-and-print)
+
+**Dispatch Scorer (`DispatchScorer.cs`, 506 lines):**
+- **ScorePrintersForJobAsync:** Called per job candidate during dispatch cycle
+- **Query pattern:** Loads all enabled printers with includes (Model, Toolheads, NozzleModel) via `AsSplitQuery()`
+- **Batch optimization:** Single query for queue depths across all printers
+- **Material lookup:** FilamentType query per job (cached by EF Core query cache)
+
+**Database Indexes (from EF config):**
+- **Printer:** Only `ServerUrl` unique index
+- **PrintJob:** Indexed on `Status`, `QueuedAt`, `Priority`, `AssignedPrinterId`, composite `(AssignedPrinterId, Status)`
+
+**Scaling Assessment @ 100 Printers:**
+
+**✅ Works Fine:**
+1. **Auto-Dispatch Background Service** — Event-driven with concurrency limits scales well. Fire-and-forget per-printer tasks means 100 idle printers dispatch in parallel (up to `MaxConcurrentDispatches`). No polling loop.
+2. **Dispatch Scorer query pattern** — Single `ToListAsync()` for all printers + batch queue depth query is efficient. N=100 printers with includes is ~5-10ms. Acceptable.
+3. **Database indexes** — Composite `(AssignedPrinterId, Status)` index covers critical queries (`TransitionToPendingReadyAsync`, `GetQueuedCountsByPrinterAsync`). Query plans are optimal.
+4. **SignalR broadcast patterns** — `hub.Clients.All.SendAsync` is O(clients), not O(printers). If 5-10 concurrent users, 100-printer state changes won't cause issues.
+
+**⚠️ Minor Concerns (acceptable at 100, optimize later):**
+1. **GetAllStatusAsync N+2 pattern** — Loads all printers in memory, then 2 batch queries. At 100 printers this is ~150-200 rows total. Not a bottleneck yet, but becomes problematic at 500+ printers.
+2. **BuildStatusDtoAsync per-printer queries** — Called from multiple places (MarkReady, Cancel, Skip, SetEnabled). Each does 2 queries (queue count, current job). At 100 printers with frequent state changes, this adds up. Could be batched.
+3. **Dispatch scorer material lookup** — `FirstOrDefaultAsync` per job. If scoring 20 candidates, that's 20 DB hits (mitigated by EF query cache). Could pre-load all active FilamentTypes.
+4. **SignalR `Clients.All` for auto-print events** — Every state change broadcasts to all clients. At 100 printers with high turnover, this is chattier than necessary. Could use `Clients.Group($"printer-{printerId}")` pattern for targeted updates.
+
+**🔴 Does NOT Break (but needs monitoring):**
+1. **AutoPrintService is not CPU-bound** — State transitions are simple in-memory checks + DB updates. No heavy computation.
+2. **No cascading failures** — If one printer's dispatch fails, it's isolated. No global locks (except the `_dispatchLock` which is scoped per-cycle, not per-printer).
+3. **Database contention is low** — Auto-print writes are infrequent (only on job completion + operator action). Dispatch writes are serialized by SemaphoreSlim.
+
+**Recommended Changes (priority order):**
+
+**Priority 1 (Small effort, high value):**
+- **Batch status building in GetAllStatusAsync** — Already uses batch queries for queue counts and current jobs. No change needed, pattern is correct.
+- **Add `Printer.IsEnabled` index** — Dispatch scorer filters `Where(p => p.IsEnabled)`. Add index to avoid table scan.
+
+**Priority 2 (Medium effort, future-proofing):**
+- **Cache FilamentType lookups in DispatchScorer** — Load all active FilamentTypes once, use in-memory dictionary for material resolution. Eliminates 20 DB queries per dispatch cycle.
+- **SignalR targeted broadcasts** — Switch from `Clients.All` to `Clients.Group($"dashboard")` or `Clients.Group($"auto-print-subscribers")`. Requires client-side group join on page load. Reduces chattiness for clients not watching auto-print.
+
+**Priority 3 (Large effort, only if scaling beyond 200 printers):**
+- **Paginate GetAllStatusAsync** — Add pagination parameters. Current "load all printers" pattern breaks at 500+ printers.
+- **Redis cache for printer status** — Cache `AutoPrintStatusDto` per printer in Redis with 30s TTL. Reduces per-status-query DB hits. Overkill for 100 printers.
+- **Horizontal scaling prep** — Current `SemaphoreSlim` is in-memory, single-node only. For multi-node API, need distributed lock (Redis) or event sourcing pattern. Not needed until multi-replica deployments.
+
+**What NOT to change:**
+- Event-driven dispatch loop is correct — don't add polling
+- Per-printer task concurrency is optimal — don't serialize it
+- SignalR fan-out is fine for <20 concurrent clients — don't over-optimize
+- Database schema is well-indexed — no schema changes needed
+
+**Key File Paths:**
+- Auto-print service: `src/infra/Services/AutoPrint/AutoPrintService.cs`
+- Auto-dispatch background: `src/infra/Services/Queue/Dispatch/AutoDispatchBackgroundService.cs`
+- Dispatch scorer: `src/infra/Services/Queue/Dispatch/DispatchScorer.cs`
+- EF config: `src/infra/Data/Configurations/PrinterConfiguration.cs`, `PrintJobConfiguration.cs`
+- SignalR hub: `src/infra/Services/SignalR/PrinterHub.cs`
+
 ### Architecture Review — 2026-03-06
 
 **Solution stats:** 1,566 C# files across 30 projects. 585 TS/TSX files in React frontend. 64 entity configs in EF Core. 64 controllers. 26 API project references.

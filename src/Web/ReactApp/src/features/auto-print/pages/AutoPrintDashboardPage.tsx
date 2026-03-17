@@ -124,14 +124,23 @@ function PrinterStatusCard({
   onCancel,
   isPending,
 }: PrinterStatusCardProps) {
+  const isPrinting = !!printer.currentJobName;
+  const isPendingReady = printer.state === 'PendingReady';
+
   const getStatusBadge = () => {
     if (!printer.enabled) {
       return <Badge variant="default" size="sm">Disabled</Badge>;
     }
+    if (isPrinting) {
+      return <Badge variant="primary" size="sm">Printing</Badge>;
+    }
     if (printer.isReady) {
       return <Badge variant="success" size="sm">Ready</Badge>;
     }
-    return <Badge variant="warning" size="sm">Not Ready</Badge>;
+    if (isPendingReady) {
+      return <Badge variant="warning" size="sm">Awaiting Bed Clear</Badge>;
+    }
+    return <Badge variant="default" size="sm">Idle</Badge>;
   };
 
   return (
@@ -189,33 +198,39 @@ function PrinterStatusCard({
         )}
 
         <div className="flex gap-2 flex-wrap">
-          <Button
-            variant="success"
-            size="sm"
-            onClick={() => onMarkReady(printer.printerId)}
-            disabled={!printer.enabled || printer.isReady || isPending}
-            iconLeft={<CheckIcon />}
-          >
-            Mark Ready
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => onSkip(printer.printerId)}
-            disabled={!printer.enabled || !printer.currentJobName || isPending}
-            iconLeft={<SkipForwardIcon />}
-          >
-            Skip
-          </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => onCancel(printer.printerId)}
-            disabled={!printer.enabled || !printer.currentJobName || isPending}
-            iconLeft={<StopIcon />}
-          >
-            Cancel
-          </Button>
+          {isPendingReady && !isPrinting && (
+            <Button
+              variant="success"
+              size="sm"
+              onClick={() => onMarkReady(printer.printerId)}
+              disabled={!printer.enabled || printer.isReady || isPending}
+              iconLeft={<CheckIcon />}
+            >
+              Mark Ready
+            </Button>
+          )}
+          {isPendingReady && printer.queueDepth > 0 && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onSkip(printer.printerId)}
+              disabled={!printer.enabled || isPending}
+              iconLeft={<SkipForwardIcon />}
+            >
+              Skip
+            </Button>
+          )}
+          {isPrinting && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => onCancel(printer.printerId)}
+              disabled={!printer.enabled || isPending}
+              iconLeft={<StopIcon />}
+            >
+              Cancel
+            </Button>
+          )}
         </div>
       </Card.Body>
     </Card>
