@@ -150,7 +150,7 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/autoprint/printer-1/ready');
+      expect(apiClient.post).toHaveBeenCalledWith('/auto-print/printer-1/ready');
     });
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Dispatching "benchy.gcode" to MK4');
@@ -266,7 +266,7 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Skip next queued job'));
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/autoprint/printer-1/skip');
+      expect(apiClient.post).toHaveBeenCalledWith('/auto-print/printer-1/skip');
     });
     await waitFor(() => {
       expect(toast.info).toHaveBeenCalledWith('Skipped next queued job');
@@ -281,7 +281,7 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Cancel auto-dispatch'));
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/autoprint/printer-1/cancel');
+      expect(apiClient.post).toHaveBeenCalledWith('/auto-print/printer-1/cancel');
     });
     await waitFor(() => {
       expect(toast.info).toHaveBeenCalledWith('Auto-dispatch cancelled');

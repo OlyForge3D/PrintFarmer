@@ -12,7 +12,7 @@ namespace Farm.Slicer.Module.Api.Controllers;
 /// API endpoints for managing slicer workers.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/workers")]
 [Authorize]
 public class WorkersController(
     IWorkerRepository workerRepository,

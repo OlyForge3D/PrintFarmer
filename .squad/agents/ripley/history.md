@@ -1493,3 +1493,23 @@ Printer assignment field:
 4. Server analytics (show load per server)
 5. Capacity indicators (warnings near max concurrent)
 
+
+### Kebab-Case Route Migration (2026-03-16)
+
+**Status:** ✅ Complete  
+**Build & Lint:** ✅ Clean
+
+### Changes
+Updated all frontend API paths in `api.ts` to match new kebab-case backend routes:
+- `/autoprint/` → `/auto-print/` (7 paths)
+- `/systemlogs` → `/system-logs` (4 paths)
+- `/jobscheduling/` → `/job-scheduling/` (15 paths across two method sets)
+- `/fileconsistency/` → `/file-consistency/` (5 paths)
+- No `/printapprovals` paths existed in the codebase
+
+Also fixed hardcoded paths outside `api.ts`:
+- `features/printers/hooks/useAutoDispatch.ts` — 7 `/autoprint/` → `/auto-print/`
+- `features/printers/__tests__/BedClearBanner.test.tsx` — 3 `/autoprint/` → `/auto-print/`
+
+### Lesson
+`useAutoDispatch.ts` bypasses `apiClient` methods and calls `apiClient.get/post/put` directly with hardcoded paths. These need updating whenever routes change. Consider consolidating into `api.ts` methods.

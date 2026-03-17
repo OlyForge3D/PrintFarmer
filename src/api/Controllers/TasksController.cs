@@ -8,7 +8,7 @@ namespace Farm.Web.Api.Controllers;
 /// Controller for managing user tasks.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/tasks")]
 public class TasksController(IUserTaskService taskService) : ControllerBase
 {
     private readonly IUserTaskService _taskService = taskService ?? throw new ArgumentNullException(nameof(taskService));

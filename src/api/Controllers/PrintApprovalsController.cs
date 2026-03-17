@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Farm.Web.Api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/print-approvals")]
     [Authorize]
     public class PrintApprovalsController(IPrintApprovalService approvalService, Farm.Infrastructure.Repositories.PrintJobs.IPrintApprovalRepository? repo = null) : ControllerBase
     {

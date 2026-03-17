@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Farm.Web.Api.Controllers;
 
 [ApiController]
-[Route("api/systemlogs")]
+[Route("api/system-logs")]
 [Authorize(Roles = "farm_admin")]
 public class SystemLogsController(ISystemLogService systemLogService, ISystemLogRepository systemLogRepository) : ControllerBase
 {

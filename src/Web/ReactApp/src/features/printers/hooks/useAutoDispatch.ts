@@ -13,7 +13,7 @@ export function useAutoDispatchStatus(printerId: string): UseQueryResult<AutoDis
   return useQuery({
     queryKey: KEYS.status(printerId),
     queryFn: async (): Promise<AutoDispatchStatus> => {
-      const res = await apiClient.get(`/autoprint/${printerId}/status`);
+      const res = await apiClient.get(`/auto-print/${printerId}/status`);
       return res.data as AutoDispatchStatus;
     },
     enabled: !!printerId,
@@ -26,7 +26,7 @@ export function useSetAutoDispatchEnabled() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ printerId, enabled }: { printerId: string; enabled: boolean }) => {
-      const res = await apiClient.put(`/autoprint/${printerId}/enabled`, { enabled });
+      const res = await apiClient.put(`/auto-print/${printerId}/enabled`, { enabled });
       return res.data as AutoDispatchStatus;
     },
     onSuccess: (_data, variables) => {
@@ -41,7 +41,7 @@ export function useAllAutoDispatchStatuses() {
   const query = useQuery<AutoDispatchStatus[]>({
     queryKey: KEYS.allStatuses,
     queryFn: async () => {
-      const res = await apiClient.get('/autoprint/status');
+      const res = await apiClient.get('/auto-print/status');
       return res.data;
     },
     refetchInterval: 10_000,
@@ -64,7 +64,7 @@ export function useSetAllAutoDispatchEnabled() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (enabled: boolean) => {
-      const res = await apiClient.put('/autoprint/enabled', { enabled });
+      const res = await apiClient.put('/auto-print/enabled', { enabled });
       return res.data as AutoDispatchStatus[];
     },
     onSuccess: () => {
@@ -77,7 +77,7 @@ export function useConfirmBedClear() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (printerId: string) => {
-      const res = await apiClient.post(`/autoprint/${printerId}/ready`);
+      const res = await apiClient.post(`/auto-print/${printerId}/ready`);
       return res.data as AutoDispatchReadyResult;
     },
     onSuccess: (_data, printerId) => {
@@ -91,7 +91,7 @@ export function useSkipNextJob() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (printerId: string) => {
-      const res = await apiClient.post(`/autoprint/${printerId}/skip`);
+      const res = await apiClient.post(`/auto-print/${printerId}/skip`);
       return res.data;
     },
     onSuccess: (_data, printerId) => {
@@ -105,7 +105,7 @@ export function useCancelAutoDispatch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (printerId: string) => {
-      const res = await apiClient.post(`/autoprint/${printerId}/cancel`);
+      const res = await apiClient.post(`/auto-print/${printerId}/cancel`);
       return res.data;
     },
     onSuccess: (_data, printerId) => {

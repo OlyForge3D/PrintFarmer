@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Controllers
     /// Provides access to printer cover images and bed textures
     /// </summary>
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/assets")]
     [Authorize]
     public sealed class AssetsController(IAssetService assetService, ILogger<AssetsController> logger) : ControllerBase
     {

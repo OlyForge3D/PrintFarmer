@@ -2202,7 +2202,7 @@ export class ApiClient {
   > {
     const response = await this.client.get<
       import("@/types/api").FileHealthSummaryDto
-    >("/fileconsistency/health/summary");
+    >("/file-consistency/health/summary");
     return response.data;
   }
 
@@ -2214,7 +2214,7 @@ export class ApiClient {
   ): Promise<import("@/types/api").FileHealthAuditDto[]> {
     const response = await this.client.get<
       import("@/types/api").FileHealthAuditDto[]
-    >("/fileconsistency/audits/history", {
+    >("/file-consistency/audits/history", {
       params: { pageSize },
     });
     return response.data;
@@ -2228,7 +2228,7 @@ export class ApiClient {
   > {
     const response = await this.client.get<
       import("@/types/api").FileIssuesSummaryDto
-    >("/fileconsistency/issues");
+    >("/file-consistency/issues");
     return response.data;
   }
 
@@ -2240,7 +2240,7 @@ export class ApiClient {
   ): Promise<import("@/types/api").FileHealthDetailDto> {
     const response = await this.client.get<
       import("@/types/api").FileHealthDetailDto
-    >(`/fileconsistency/model3d/${id}/health`);
+    >(`/file-consistency/model3d/${id}/health`);
     return response.data;
   }
 
@@ -2252,7 +2252,7 @@ export class ApiClient {
   ): Promise<import("@/types/api").FileHealthDetailDto> {
     const response = await this.client.get<
       import("@/types/api").FileHealthDetailDto
-    >(`/fileconsistency/gcode/${id}/health`);
+    >(`/file-consistency/gcode/${id}/health`);
     return response.data;
   }
 
@@ -2424,7 +2424,7 @@ export class ApiClient {
   // ============ Job Scheduling API methods ============
   async scheduleJob(jobId: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
     const req = request as { scheduledStartTime: Date; timeZone?: string; recurrencePattern?: string; recurrenceEndDate?: Date };
-    const response = await this.client.post(`/jobscheduling/${jobId}/schedule`, {
+    const response = await this.client.post(`/job-scheduling/${jobId}/schedule`, {
       scheduledStartTime: req.scheduledStartTime.toISOString(),
       timeZone: req.timeZone || 'UTC',
       recurrencePattern: req.recurrencePattern || null,
@@ -2435,7 +2435,7 @@ export class ApiClient {
 
   async rescheduleJob(jobId: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
     const req = request as { newScheduledTime: Date; timeZone?: string };
-    const response = await this.client.put(`/jobscheduling/${jobId}/reschedule`, {
+    const response = await this.client.put(`/job-scheduling/${jobId}/reschedule`, {
       newScheduledTime: req.newScheduledTime.toISOString(),
       timeZone: req.timeZone || 'UTC',
     });
@@ -2443,20 +2443,20 @@ export class ApiClient {
   }
 
   async cancelScheduling(jobId: string): Promise<void> {
-    await this.client.delete(`/jobscheduling/${jobId}/schedule`);
+    await this.client.delete(`/job-scheduling/${jobId}/schedule`);
   }
 
   async pauseScheduling(jobId: string): Promise<void> {
-    await this.client.post(`/jobscheduling/${jobId}/pause`);
+    await this.client.post(`/job-scheduling/${jobId}/pause`);
   }
 
   async resumeScheduling(jobId: string): Promise<void> {
-    await this.client.post(`/jobscheduling/${jobId}/resume`);
+    await this.client.post(`/job-scheduling/${jobId}/resume`);
   }
 
   async getScheduledJob(jobId: string): Promise<Record<string, unknown> | null> {
     try {
-      const response = await this.client.get(`/jobscheduling/${jobId}`);
+      const response = await this.client.get(`/job-scheduling/${jobId}`);
       return response.data;
     } catch (error: unknown) {
       if ((error as Record<string, unknown>).statusCode === 404) {
@@ -2474,17 +2474,17 @@ export class ApiClient {
     if (dateTo) {
       params.append('dateTo', dateTo.toISOString());
     }
-    const response = await this.client.get(`/jobscheduling/scheduled?${params.toString()}`);
+    const response = await this.client.get(`/job-scheduling/scheduled?${params.toString()}`);
     return response.data || [];
   }
 
   async getExecutionHistory(jobId: string): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get(`/jobscheduling/${jobId}/executions`);
+    const response = await this.client.get(`/job-scheduling/${jobId}/executions`);
     return response.data || [];
   }
 
   async getAvailableTimeZones(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/jobscheduling/timezones');
+    const response = await this.client.get('/job-scheduling/timezones');
     return response.data || [];
   }
 
@@ -2542,7 +2542,7 @@ export class ApiClient {
    * Get system logs with optional filtering by parameters
    */
   async getSystemLogs(params: Record<string, string>): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/systemlogs', { params });
+    const response = await this.client.get('/system-logs', { params });
     return response.data || [];
   }
 
@@ -2550,7 +2550,7 @@ export class ApiClient {
    * Get system logs with advanced query string search
    */
   async getSystemLogsQuery(query: string): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get(`/systemlogs?query=${encodeURIComponent(query)}`);
+    const response = await this.client.get(`/system-logs?query=${encodeURIComponent(query)}`);
     return response.data || [];
   }
 
@@ -2558,7 +2558,7 @@ export class ApiClient {
    * Export system logs as JSON blob with optional filtering
    */
   async exportSystemLogs(params: Record<string, string>): Promise<Blob> {
-    const response = await this.client.get('/systemlogs/export', {
+    const response = await this.client.get('/system-logs/export', {
       params,
       responseType: 'blob'
     });
@@ -2566,7 +2566,7 @@ export class ApiClient {
   }
 
   async getSystemLogStats(): Promise<{ rowCount: number }> {
-    const response = await this.client.get('/systemlogs/stats');
+    const response = await this.client.get('/system-logs/stats');
     return response.data;
   }
 
@@ -3699,77 +3699,77 @@ export class ApiClient {
 
   // ============ Auto-Print API methods ============
   async getAutoPrintStatus(): Promise<AutoPrintGlobalStatus> {
-    const response = await this.client.get('/autoprint/status');
+    const response = await this.client.get('/auto-print/status');
     return response.data;
   }
 
   async getAutoPrintPrinterStatus(printerId: string): Promise<AutoPrintStatus> {
-    const response = await this.client.get(`/autoprint/${printerId}/status`);
+    const response = await this.client.get(`/auto-print/${printerId}/status`);
     return response.data;
   }
 
   async markPrinterReady(printerId: string): Promise<void> {
-    await this.client.post(`/autoprint/${printerId}/ready`);
+    await this.client.post(`/auto-print/${printerId}/ready`);
   }
 
   async skipAutoPrintJob(printerId: string): Promise<void> {
-    await this.client.post(`/autoprint/${printerId}/skip`);
+    await this.client.post(`/auto-print/${printerId}/skip`);
   }
 
   async cancelAutoPrint(printerId: string): Promise<void> {
-    await this.client.post(`/autoprint/${printerId}/cancel`);
+    await this.client.post(`/auto-print/${printerId}/cancel`);
   }
 
   async setAutoPrintEnabled(printerId: string, enabled: boolean): Promise<void> {
-    await this.client.put(`/autoprint/${printerId}/enabled`, { enabled });
+    await this.client.put(`/auto-print/${printerId}/enabled`, { enabled });
   }
 
   async setAutoPrintGlobalEnabled(enabled: boolean): Promise<void> {
-    await this.client.put('/autoprint/enabled', { enabled });
+    await this.client.put('/auto-print/enabled', { enabled });
   }
 
   // ============ Job Scheduling API methods ============
   async getScheduledJobs(): Promise<ScheduledJob[]> {
-    const response = await this.client.get('/jobscheduling/scheduled');
+    const response = await this.client.get('/job-scheduling/scheduled');
     return response.data || [];
   }
 
   async getScheduledJob(jobId: string): Promise<ScheduledJob> {
-    const response = await this.client.get(`/jobscheduling/${jobId}`);
+    const response = await this.client.get(`/job-scheduling/${jobId}`);
     return response.data;
   }
 
   async scheduleJob(jobId: string, request: ScheduleJobRequest): Promise<ScheduledJob> {
-    const response = await this.client.post(`/jobscheduling/${jobId}/schedule`, request);
+    const response = await this.client.post(`/job-scheduling/${jobId}/schedule`, request);
     return response.data;
   }
 
   async rescheduleJob(jobId: string, request: ScheduleJobRequest): Promise<ScheduledJob> {
-    const response = await this.client.put(`/jobscheduling/${jobId}/reschedule`, request);
+    const response = await this.client.put(`/job-scheduling/${jobId}/reschedule`, request);
     return response.data;
   }
 
   async cancelSchedule(jobId: string): Promise<void> {
-    await this.client.delete(`/jobscheduling/${jobId}/schedule`);
+    await this.client.delete(`/job-scheduling/${jobId}/schedule`);
   }
 
   async pauseSchedule(jobId: string): Promise<ScheduledJob> {
-    const response = await this.client.post(`/jobscheduling/${jobId}/pause`);
+    const response = await this.client.post(`/job-scheduling/${jobId}/pause`);
     return response.data;
   }
 
   async resumeSchedule(jobId: string): Promise<ScheduledJob> {
-    const response = await this.client.post(`/jobscheduling/${jobId}/resume`);
+    const response = await this.client.post(`/job-scheduling/${jobId}/resume`);
     return response.data;
   }
 
   async getJobExecutions(jobId: string): Promise<JobExecution[]> {
-    const response = await this.client.get(`/jobscheduling/${jobId}/executions`);
+    const response = await this.client.get(`/job-scheduling/${jobId}/executions`);
     return response.data || [];
   }
 
   async getTimezones(): Promise<string[]> {
-    const response = await this.client.get('/jobscheduling/timezones');
+    const response = await this.client.get('/job-scheduling/timezones');
     return response.data || [];
   }
 

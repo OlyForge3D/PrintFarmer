@@ -10,7 +10,7 @@ namespace Farm.Web.Api.Controllers;
 /// the bed is clear before the next queued job is dispatched.
 /// </summary>
 [ApiController]
-[Route("api/autoprint")]
+[Route("api/auto-print")]
 [Authorize]
 public class AutoPrintController(
     IAutoPrintService autoPrintService,

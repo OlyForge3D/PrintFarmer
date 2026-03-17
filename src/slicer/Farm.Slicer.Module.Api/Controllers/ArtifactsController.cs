@@ -14,7 +14,7 @@ namespace Farm.Slicer.Module.Api.Controllers;
 /// API endpoints for managing slice job artifacts.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/artifacts")]
 [Authorize]
 public class ArtifactsController(
     IArtifactsService service,

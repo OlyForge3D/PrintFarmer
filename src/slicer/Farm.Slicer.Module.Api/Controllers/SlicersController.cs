@@ -10,7 +10,7 @@ namespace Farm.Slicer.Module.Api.Controllers;
 /// API endpoints for slicer service registration and lifecycle management.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/slicers")]
 [RequireSlicerApiKey]
 public class SlicersController(ISlicersService service) : ControllerBase
 {

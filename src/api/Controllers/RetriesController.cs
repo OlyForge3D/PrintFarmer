@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Controllers;
 /// REST API endpoints for managing job retry logic
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/retries")]
 [Authorize]
 public class RetriesController(
     IRetryService retryService,

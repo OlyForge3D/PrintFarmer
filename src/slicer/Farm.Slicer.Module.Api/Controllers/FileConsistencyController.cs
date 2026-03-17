@@ -17,7 +17,7 @@ namespace Farm.Slicer.Module.Api.Controllers;
 /// Requires admin role for all operations.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/file-consistency")]
 [Authorize(Roles = "farm_admin")]
 public class FileConsistencyController(
     IFileConsistencyRepository fileConsistencyRepo) : ControllerBase

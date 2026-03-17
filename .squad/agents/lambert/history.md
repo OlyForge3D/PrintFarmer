@@ -1396,3 +1396,15 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 **Generated Schema:** ObicoServers table (Id, Name, Url, IsEnabled, MaxConcurrentAnalyses, CreatedAt, UpdatedAt) + Printer.ObicoServerId nullable FK + index.
 
 **Validation:** Build succeeded with 0 warnings, 0 errors.
+
+### Kebab-Case Route Standardization (2026-07-17)
+
+**Changed:** Standardized all backend API controller `[Route]` attributes to explicit kebab-case. Updated 11 controllers across `api/Controllers/` and `slicer/Farm.Slicer.Module.Api/Controllers/`:
+- `api/autoprint` → `api/auto-print`
+- `api/systemlogs` → `api/system-logs`
+- `api/[controller]` → explicit kebab-case for JobScheduling, PrintApprovals, Retries, Tasks, Assets, Artifacts, FileConsistency, Slicers, Workers
+- Left `api/filaman` as-is (brand name)
+
+**Why:** The `[controller]` convention uses PascalCase class names without hyphens (e.g., `JobScheduling` not `job-scheduling`), which doesn't match the team's kebab-case standard. The frontend `api.ts` was already using kebab-case URLs — the backend routes were the mismatch.
+
+**Validation:** Build succeeded with 0 warnings, 0 errors. Format clean.

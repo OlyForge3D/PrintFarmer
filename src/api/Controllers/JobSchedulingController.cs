@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 /// Phase 4.1: Job Scheduling
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/job-scheduling")]
 [Authorize]
 public class JobSchedulingController(JobSchedulingService schedulingService, ILogger<JobSchedulingController> logger) : ControllerBase
 {
