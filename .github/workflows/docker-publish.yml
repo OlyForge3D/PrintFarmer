@@ -13,12 +13,9 @@ name: Build and Publish Docker Images
 on:
   push:
     branches:
-      - main
       - release
     tags:
       - 'v*'
-  schedule:
-    - cron: '0 0 * * *'  # Daily at midnight UTC for cache warming
   workflow_dispatch:
     inputs:
       tag_suffix:
@@ -330,13 +327,10 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,format=short,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/release' }}
             type=raw,value=release,enable=${{ github.ref == 'refs/heads/release' }}
             type=sha,format=short,prefix=release-sha-,enable=${{ github.ref == 'refs/heads/release' }}
             type=raw,value=manual-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
-            type=schedule,pattern=nightly
           labels: |
             org.opencontainers.image.title=printfarmer-${{ matrix.image }}
             org.opencontainers.image.description=PrintFarmer - Multi-printer 3D print farm management
@@ -397,13 +391,10 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,format=short,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/release' }}
             type=raw,value=release,enable=${{ github.ref == 'refs/heads/release' }}
             type=sha,format=short,prefix=release-sha-,enable=${{ github.ref == 'refs/heads/release' }}
             type=raw,value=manual-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
-            type=schedule,pattern=nightly
           labels: |
             org.opencontainers.image.title=printfarmer-monolith
             org.opencontainers.image.description=PrintFarmer - Multi-printer 3D print farm management (monolith)
