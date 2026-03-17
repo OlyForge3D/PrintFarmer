@@ -20,13 +20,13 @@ export const CostDashboardPage: React.FC = () => {
   };
 
   const materialCostPercentage = useMemo(() => {
-    if (!summary || summary.totalCost === 0) return '0';
-    return ((summary.totalMaterialCost / summary.totalCost) * 100).toFixed(1);
+    if (!summary || !summary.totalCost) return '0';
+    return (((summary.totalMaterialCost ?? 0) / summary.totalCost) * 100).toFixed(1);
   }, [summary]);
 
   const energyCostPercentage = useMemo(() => {
-    if (!summary || summary.totalCost === 0) return '0';
-    return ((summary.totalEnergyCost / summary.totalCost) * 100).toFixed(1);
+    if (!summary || !summary.totalCost) return '0';
+    return (((summary.totalEnergyCost ?? 0) / summary.totalCost) * 100).toFixed(1);
   }, [summary]);
 
   const printerTableColumns = [

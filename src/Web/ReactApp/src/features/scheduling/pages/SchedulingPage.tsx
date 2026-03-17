@@ -139,7 +139,7 @@ export function SchedulingPage() {
     return (
       <PageTemplate title="Job Scheduling" icon={CalendarIcon}>
         <div className="text-pf-error p-4">
-          Failed to load scheduled jobs: {String(error)}
+          Failed to load scheduled jobs: {error instanceof Error ? error.message : String(error)}
         </div>
       </PageTemplate>
     );

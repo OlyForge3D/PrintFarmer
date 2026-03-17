@@ -3699,77 +3699,77 @@ export class ApiClient {
 
   // ============ Auto-Print API methods ============
   async getAutoPrintStatus(): Promise<AutoPrintGlobalStatus> {
-    const response = await this.client.get('/auto-print/status');
+    const response = await this.client.get('/autoprint/status');
     return response.data;
   }
 
   async getAutoPrintPrinterStatus(printerId: string): Promise<AutoPrintStatus> {
-    const response = await this.client.get(`/auto-print/${printerId}/status`);
+    const response = await this.client.get(`/autoprint/${printerId}/status`);
     return response.data;
   }
 
   async markPrinterReady(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/ready`);
+    await this.client.post(`/autoprint/${printerId}/ready`);
   }
 
   async skipAutoPrintJob(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/skip`);
+    await this.client.post(`/autoprint/${printerId}/skip`);
   }
 
   async cancelAutoPrint(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/cancel`);
+    await this.client.post(`/autoprint/${printerId}/cancel`);
   }
 
   async setAutoPrintEnabled(printerId: string, enabled: boolean): Promise<void> {
-    await this.client.put(`/auto-print/${printerId}/enabled`, { enabled });
+    await this.client.put(`/autoprint/${printerId}/enabled`, { enabled });
   }
 
   async setAutoPrintGlobalEnabled(enabled: boolean): Promise<void> {
-    await this.client.put('/auto-print/enabled', { enabled });
+    await this.client.put('/autoprint/enabled', { enabled });
   }
 
   // ============ Job Scheduling API methods ============
   async getScheduledJobs(): Promise<ScheduledJob[]> {
-    const response = await this.client.get('/job-scheduling/scheduled');
+    const response = await this.client.get('/jobscheduling/scheduled');
     return response.data || [];
   }
 
   async getScheduledJob(jobId: string): Promise<ScheduledJob> {
-    const response = await this.client.get(`/job-scheduling/${jobId}`);
+    const response = await this.client.get(`/jobscheduling/${jobId}`);
     return response.data;
   }
 
   async scheduleJob(jobId: string, request: ScheduleJobRequest): Promise<ScheduledJob> {
-    const response = await this.client.post(`/job-scheduling/${jobId}/schedule`, request);
+    const response = await this.client.post(`/jobscheduling/${jobId}/schedule`, request);
     return response.data;
   }
 
   async rescheduleJob(jobId: string, request: ScheduleJobRequest): Promise<ScheduledJob> {
-    const response = await this.client.put(`/job-scheduling/${jobId}/reschedule`, request);
+    const response = await this.client.put(`/jobscheduling/${jobId}/reschedule`, request);
     return response.data;
   }
 
   async cancelSchedule(jobId: string): Promise<void> {
-    await this.client.delete(`/job-scheduling/${jobId}/schedule`);
+    await this.client.delete(`/jobscheduling/${jobId}/schedule`);
   }
 
   async pauseSchedule(jobId: string): Promise<ScheduledJob> {
-    const response = await this.client.post(`/job-scheduling/${jobId}/pause`);
+    const response = await this.client.post(`/jobscheduling/${jobId}/pause`);
     return response.data;
   }
 
   async resumeSchedule(jobId: string): Promise<ScheduledJob> {
-    const response = await this.client.post(`/job-scheduling/${jobId}/resume`);
+    const response = await this.client.post(`/jobscheduling/${jobId}/resume`);
     return response.data;
   }
 
   async getJobExecutions(jobId: string): Promise<JobExecution[]> {
-    const response = await this.client.get(`/job-scheduling/${jobId}/executions`);
+    const response = await this.client.get(`/jobscheduling/${jobId}/executions`);
     return response.data || [];
   }
 
   async getTimezones(): Promise<string[]> {
-    const response = await this.client.get('/job-scheduling/timezones');
+    const response = await this.client.get('/jobscheduling/timezones');
     return response.data || [];
   }
 

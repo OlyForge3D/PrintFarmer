@@ -51,7 +51,7 @@ export function AutoPrintDashboardPage() {
   if (error) {
     return (
       <PageTemplate title="Auto-Print Dashboard" icon={PlayIcon}>
-        <div className="p-4 text-pf-error">Failed to load auto-print status: {String(error)}</div>
+        <div className="p-4 text-pf-error">Failed to load auto-print status: {error instanceof Error ? error.message : String(error)}</div>
       </PageTemplate>
     );
   }
