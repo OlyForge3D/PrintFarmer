@@ -907,7 +907,7 @@ export function Layout() {
         </aside>
 
         {/* Main content area */}
-        <main className="flex-1 overflow-y-auto min-h-0">
+        <main data-main-content className="flex-1 overflow-y-auto min-h-0">
           <EmailConfirmationBanner />
           <PlatformBanner />
           <InstallBanner />
