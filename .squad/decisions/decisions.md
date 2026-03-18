@@ -993,3 +993,51 @@ Three targeted fixes to reduce the Ready → Printing state transition latency:
 - Tests: 1407/1407 API tests passing, all dispatch tests green
 - State machine flow unchanged: Ready → dispatch → Starting → Printing
 
+---
+
+## Batch N: Tailwind v4 CSS-First Migration
+
+### Decision N+1: Tailwind v4 CSS-First @theme Migration (PFarm1-ctv)
+
+**Date:** 2026-03-18  
+**Agent:** Ripley (Frontend Dev)  
+**Status:** ✅ COMPLETE  
+
+**Context:**  
+Tailwind v3-style JS configuration (`tailwind.config.js`) required ongoing maintenance and was not aligned with Tailwind v4's CSS-first approach.
+
+**Decision:**  
+Migrate to Tailwind v4 native CSS-first configuration using `@theme` block in `src/Web/ReactApp/src/index.css`. Delete `tailwind.config.js`.
+
+**Implementation:**
+- All 54 color tokens moved to `@theme { }` block
+- 2 fonts (Inter, Bebas) added to `@theme`
+- Ring colors (focus states) added to `@theme`
+- 3 plugin utilities converted to `@utility` blocks:
+  - `card-container`
+  - `text-ellipsis`
+  - `no-shrink-content`
+- Safelist (90+ lines) removed — v4 auto-detects used classes
+- `@config` directives removed from CSS files
+- `tailwind.config.js` deleted entirely
+
+**Validation:**
+- ✅ Production build: 0 errors
+- ✅ ESLint: 0 errors (full codebase)
+- ✅ TypeScript (tsc): 0 errors
+- ✅ React Tests: 1480/1480 passing
+- ✅ API (.NET) Tests: All passing
+- ✅ Backward compatibility: 100% (no class name changes)
+
+**Rationale:**  
+Tailwind v4's CSS-first approach reduces maintenance overhead (no JS file), consolidates theme tokens in a single CSS location, and leverages native v4 capabilities (auto-detection, built-in utilities).
+
+**Future Token Additions:**
+- Add new colors/fonts directly to `@theme` block in `index.css`
+- Define custom utilities as `@utility` blocks in `index.css`
+
+**Documentation:**
+- Updated 4 docs files: `printfarmer-react-components.instructions.md`, `DESIGN_SYSTEM.md`, `FRONTEND_UI_COMPONENTS.md`, `TROUBLESHOOTING.md`
+- All references to `tailwind.config.js` replaced with CSS-first approach
+- Architecture pattern (Layer 3: Components → Layer 2: Utilities → Layer 1: CSS Custom Properties) documented
+

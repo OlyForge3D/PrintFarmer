@@ -41,8 +41,7 @@ Layer 1: CSS Custom Properties   (--pf-bg-0, --pf-accent, etc.)
 - `src/Web/ReactApp/src/common/components/ui/` — React components (Button, Input, Card, etc.)
 - `src/Web/ReactApp/src/styles/theme.css` — CSS variable orchestrator and default (GitHub Dark) theme
 - `src/Web/ReactApp/src/styles/themes/*.css` — Theme variant definitions (printfarmer-dark, light)
-- `src/Web/ReactApp/src/index.css` — Global styles and custom utilities
-- `src/Web/ReactApp/tailwind.config.js` — Tailwind theme configuration
+- `src/Web/ReactApp/src/index.css` — Global styles, `@theme` block for design tokens, and custom utilities
 
 ---
 
@@ -1258,7 +1257,7 @@ export function AddPrinterModal({ isOpen, onClose }) {
 
 ### Styles not applying
 - Ensure the component class uses `bg-pf-*`, `text-pf-*`, `border-pf-*` tokens
-- Check Tailwind `content` paths in `tailwind.config.js` include your component files
+- Verify component files are included in Tailwind's content detection (Tailwind v4 auto-detects `.tsx` files)
 - Run Tailwind rebuild: `npm run build`
 
 ### Focus ring not visible

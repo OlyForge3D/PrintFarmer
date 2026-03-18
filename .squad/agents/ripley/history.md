@@ -1610,3 +1610,76 @@ Also fixed hardcoded paths outside `api.ts`:
 - Event payload matches `FailureDetectionEvent` interface
 
 ---
+
+## Learnings — Tailwind v4 CSS-first Migration (2025-07-25)
+
+- **Tailwind v4 @theme migration**: Converted all `theme.extend` entries from `tailwind.config.js` to CSS-first `@theme` block in `index.css`. The v4 mapping pattern is `--color-{name}: value` for colors, `--font-{name}: value` for fonts, `--ring-color-{name}` / `--ring-offset-color-{name}` for focus ring theming.
+- **Two CSS entry points**: Both `index.css` and `App.css` had `@config "../tailwind.config.js"` — both needed cleanup. App.css is a secondary entry used for app-level styles.
+- **Plugin utilities → @utility blocks**: v3 `addUtilities` plugin functions convert to `@utility name { ... }` blocks in CSS. Follow the existing pattern already used for `pf-animate-skeleton`, `btn-pf`, etc.
+- **Safelist removal**: v4 auto-detects content files and doesn't need a safelist. The 90+ line safelist was a v3 workaround.
+- **No PostCSS changes needed**: `postcss.config.js` with `@tailwindcss/postcss` works for both v3-compat and v4-native modes.
+- **Key file paths**: `src/Web/ReactApp/src/index.css` is the primary Tailwind entry point with all @theme vars and @utility definitions.
+
+---
+
+## Tailwind v4 CSS-First Migration — Complete (2026-03-18)
+
+**Bead:** PFarm1-ctv  
+**Status:** ✅ DELIVERED  
+**Mode:** Background  
+**Coordination:** Multi-agent sprint (Ripley + Ash + Kane)
+
+### Deliverables
+
+**Frontend Implementation:**
+- ✅ Migrated `src/Web/ReactApp/src/index.css` from `@config` bridge to native Tailwind v4 `@theme` block
+- ✅ Moved 54 colors + 2 fonts + ring colors into `@theme` CSS
+- ✅ Converted 3 plugin utilities to `@utility` blocks: `card-container`, `text-ellipsis`, `no-shrink-content`
+- ✅ Deleted `src/Web/ReactApp/tailwind.config.js` — no longer needed
+- ✅ Removed `@config` directives from both `index.css` and `App.css`
+- ✅ Removed 90+ line safelist — v4 auto-detects
+
+### Validation
+- ✅ Production build: 0 errors, clean output
+- ✅ ESLint: 0 errors across full codebase
+- ✅ TypeScript (tsc): 0 errors, strict mode
+- ✅ React Tests: 1480/1480 PASS
+- ✅ API Tests: All passing
+- ✅ Backward compatibility: 100% (no class name changes)
+
+### Team Coordination
+
+**Ash (Documentation Specialist)** — Completed 4 docs updates:
+- `.github/instructions/printfarmer-react-components.instructions.md` — Styling section updated for CSS-first
+- `docs/DESIGN_SYSTEM.md` — Key Files + troubleshooting updated
+- `docs/FRONTEND_UI_COMPONENTS.md` — Overview + dependencies updated  
+- `docs/TROUBLESHOOTING.md` — Tailwind CSS section updated
+
+**Kane (Tester)** — Independent verification:
+- ✅ Production build verified
+- ✅ ESLint clean
+- ✅ tsc clean
+- ✅ All 1480 React tests pass
+- ✅ API (.NET) tests pass
+
+### Technical Notes
+
+**Future Token Additions:**
+- Add new colors/fonts directly to `@theme` block in `src/Web/ReactApp/src/index.css`
+- Define custom utilities as `@utility` blocks (follow existing pattern)
+
+**PostCSS Configuration:**
+- Unchanged — `@tailwindcss/postcss` handles both v3-compat and v4-native modes
+
+**Key Learnings:**
+- v4 `@theme` CSS block replaces all `theme.extend` entries from v3 JS config
+- Color mapping: `--color-{name}:` for CSS properties, `bg-pf-*` for Tailwind classes
+- Two CSS entry points: `index.css` (primary) + `App.css` (secondary) — both needed cleanup
+
+### Ready for
+
+✅ Code review  
+✅ Merge to main  
+✅ Production deployment
+
+---
