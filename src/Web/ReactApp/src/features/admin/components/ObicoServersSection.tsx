@@ -14,8 +14,8 @@ import {
   DeleteIcon,
   CheckIcon,
   CloseIcon,
-  TestTubeIcon,
-  PencilIcon,
+  TestIcon,
+  EditIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Modal } from '@/common/components/modals/Modal';
 import {
@@ -274,7 +274,7 @@ export function ObicoServersSection() {
                       size="sm"
                       onClick={() => handleTestHealth(server.id)}
                       loading={testingServerId === server.id}
-                      iconLeft={<TestTubeIcon />}
+                      iconLeft={<TestIcon />}
                       title="Test connection"
                     >
                       Test
@@ -291,7 +291,7 @@ export function ObicoServersSection() {
                       variant="ghost"
                       size="sm"
                       onClick={() => handleOpenEditModal(server)}
-                      iconLeft={<PencilIcon />}
+                      iconLeft={<EditIcon />}
                       title="Edit server"
                     >
                       Edit
