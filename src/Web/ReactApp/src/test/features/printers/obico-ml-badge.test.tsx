@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
+import type { Printer } from '@/types/api';
 
 // ── Mocks for CompactPrinterCard dependencies ──
 
@@ -111,10 +111,6 @@ function makePrinter(overrides: Partial<Printer> = {}): Printer {
 
 describe('FailureDetectionEvent type', () => {
   it('should have the correct shape when used as an object', async () => {
-    const { FailureDetectionEvent: _ } = await import('@/types/api') as Record<string, unknown>;
-
-    // The type is an interface — it doesn't exist at runtime.
-    // Verify by constructing an object matching the interface and checking properties.
     const event = {
       printerId: 'abc-123',
       printerName: 'My Printer',

@@ -100,6 +100,13 @@ public class ObicoServerController : ControllerBase
             UpdatedAt = DateTime.UtcNow
         };
 
+        // Validate server connectivity before saving
+        ObicoServerHealthDto healthResult = await ValidateServerConnectivityAsync(server, ct);
+        if (!healthResult.Healthy)
+        {
+            return BadRequest($"Obico server validation failed: {healthResult.ErrorMessage}");
+        }
+
         _dbContext.ObicoServers.Add(server);
         await _dbContext.SaveChangesAsync(ct);
 
@@ -158,6 +165,24 @@ public class ObicoServerController : ControllerBase
 
         if (dto.IsEnabled.HasValue)
         {
+            // Validate connectivity when enabling a server
+            if (dto.IsEnabled.Value && !server.IsEnabled)
+            {
+                // Apply URL/ApiKey changes before validation
+                ObicoServer probeServer = new()
+                {
+                    Url = dto.Url ?? server.Url,
+                    ApiKey = dto.ApiKey is not null
+                        ? (string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim())
+                        : server.ApiKey
+                };
+                ObicoServerHealthDto healthResult = await ValidateServerConnectivityAsync(probeServer, ct);
+                if (!healthResult.Healthy)
+                {
+                    return BadRequest($"Cannot enable server — validation failed: {healthResult.ErrorMessage}");
+                }
+            }
+
             server.IsEnabled = dto.IsEnabled.Value;
         }
 
@@ -220,7 +245,7 @@ public class ObicoServerController : ControllerBase
     }
 
     /// <summary>
-    /// Tests connectivity to an Obico ML server by calling its /p/ endpoint.
+    /// Tests connectivity to an Obico ML server by validating its prediction endpoint.
     /// </summary>
     [HttpGet("{id:guid}/health")]
     [ProducesResponseType(typeof(ObicoServerHealthDto), StatusCodes.Status200OK)]
@@ -233,15 +258,29 @@ public class ObicoServerController : ControllerBase
             return NotFound($"Obico server with ID {id} not found");
         }
 
+        ObicoServerHealthDto result = await ValidateServerConnectivityAsync(server, ct);
+
+        _logger.LogInformation(
+            "[ObicoServer] Health check for {ServerId} ({ServerName}) at {ServerUrl}: healthy={IsHealthy}, latency={Latency}ms",
+            server.Id, server.Name, server.Url, result.Healthy, result.LatencyMs);
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Validates full Obico ML server connectivity by probing the prediction endpoint.
+    /// Tests /p/ (prediction/detect), accepting 400/405 as evidence the endpoint exists.
+    /// </summary>
+    private async Task<ObicoServerHealthDto> ValidateServerConnectivityAsync(ObicoServer server, CancellationToken ct)
+    {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        bool isHealthy = false;
-        string? errorMessage = null;
+        List<string> errors = [];
 
         try
         {
             using HttpClient httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(10);
-            httpClient.BaseAddress = new Uri(server.Url);
+            httpClient.BaseAddress = new Uri(server.Url.TrimEnd('/') + "/");
 
             if (!string.IsNullOrWhiteSpace(server.ApiKey))
             {
@@ -249,48 +288,58 @@ public class ObicoServerController : ControllerBase
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", server.ApiKey);
             }
 
-            // Test the /p/ endpoint with a simple HEAD request
-            var request = new HttpRequestMessage(HttpMethod.Head, "/p/");
-            HttpResponseMessage response = await httpClient.SendAsync(request, ct);
-
-            // Accept 405 Method Not Allowed as healthy (server exists but doesn't support HEAD)
-            // Accept 400 Bad Request as healthy (server exists but requires proper multipart form data)
-            isHealthy = response.IsSuccessStatusCode ||
-                        response.StatusCode == System.Net.HttpStatusCode.MethodNotAllowed ||
-                        response.StatusCode == System.Net.HttpStatusCode.BadRequest;
-
-            if (!isHealthy)
+            // Test /p/ prediction endpoint (core functionality)
+            try
             {
-                errorMessage = $"HTTP {(int)response.StatusCode}: {response.ReasonPhrase}";
+                var request = new HttpRequestMessage(HttpMethod.Post, "p/");
+                request.Content = new StringContent(string.Empty);
+                HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+
+                // 400 = endpoint exists but needs proper multipart form data (expected)
+                // 405 = endpoint exists but method not allowed (acceptable)
+                // 2xx = endpoint responds (ideal)
+                bool endpointReachable = response.IsSuccessStatusCode ||
+                    response.StatusCode == System.Net.HttpStatusCode.BadRequest ||
+                    response.StatusCode == System.Net.HttpStatusCode.MethodNotAllowed ||
+                    response.StatusCode == System.Net.HttpStatusCode.UnsupportedMediaType;
+
+                if (!endpointReachable)
+                {
+                    errors.Add($"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}: {response.ReasonPhrase}");
+                }
             }
+            catch (HttpRequestException ex)
+            {
+                errors.Add($"Cannot reach prediction endpoint /p/: {ex.Message}");
+            }
+        }
+        catch (UriFormatException)
+        {
+            errors.Add($"Invalid server URL: {server.Url}");
         }
         catch (HttpRequestException ex)
         {
-            errorMessage = $"Connection failed: {ex.Message}";
+            errors.Add($"Connection failed: {ex.Message}");
         }
         catch (TaskCanceledException)
         {
-            errorMessage = "Request timeout";
+            errors.Add("Request timeout — server did not respond within 10 seconds");
         }
         catch (Exception ex)
         {
-            errorMessage = $"Unexpected error: {ex.Message}";
+            errors.Add($"Unexpected error: {ex.Message}");
         }
         finally
         {
             stopwatch.Stop();
         }
 
-        _logger.LogInformation(
-            "[ObicoServer] Health check for {ServerId} ({ServerName}) at {ServerUrl}: healthy={IsHealthy}, latency={Latency}ms",
-            server.Id, server.Name, server.Url, isHealthy, stopwatch.ElapsedMilliseconds);
-
-        return Ok(new ObicoServerHealthDto
+        return new ObicoServerHealthDto
         {
-            Healthy = isHealthy,
+            Healthy = errors.Count == 0,
             LatencyMs = stopwatch.ElapsedMilliseconds,
-            ErrorMessage = errorMessage
-        });
+            ErrorMessage = errors.Count > 0 ? string.Join("; ", errors) : null
+        };
     }
 
     private static ObicoServerDto ToDto(ObicoServer server)

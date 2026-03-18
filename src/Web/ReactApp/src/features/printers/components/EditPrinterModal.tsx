@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
-import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels, useObicoServers } from '@/common/hooks/useApi';
+import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
@@ -34,9 +34,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const { data: extruderModels } = useExtruderModels();
   const { data: toolheadModels } = useToolheadModels();
   const { data: nozzleModels } = useNozzleModels();
-  
-  // Obico ML servers for failure detection
-  const { data: obicoServers = [] } = useObicoServers();
 
   const [formData, setFormData] = useState<UpdatePrinterDto | null>(null);
   const [originalFormData, setOriginalFormData] = useState<UpdatePrinterDto | null>(null);
@@ -94,7 +91,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         maxPrintSpeed: printerDetails.capabilities?.maxPrintSpeed,
         backendPort: printerDetails.backendPort ?? undefined,
         frontendPort: printerDetails.frontendPort ?? undefined,
-        obicoServerId: printerDetails.obicoServerId ?? undefined,
+        obicoEnabled: printerDetails.obicoEnabled ?? false,
       };
       
       setFormData(initialFormData);
@@ -388,7 +385,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     return Object.keys(errors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!formData || !printerId) return;
     if (!validateForm()) return;
@@ -638,7 +635,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       type="button"
                       variant="subtle"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                       iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
                     />
@@ -663,7 +660,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       type="button"
                       variant="subtle"
                       onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
                       aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
                       iconCenter={showApiKey ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
                     />
@@ -1068,27 +1065,25 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               </div>
             </div>
             
-            {/* Obico ML Server Assignment */}
+            {/* Obico AI Failure Detection */}
             <FormField 
-              label="Obico ML Server" 
-              htmlFor="obico-server"
-              helper="Select a server for AI-powered print failure detection. Leave empty to use global default."
+              label="Obico AI Monitoring" 
+              htmlFor="obico-enabled"
+              helper="Enable AI-powered print failure detection. Requires a camera. The app auto-assigns the best available Obico server."
             >
-              <Select
-                id="obico-server"
-                value={formData.obicoServerId || ''}
-                onChange={e => handleInputChange('obicoServerId', e.target.value || undefined)}
-                title="Obico ML Server"
-              >
-                <option value="">Default (global setting)</option>
-                {obicoServers
-                  .filter(s => s.isEnabled)
-                  .map(server => (
-                    <option key={server.id} value={server.id}>
-                      {server.name} ({server.url})
-                    </option>
-                  ))}
-              </Select>
+              <Checkbox
+                id="obico-enabled"
+                checked={formData.obicoEnabled || false}
+                onChange={e => {
+                  const enabling = e.target.checked;
+                  if (enabling && !formData.cameraStreamUrl && !formData.cameraSnapshotUrl) {
+                    toast.error('Obico monitoring requires a camera. Configure a camera URL first.');
+                    return;
+                  }
+                  handleInputChange('obicoEnabled', enabling);
+                }}
+                label="Enable Obico monitoring for this printer"
+              />
             </FormField>
           </form>
 

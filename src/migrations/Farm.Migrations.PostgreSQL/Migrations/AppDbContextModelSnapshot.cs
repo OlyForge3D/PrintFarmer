@@ -2831,6 +2831,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<bool>("ObicoEnabled")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid?>("ObicoServerId")
                         .HasColumnType("uuid");
 

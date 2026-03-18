@@ -389,7 +389,7 @@ export function CompactPrinterCard({
             iconCenter={<MoreVerticalIcon className="h-4 w-4" />}
           />
           {showMenu && (
-            <div className="absolute right-0 bottom-full mb-1 z-50 min-w-[180px] bg-pf-bg-1 border border-white/10 rounded-lg shadow-xl py-1 text-sm">
+            <div className="absolute right-0 bottom-full mb-1 z-50 min-w-45 bg-pf-bg-1 border border-white/10 rounded-lg shadow-xl py-1 text-sm">
                 <Button
                   type="button"
                   variant="ghost"
