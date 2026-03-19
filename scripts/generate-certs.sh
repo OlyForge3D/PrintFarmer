@@ -19,10 +19,19 @@ if command -v hostname >/dev/null 2>&1; then
     LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
 fi
 
+# Detect Tailscale IP for SAN (best-effort)
+TAILSCALE_IP=""
+if command -v tailscale >/dev/null 2>&1; then
+    TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || true)
+fi
+
 # Build Subject Alternative Names
 SAN="DNS:localhost,DNS:printfarmer.local"
 if [[ -n "$LAN_IP" ]]; then
     SAN="${SAN},IP:${LAN_IP}"
+fi
+if [[ -n "$TAILSCALE_IP" && "$TAILSCALE_IP" != "$LAN_IP" ]]; then
+    SAN="${SAN},IP:${TAILSCALE_IP}"
 fi
 SAN="${SAN},IP:127.0.0.1"
 
