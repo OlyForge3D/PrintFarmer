@@ -1,6 +1,6 @@
 # Team Decisions Log
 
-**Updated:** 2026-03-12T03:45:00Z
+**Updated:** 2026-03-19T22-22-12Z
 
 ## UI Design System Decisions
 
@@ -1041,3 +1041,67 @@ Tailwind v4's CSS-first approach reduces maintenance overhead (no JS file), cons
 - All references to `tailwind.config.js` replaced with CSS-first approach
 - Architecture pattern (Layer 3: Components → Layer 2: Utilities → Layer 1: CSS Custom Properties) documented
 
+
+---
+
+## Batch N+2: Frontend Architecture & Workflow Integration
+
+### Decision N+2: Keep Auto-Dispatch Dashboard Separate (PFarm1-fkx)
+
+**Date:** 2026-03-19  
+**Agent:** Newt (Designer)  
+**Status:** ⏳ PENDING APPROVAL  
+
+**Context:**  
+Jeff Papiez questioned whether Auto-Dispatch Dashboard (449 lines) is wasteful duplication of CompactPrinterCard (482L) and DetailedPrinterCard (751L), proposing consolidation.
+
+**Decision:**  
+**KEEP the separate Auto-Dispatch Dashboard.** Merge is not recommended due to fundamental workflow differences and information density constraints.
+
+**Rationale:**
+
+1. **Distinct Workflow Separation**
+   - Auto-Dispatch Dashboard: Farm-level dispatch operations (queue operators monitoring dispatch readiness across all printers)
+   - Printer Cards: Printer-centric workflows (device status viewing, per-printer controls)
+   - These are fundamentally different mental models and user roles
+
+2. **Information Density at Capacity**
+   - CompactPrinterCard already shows: header, status pill, tags, progress bar, temps, camera, filament info, action buttons
+   - Adding dispatch-specific UI (ready-gate checks, activity timestamp, dispatch actions, state coloring) would exceed density limits
+   - Result: visual clutter, reduced scannability
+
+3. **Global Controls Problem**
+   - Farm-wide auto-dispatch toggle, state filtering, and priority sorting don't belong on individual cards
+   - Options (duplicate on every card / put in page header / create separate panel) all lead back to having a separate dashboard
+   - There is no elegant solution within the card paradigm
+
+4. **Power User Consideration**
+   - Queue operators benefit from an optimized, dedicated interface
+   - Hiding dispatch features in card expansions or mixing with printer controls degrades UX for this user segment
+
+**Implementation (Alternative to Merger):**
+
+Instead of merging, improve discoverability and reduce code duplication:
+
+1. **Extract `PrinterBaseCard` component** (~2 hours)
+   - Shared header/accent/progress layout consumed by CompactPrinterCard, DetailedPrinterCard, and Auto-Dispatch PrinterStatusCard
+   - Reduces duplication without merging workflows
+
+2. **Add cross-linking** (~45 min total)
+   - "Dispatch Center" button in printer page header (guides operators to dashboard)
+   - "View in Dispatch Center →" link in Bed Clear Banner when printer in PendingReady state
+
+**Total Effort:** ~4 hours to improve design without losing workflow separation
+
+**Validation:**
+- ✅ Full design analysis completed (215 lines)
+- ✅ Workflow mapping verified
+- ✅ Information density constraints confirmed
+- ✅ Alternative patterns considered and rejected
+
+**Next Steps:**
+- Stakeholder review and approval of recommendation
+- If approved: Execute component extraction + cross-linking proposal
+- If merger still preferred: Schedule detailed UI/UX evaluation with stakeholders to surface tradeoffs
+
+---

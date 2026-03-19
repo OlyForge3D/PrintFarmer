@@ -146,3 +146,19 @@
 - **Before:** `box-shadow: 0 0 0 4px var(--pf-accent), 0 0 20px rgba(88, 166, 255, 0.3)`
 - **After:** `outline: 3px solid var(--pf-accent)` + `outline-offset: 3px` + `filter: drop-shadow(0 0 10px rgba(88, 166, 255, 0.35))`
 - **Lesson:** When you need visible effects that must survive `overflow: hidden` ancestors, use `outline` (not `box-shadow`) and `filter: drop-shadow()` (not `box-shadow` glow). Both are painted outside the overflow clip boundary.
+
+### Auto-Dispatch Integration Analysis (2026-01-15)
+- **Request:** Jeff asked if the separate Auto-Dispatch Dashboard (449 lines) is wasteful and should be merged into CompactPrinterCard (482 lines) and DetailedPrinterCard (751 lines)
+- **Key finding — Workflow separation:** Auto-Dispatch Dashboard serves a **farm-level operations workflow** (queue operators monitoring readiness across all printers), not a per-printer workflow. Mental model: "What needs attention across the farm?" vs. "What can I do with this printer?"
+- **Key finding — Information density at limit:** CompactPrinterCard is already 482 lines showing status, progress, temps, camera, filament, 3 action buttons. Adding dispatch features (ready-gate checks bar + list, last activity timestamp, Mark Ready/Skip/Pre-Clear buttons, state-based accent) would create visual clutter and reduce scannability.
+- **Key finding — Global controls don't fit cards:** Global toggle (enable/disable all printers) and state filtering (show only PendingReady) are farm-level controls. No good place to put them on individual cards without duplication or coupling to page layout.
+- **Key finding — Progressive disclosure doesn't solve the core issue:** Hiding dispatch details behind expansion toggles means users monitoring farm readiness must expand each card individually. Farm-level filtering and sorting by dispatch priority would still be missing.
+- **Recommendation:** **Keep the separate dashboard.** It's not wasteful — it's workflow-appropriate. Different mental models deserve different interfaces.
+- **Alternative approach (if Jeff wants to reduce duplication):**
+  1. Extract shared `PrinterBaseCard` component (header, accent border, progress layout) consumed by all three card types
+  2. Add "Dispatch Center" link to printer page header for discoverability
+  3. Add "View in Dispatch Center →" link to Bed Clear Banner on cards
+  4. Result: Reduces code duplication, improves discoverability, preserves workflow separation
+- **Anti-pattern rejected:** "Add dispatch mode toggle to printer cards page" — couples two workflows to same page, adds conditional rendering complexity, doesn't simplify UX
+- **Design principle reinforced:** **Workflow separation** — farm-level operations deserve dedicated interfaces optimized for their mental model, not shoehorned into per-entity cards
+- **Decision document:** `.squad/decisions/inbox/newt-auto-dispatch-integration.md`

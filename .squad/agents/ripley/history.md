@@ -1683,3 +1683,41 @@ Also fixed hardcoded paths outside `api.ts`:
 ✅ Production deployment
 
 ---
+
+## 2026-03-19: Frontend Architecture Review Support
+
+**Context:** Newt (Designer) completed a comprehensive design review of Auto-Dispatch Dashboard integration proposal from Jeff Papiez.
+
+**Impact for Frontend (Ripley):**
+
+### If Recommendation is Approved (Keep Separate Dashboard)
+
+**Component Extraction Opportunity:**
+- Extract `PrinterBaseCard` component (header, accent border, progress bar layout)
+- Currently duplicated across:
+  - CompactPrinterCard (482 lines)
+  - DetailedPrinterCard (751 lines)
+  - Auto-Dispatch PrinterStatusCard
+- This is ~50-100 lines of shared layout logic
+- **Effort:** ~2 hours to extract and integrate
+- **Benefit:** Reduces maintenance burden, single source of truth for card structure
+
+**Cross-Linking Implementation:**
+- Add "Dispatch Center" link/button to printer page header
+- Add breadcrumb link in Bed Clear Banner: "View in Dispatch Center →"
+- **Effort:** ~45 minutes
+- **Benefit:** Guides operators to appropriate tool for dispatch workflows
+
+### Design System Implications
+
+- No new component variants needed (dashboard uses existing design tokens)
+- Bed Clear Banner already uses pf-* tokens — no dark theme work needed
+- Card-level accent borders (state-based coloring) already token-compliant
+
+### Recommendation
+
+The auto-dispatch workflow is **farm-level operations**, not **per-printer control**. The separation is architecturally sound. If consolidation ever becomes necessary, component extraction + cross-linking is the right approach (doesn't break workflow separation or create UI clutter).
+
+**Status:** Awaiting stakeholder decision on recommendation.
+
+---
