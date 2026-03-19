@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Tasks;
+using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -9,9 +10,10 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/tasks")]
-public class TasksController(IUserTaskService taskService) : ControllerBase
+public class TasksController(IUserTaskService taskService, IValidator<CreateManualTaskDto> createManualTaskValidator) : ControllerBase
 {
     private readonly IUserTaskService _taskService = taskService ?? throw new ArgumentNullException(nameof(taskService));
+    private readonly IValidator<CreateManualTaskDto> _createManualTaskValidator = createManualTaskValidator ?? throw new ArgumentNullException(nameof(createManualTaskValidator));
 
     /// <summary>
     /// Gets all pending tasks.
@@ -22,6 +24,24 @@ public class TasksController(IUserTaskService taskService) : ControllerBase
     {
         IReadOnlyList<UserTaskDto> tasks = await _taskService.GetPendingTasksAsync(ct);
         return Ok(tasks);
+    }
+
+    /// <summary>
+    /// Creates a new manual task.
+    /// </summary>
+    [HttpPost]
+    [ProducesResponseType(typeof(UserTaskDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<UserTaskDto>> CreateManualTaskAsync([FromBody] CreateManualTaskDto dto, CancellationToken ct)
+    {
+        FluentValidation.Results.ValidationResult validationResult = await _createManualTaskValidator.ValidateAsync(dto, ct);
+        if (!validationResult.IsValid)
+        {
+            return BadRequest(validationResult.Errors);
+        }
+
+        UserTaskDto task = await _taskService.CreateManualTaskAsync(dto, ct);
+        return CreatedAtAction(nameof(GetByIdAsync), new { id = task.Id }, task);
     }
 
     /// <summary>

@@ -52,13 +52,20 @@ export function usePageTour({
   const driverRef = useRef<Driver | null>(null);
 
   const buildDriverSteps = useCallback((): DriveStep[] => {
-    return steps.map((step) => ({
-      element: step.element,
-      popover: {
-        title: step.popover.title,
-        description: step.popover.description,
-      },
-    }));
+    return steps
+      .filter((step) => {
+        const el = document.querySelector(step.element);
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      })
+      .map((step) => ({
+        element: step.element,
+        popover: {
+          title: step.popover.title,
+          description: step.popover.description,
+        },
+      }));
   }, [steps]);
 
   const startTour = useCallback(() => {

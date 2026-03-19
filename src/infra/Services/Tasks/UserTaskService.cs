@@ -174,6 +174,32 @@ public class UserTaskService(
         return existingTask != null;
     }
 
+    /// <inheritdoc />
+    public async Task<UserTaskDto> CreateManualTaskAsync(CreateManualTaskDto dto, CancellationToken ct = default)
+    {
+        UserTask newTask = new()
+        {
+            Id = Guid.NewGuid(),
+            TaskType = UserTaskType.Custom,
+            EntityType = "Manual",
+            EntityId = Guid.Empty,
+            Title = dto.Title,
+            Description = dto.Description,
+            Status = UserTaskStatus.Pending,
+            Priority = dto.Priority,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        await _taskRepository.AddAsync(newTask, ct);
+        _logger.LogInformation("[UserTaskService] Created manual task: {TaskTitle}", newTask.Title);
+
+        UserTaskDto createdDto = MapToDto(newTask);
+        await BroadcastTaskCreatedAsync(createdDto, ct);
+
+        return createdDto;
+    }
+
     private static UserTaskDto MapToDto(UserTask task)
     {
         int relatedCount = ParseRelatedEntityIds(task.RelatedEntityIdsJson).Count;

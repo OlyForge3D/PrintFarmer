@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { tasksApi, UserTask, TaskType, TaskPriority } from '@/services/tasksApi';
-import { AlertCircleIcon, CheckCircleIcon, CloseIcon, LayersIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { tasksApi, UserTask, TaskType, TaskPriority, CreateTaskDto } from '@/services/tasksApi';
+import { AlertCircleIcon, CheckCircleIcon, CloseIcon, LayersIcon, WrenchIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
+import { Button, FormField, Input, Textarea, Select } from '@/common/components/ui';
 import { DashboardWidget } from '@/common/components/DashboardWidget';
+import { Modal } from '@/common/components/modals/Modal';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
+import { useState } from 'react';
 
 /**
  * Render icon for task type inline to avoid dynamic component creation
@@ -105,6 +107,10 @@ function TaskItem({ task, onSkip, onNavigate }: TaskItemProps) {
 export function TasksWidget() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDescription, setNewTaskDescription] = useState('');
+  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>(TaskPriority.Normal);
   
   // Fetch pending tasks
   const { data: tasks, isLoading, error } = useQuery({
@@ -125,6 +131,35 @@ export function TasksWidget() {
       toast.error('Failed to skip task');
     },
   });
+
+  // Create task mutation
+  const createMutation = useMutation({
+    mutationFn: (dto: CreateTaskDto) => tasksApi.createTask(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      toast.success('Task created');
+      // Reset form
+      setNewTaskTitle('');
+      setNewTaskDescription('');
+      setNewTaskPriority(TaskPriority.Normal);
+      setIsCreateModalOpen(false);
+    },
+    onError: () => {
+      toast.error('Failed to create task');
+    },
+  });
+
+  const handleCreateTask = () => {
+    if (!newTaskTitle.trim()) {
+      toast.error('Title is required');
+      return;
+    }
+    createMutation.mutate({
+      title: newTaskTitle.trim(),
+      description: newTaskDescription.trim() || undefined,
+      priority: newTaskPriority,
+    });
+  };
 
   // Navigate to task action
   const handleNavigate = (task: UserTask) => {
@@ -156,17 +191,24 @@ export function TasksWidget() {
     }
   };
 
-  // Don't render if no tasks
-  if (!isLoading && (!tasks || tasks.length === 0)) {
-    return null;
-  }
-
   const taskCount = tasks?.length ?? 0;
   const badge = taskCount > 0 ? (
     <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs font-medium rounded-full bg-pf-warning text-white">
       {taskCount}
     </span>
   ) : undefined;
+  
+  const headerAction = (
+    <Button
+      variant="subtle"
+      size="sm"
+      onClick={() => setIsCreateModalOpen(true)}
+      title="Create new task"
+      iconLeft={<PlusIcon className="h-4 w-4" />}
+    >
+      New
+    </Button>
+  );
 
   const emptyState = (
     <div className="text-center py-6">
@@ -176,30 +218,87 @@ export function TasksWidget() {
   );
 
   return (
-    <DashboardWidget
-      title="Pending Tasks"
-      icon={AlertCircleIcon}
-      iconColorClass="text-pf-warning"
-      iconBgClass="bg-pf-warning/10"
-      badge={badge}
-      collapsible
-      storageKey="tasks-widget"
-      hasContent={taskCount > 0}
-      emptyState={emptyState}
-      isLoading={isLoading}
-      error={error ? 'Failed to load tasks' : undefined}
-    >
-      <div className="max-h-80 overflow-y-auto divide-y divide-pf-border -m-3">
-        {tasks?.map((task) => (
-          <TaskItem
-            key={task.id}
-            task={task}
-            onSkip={(id) => skipMutation.mutate(id)}
-            onNavigate={handleNavigate}
-          />
-        ))}
-      </div>
-    </DashboardWidget>
+    <>
+      <DashboardWidget
+        title="Pending Tasks"
+        icon={AlertCircleIcon}
+        iconColorClass="text-pf-warning"
+        iconBgClass="bg-pf-warning/10"
+        badge={badge}
+        headerAction={headerAction}
+        collapsible
+        storageKey="tasks-widget"
+        hasContent={taskCount > 0}
+        emptyState={emptyState}
+        isLoading={isLoading}
+        error={error ? 'Failed to load tasks' : undefined}
+      >
+        <div className="max-h-80 overflow-y-auto divide-y divide-pf-border -m-3">
+          {tasks?.map((task) => (
+            <TaskItem
+              key={task.id}
+              task={task}
+              onSkip={(id) => skipMutation.mutate(id)}
+              onNavigate={handleNavigate}
+            />
+          ))}
+        </div>
+      </DashboardWidget>
+
+      {/* Create Task Modal */}
+      <Modal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Create Task"
+        size="md"
+        footer={
+          <>
+            <Button onClick={() => setIsCreateModalOpen(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              loading={createMutation.isPending}
+              disabled={createMutation.isPending}
+              onClick={handleCreateTask}
+            >
+              Create
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <FormField label="Title" htmlFor="task-title" required>
+            <Input
+              id="task-title"
+              value={newTaskTitle}
+              onChange={(e) => setNewTaskTitle(e.target.value)}
+              placeholder="Enter task title"
+            />
+          </FormField>
+
+          <FormField label="Description" htmlFor="task-description">
+            <Textarea
+              id="task-description"
+              value={newTaskDescription}
+              onChange={(e) => setNewTaskDescription(e.target.value)}
+              placeholder="Enter task description (optional)"
+              rows={3}
+            />
+          </FormField>
+
+          <FormField label="Priority" htmlFor="task-priority">
+            <Select
+              id="task-priority"
+              value={newTaskPriority}
+              onChange={(e) => setNewTaskPriority(e.target.value as TaskPriority)}
+            >
+              <option value={TaskPriority.Low}>Low</option>
+              <option value={TaskPriority.Normal}>Normal</option>
+              <option value={TaskPriority.High}>High</option>
+            </Select>
+          </FormField>
+        </div>
+      </Modal>
+    </>
   );
 }
 

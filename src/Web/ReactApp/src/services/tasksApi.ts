@@ -57,6 +57,15 @@ export interface TaskCountResponse {
 }
 
 /**
+ * DTO for creating a new task
+ */
+export interface CreateTaskDto {
+  title: string;
+  description?: string;
+  priority?: TaskPriority;
+}
+
+/**
  * Tasks API service for managing user tasks
  */
 export const tasksApi = {
@@ -103,5 +112,13 @@ export const tasksApi = {
    */
   async skipTask(taskId: string): Promise<void> {
     await apiClient.post(`/tasks/${taskId}/skip`);
+  },
+
+  /**
+   * Create a new task
+   */
+  async createTask(dto: CreateTaskDto): Promise<UserTask> {
+    const response = await apiClient.post<UserTask>('/tasks', dto);
+    return response.data;
   }
 };

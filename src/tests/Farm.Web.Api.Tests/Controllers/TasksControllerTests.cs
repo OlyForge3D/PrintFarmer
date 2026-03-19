@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Tasks;
 using Farm.Web.Api.Controllers;
+using FluentValidation;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
@@ -11,12 +12,14 @@ namespace Farm.Web.Api.Tests.Controllers;
 public class TasksControllerTests
 {
     private readonly Mock<IUserTaskService> _taskServiceMock;
+    private readonly Mock<IValidator<CreateManualTaskDto>> _validatorMock;
     private readonly TasksController _controller;
 
     public TasksControllerTests()
     {
         _taskServiceMock = new Mock<IUserTaskService>();
-        _controller = new TasksController(_taskServiceMock.Object);
+        _validatorMock = new Mock<IValidator<CreateManualTaskDto>>();
+        _controller = new TasksController(_taskServiceMock.Object, _validatorMock.Object);
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext()

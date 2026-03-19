@@ -12,6 +12,14 @@ public record CreateProfileImportTaskDto(
     Guid PrinterId);
 
 /// <summary>
+/// DTO for creating a manual user task.
+/// </summary>
+public record CreateManualTaskDto(
+    string Title,
+    string? Description,
+    UserTaskPriority Priority);
+
+/// <summary>
 /// DTO representing a user task for API responses.
 /// </summary>
 public record UserTaskDto(
@@ -74,4 +82,9 @@ public interface IUserTaskService
     /// Checks if a profile import task exists for a printer model.
     /// </summary>
     Task<bool> HasPendingProfileImportTaskAsync(Guid printerModelId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a manual user task.
+    /// </summary>
+    Task<UserTaskDto> CreateManualTaskAsync(CreateManualTaskDto dto, CancellationToken ct = default);
 }
