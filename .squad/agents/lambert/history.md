@@ -1525,3 +1525,10 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 - Deleted `src/tests/Farm.Web.Api.Tests/Importing/ImportServicesTests.cs` integration test file
 - Build: 0 errors, 0 warnings. Tests: 2091 passing (0 failures)
 - Net removal: 1 project, 1 test project, 1 integration test file, DI wiring, 2 ProjectReferences
+
+### CreatedAtAction + Async Suffix Bug (2025-07-17)
+- **Bug**: `CreatedAtAction(nameof(GetByIdAsync), ...)` fails at runtime because ASP.NET Core's `SuppressAsyncSuffixInActionNames` (default: true) registers `GetByIdAsync` as `GetById`, but `nameof()` returns the literal method name with the Async suffix — route mismatch → `InvalidOperationException`.
+- **Fix**: Use string literals (`"GetById"`, `"GetServer"`) instead of `nameof()` in `CreatedAtAction` calls.
+- **Affected controllers**: `TasksController.cs` (line 44), `ObicoServerController.cs` (line 117).
+- **Tests added**: `CreateManualTaskAsync_WithValidDto_ReturnsCreatedWithLocationHeader` and `CreateManualTaskAsync_WithInvalidDto_ReturnsBadRequest` in `TasksControllerTests.cs`.
+- **Decision filed**: `.squad/decisions/inbox/lambert-createdataction-route-fix.md`

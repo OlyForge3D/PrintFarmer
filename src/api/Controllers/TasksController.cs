@@ -41,7 +41,7 @@ public class TasksController(IUserTaskService taskService, IValidator<CreateManu
         }
 
         UserTaskDto task = await _taskService.CreateManualTaskAsync(dto, ct);
-        return CreatedAtAction(nameof(GetByIdAsync), new { id = task.Id }, task);
+        return CreatedAtAction("GetById", new { id = task.Id }, task);
     }
 
     /// <summary>

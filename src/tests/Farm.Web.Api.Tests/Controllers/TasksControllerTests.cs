@@ -71,6 +71,57 @@ public class TasksControllerTests
 
     #endregion
 
+    #region CreateManualTaskAsync Tests
+
+    [Fact]
+    public async Task CreateManualTaskAsync_WithValidDto_ReturnsCreatedWithLocationHeader()
+    {
+        // Arrange
+        var taskId = Guid.NewGuid();
+        var dto = new CreateManualTaskDto("Test Task", "Test description", UserTaskPriority.Normal);
+        var createdTask = CreateUserTaskDto("Test Task", UserTaskType.ProfileImport, taskId);
+
+        _validatorMock
+            .Setup(v => v.ValidateAsync(dto, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FluentValidation.Results.ValidationResult());
+
+        _taskServiceMock
+            .Setup(s => s.CreateManualTaskAsync(dto, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(createdTask);
+
+        // Act
+        ActionResult<UserTaskDto> result = await _controller.CreateManualTaskAsync(dto, CancellationToken.None);
+
+        // Assert
+        CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
+        Assert.Equal(StatusCodes.Status201Created, createdResult.StatusCode);
+        Assert.Equal("GetById", createdResult.ActionName);
+        Assert.Equal(taskId, createdResult.RouteValues!["id"]);
+        Assert.Equal(createdTask, createdResult.Value);
+    }
+
+    [Fact]
+    public async Task CreateManualTaskAsync_WithInvalidDto_ReturnsBadRequest()
+    {
+        // Arrange
+        var dto = new CreateManualTaskDto("", "", UserTaskPriority.Normal);
+        var validationResult = new FluentValidation.Results.ValidationResult(
+            [new FluentValidation.Results.ValidationFailure("Title", "Title is required")]);
+
+        _validatorMock
+            .Setup(v => v.ValidateAsync(dto, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(validationResult);
+
+        // Act
+        ActionResult<UserTaskDto> result = await _controller.CreateManualTaskAsync(dto, CancellationToken.None);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        _taskServiceMock.Verify(s => s.CreateManualTaskAsync(It.IsAny<CreateManualTaskDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #endregion
+
     #region GetByIdAsync Tests
 
     [Fact]

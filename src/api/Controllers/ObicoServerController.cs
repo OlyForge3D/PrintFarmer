@@ -114,7 +114,7 @@ public class ObicoServerController : ControllerBase
             "[ObicoServer] Created new Obico server: {ServerId} ({ServerName}) at {ServerUrl}",
             server.Id, server.Name, server.Url);
 
-        return CreatedAtAction(nameof(GetServerAsync), new { id = server.Id }, ToDto(server));
+        return CreatedAtAction("GetServer", new { id = server.Id }, ToDto(server));
     }
 
     /// <summary>
