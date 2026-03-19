@@ -3,27 +3,29 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AutoPrintDashboardPage } from '@/features/auto-print/pages/AutoPrintDashboardPage';
+import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 
-// Mock the API hooks
-vi.mock('@/common/hooks/useApi', () => ({
-  useAutoPrintStatus: vi.fn(),
-  useMarkPrinterReady: vi.fn(),
-  useSkipAutoPrintJob: vi.fn(),
-  useCancelAutoPrint: vi.fn(),
-  useSetAutoPrintEnabled: vi.fn(),
-  useSetAutoPrintGlobalEnabled: vi.fn(),
+// Mock the auto-dispatch hooks
+vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
+  useAutoDispatchGlobalStatus: vi.fn(),
+  useConfirmBedClear: vi.fn(),
+  useSkipNextJob: vi.fn(),
+  useCancelAutoDispatch: vi.fn(),
+  useSetAutoDispatchEnabled: vi.fn(),
+  useSetAllAutoDispatchEnabled: vi.fn(),
+  usePreClearBed: vi.fn(),
 }));
 
 // Dynamic import after mocks
 const {
-  useAutoPrintStatus,
-  useMarkPrinterReady,
-  useSkipAutoPrintJob,
-  useCancelAutoPrint,
-  useSetAutoPrintEnabled,
-  useSetAutoPrintGlobalEnabled,
-} = await import('@/common/hooks/useApi');
+  useAutoDispatchGlobalStatus,
+  useConfirmBedClear,
+  useSkipNextJob,
+  useCancelAutoDispatch,
+  useSetAutoDispatchEnabled,
+  useSetAllAutoDispatchEnabled,
+  usePreClearBed,
+} = await import('@/features/printers/hooks/useAutoDispatch');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -41,7 +43,7 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
-describe('AutoPrintDashboardPage', () => {
+describe('AutoDispatchDashboardPage', () => {
   const mockPrinterStatus = {
     printerId: 'printer-1',
     printerName: 'Printer 1',
@@ -93,44 +95,50 @@ describe('AutoPrintDashboardPage', () => {
     isPending: false,
   };
 
+  const mockPreClearMutation = {
+    mutate: vi.fn(),
+    isPending: false,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     
-    vi.mocked(useMarkPrinterReady).mockReturnValue(mockMarkReadyMutation as ReturnType<typeof useMarkPrinterReady>);
-    vi.mocked(useSkipAutoPrintJob).mockReturnValue(mockSkipMutation as ReturnType<typeof useSkipAutoPrintJob>);
-    vi.mocked(useCancelAutoPrint).mockReturnValue(mockCancelMutation as ReturnType<typeof useCancelAutoPrint>);
-    vi.mocked(useSetAutoPrintEnabled).mockReturnValue(mockSetEnabledMutation as ReturnType<typeof useSetAutoPrintEnabled>);
-    vi.mocked(useSetAutoPrintGlobalEnabled).mockReturnValue(mockSetGlobalEnabledMutation as ReturnType<typeof useSetAutoPrintGlobalEnabled>);
+    vi.mocked(useConfirmBedClear).mockReturnValue(mockMarkReadyMutation as ReturnType<typeof useConfirmBedClear>);
+    vi.mocked(useSkipNextJob).mockReturnValue(mockSkipMutation as ReturnType<typeof useSkipNextJob>);
+    vi.mocked(useCancelAutoDispatch).mockReturnValue(mockCancelMutation as ReturnType<typeof useCancelAutoDispatch>);
+    vi.mocked(useSetAutoDispatchEnabled).mockReturnValue(mockSetEnabledMutation as ReturnType<typeof useSetAutoDispatchEnabled>);
+    vi.mocked(useSetAllAutoDispatchEnabled).mockReturnValue(mockSetGlobalEnabledMutation as ReturnType<typeof useSetAllAutoDispatchEnabled>);
+    vi.mocked(usePreClearBed).mockReturnValue(mockPreClearMutation as ReturnType<typeof usePreClearBed>);
   });
 
   it('renders dashboard with global toggle and printer cards', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
-    expect(screen.getByText('Auto-Print Dashboard')).toBeInTheDocument();
-    expect(screen.getByLabelText('Global auto-print toggle')).toBeInTheDocument();
+    expect(screen.getByText('Auto-Dispatch Dashboard')).toBeInTheDocument();
+    expect(screen.getByLabelText('Global auto-dispatch toggle')).toBeInTheDocument();
     expect(screen.getByText('Printer 1')).toBeInTheDocument();
   });
 
   it('shows loading spinner while data is fetching', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
@@ -141,32 +149,32 @@ describe('AutoPrintDashboardPage', () => {
   });
 
   it('shows empty state when no printers configured', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: { globalEnabled: true, printers: [] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
     expect(screen.getByText('No Printers Configured')).toBeInTheDocument();
-    expect(screen.getByText('Configure printers to enable auto-print queue management.')).toBeInTheDocument();
+    expect(screen.getByText('Configure printers to enable auto-dispatch queue management.')).toBeInTheDocument();
   });
 
   it('displays ready-gate checks with pass/fail indicators', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
@@ -178,19 +186,19 @@ describe('AutoPrintDashboardPage', () => {
 
   it('global enable/disable toggle calls correct mutation', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
-    const globalToggle = screen.getByLabelText('Global auto-print toggle');
+    const globalToggle = screen.getByLabelText('Global auto-dispatch toggle');
     await user.click(globalToggle);
 
     await waitFor(() => {
@@ -198,21 +206,21 @@ describe('AutoPrintDashboardPage', () => {
     });
   });
 
-  it('per-printer enable/disable toggle works', async () => {
+  it('per-printer auto-dispatch toggle works', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
-    const printerToggle = screen.getByLabelText(/Toggle auto-print for Printer 1/);
+    const printerToggle = screen.getByLabelText(/Toggle auto-dispatch for Printer 1/);
     await user.click(printerToggle);
 
     await waitFor(() => {
@@ -222,15 +230,15 @@ describe('AutoPrintDashboardPage', () => {
 
   it('mark ready button calls mutation with correct printerId', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
@@ -242,15 +250,15 @@ describe('AutoPrintDashboardPage', () => {
 
   it('skip button calls skip mutation', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
@@ -262,15 +270,15 @@ describe('AutoPrintDashboardPage', () => {
 
   it('cancel button calls cancel mutation', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: { globalEnabled: true, printers: [mockPrintingStatus] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
@@ -281,15 +289,15 @@ describe('AutoPrintDashboardPage', () => {
   });
 
   it('ready-gate check items show pass indicator for passed checks', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
@@ -301,31 +309,31 @@ describe('AutoPrintDashboardPage', () => {
   });
 
   it('shows error message when data fails to load', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: new Error('Failed to fetch auto-print status'),
-    } as ReturnType<typeof useAutoPrintStatus>);
+      error: new Error('Failed to fetch auto-dispatch status'),
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
-    expect(screen.getByText(/Failed to load auto-print status/)).toBeInTheDocument();
+    expect(screen.getByText(/Failed to load auto-dispatch status/)).toBeInTheDocument();
   });
 
   it('hides Mark Ready button when printer is actively printing', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: { globalEnabled: true, printers: [mockPrintingStatus] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
@@ -334,15 +342,15 @@ describe('AutoPrintDashboardPage', () => {
   });
 
   it('hides Cancel button when printer is not printing', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
@@ -351,31 +359,34 @@ describe('AutoPrintDashboardPage', () => {
   });
 
   it('shows Printing badge when printer is actively printing', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: { globalEnabled: true, printers: [mockPrintingStatus] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 
-    expect(screen.getByText('Printing')).toBeInTheDocument();
+    expect(screen.getAllByText('Printing').length).toBeGreaterThanOrEqual(1);
+    // Verify the badge specifically exists
+    const badges = screen.getAllByText('Printing');
+    expect(badges.some(el => el.closest('[class*="badge"]') || el.tagName === 'SPAN')).toBe(true);
   });
 
   it('shows Awaiting Bed Clear badge when in PendingReady state', () => {
-    vi.mocked(useAutoPrintStatus).mockReturnValue({
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoPrintStatus>);
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
 
     render(
       <TestWrapper>
-        <AutoPrintDashboardPage />
+        <AutoDispatchDashboardPage />
       </TestWrapper>
     );
 

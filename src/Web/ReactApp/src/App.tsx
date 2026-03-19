@@ -57,7 +57,7 @@ import { CostDashboardPage } from '@/features/statistics/pages/CostDashboardPage
 import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDashboardPage';
 import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
-import { AutoPrintDashboardPage } from '@/features/auto-print/pages/AutoPrintDashboardPage';
+import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
 import { useSlicer } from '@/hooks/useSlicer';
 
@@ -214,7 +214,7 @@ function AuthenticatedAppRoutes() {
         <Route path="cameras/:tabId" element={<CamerasPage />} />
         <Route path="nfc-devices" element={<NfcDevicesPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
-        <Route path="auto-print" element={<AutoPrintDashboardPage />} />
+        <Route path="auto-dispatch" element={<AutoDispatchDashboardPage />} />
         <Route path="statistics" element={<StatisticsPage />} />
         <Route path="statistics/costs" element={<CostDashboardPage />} />
         <Route path="analytics" element={<AnalyticsDashboardPage />} />

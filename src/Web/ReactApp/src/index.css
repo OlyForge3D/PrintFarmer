@@ -4,7 +4,85 @@ layer(base);
 @import './styles/theme.css' layer(base);
 @import './styles/controls.css';
 
-@config "../tailwind.config.js";
+@theme {
+  /* PrintFarmer Colors — primary backgrounds */
+  --color-pf-bg-0: var(--pf-bg-0);
+  --color-pf-bg-1: var(--pf-bg-1);
+  --color-pf-bg-2: var(--pf-bg-2);
+  --color-pf-panel: var(--pf-panel);
+  --color-pf-card: var(--pf-card-bg);
+  --color-pf-sidebar: var(--pf-sidebar-bg);
+
+  /* Borders and dividers */
+  --color-pf-border: var(--pf-border);
+  --color-pf-border-light: var(--pf-border-light);
+  --color-pf-border-medium: var(--pf-border-medium);
+  --color-pf-border-dark: var(--pf-border-dark);
+  --color-pf-border-gray: var(--pf-border-gray);
+
+  /* Text colors */
+  --color-pf-text-primary: var(--pf-text-primary);
+  --color-pf-text-secondary: var(--pf-text-secondary);
+  --color-pf-text-tertiary: var(--pf-text-tertiary);
+  --color-pf-text-light: var(--pf-text-light);
+  --color-pf-text-muted: var(--pf-text-muted);
+
+  /* Accent colors */
+  --color-pf-accent: var(--pf-accent);
+  --color-pf-accent-bg: var(--pf-accent-bg);
+  --color-pf-accent-hover: var(--pf-accent-hover);
+  --color-pf-accent-2: var(--pf-accent-2);
+  --color-pf-success: var(--pf-success);
+  --color-pf-success-bg: var(--pf-success-bg);
+  --color-pf-success-hover: var(--pf-success-hover);
+  --color-pf-link: var(--pf-link);
+
+  /* Status colors */
+  --color-pf-status-online-bg: var(--pf-status-online-bg);
+  --color-pf-status-online-text: var(--pf-status-online-text);
+  --color-pf-status-online-border: var(--pf-status-online-border);
+  --color-pf-status-offline-bg: var(--pf-status-offline-bg);
+  --color-pf-status-offline-text: var(--pf-status-offline-text);
+  --color-pf-status-offline-border: var(--pf-status-offline-border);
+
+  /* Error and warning */
+  --color-pf-error: var(--pf-error);
+  --color-pf-error-bg: var(--pf-error-bg);
+  --color-pf-error-hover: var(--pf-error-hover);
+  --color-pf-error-text: var(--pf-error-text);
+  --color-pf-error-border: var(--pf-error-border);
+  --color-pf-warning: var(--pf-warning);
+  --color-pf-warning-text: var(--pf-warning-text);
+
+  /* Loading and disabled */
+  --color-pf-loading: var(--pf-loading);
+  --color-pf-loading-border: var(--pf-loading-border);
+  --color-pf-disabled: var(--pf-disabled);
+
+  /* Gradient colors */
+  --color-pf-gradient-primary-start: var(--pf-gradient-primary-start);
+  --color-pf-gradient-primary-end: var(--pf-gradient-primary-end);
+  --color-pf-gradient-secondary-start: var(--pf-gradient-secondary-start);
+  --color-pf-gradient-secondary-end: var(--pf-gradient-secondary-end);
+  --color-pf-gradient-success-start: var(--pf-gradient-success-start);
+  --color-pf-gradient-success-end: var(--pf-gradient-success-end);
+  --color-pf-gradient-green-start: var(--pf-gradient-green-start);
+  --color-pf-gradient-green-end: var(--pf-gradient-green-end);
+  --color-pf-gradient-green-active-start: var(--pf-gradient-green-active-start);
+  --color-pf-gradient-green-active-end: var(--pf-gradient-green-active-end);
+  --color-pf-gradient-gray-start: var(--pf-gradient-gray-start);
+  --color-pf-gradient-gray-end: var(--pf-gradient-gray-end);
+  --color-pf-gradient-gray-dark-start: var(--pf-gradient-gray-dark-start);
+  --color-pf-gradient-gray-dark-end: var(--pf-gradient-gray-dark-end);
+
+  /* Font families */
+  --font-inter: 'Inter', ui-sans-serif, system-ui;
+  --font-bebas: 'Bebas Neue', sans-serif;
+
+  /* Focus ring colors */
+  --ring-color-pf-focus: var(--pf-focus-ring);
+  --ring-offset-color-pf-focus: var(--pf-focus-ring-offset);
+}
 
 /*
   The default border color has changed to `currentcolor` in Tailwind CSS v4,
@@ -22,6 +100,18 @@ layer(base);
   ::file-selector-button {
     border-color: var(--color-gray-200, currentcolor);
   }
+}
+
+@utility card-container {
+  @apply overflow-hidden flex flex-col min-h-0;
+}
+
+@utility text-ellipsis {
+  @apply truncate;
+}
+
+@utility no-shrink-content {
+  @apply min-w-0;
 }
 
 @utility pf-animate-skeleton {

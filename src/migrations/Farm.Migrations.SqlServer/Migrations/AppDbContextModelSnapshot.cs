@@ -2833,6 +2833,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<bool>("ObicoEnabled")
+                        .HasColumnType("bit");
+
                     b.Property<Guid?>("ObicoServerId")
                         .HasColumnType("uniqueidentifier");
 

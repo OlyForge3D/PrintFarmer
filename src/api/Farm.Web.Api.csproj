@@ -66,7 +66,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\import\Farm.Importing.csproj" />
     <!-- Slicer domain types (Models, Domain, Data namespaces) needed by FileManagement, Model3D,
          and Swagger helpers. No SignalR hubs, no OrcaSlicer, no slicer EF migrations. -->
     <ProjectReference Include="..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
@@ -115,13 +114,13 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <!-- Include seed data YAML files in build output -->
-    <None Include="data/seed/**/*.yaml">
+    <None Include="Data/seed/**/*.yaml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="data/seed/**/*.yml">
+    <None Include="Data/seed/**/*.yml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="data/seed/**/*.md">
+    <None Include="Data/seed/**/*.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

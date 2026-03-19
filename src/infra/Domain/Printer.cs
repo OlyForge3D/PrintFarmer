@@ -245,8 +245,13 @@ public class Printer
     public PrinterStatistics? Statistics { get; set; }
 
     /// <summary>
-    /// Optional Obico ML server assignment for AI-powered failure detection.
-    /// If null, uses the global ObicoSettings.ObicoApiUrl as fallback.
+    /// Whether AI-powered Obico failure detection is enabled for this printer.
+    /// The app auto-assigns an Obico server — users just opt in/out.
+    /// </summary>
+    public bool ObicoEnabled { get; set; }
+
+    /// <summary>
+    /// Internal Obico ML server assignment (managed by ObicoServerAssignmentService, not user-facing).
     /// </summary>
     public Guid? ObicoServerId { get; set; }
 

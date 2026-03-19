@@ -444,3 +444,103 @@ Ash specializes in comprehensive documentation work. Key expertise areas and sta
 
 **Decision:** `.squad/decisions.md` #17 — Camera Management Phase A  
 **Next Phase:** Phase D — Frontend multi-camera UI
+
+## 2026-01-XX Tailwind v4 CSS-First Documentation Update
+
+**Task:** Update developer documentation to reflect Tailwind v4 CSS-first migration (requested by Jeff Papiez, executed by Ripley).
+
+**Files Updated:**
+1. `.github/instructions/printfarmer-react-components.instructions.md` — Updated Styling section to reference `@theme` block in `index.css` instead of `tailwind.config.js`
+2. `docs/DESIGN_SYSTEM.md` — Removed reference to `tailwind.config.js` from Key Files; updated troubleshooting guidance
+3. `docs/FRONTEND_UI_COMPONENTS.md` — Updated component overview and dependencies to reference CSS-first configuration
+4. `docs/TROUBLESHOOTING.md` — Updated Tailwind CSS troubleshooting steps to reflect `@theme` block approach
+
+**Key Changes Documented:**
+- Tailwind v4 uses CSS-first configuration: no `tailwind.config.js` file
+- Design tokens defined via `@theme { }` block in `src/Web/ReactApp/src/index.css` with CSS custom properties (`--color-pf-*`, `--font-family-*`)
+- Custom utilities defined with `@utility` blocks (not JS plugins)
+- No manual `content` array needed (v4 auto-detects)
+- PostCSS config unchanged (`@tailwindcss/postcss`)
+
+**Architecture Pattern Reinforced:**
+- Layer 1: CSS Custom Properties (`--pf-*`) defined in `@theme` block
+- Layer 2: Tailwind utilities (flex, gap, rounded, etc.)
+- Layer 3: React components consuming tokens
+
+**No New Files Created** — integrated all updates into existing documentation following Ash charter.
+
+### Key Learnings
+- Instruction files (`.github/instructions/`) directly impact code generation quality via Copilot; updates to these take priority
+- Tailwind v4 CSS-first migration is architecture-wide, affecting design system docs, troubleshooting guides, and component patterns
+- Design token management shifts from JS config layer to CSS layer, enabling better runtime flexibility
+
+---
+
+## Tailwind v4 CSS-First Documentation Updates — Complete (2026-03-18)
+
+**Coordination:** Multi-agent sprint (Ripley + Ash + Kane)  
+**Status:** ✅ DELIVERED  
+**Mode:** Background
+
+### Documentation Scope
+
+**Priority 1: Copilot Instruction Files** (Impact: Code generation quality)
+- `.github/instructions/printfarmer-react-components.instructions.md` — Updated Styling section
+  - Added explicit reference to `@theme` block in `index.css`
+  - Documented `@utility` blocks for custom utilities
+  - Removed references to `tailwind.config.js`
+
+**Priority 2: Design System Documentation** (Impact: Architecture clarity)
+- `docs/DESIGN_SYSTEM.md` — Key Files + troubleshooting
+  - Removed: `src/Web/ReactApp/tailwind.config.js` from project file structure
+  - Added: Clarification that design tokens live in CSS `@theme` block
+  - Updated: Troubleshooting section (v4 auto-detects, no manual safelist)
+
+**Priority 3: Component Documentation** (Impact: Developer onboarding)
+- `docs/FRONTEND_UI_COMPONENTS.md` — Overview + dependencies
+  - Updated: Component overview references tokens in `index.css` `@theme`
+  - Updated: Dependencies listed CSS-first approach
+
+**Priority 4: Troubleshooting Guides** (Impact: Problem resolution)
+- `docs/TROUBLESHOOTING.md` — Styles not applying section
+  - Updated: Verification of `@theme` block in `index.css`
+  - Updated: Tailwind CSS checks for v4 auto-detection
+
+### Validation
+
+- ✅ All 4 docs files verified readable and consistent
+- ✅ No broken links or formatting issues
+- ✅ Search of all `.md` and `.instructions.md` files: no orphaned v3 references
+- ✅ All updates integrated into existing docs (no new files created)
+
+### Architecture Pattern Reinforced
+
+Documentation now consistently reflects three-layer design system:
+```
+Layer 3: React Components (Button, Input, Card, etc.)
+        ↓ composed of
+Layer 2: Tailwind Utilities (flex, gap-4, rounded-lg, etc.)
+        ↓ powered by
+Layer 1: CSS Custom Properties (@theme block in index.css)
+```
+
+### Team Coordination
+
+**Ripley (Frontend Dev)** — CSS-first implementation:
+- Migrated `index.css` to `@theme` block
+- Converted 3 plugin utilities to `@utility` blocks
+- Deleted `tailwind.config.js`
+- All 1480 tests pass ✅
+
+**Kane (Tester)** — Independent verification:
+- Verified all documentation changes align with Ripley's implementation
+- Confirmed no references to deleted files in docs
+- All tests passing ✅
+
+### Ready for
+
+✅ Code review  
+✅ Merge to main  
+✅ Production deployment
+
+---

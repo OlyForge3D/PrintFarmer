@@ -8,6 +8,8 @@ import type { AutoDispatchStatus } from '@/types/api';
 vi.mock('@/services/api', () => ({
   apiClient: {
     post: vi.fn().mockResolvedValue({ data: {} }),
+    skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
+    cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -259,14 +261,14 @@ describe('BedClearBanner', () => {
   });
 
   it('calls skip endpoint when Skip button is clicked', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: {} });
+    vi.mocked(apiClient.skipAutoDispatchJob).mockResolvedValueOnce(undefined);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Skip next queued job'));
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/auto-print/printer-1/skip');
+      expect(apiClient.skipAutoDispatchJob).toHaveBeenCalledWith('printer-1');
     });
     await waitFor(() => {
       expect(toast.info).toHaveBeenCalledWith('Skipped next queued job');
@@ -274,14 +276,14 @@ describe('BedClearBanner', () => {
   });
 
   it('calls cancel endpoint when Cancel button is clicked', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: {} });
+    vi.mocked(apiClient.cancelAutoDispatch).mockResolvedValueOnce(undefined);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Cancel auto-dispatch'));
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/auto-print/printer-1/cancel');
+      expect(apiClient.cancelAutoDispatch).toHaveBeenCalledWith('printer-1');
     });
     await waitFor(() => {
       expect(toast.info).toHaveBeenCalledWith('Auto-dispatch cancelled');

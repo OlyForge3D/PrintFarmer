@@ -2,7 +2,7 @@
 
 ## Overview
 
-PrintFarmer uses a standardized set of shared UI components built with React and TypeScript. All components follow the PrintFarmer design system using `pf-*` color tokens defined in `tailwind.config.js` for consistent theming and dynamic theme support.
+PrintFarmer uses a standardized set of shared UI components built with React and TypeScript. All components follow the PrintFarmer design system using `pf-*` color tokens defined in `src/Web/ReactApp/src/index.css` (via the `@theme` block) for consistent theming and dynamic theme support.
 
 ## Available Components
 
@@ -1490,7 +1490,7 @@ When refactoring existing components:
 All components require:
 - `clsx` - For conditional class merging
 - `tailwindcss` - For utility classes
-- PrintFarmer color tokens configured in `tailwind.config.js`
+- PrintFarmer color tokens defined in `src/Web/ReactApp/src/index.css` (`@theme` block)
 
 ---
 

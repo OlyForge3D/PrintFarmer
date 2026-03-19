@@ -120,8 +120,8 @@ const navigation: NavigationElement[] = [
     requiredPermission: { resource: 'printers', action: 'read' }
   },
   {
-    name: 'Auto-Print',
-    href: '/auto-print',
+    name: 'Auto-Dispatch',
+    href: '/auto-dispatch',
     icon: PlayIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
   },
@@ -512,7 +512,7 @@ export function Layout() {
                 aria-label={`${pendingAttentionCount} printers need attention`}
               >
                 <AlertIcon className="h-4 w-4" />
-                <span className="absolute -top-1.5 -right-1.5 bg-pf-warning text-black text-[9px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center leading-none">
+                <span className="absolute -top-1.5 -right-1.5 bg-pf-warning text-black text-[9px] font-bold rounded-full min-w-3.5 h-3.5 flex items-center justify-center leading-none">
                   {pendingAttentionCount}
                 </span>
               </Button>
@@ -571,7 +571,7 @@ export function Layout() {
                           onClick={() => setUserMenuOpen(false)}
                           variant="subtle"
                           size="sm"
-                          className="w-full !justify-start"
+                          className="w-full justify-start!"
                           iconLeft={<SettingsIcon className="h-4 w-4" />}
                         >
                           Profile
@@ -581,7 +581,7 @@ export function Layout() {
                           onClick={handleLogout}
                           variant="subtle"
                           size="sm"
-                          className="w-full !justify-start"
+                          className="w-full justify-start!"
                           iconLeft={<LogoutIcon className="h-4 w-4" />}
                         >
                           Sign out
@@ -597,7 +597,7 @@ export function Layout() {
                           }}
                           variant="subtle"
                           size="sm"
-                          className="w-full !justify-start"
+                          className="w-full justify-start!"
                           iconLeft={<LoginIcon className="h-4 w-4" />}
                         >
                           Sign In
@@ -610,7 +610,7 @@ export function Layout() {
                           }}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center w-full !justify-start"
+                          className="flex items-center w-full justify-start!"
                         >
                           Register
                         </Button>
@@ -907,7 +907,7 @@ export function Layout() {
         </aside>
 
         {/* Main content area */}
-        <main className="flex-1 overflow-y-auto min-h-0">
+        <main data-main-content className="flex-1 overflow-y-auto min-h-0">
           <EmailConfirmationBanner />
           <PlatformBanner />
           <InstallBanner />

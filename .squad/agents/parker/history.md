@@ -233,6 +233,22 @@
 
 ## Learnings
 
+### Unified Docker Workflow (2026-03-17)
+
+Merged `docker-publish.yml` (release pipeline, multistage Dockerfile) and `containers.yml` (native-build pipeline, daily schedule) into a single `docker-publish.yml`.
+
+**Architecture of the unified pipeline:**
+- **Native build path** (api, frontend, printer-discovery, orcaslicer-worker): .NET and React build natively on the runner via `build-dotnet` and `build-frontend` jobs, then artifacts are COPY'd into minimal containers. Faster builds, better caching, smaller images.
+- **Multistage path** (monolith only): Uses `Dockerfile.multistage` with `monolith-runtime` target. Runs in parallel with native builds since it's self-contained (combines API + frontend in one image).
+- **Triggers:** push to main/release, version tags (v*), daily schedule (midnight UTC), manual dispatch with optional tag suffix.
+- **Tagging:** Comprehensive — semver (v1.2.3 → v1.2.3, v1.2, v1), branch names (main, release), SHA prefixes, manual tags, nightly schedule tags.
+- **5 images total:** api, frontend, printer-discovery, orcaslicer-worker (amd64 only), monolith — all with ARM64 except orca.
+- **ARM64 smoke test** retained from containers.yml — validates api, frontend, and discovery start on arm64.
+- **OrcaSlicer base image** ensure job retained — triggers base image build if missing.
+
+**Key decision:** Monolith can't use native build because it combines API + frontend in a single Docker stage. All other images benefit from native compilation speed.
+
+**Deleted:** `.github/workflows/containers.yml` (fully superseded).
 
 ---
 

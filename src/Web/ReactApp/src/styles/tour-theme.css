@@ -104,6 +104,13 @@
   color: var(--pf-text-primary);
 }
 
+/* When the tour is active, prevent the main scroll container from
+   clipping the spotlight outline on highlighted elements.
+   The overlay already blocks interaction, so losing scroll is fine. */
+body:has(.driver-overlay) [data-main-content] {
+  overflow: visible !important;
+}
+
 /* Highlight ring on the spotlighted element.
    Uses outline instead of box-shadow so the glow is never clipped
    by ancestor overflow: hidden/auto/scroll containers. */

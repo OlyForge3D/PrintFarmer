@@ -46,6 +46,7 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
+    Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
@@ -60,6 +61,7 @@ public class PrintersController(
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
+    private readonly Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService _obicoServerAssignment = obicoServerAssignment;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -836,7 +838,9 @@ public class PrintersController(
             capabilitiesDto,
             toolheadDtos,
             p.Username,
-            p.Password);
+            p.Password,
+            p.ObicoEnabled,
+            p.ObicoServer?.Name);
     }
 
     /// <summary>
@@ -1385,6 +1389,37 @@ public class PrintersController(
         if (dto.IsEnabled.HasValue)
         {
             p.IsEnabled = dto.IsEnabled.Value;
+        }
+
+        // Update Obico monitoring opt-in (requires camera, auto-assigns server)
+        if (dto.ObicoEnabled.HasValue)
+        {
+            if (dto.ObicoEnabled.Value && !p.ObicoEnabled)
+            {
+                // Enabling: validate camera exists
+                bool hasCamera = (p.Cameras != null && p.Cameras.Count != 0)
+                    || !string.IsNullOrWhiteSpace(p.CameraStreamUrl)
+                    || !string.IsNullOrWhiteSpace(p.CameraSnapshotUrl);
+                if (!hasCamera)
+                {
+                    return BadRequest(new { error = "Obico monitoring requires at least one camera configured on the printer." });
+                }
+
+                p.ObicoEnabled = true;
+
+                // Auto-assign to best available server
+                ObicoServer? assigned = await _obicoServerAssignment.AssignServerAsync(p.Id, ct);
+                if (assigned is null)
+                {
+                    return BadRequest(new { error = "No available Obico server. Add and enable at least one Obico server in Settings." });
+                }
+            }
+            else if (!dto.ObicoEnabled.Value && p.ObicoEnabled)
+            {
+                // Disabling: unassign server
+                p.ObicoEnabled = false;
+                await _obicoServerAssignment.UnassignServerAsync(p.Id, ct);
+            }
         }
 
         // Update hardware specs on the Printer entity (merged from legacy PrinterCapabilities)

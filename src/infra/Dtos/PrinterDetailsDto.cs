@@ -30,4 +30,6 @@ public record PrinterDetailsDto(
     PrinterCapabilitiesDto? Capabilities = null,
     ToolheadDto[]? Toolheads = null,
     string? Username = null,
-    string? Password = null);
+    string? Password = null,
+    bool ObicoEnabled = false,
+    string? ObicoServerName = null);

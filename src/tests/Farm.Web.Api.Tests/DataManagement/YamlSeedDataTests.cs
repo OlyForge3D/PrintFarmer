@@ -26,7 +26,7 @@ public class YamlSeedDataTests
 
         _loggerMock = new Mock<ILogger<YamlSeedDataReader>>();
         _configMock = new Mock<IConfiguration>();
-        _configMock.Setup(c => c["SeedData:Path"]).Returns("data/seed/");
+        _configMock.Setup(c => c["SeedData:Path"]).Returns("Data/seed/");
 
         _yamlReader = new YamlSeedDataReader(_loggerMock.Object, _configMock.Object);
     }

@@ -21,7 +21,7 @@ PrintFarmer provides the following OctoPrint-compatible endpoints required for s
 |----------|--------|-------------|
 | `/api/octoprint/version` | GET | Returns server version information (required by slicers for compatibility check) |
 | `/api/octoprint/server` | GET | Returns server status |
-| `/api/octoprint/files/local` | POST | Uploads a new G-code file with optional auto-print |
+| `/api/octoprint/files/local` | POST | Uploads a new G-code file with optional auto-dispatch |
 
 These are the minimal endpoints required for PrusaSlicer, OrcaSlicer, and SuperSlicer to upload files to PrintFarmer.
 

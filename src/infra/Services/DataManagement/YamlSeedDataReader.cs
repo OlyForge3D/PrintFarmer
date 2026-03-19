@@ -19,7 +19,7 @@ public class YamlSeedDataReader : IYamlSeedDataReader
     public YamlSeedDataReader(ILogger<YamlSeedDataReader> logger, IConfiguration configuration)
     {
         _logger = logger;
-        _seedDataPath = configuration["SeedData:Path"] ?? Path.Combine(AppContext.BaseDirectory, "data", "seed");
+        _seedDataPath = configuration["SeedData:Path"] ?? Path.Combine(AppContext.BaseDirectory, "Data", "seed");
 
         // Configure YamlDotNet deserializer
         _yamlDeserializer = new DeserializerBuilder()

@@ -42,7 +42,7 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
 
     public async Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct)
     {
-        Printer? printer = await _db.Printers.Include(p => p.Toolheads).FirstOrDefaultAsync(p => p.Id == id, ct);  // With tracking for updates
+        Printer? printer = await _db.Printers.Include(p => p.Toolheads).Include(p => p.Cameras).FirstOrDefaultAsync(p => p.Id == id, ct);  // With tracking for updates
         if (printer != null)
         {
             PopulateCredential(printer);
@@ -67,6 +67,7 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
         Printer? printer = await _db.Printers
             .Include(p => p.Manufacturer)
             .Include(p => p.Model)
+            .Include(p => p.ObicoServer)
             .Include(p => p.Toolheads).ThenInclude(t => t.HotendModel)
             .Include(p => p.Toolheads).ThenInclude(t => t.ExtruderModel)
             .Include(p => p.Toolheads).ThenInclude(t => t.ToolheadModelDef)

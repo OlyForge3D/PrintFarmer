@@ -108,7 +108,9 @@ function MyPage() {
 
 ## Styling
 
-- **Tailwind CSS v4** with custom `pf-` design tokens
+- **Tailwind CSS v4** with CSS-first configuration (no `tailwind.config.js`)
+- Design tokens defined via `@theme` block in `src/Web/ReactApp/src/index.css` (CSS custom properties: `--color-pf-*`, `--font-family-*`, etc.)
+- Custom utilities defined with `@utility` blocks in `index.css` (e.g., `pf-skeleton`, `pf-animate-spin`)
 - Use `clsx` (not `classnames`) for conditional class composition
 - Common tokens: `bg-pf-bg-0`, `text-pf-text-primary`, `border-pf-border`, `text-pf-error`, `bg-pf-accent-bg`
 - No CSS modules — use Tailwind utility classes exclusively

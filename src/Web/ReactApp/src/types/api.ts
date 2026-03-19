@@ -660,8 +660,8 @@ export interface UpdatePrinterDto {
   password?: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
-  /** Optional Obico ML server assignment. If null, uses global default. */
-  obicoServerId?: string | null;
+  /** Optional Obico ML monitoring opt-in. When true, the app auto-assigns a healthy server. */
+  obicoEnabled?: boolean;
   // Printer capabilities
   nozzleDiameter?: number;
   supportedMaterials?: string[];
@@ -1153,10 +1153,12 @@ export interface PrinterDetails {
   ipAddress?: string;
   backendPort?: number | null;
   frontendPort?: number | null;
-  /** Assigned Obico ML server ID. If null, uses global default. */
+  /** Assigned Obico ML server ID (managed by backend, not user-facing). */
   obicoServerId?: string | null;
   /** Assigned Obico ML server name (for display). */
   obicoServerName?: string | null;
+  /** Whether Obico AI failure detection is enabled for this printer. */
+  obicoEnabled?: boolean;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
 }
@@ -3274,7 +3276,7 @@ export interface CostOverTime {
   jobCount: number;
 }
 
-// ============ Auto-Print Types ============
+// ============ Auto-Dispatch Dashboard Types ============
 
 export interface ReadyGateCheck {
   name: string;
@@ -3283,7 +3285,7 @@ export interface ReadyGateCheck {
   checkedAt: string;
 }
 
-export interface AutoPrintStatus {
+export interface AutoDispatchDetailedStatus {
   printerId: string;
   printerName: string;
   enabled: boolean;
@@ -3292,13 +3294,14 @@ export interface AutoPrintStatus {
   queueDepth: number;
   readyGateChecks: ReadyGateCheck[];
   lastActivity?: string;
-  /** Auto-print workflow state: "None", "PendingReady", or "Ready" */
+  /** Auto-dispatch workflow state: "None", "PendingReady", or "Ready" */
   state: string;
+  bedPreConfirmed?: boolean;
 }
 
-export interface AutoPrintGlobalStatus {
+export interface AutoDispatchGlobalStatus {
   globalEnabled: boolean;
-  printers: AutoPrintStatus[];
+  printers: AutoDispatchDetailedStatus[];
 }
 
 // ============== Obico ML Server Management ==============

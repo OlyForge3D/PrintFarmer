@@ -157,7 +157,6 @@ public static class ServiceCollectionExtensions
         RegisterAuthenticationServices(services);
         RegisterEmailServices(services);
         RegisterRateLimitingServices(services);
-        RegisterImportingServices(services);
         RegisterCatalogServices(services);
 
         // Cost tracking
@@ -424,16 +423,6 @@ public static class ServiceCollectionExtensions
 
     #endregion
 
-    #region Importing
-
-    private static void RegisterImportingServices(IServiceCollection services)
-    {
-        _ = services.AddScoped<Importing.Services.Import.IImportParserService, Importing.Services.Import.ImportParserService>();
-        _ = services.AddScoped<Importing.Services.Import.IImportProcessorService, Importing.Services.Import.ImportProcessorService>();
-    }
-
-    #endregion
-
     #region Catalog
 
     private static void RegisterCatalogServices(IServiceCollection services)
@@ -532,6 +521,9 @@ public static class ServiceCollectionExtensions
 
         // Register Obico failure detection service - AI-powered print failure detection
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
+
+        // Register Obico server assignment service - auto-assigns printers to healthy servers
+        _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService, Farm.Infrastructure.Services.FailureDetection.ObicoServerAssignmentService>();
 
         // Register NfcDeviceService from Infrastructure layer - NFC reader device management
         _ = services.AddScoped<Farm.Infrastructure.Services.NfcDevices.INfcDeviceService, Farm.Infrastructure.Services.NfcDevices.NfcDeviceService>();

@@ -286,8 +286,8 @@ Solutions to common issues in PrintFarmer.
 **Solutions:**
 
 1. **Check Tailwind CSS**
-   - Verify `tailwind.config.js` exists
-   - Check `src/index.css` imports Tailwind
+   - Verify `src/index.css` includes the `@theme` block with design tokens
+   - Check `src/index.css` imports Tailwind via `@import "tailwindcss"`
    - Rebuild: `npm run build`
 
 2. **Clear Tailwind Cache**

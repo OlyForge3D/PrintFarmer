@@ -46,5 +46,8 @@ public record UpdatePrinterDto(
     // Approval workflow
     bool? IsEnabled = null,
 
+    // Obico AI failure detection opt-in
+    bool? ObicoEnabled = null,
+
     // Toolheads - for updating individual toolhead settings
     UpdateToolheadDto[]? Toolheads = null);
