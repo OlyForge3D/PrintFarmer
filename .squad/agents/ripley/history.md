@@ -1721,3 +1721,29 @@ The auto-dispatch workflow is **farm-level operations**, not **per-printer contr
 **Status:** Awaiting stakeholder decision on recommendation.
 
 ---
+
+## Learnings
+
+### Auto-Dispatch Dashboard Visual Redesign (2025-07-15)
+
+**Task:** Major visual upgrade of the Auto-Dispatch Dashboard from "bland" to "Industrial Command Center / Mission Control" aesthetic.
+
+**Changes Made:**
+- **Farm Status Bar** — New top-level summary component showing real-time counts for Printing, Ready, Attention, Idle, Offline, and Queued states. Animated scan line and beacon indicator for system status. Uses `font-bebas` for large numbers.
+- **State-based card treatment** — Cards now have gradient header overlays, animated glow effects, and pulsing indicators per state. Printing pulses blue with a scan line. PendingReady flashes amber. Ready glows green. Disabled is desaturated with 50% opacity.
+- **Ready-gate diagnostics** — Segmented bar with animated fill (`ad-gate-fill` keyframe with staggered delays). Check items displayed in a 2-column grid with colored dot indicators instead of text symbols.
+- **Filter chips** — Replaced Select dropdown with clickable chip buttons showing state counts. Active chip has accent glow shadow. Uses `Button variant="unstyled"` to satisfy lint rules.
+- **Staggered card entrance** — Cards fade/slide in with `ad-float-in` animation, each delayed by 50ms × index.
+- **CSS-only animations** — All animations via injected `<style>` block (no Motion library). Keyframes: pulse-glow, scan-line, pending-flash, gate-fill, beacon, float-in.
+
+**Key Decisions:**
+- Removed `Badge` import — replaced with custom inline status badges styled per-state via `accentConfig` record for more dramatic visual treatment.
+- Changed page title from "Auto-Dispatch Dashboard" to "Auto-Dispatch" (shorter, punchier) — required test update.
+- Used `font-bebas` (already imported in project) for stat numbers to give them a HUD feel.
+- Filter chips show counts from `farmStats` for at-a-glance awareness without clicking.
+
+**Files Changed:**
+- `src/Web/ReactApp/src/features/auto-dispatch/pages/AutoDispatchDashboardPage.tsx` — Full visual redesign
+- `src/Web/ReactApp/src/test/features/auto-dispatch/AutoDispatchDashboardPage.test.tsx` — Updated title assertion
+
+**Validation:** TypeScript clean, ESLint clean, all 1480 tests passing, production build successful.

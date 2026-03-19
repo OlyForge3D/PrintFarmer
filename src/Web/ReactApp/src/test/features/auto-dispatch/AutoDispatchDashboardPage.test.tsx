@@ -124,7 +124,7 @@ describe('AutoDispatchDashboardPage', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Auto-Dispatch Dashboard')).toBeInTheDocument();
+    expect(screen.getByText('Auto-Dispatch')).toBeInTheDocument();
     expect(screen.getByLabelText('Global auto-dispatch toggle')).toBeInTheDocument();
     expect(screen.getByText('Printer 1')).toBeInTheDocument();
   });
