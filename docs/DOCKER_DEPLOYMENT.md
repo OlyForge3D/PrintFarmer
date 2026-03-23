@@ -186,7 +186,7 @@ Use our automated setup script for easy deployment:
 
 ```bash
 # Clone repository
-git clone https://github.com/OlyForge3D/printfarmer.git
+git clone https://github.com/OlyForge3D/PrintFarmer.git
 cd PrintFarmer
 
 # Run automated setup script

@@ -496,12 +496,12 @@ When asking for help, provide:
 
 ### Report Issues
 
-- [GitHub Issues](https://github.com/OlyForge3D/printfarmer/issues)
+- [GitHub Issues](https://github.com/OlyForge3D/PrintFarmer/issues)
 - Include error details, logs, and reproduction steps
 - Labels help categorize: bug, help wanted, enhancement
 
 ### Community Help
 
-- [GitHub Discussions](https://github.com/OlyForge3D/printfarmer/discussions)
+- [GitHub Discussions](https://github.com/OlyForge3D/PrintFarmer/discussions)
 - Search for similar questions first
 - Provide context and what you've tried

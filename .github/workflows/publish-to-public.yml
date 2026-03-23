@@ -16,7 +16,7 @@ on:
       public_repo:
         description: 'Public repository (org/repo)'
         required: true
-        default: 'OlyForge3D/printfarmer'
+        default: 'OlyForge3D/PrintFarmer'
         type: string
       dry_run:
         description: 'Dry run (do not push)'

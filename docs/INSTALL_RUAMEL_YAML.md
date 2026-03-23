@@ -175,7 +175,7 @@ For new VMs or CI/CD pipelines, you can run the entire bootstrap with one comman
 
 ```bash
 # Download and run bootstrap
-curl -fsSL https://raw.githubusercontent.com/OlyForge3D/printfarmer/main/scripts/bootstrap-ubuntu.sh | bash
+curl -fsSL https://raw.githubusercontent.com/OlyForge3D/PrintFarmer/main/scripts/bootstrap-ubuntu.sh | bash
 ```
 
 Or for existing clones:

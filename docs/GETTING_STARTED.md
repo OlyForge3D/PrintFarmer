@@ -14,7 +14,7 @@ A quick guide to set up PrintFarmer for local development.
 ### 1. Clone and Navigate
 
 ```bash
-git clone https://github.com/OlyForge3D/printfarmer.git
+git clone https://github.com/OlyForge3D/PrintFarmer.git
 cd PrintFarmer/src
 ```
 
@@ -244,6 +244,6 @@ npm run test:run -- --reporter=verbose
 
 ## Getting Help
 
-- 🐛 Found a bug? [Report it on GitHub](https://github.com/OlyForge3D/printfarmer/issues)
-- 💬 Have questions? [Start a discussion](https://github.com/OlyForge3D/printfarmer/discussions)
+- 🐛 Found a bug? [Report it on GitHub](https://github.com/OlyForge3D/PrintFarmer/issues)
+- 💬 Have questions? [Start a discussion](https://github.com/OlyForge3D/PrintFarmer/discussions)
 - 📧 Security issue? See [SECURITY.md](../SECURITY.md)
