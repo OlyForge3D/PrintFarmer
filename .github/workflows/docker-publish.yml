@@ -431,6 +431,19 @@ jobs:
     needs: [build-containers]
     if: needs.build-containers.result == 'success'
     steps:
+      - name: Determine image tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/v}"
+          elif [[ "${{ github.ref }}" == "refs/heads/release" ]]; then
+            TAG="release-sha-${GITHUB_SHA::7}"
+          else
+            TAG="manual-${GITHUB_SHA::7}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Using image tag: $TAG"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -443,17 +456,17 @@ jobs:
 
       - name: Verify API image starts on ARM64
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-api:sha-${GITHUB_SHA::7}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-api:${{ steps.tag.outputs.tag }}"
           echo "Testing ARM64 startup: $IMAGE"
           docker run --rm --platform linux/arm64 \
             -e ASPNETCORE_URLS=http://+:5000 \
             -e DB_PROVIDER=sqlite \
-            "$IMAGE" dotnet Farm.Web.Api.dll --help 2>&1 | head -20 || true
+            "$IMAGE" dotnet Farm.Web.Api.dll --help 2>&1 | head -20
           echo "✅ API image runs on ARM64"
 
       - name: Verify frontend image starts on ARM64
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-frontend:sha-${GITHUB_SHA::7}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-frontend:${{ steps.tag.outputs.tag }}"
           echo "Testing ARM64 startup: $IMAGE"
           docker run --rm --platform linux/arm64 -d --name frontend-test "$IMAGE"
           sleep 3
@@ -463,10 +476,10 @@ jobs:
 
       - name: Verify printer-discovery image starts on ARM64
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-printer-discovery:sha-${GITHUB_SHA::7}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-printer-discovery:${{ steps.tag.outputs.tag }}"
           echo "Testing ARM64 startup: $IMAGE"
           docker run --rm --platform linux/arm64 \
-            "$IMAGE" dotnet PrinterDiscoveryService.dll --help 2>&1 | head -20 || true
+            "$IMAGE" dotnet PrinterDiscoveryService.dll --help 2>&1 | head -20
           echo "✅ Printer Discovery image runs on ARM64"
 
   # ====================
