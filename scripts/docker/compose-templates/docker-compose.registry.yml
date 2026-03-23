@@ -8,7 +8,7 @@
 #   ./scripts/deploy-docker.sh --use-registry --registry-host my-registry.com --registry-tag latest
 #
 # Manual usage with docker compose:
-#   1. Set your registry: export REGISTRY_HOST=ghcr.io/jpapiez
+#   1. Set your registry: export REGISTRY_HOST=ghcr.io/olyforge3d
 #   2. Set image tag: export REGISTRY_IMAGE_TAG=latest
 #   3. Deploy: docker compose -f docker-compose.yml -f docker-compose.registry.yml up
 #
@@ -21,15 +21,15 @@
 services:
   # Override API to use registry image
   api:
-    image: ${REGISTRY_HOST:-ghcr.io/jpapiez}/printfarmer-api:${REGISTRY_IMAGE_TAG:-latest}
+    image: ${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-api:${REGISTRY_IMAGE_TAG:-latest}
     build: !reset null
     
   # Override React frontend to use registry image
   frontend:
-    image: ${REGISTRY_HOST:-ghcr.io/jpapiez}/printfarmer-frontend:${REGISTRY_IMAGE_TAG:-latest}
+    image: ${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-frontend:${REGISTRY_IMAGE_TAG:-latest}
     build: !reset null
     
   # Override printer-discovery to use registry image (when included)
   printer-discovery:
-    image: ${REGISTRY_HOST:-ghcr.io/jpapiez}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG:-latest}
+    image: ${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG:-latest}
     build: !reset null

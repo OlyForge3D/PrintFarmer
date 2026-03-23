@@ -1,10 +1,10 @@
 # PrintFarmer
 
-![CI](https://github.com/jpapiez/PrintFarmer/actions/workflows/ci.yml/badge.svg)
-![Containers](https://github.com/jpapiez/PrintFarmer/actions/workflows/containers.yml/badge.svg)
-![Dependency Review](https://github.com/jpapiez/PrintFarmer/actions/workflows/dependency-review.yml/badge.svg)
-![Codecov](https://img.shields.io/codecov/c/github/jpapiez/PrintFarmer)
-![CodeQL](https://github.com/jpapiez/PrintFarmer/actions/workflows/codeql.yml/badge.svg)
+![CI](https://github.com/OlyForge3D/printfarmer/actions/workflows/ci.yml/badge.svg)
+![Containers](https://github.com/OlyForge3D/printfarmer/actions/workflows/containers.yml/badge.svg)
+![Dependency Review](https://github.com/OlyForge3D/printfarmer/actions/workflows/dependency-review.yml/badge.svg)
+![Codecov](https://img.shields.io/codecov/c/github/OlyForge3D/printfarmer)
+![CodeQL](https://github.com/OlyForge3D/printfarmer/actions/workflows/codeql.yml/badge.svg)
 
 A **production-ready** React TypeScript dashboard for managing multiple 3D printers with real-time updates, location organization, and integrated slicing capabilities.
 
@@ -42,7 +42,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ### Option 1: Docker Deployment (Recommended for Production)
 
 ```bash
-git clone https://github.com/jpapiez/PrintFarmer.git
+git clone https://github.com/OlyForge3D/printfarmer.git
 cd PrintFarmer
 ./scripts/deploy-docker.sh --non-interactive
 ```
@@ -72,7 +72,7 @@ See **[Deployment Hardware Guide](./docs/DEPLOYMENT_HARDWARE.md)** for hardware 
 ### Option 2: Local Development (Recommended for Development)
 
 ```bash
-git clone https://github.com/jpapiez/PrintFarmer.git
+git clone https://github.com/OlyForge3D/printfarmer.git
 cd PrintFarmer/src
 
 # Restore dependencies
@@ -372,12 +372,12 @@ PrintFarmer builds on amazing open-source projects:
 ## 📧 Support
 
 - 📖 **[Complete Documentation](./docs/)**
-- 🐛 **[GitHub Issues](https://github.com/jpapiez/PrintFarmer/issues)**
-- 💬 **[GitHub Discussions](https://github.com/jpapiez/PrintFarmer/discussions)**
+- 🐛 **[GitHub Issues](https://github.com/OlyForge3D/printfarmer/issues)**
+- 💬 **[GitHub Discussions](https://github.com/OlyForge3D/printfarmer/discussions)**
 - 🔒 **[Security Issues](./SECURITY.md)**
 
 ---
 
 **Last Updated:** January 11, 2026  
-**Current Version:** See [GitHub Releases](https://github.com/jpapiez/PrintFarmer/releases)  
+**Current Version:** See [GitHub Releases](https://github.com/OlyForge3D/printfarmer/releases)  
 **Current Phase:** Phase 4 - COMPLETE (Phase 4.5 Load Balancing planned next)

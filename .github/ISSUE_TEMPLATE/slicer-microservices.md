@@ -445,7 +445,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
       - name: orcaslicer
-        image: ghcr.io/jpapiez/printfarmer-orcaslicer:latest
+        image: ghcr.io/olyforge3d/printfarmer-orcaslicer:latest
         ports:
         - containerPort: 8080
           name: http

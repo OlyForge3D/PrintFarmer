@@ -70,7 +70,7 @@ COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 # Registry deployment: pull pre-built images from container registry instead of building locally
 USE_REGISTRY=false
 # Registry host (default: GitHub Container Registry)
-REGISTRY_HOST="${REGISTRY_HOST:-ghcr.io/jpapiez}"
+REGISTRY_HOST="${REGISTRY_HOST:-ghcr.io/olyforge3d}"
 # Image version tag (default: latest, or specify semver like v1.2.3, branch name, or SHA)
 REGISTRY_IMAGE_TAG="${REGISTRY_IMAGE_TAG:-latest}"
 
@@ -2335,7 +2335,7 @@ REGISTRY DEPLOYMENT OPTIONS:
     Images are built and pushed via GitHub Actions on push to main/release or tags.
     
     --use-registry              Pull pre-built images from container registry (skip local builds)
-    --registry-host HOST        Registry host (default: ghcr.io/jpapiez)
+    --registry-host HOST        Registry host (default: ghcr.io/olyforge3d)
     --registry-tag TAG          Image tag to pull (default: latest)
     
     VERSION CONTROL:

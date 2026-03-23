@@ -567,7 +567,7 @@ sudo usermod -aG docker $USER
 newgrp docker
 
 # Clone PrintFarmer
-git clone https://github.com/jpapiez/PrintFarmer.git
+git clone https://github.com/OlyForge3D/printfarmer.git
 cd PrintFarmer
 ```
 

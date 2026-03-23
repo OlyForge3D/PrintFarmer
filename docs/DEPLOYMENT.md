@@ -18,7 +18,7 @@ PrintFarmer supports multiple deployment architectures designed for different us
 
 ### Quick Start
 ```bash
-git clone https://github.com/jpapiez/PrintFarmer.git
+git clone https://github.com/OlyForge3D/printfarmer.git
 cd PrintFarmer/src
 
 # Terminal 1 - API Server
@@ -51,7 +51,7 @@ cd Web/ReactApp && npm run dev
 **Best for:** Most users, production deployment, quick setup
 
 ```bash
-git clone https://github.com/jpapiez/PrintFarmer.git
+git clone https://github.com/OlyForge3D/printfarmer.git
 cd PrintFarmer
 
 # Automated setup with prompts

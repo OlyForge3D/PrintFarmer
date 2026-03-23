@@ -187,7 +187,7 @@ spec:
                 - amd64
       containers:
       - name: api
-        image: ghcr.io/jpapiez/printfarmer:latest
+        image: ghcr.io/olyforge3d/printfarmer:latest
         ports:
         - containerPort: 8080
           name: http

@@ -25,7 +25,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_OWNER: ${{ github.repository_owner }}
+  IMAGE_OWNER: olyforge3d
   DOTNET_VERSION: '10.0.x'
   NODE_VERSION: '24'
   ORCA_VERSION: '2.3.1'

@@ -364,7 +364,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: ghcr.io/jpapiez/printfarmer:latest
+        image: ghcr.io/olyforge3d/printfarmer:latest
         ports:
         - containerPort: 8080
         env:
@@ -456,7 +456,7 @@ log "Deploying to: $DEPLOY_COLOR"
 # Deploy to inactive environment
 log "Updating deployment $APP_NAME-$DEPLOY_COLOR"
 kubectl set image deployment/$APP_NAME-$DEPLOY_COLOR \
-    api=ghcr.io/jpapiez/printfarmer:$IMAGE_TAG \
+    api=ghcr.io/olyforge3d/printfarmer:$IMAGE_TAG \
     -n $NAMESPACE
 
 # Wait for rollout to complete

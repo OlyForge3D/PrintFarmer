@@ -4,7 +4,7 @@
 # One-command setup for your 3D printer management dashboard.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/jpapiez/PrintFarmer/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/OlyForge3D/printfarmer/main/install.sh | bash
 #   curl -fsSL ... | bash -s -- --non-interactive
 #   ./install.sh --help
 #
@@ -36,7 +36,7 @@ set -euo pipefail
 INSTALLER_VERSION="1.0.0"
 
 # ─── Defaults ───────────────────────────────────────────────────────────────
-REGISTRY_HOST="ghcr.io/jpapiez"
+REGISTRY_HOST="ghcr.io/olyforge3d"
 IMAGE_TAG="${PRINTFARMER_VERSION:-latest}"
 HTTP_PORT="${PRINTFARMER_PORT:-8080}"
 INSTALL_DIR="${PRINTFARMER_DIR:-./printfarmer}"
@@ -159,7 +159,7 @@ if [[ "$SHOW_HELP" == "true" ]]; then
 
   USAGE
     ./install.sh [OPTIONS]
-    curl -fsSL https://raw.githubusercontent.com/jpapiez/PrintFarmer/main/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/OlyForge3D/printfarmer/main/install.sh | bash
     curl ... | bash -s -- --non-interactive --port 9090
 
   OPTIONS
@@ -910,7 +910,7 @@ if [[ "$DEPLOY_PROFILE" == "lite" ]]; then
     cat > "$INSTALL_DIR/docker-compose.yml" <<COMPOSEEOF
 # PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
 # Profile: lite | Database: sqlite | Single container
-# Docs: https://github.com/jpapiez/PrintFarmer
+# Docs: https://github.com/OlyForge3D/printfarmer
 
 name: printfarmer
 
@@ -1092,7 +1092,7 @@ else
     cat > "$INSTALL_DIR/docker-compose.yml" <<COMPOSEEOF
 # PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
 # Profile: ${DEPLOY_PROFILE} | Database: ${DB_ENGINE} | Images: \${REGISTRY_HOST}/*:\${IMAGE_TAG}
-# Docs: https://github.com/jpapiez/PrintFarmer
+# Docs: https://github.com/OlyForge3D/printfarmer
 
 name: printfarmer
 
