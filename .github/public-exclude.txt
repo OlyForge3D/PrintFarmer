@@ -51,4 +51,4 @@ devnotes/
 
 # Prototype/sample files
 sample_profiles/
-proto/
+# proto/ — NOT excluded: slicer_jobs.proto is needed for gRPC build

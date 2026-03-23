@@ -327,7 +327,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/release' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=release,enable=${{ github.ref == 'refs/heads/release' }}
             type=sha,format=short,prefix=release-sha-,enable=${{ github.ref == 'refs/heads/release' }}
             type=raw,value=manual-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
@@ -391,7 +391,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/release' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=release,enable=${{ github.ref == 'refs/heads/release' }}
             type=sha,format=short,prefix=release-sha-,enable=${{ github.ref == 'refs/heads/release' }}
             type=raw,value=manual-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
