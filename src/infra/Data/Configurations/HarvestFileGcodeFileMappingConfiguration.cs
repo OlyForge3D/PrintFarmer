@@ -17,14 +17,14 @@ public class HarvestFileGcodeFileMappingConfiguration : IEntityTypeConfiguration
         // Foreign key to HarvestDiscoveredFile
         // Use Restrict (not Cascade) to prevent accidental deletion of mappings when cleaning up harvest operations
         // This protects GcodeFile records from being orphaned if someone deletes the harvest operation
-        _ = builder.HasOne<HarvestDiscoveredFile>()
+        _ = builder.HasOne(m => m.HarvestDiscoveredFile)
             .WithMany(h => h.GcodeFileMappings)
             .HasForeignKey(m => m.HarvestDiscoveredFileId)
             .OnDelete(DeleteBehavior.Restrict);
 
         // Foreign key to GcodeFile
         // Use NoAction to absolutely prevent cascade deletion of library files from harvest operations
-        _ = builder.HasOne<GcodeFile>()
+        _ = builder.HasOne(m => m.GcodeFile)
             .WithMany(g => g.HarvestFileMappings)
             .HasForeignKey(m => m.GcodeFileId)
             .OnDelete(DeleteBehavior.NoAction);

@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Farm.Infrastructure.Data.Configurations;
@@ -26,6 +27,11 @@ public class ToolheadConfiguration : IEntityTypeConfiguration<Toolhead>
             .HasConversion(
                 v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
                 v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
+        builder.Property(t => t.SupportedMaterials).Metadata.SetValueComparer(
+            new ValueComparer<string[]?>(
+                (a, b) => (a == null && b == null) || (a != null && b != null && a.SequenceEqual(b)),
+                c => c == null ? 0 : c.Aggregate(0, (h, v) => HashCode.Combine(h, v.GetHashCode())),
+                c => c == null ? null : c.ToArray()));
 
         // Foreign Key to Printer
         builder.HasOne(t => t.Printer)

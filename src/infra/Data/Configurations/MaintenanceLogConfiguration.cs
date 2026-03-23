@@ -17,7 +17,7 @@ public class MaintenanceLogConfiguration : IEntityTypeConfiguration<MaintenanceL
 
         // Relationship with Printer (required)
         _ = builder.HasOne(l => l.Printer)
-            .WithMany()
+            .WithMany(p => p.MaintenanceLogs)
             .HasForeignKey(l => l.PrinterId)
             .OnDelete(DeleteBehavior.Cascade);
 

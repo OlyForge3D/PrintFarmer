@@ -22,12 +22,12 @@ public class JobRetryConfiguration : IEntityTypeConfiguration<JobRetry>
 
         // Foreign Keys - many-to-one relationships with PrintJobs
         _ = builder.HasOne(jr => jr.OriginalJob)
-            .WithMany()
+            .WithMany(pj => pj.RetriesAsOriginal)
             .HasForeignKey(jr => jr.OriginalJobId)
             .OnDelete(DeleteBehavior.Restrict); // Prevent deleting original job if retry exists
 
         _ = builder.HasOne(jr => jr.RetryJob)
-            .WithMany()
+            .WithMany(pj => pj.RetriesAsAttempt)
             .HasForeignKey(jr => jr.RetryJobId)
             .OnDelete(DeleteBehavior.Restrict); // Prevent deleting retry job if history exists
 

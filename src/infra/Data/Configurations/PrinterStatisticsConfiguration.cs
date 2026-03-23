@@ -12,7 +12,7 @@ public class PrinterStatisticsConfiguration : IEntityTypeConfiguration<PrinterSt
 
         // One-to-one with Printer (PrinterId should match Id)
         _ = builder.HasOne(s => s.Printer)
-            .WithOne()
+            .WithOne(p => p.Statistics)
             .HasForeignKey<PrinterStatistics>(s => s.PrinterId)
             .OnDelete(DeleteBehavior.Cascade);
 
