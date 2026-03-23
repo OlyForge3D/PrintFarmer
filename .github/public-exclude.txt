@@ -49,6 +49,36 @@ devnotes/
 .github/copilot-instructions.md
 .github/workflows/publish-to-public.yml
 
+# Internal workflows not needed in public repo
+# Keep only: docker-publish.yml, orcaslicer-base-image.yml, ci.yml
+.github/workflows/appimage-preseed-uploader.yml
+.github/workflows/auto-bump-release.yml
+.github/workflows/bootstrap-ubuntu-ci.yml
+.github/workflows/ci-lint.yml
+.github/workflows/compose-validate.yml
+.github/workflows/devcontainer-multiarch.yml
+.github/workflows/draft-release.yml
+.github/workflows/enforce-path-casing.yml
+.github/workflows/orcaslicer-strict-build.yml
+.github/workflows/prusa-preseed-build.yml
+.github/workflows/prusaslicer-strict-build.yml
+.github/workflows/release.yml
+.github/workflows/slicer-assets-ci.yml
+.github/workflows/slicer-worker-security.yml
+.github/workflows/squad-ci.yml
+.github/workflows/squad-docs.yml
+.github/workflows/squad-heartbeat.yml
+.github/workflows/squad-insider-release.yml
+.github/workflows/squad-issue-assign.yml
+.github/workflows/squad-label-enforce.yml
+.github/workflows/squad-main-guard.yml
+.github/workflows/squad-preview.yml
+.github/workflows/squad-promote.yml
+.github/workflows/squad-release.yml
+.github/workflows/squad-triage.yml
+.github/workflows/sync-squad-labels.yml
+.github/workflows/yamllint.yml
+
 # Prototype/sample files
 sample_profiles/
 # proto/ — NOT excluded: slicer_jobs.proto is needed for gRPC build
