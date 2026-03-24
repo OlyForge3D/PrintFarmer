@@ -50,9 +50,11 @@ log_info "Public repo : $PUBLIC_REPO"
 log_info "Bump type   : $BUMP"
 log_info "Dry run     : $DRY_RUN"
 
-# ── Get latest version from public repo via gh API ───────────────────────────
-log_info "Checking latest version in public repo..."
-LATEST_TAG=$(gh api "repos/${PUBLIC_REPO}/tags" --jq '.[0].name // ""' 2>/dev/null || true)
+# ── Calculate new version from local tags ────────────────────────────────────
+# Local tags include those fetched from olyforge3d (via previous fetches).
+# Use the published/* marker tag if present, otherwise fall back to semver tags.
+log_info "Checking latest published version..."
+LATEST_TAG=$(git tag --sort=-version:refname | grep "^v[0-9]" | grep -v "^v0\.0\.0$" | head -1 || true)
 
 if [[ -z "$LATEST_TAG" ]]; then
     MAJOR=0; MINOR=1; PATCH=0; PREV_TAG=""
@@ -75,23 +77,28 @@ esac
 NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
 log_success "New version: $NEW_VERSION"
 
-# ── Generate release notes ────────────────────────────────────────────────────
+# ── Generate release notes from private repo history ─────────────────────────
+# Use published-<version> marker tag if it exists to scope the log range.
+# This tracks what was last published from the private repo.
 RELEASE_NOTES_FILE="$(mktemp)"
+MARKER_TAG="published-${LATEST_TAG:-none}"
 {
     echo "## What's Changed"
     echo ""
-    if [[ -z "$PREV_TAG" ]]; then
-        git log --pretty=format:"- %s" HEAD \
-            | grep -v "Bump version to" | grep -v "\[skip ci\]" | head -50
-    else
-        git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" \
-            | grep -v "Bump version to" | grep -v "\[skip ci\]"
+    if git rev-parse "$MARKER_TAG" > /dev/null 2>&1; then
+        # Show commits since last publish marker on private repo
+        git log -50 --pretty=format:"- %s" "${MARKER_TAG}..HEAD" \
+            | grep -v "Bump version to" | grep -v "\[skip ci\]" || true
         echo ""
-        echo "**Full Changelog**: https://github.com/${PUBLIC_REPO}/compare/${PREV_TAG}...${NEW_VERSION}"
+        echo "**Full Changelog**: https://github.com/${PUBLIC_REPO}/compare/${LATEST_TAG}...${NEW_VERSION}"
+    else
+        # No marker — show last 30 commits as summary
+        git log -30 --pretty=format:"- %s" HEAD \
+            | grep -v "Bump version to" | grep -v "\[skip ci\]" || true
     fi
 } > "$RELEASE_NOTES_FILE"
 
-log_info "Release notes:"
+log_info "Release notes preview:"
 cat "$RELEASE_NOTES_FILE"
 
 # ── Create orphan squash branch ───────────────────────────────────────────────
@@ -134,6 +141,13 @@ PUBLIC_URL="$(gh repo view "$PUBLIC_REPO" --json url --jq '.url').git"
 git push "$PUBLIC_URL" "$SQUASH_BRANCH:main" --force
 git push "$PUBLIC_URL" "$NEW_VERSION"
 log_success "Pushed $NEW_VERSION to $PUBLIC_REPO"
+
+# ── Tag private repo HEAD as publish marker ───────────────────────────────────
+# Allows next run to generate accurate release notes (commits since last publish)
+git checkout main
+MARKER="published-${NEW_VERSION}"
+git tag -f "$MARKER"
+log_info "Marked private repo HEAD as $MARKER"
 
 # ── Draft release ─────────────────────────────────────────────────────────────
 log_info "Creating draft release..."
