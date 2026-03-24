@@ -14,6 +14,7 @@
 AGENTS.md
 
 # Dev/debug scripts
+scripts/publish-to-public.sh
 scripts/build-and-push-registry.sh
 scripts/build-orcaslicer-optimized.sh
 scripts/debug-deployment.sh
