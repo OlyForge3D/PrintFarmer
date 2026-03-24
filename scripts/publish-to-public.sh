@@ -41,13 +41,9 @@ if [[ ! -f "$EXCLUDE_FILE" ]]; then
 fi
 
 # ── Configure public remote ───────────────────────────────────────────────────
-if [[ -n "${PUBLIC_REPO_PAT:-}" ]]; then
-    PUBLIC_REMOTE_URL="https://x-access-token:${PUBLIC_REPO_PAT}@github.com/${PUBLIC_REPO}.git"
-else
-    PUBLIC_REMOTE_URL="https://github.com/${PUBLIC_REPO}.git"
-fi
+PUBLIC_REMOTE_URL="https://github.com/${PUBLIC_REPO}.git"
 
-# Ensure remote exists (temporary remote so we don't pollute .git/config permanently)
+# Temporary remote so we don't pollute .git/config permanently
 REMOTE_NAME="public-publish-$$"
 git remote add "$REMOTE_NAME" "$PUBLIC_REMOTE_URL"
 cleanup() { git remote remove "$REMOTE_NAME" 2>/dev/null || true; }
