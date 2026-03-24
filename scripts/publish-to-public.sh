@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # Publish the private repo to OlyForge3D/PrintFarmer (public).
 #
 # Takes a snapshot of HEAD, strips files in .github/public-exclude.txt,
@@ -37,30 +37,22 @@ if [[ ! -f "$EXCLUDE_FILE" ]]; then
     log_error "Missing $EXCLUDE_FILE"; exit 1
 fi
 
-# ── Temporary remote ─────────────────────────────────────────────────────────
-REMOTE_NAME="public-publish-$$"
+# ── Cleanup trap ─────────────────────────────────────────────────────────────
 SQUASH_BRANCH="release-squash-$$"
-
 cleanup() {
     git checkout main 2>/dev/null || true
     git branch -D "$SQUASH_BRANCH" 2>/dev/null || true
-    git remote remove "$REMOTE_NAME" 2>/dev/null || true
 }
 trap cleanup EXIT
-
-git remote add "$REMOTE_NAME" "https://github.com/${PUBLIC_REPO}.git"
 
 log_header "Publish to Public Repo"
 log_info "Public repo : $PUBLIC_REPO"
 log_info "Bump type   : $BUMP"
 log_info "Dry run     : $DRY_RUN"
 
-# ── Fetch tags from public repo ───────────────────────────────────────────────
-log_info "Fetching tags from public repo..."
-git fetch "$REMOTE_NAME" --tags 2>/dev/null || log_warn "No tags in public repo yet"
-
-# ── Calculate new version ────────────────────────────────────────────────────
-LATEST_TAG=$(git tag --sort=-version:refname | grep "^v[0-9]" | head -1 || true)
+# ── Get latest version from public repo via gh API ───────────────────────────
+log_info "Checking latest version in public repo..."
+LATEST_TAG=$(gh api "repos/${PUBLIC_REPO}/tags" --jq '.[0].name // ""' 2>/dev/null || true)
 
 if [[ -z "$LATEST_TAG" ]]; then
     MAJOR=0; MINOR=1; PATCH=0; PREV_TAG=""
@@ -103,14 +95,11 @@ log_info "Release notes:"
 cat "$RELEASE_NOTES_FILE"
 
 # ── Create orphan squash branch ───────────────────────────────────────────────
-# Always orphan — private and public repos have unrelated git histories.
-# We snapshot HEAD, strip excluded files, and commit as a single squashed commit.
+# Always orphan: private and public repos have unrelated git histories.
 log_info "Creating orphan squash branch from HEAD..."
-CURRENT_HEAD="$(git rev-parse HEAD)"
 
 git checkout --orphan "$SQUASH_BRANCH"
 
-# Strip excluded files from the index (working tree untouched)
 log_info "Stripping excluded files..."
 removed=0
 while IFS= read -r pattern || [[ -n "$pattern" ]]; do
@@ -139,10 +128,11 @@ if [[ "$DRY_RUN" == "true" ]]; then
     exit 0
 fi
 
-# ── Push ─────────────────────────────────────────────────────────────────────
+# ── Push via gh CLI (handles auth natively) ───────────────────────────────────
 log_info "Pushing $NEW_VERSION to $PUBLIC_REPO..."
-git push "$REMOTE_NAME" "$SQUASH_BRANCH:main" --force
-git push "$REMOTE_NAME" "$NEW_VERSION"
+PUBLIC_URL="$(gh repo view "$PUBLIC_REPO" --json url --jq '.url').git"
+git push "$PUBLIC_URL" "$SQUASH_BRANCH:main" --force
+git push "$PUBLIC_URL" "$NEW_VERSION"
 log_success "Pushed $NEW_VERSION to $PUBLIC_REPO"
 
 # ── Draft release ─────────────────────────────────────────────────────────────
