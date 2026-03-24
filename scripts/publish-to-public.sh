@@ -9,7 +9,9 @@
 #   ./scripts/publish-to-public.sh [micro|minor|major] [--dry-run]
 #
 # Requirements:
-#   - git, gh (GitHub CLI, authenticated with write access to public repo)
+#   - Run with Git Bash, NOT WSL bash (gh.exe is not on the WSL PATH):
+#       "C:\Program Files\Git\bin\bash.exe" scripts/publish-to-public.sh micro
+#   - gh CLI authenticated with write access to the public repo
 
 set -euo pipefail
 
