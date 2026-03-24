@@ -357,8 +357,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
     private string GetFilePath(string key)
     {
-        // Ensure key is safe for file system
+        // Ensure key is safe for file system and normalize path separators
         string safeKey = key.Replace("..", string.Empty).Replace(":", "_").Replace("?", "_").Replace("&", "_");
+        safeKey = safeKey.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
         return Path.Combine(_options.BasePath, safeKey);
     }
 
@@ -391,7 +392,13 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
     private string GetFileUrl(string key)
     {
-        return string.IsNullOrEmpty(_options.BaseUrl) ? $"file://{GetFilePath(key)}" : $"{_options.BaseUrl.TrimEnd('/')}/{key}";
+        if (string.IsNullOrEmpty(_options.BaseUrl))
+        {
+            string filePath = GetFilePath(key).Replace('\\', '/');
+            return filePath.StartsWith('/') ? $"file://{filePath}" : $"file:///{filePath}";
+        }
+
+        return $"{_options.BaseUrl.TrimEnd('/')}/{key}";
     }
 
     private string GetFileUrlFromKeyOrUrl(string keyOrUrl)

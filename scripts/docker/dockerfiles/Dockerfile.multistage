@@ -530,7 +530,9 @@ ENV DEPLOYMENT_MODE=monolith
 
 # Monolith serves both API and frontend on port 5000
 # No separate nginx needed — ASP.NET Core serves static files directly
-# Inherits: EXPOSE 5000, healthcheck, user setup, and entrypoint from api-runtime
+# Override inherited healthcheck with longer start_period for ARM/RPi deployments
+HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=8 \
+    CMD curl -f http://localhost:5000/healthz || exit 1
 
 ############################################################
 # Printer Discovery Service Runtime Container

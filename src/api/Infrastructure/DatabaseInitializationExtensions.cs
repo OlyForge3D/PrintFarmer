@@ -44,11 +44,18 @@ public static class DatabaseInitializationExtensions
             {
                 // Production: Use migrations for proper schema versioning and updates.
                 // Development: Use EnsureCreated for rapid iteration.
-                if (app.Environment.IsDevelopment())
+                // SQLite (any environment): Always use EnsureCreated because no SQLite
+                // migration assembly exists. SQLite is used for lite/RPi deployments
+                // and development; schema changes are applied by recreating the DB.
+                bool isSqlite = (db.Database.ProviderName ?? string.Empty)
+                    .Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+
+                if (app.Environment.IsDevelopment() || isSqlite)
                 {
-                    // EnsureCreated is fast but won't update existing schema
                     _ = await db.Database.EnsureCreatedAsync(startupCts.Token);
-                    logger.LogInformation("[Startup]   ✓ Schema ensured (Development mode)");
+                    logger.LogInformation(
+                        "[Startup]   ✓ Schema ensured ({Mode})",
+                        isSqlite ? "SQLite — no migration assembly" : "Development mode");
                 }
                 else
                 {

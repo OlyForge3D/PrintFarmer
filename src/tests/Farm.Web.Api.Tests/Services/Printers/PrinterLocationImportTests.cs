@@ -501,7 +501,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
         string csv = Encoding.UTF8.GetString(csvBytes);
 
         // Assert
-        string[] lines = csv.Split('\n');
+        string[] lines = csv.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         string headerLine = lines[0];
         headerLine.Should().Contain("LocationName");
 
@@ -539,7 +539,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
         string csv = Encoding.UTF8.GetString(csvBytes);
 
         // Assert
-        string[] lines = csv.Split('\n');
+        string[] lines = csv.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         string? printerLine = lines.FirstOrDefault(l => l.Contains("NoLocationPrinter"));
         printerLine.Should().NotBeNullOrEmpty();
         // Should have trailing empty field for location

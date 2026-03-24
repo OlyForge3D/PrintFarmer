@@ -927,6 +927,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=\${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:5000
       - DB_PROVIDER=Sqlite
+      - DB_STARTUP_TIMEOUT=180
       - ConnectionStrings__Default=\${ConnectionStrings__Default}
       - Jwt__Key=\${Jwt__Key}
       - Jwt__Issuer=\${Jwt__Issuer:-PrintFarmer}
@@ -950,8 +951,8 @@ services:
       test: ["CMD", "sh", "-c", "curl -sf http://localhost:5000/healthz || exit 1"]
       interval: 30s
       timeout: 15s
-      retries: 5
-      start_period: 120s
+      retries: 8
+      start_period: 180s
     networks:
       - printfarmer-network
 
@@ -1304,7 +1305,7 @@ if [[ "$START" == "true" ]]; then
     echo ""
     step "Waiting for services"
 
-    MAX_WAIT=180
+    MAX_WAIT=240
     WAITED=0
     INTERVAL=5
     API_READY=false
