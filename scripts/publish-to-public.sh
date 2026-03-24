@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Publish the private repo to OlyForge3D/PrintFarmer (public).
 #
 # Takes a snapshot of HEAD, strips files in .github/public-exclude.txt,
