@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 # Publish the private repo to OlyForge3D/PrintFarmer (public).
 #
-# Squashes all commits since the last version tag into a single commit,
-# strips files listed in .github/public-exclude.txt, force-pushes to the
-# public repo's main branch, creates a version tag, and opens a draft
-# GitHub release.
+# Takes a snapshot of HEAD, strips files in .github/public-exclude.txt,
+# force-pushes to the public repo main branch as a single squashed commit,
+# creates a version tag, and opens a draft GitHub release.
 #
 # Usage:
 #   ./scripts/publish-to-public.sh [micro|minor|major] [--dry-run]
 #
 # Requirements:
-#   - git, gh (GitHub CLI, authenticated)
-#   - A PAT stored in the env var PUBLIC_REPO_PAT  OR  gh must have write
-#     access to the public repo via its stored credentials.
+#   - git, gh (GitHub CLI, authenticated with write access to public repo)
 
 set -euo pipefail
 
@@ -40,14 +37,18 @@ if [[ ! -f "$EXCLUDE_FILE" ]]; then
     log_error "Missing $EXCLUDE_FILE"; exit 1
 fi
 
-# ── Configure public remote ───────────────────────────────────────────────────
-PUBLIC_REMOTE_URL="https://github.com/${PUBLIC_REPO}.git"
-
-# Temporary remote so we don't pollute .git/config permanently
+# ── Temporary remote ─────────────────────────────────────────────────────────
 REMOTE_NAME="public-publish-$$"
-git remote add "$REMOTE_NAME" "$PUBLIC_REMOTE_URL"
-cleanup() { git remote remove "$REMOTE_NAME" 2>/dev/null || true; }
+SQUASH_BRANCH="release-squash-$$"
+
+cleanup() {
+    git checkout main 2>/dev/null || true
+    git branch -D "$SQUASH_BRANCH" 2>/dev/null || true
+    git remote remove "$REMOTE_NAME" 2>/dev/null || true
+}
 trap cleanup EXIT
+
+git remote add "$REMOTE_NAME" "https://github.com/${PUBLIC_REPO}.git"
 
 log_header "Publish to Public Repo"
 log_info "Public repo : $PUBLIC_REPO"
@@ -62,9 +63,7 @@ git fetch "$REMOTE_NAME" --tags 2>/dev/null || log_warn "No tags in public repo 
 LATEST_TAG=$(git tag --sort=-version:refname | grep "^v[0-9]" | head -1 || true)
 
 if [[ -z "$LATEST_TAG" ]]; then
-    MAJOR=0; MINOR=1; PATCH=0
-    PREV_TAG=""
-    FIRST_RELEASE=true
+    MAJOR=0; MINOR=1; PATCH=0; PREV_TAG=""
     log_info "No previous version found, starting at v0.1.0"
 else
     VERSION="${LATEST_TAG#v}"
@@ -72,7 +71,6 @@ else
     MINOR=$(echo "$VERSION" | cut -d. -f2)
     PATCH=$(echo "$VERSION" | cut -d. -f3)
     PREV_TAG="$LATEST_TAG"
-    FIRST_RELEASE=false
     log_info "Current version: $LATEST_TAG"
 fi
 
@@ -90,7 +88,7 @@ RELEASE_NOTES_FILE="$(mktemp)"
 {
     echo "## What's Changed"
     echo ""
-    if [[ "$FIRST_RELEASE" == "true" ]]; then
+    if [[ -z "$PREV_TAG" ]]; then
         git log --pretty=format:"- %s" HEAD \
             | grep -v "Bump version to" | grep -v "\[skip ci\]" | head -50
     else
@@ -104,53 +102,38 @@ RELEASE_NOTES_FILE="$(mktemp)"
 log_info "Release notes:"
 cat "$RELEASE_NOTES_FILE"
 
-# ── Remove excluded files from index ─────────────────────────────────────────
-remove_excluded() {
-    log_info "Stripping excluded files..."
-    local removed=0
-    while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-        [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
-        local clean="${pattern%/}"
-        if git rm -rf --cached --ignore-unmatch -- "$clean" > /dev/null 2>&1; then
-            if ! git diff --cached --quiet -- "$clean" 2>/dev/null; then
-                log_info "  Removed: $pattern"
-                removed=$((removed + 1))
-            fi
-        fi
-    done < "$EXCLUDE_FILE"
-    log_success "Stripped $removed excluded entries"
-}
-
-# ── Create squashed release branch ───────────────────────────────────────────
-SQUASH_BRANCH="release-squash-$$"
+# ── Create orphan squash branch ───────────────────────────────────────────────
+# Always orphan — private and public repos have unrelated git histories.
+# We snapshot HEAD, strip excluded files, and commit as a single squashed commit.
+log_info "Creating orphan squash branch from HEAD..."
 CURRENT_HEAD="$(git rev-parse HEAD)"
 
-log_info "Creating squashed commit on branch $SQUASH_BRANCH..."
+git checkout --orphan "$SQUASH_BRANCH"
 
-if [[ "$FIRST_RELEASE" == "true" ]]; then
-    git checkout --orphan "$SQUASH_BRANCH"
-    remove_excluded
-    git commit -m "$NEW_VERSION - Initial release"
-else
-    git checkout -b "$SQUASH_BRANCH" "$PREV_TAG"
-    git merge --squash "$CURRENT_HEAD"
-    remove_excluded
-    git commit -m "$NEW_VERSION"
-fi
+# Strip excluded files from the index (working tree untouched)
+log_info "Stripping excluded files..."
+removed=0
+while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+    clean="${pattern%/}"
+    git rm -rf --cached --ignore-unmatch -- "$clean" > /dev/null 2>&1 || true
+    removed=$((removed + 1))
+done < "$EXCLUDE_FILE"
+log_success "Processed $removed exclusion rules"
 
+COMMIT_MSG="${NEW_VERSION}"
+[[ -z "$PREV_TAG" ]] && COMMIT_MSG="${NEW_VERSION} - Initial release"
+git commit -m "$COMMIT_MSG"
 git tag "$NEW_VERSION"
 
-log_success "Squashed commit:"
-git log -1 --oneline
+log_success "Squashed commit: $(git log -1 --oneline)"
+log_info "Files in release: $(git ls-tree -r --name-only HEAD | wc -l)"
 
-# ── Dry run summary ───────────────────────────────────────────────────────────
+# ── Dry run ───────────────────────────────────────────────────────────────────
 if [[ "$DRY_RUN" == "true" ]]; then
     log_header "DRY RUN — no changes pushed"
-    log_info "Would push: $SQUASH_BRANCH -> $PUBLIC_REPO main"
-    log_info "Would tag : $NEW_VERSION"
-    log_info "Files in squashed commit: $(git ls-tree -r --name-only HEAD | wc -l)"
-    git checkout -
-    git branch -D "$SQUASH_BRANCH"
+    log_info "Would push to : $PUBLIC_REPO main"
+    log_info "Would tag     : $NEW_VERSION"
     git tag -d "$NEW_VERSION"
     rm -f "$RELEASE_NOTES_FILE"
     exit 0
@@ -162,8 +145,8 @@ git push "$REMOTE_NAME" "$SQUASH_BRANCH:main" --force
 git push "$REMOTE_NAME" "$NEW_VERSION"
 log_success "Pushed $NEW_VERSION to $PUBLIC_REPO"
 
-# ── Create draft release via gh CLI ──────────────────────────────────────────
-log_info "Creating draft release on GitHub..."
+# ── Draft release ─────────────────────────────────────────────────────────────
+log_info "Creating draft release..."
 gh release create "$NEW_VERSION" \
     --repo "$PUBLIC_REPO" \
     --title "$NEW_VERSION" \
@@ -171,11 +154,8 @@ gh release create "$NEW_VERSION" \
     --draft
 log_success "Draft release: https://github.com/${PUBLIC_REPO}/releases"
 
-# ── Clean up local squash branch (tag stays) ─────────────────────────────────
-git checkout -
-git branch -D "$SQUASH_BRANCH"
 rm -f "$RELEASE_NOTES_FILE"
 
 log_header "Done — $NEW_VERSION published to $PUBLIC_REPO"
-log_info "Review and publish the draft release at:"
+log_info "Review and publish the draft at:"
 log_info "  https://github.com/${PUBLIC_REPO}/releases"
