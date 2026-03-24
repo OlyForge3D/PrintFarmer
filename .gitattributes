@@ -6,3 +6,7 @@
 .squad/agents/*/history.md merge=union
 .squad/log/** merge=union
 .squad/orchestration-log/** merge=union
+
+# Shell scripts must always use LF line endings
+*.sh text eol=lf
+install.sh text eol=lf
