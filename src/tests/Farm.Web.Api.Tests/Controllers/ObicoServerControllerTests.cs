@@ -91,6 +91,70 @@ public class ObicoServerControllerTests
         requests[1].PathAndQuery.Should().Be("/p/");
     }
 
+    [Fact]
+    public async Task CreateServerAsync_WhenLegacyProbeAlsoReturnsMethodNotAllowed_RejectsServer()
+    {
+        List<CapturedRequest> requests = [];
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(request =>
+        {
+            requests.Add(CapturedRequest.From(request));
+            return new HttpResponseMessage(HttpStatusCode.MethodNotAllowed);
+        });
+
+        CreateObicoServerDto dto = new()
+        {
+            Name = "Incompatible Obico",
+            Url = "http://obico.local:3333",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 2,
+        };
+
+        ActionResult<ObicoServerDto> result = await controller.CreateServerAsync(dto, CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        string message = Assert.IsType<string>(badRequest.Value);
+        message.Should().Contain("Obico server validation failed");
+        message.Should().Contain("HTTP 405");
+        dbContext.ObicoServers.Should().BeEmpty();
+
+        requests.Should().HaveCount(2);
+        requests[0].Method.Should().Be(HttpMethod.Get);
+        requests[1].Method.Should().Be(HttpMethod.Post);
+        requests[0].PathAndQuery.Should().StartWith("/p/?img=");
+        requests[1].PathAndQuery.Should().Be("/p/");
+    }
+
+    [Fact]
+    public async Task CreateServerAsync_WhenUpstreamContractReturnsBadRequest_RejectsServerWithoutLegacyProbe()
+    {
+        List<CapturedRequest> requests = [];
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(request =>
+        {
+            requests.Add(CapturedRequest.From(request));
+            return new HttpResponseMessage(HttpStatusCode.BadRequest);
+        });
+
+        CreateObicoServerDto dto = new()
+        {
+            Name = "Unreachable Snapshot Obico",
+            Url = "http://obico.local:3333",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 2,
+        };
+
+        ActionResult<ObicoServerDto> result = await controller.CreateServerAsync(dto, CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        string message = Assert.IsType<string>(badRequest.Value);
+        message.Should().Contain("Obico server validation failed");
+        message.Should().Contain("HTTP 400");
+        dbContext.ObicoServers.Should().BeEmpty();
+
+        requests.Should().ContainSingle();
+        requests[0].Method.Should().Be(HttpMethod.Get);
+        requests[0].PathAndQuery.Should().StartWith("/p/?img=");
+    }
+
     private static (ObicoServerController Controller, AppDbContext DbContext) CreateController(
         Func<HttpRequestMessage, HttpResponseMessage> responder)
     {

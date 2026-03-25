@@ -382,7 +382,6 @@ public class ObicoServerController : ControllerBase
 
         bool endpointReachable = response.IsSuccessStatusCode ||
             response.StatusCode == HttpStatusCode.BadRequest ||
-            response.StatusCode == HttpStatusCode.MethodNotAllowed ||
             response.StatusCode == HttpStatusCode.UnsupportedMediaType;
 
         return endpointReachable
@@ -438,8 +437,7 @@ public class ObicoServerController : ControllerBase
     /// </summary>
     private static bool ShouldFallbackToLegacyProbe(HttpStatusCode statusCode)
     {
-        return statusCode is HttpStatusCode.BadRequest
-            or HttpStatusCode.MethodNotAllowed
+        return statusCode is HttpStatusCode.MethodNotAllowed
             or HttpStatusCode.NotFound
             or HttpStatusCode.UnsupportedMediaType;
     }

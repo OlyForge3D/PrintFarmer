@@ -36,7 +36,26 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     }
 
     /// <inheritdoc/>
-    public async Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, string obicoServerUrl, string? apiKey = null, CancellationToken ct = default)
+    public Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, string obicoServerUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        return AnalyzeImageAsync(
+            imageData,
+            obicoServerUrl,
+            apiKey,
+            treatLegacyUploadMismatchAsCompatibilityError: false,
+            ct: ct);
+    }
+
+    /// <summary>
+    /// Analyzes image data against the legacy multipart contract and optionally upgrades contract-mismatch failures
+    /// into actionable configuration errors when it is being used as a fallback after the upstream contract failed.
+    /// </summary>
+    private async Task<FailureDetectionResult> AnalyzeImageAsync(
+        byte[] imageData,
+        string obicoServerUrl,
+        string? apiKey,
+        bool treatLegacyUploadMismatchAsCompatibilityError,
+        CancellationToken ct)
     {
         if (imageData == null || imageData.Length == 0)
         {
@@ -62,7 +81,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 obicoServerUrl);
 
             HttpResponseMessage response = await httpClient.PostAsync("p/", content, ct);
-            (bool handled, FailureDetectionResult result) parsedResponse = await ParseResponseAsync(response, obicoServerUrl, allowLegacyFallback: false, ct);
+            (bool handled, FailureDetectionResult result) parsedResponse = await ParseResponseAsync(
+                response,
+                obicoServerUrl,
+                allowLegacyFallback: false,
+                treatLegacyUploadMismatchAsCompatibilityError: treatLegacyUploadMismatchAsCompatibilityError,
+                ct: ct);
             return parsedResponse.result;
         }
         catch (HttpRequestException ex)
@@ -136,7 +160,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 requestPath);
 
             HttpResponseMessage response = await httpClient.GetAsync(requestPath, ct);
-            return await ParseResponseAsync(response, obicoServerUrl, allowLegacyFallback: true, ct);
+            return await ParseResponseAsync(
+                response,
+                obicoServerUrl,
+                allowLegacyFallback: true,
+                treatLegacyUploadMismatchAsCompatibilityError: false,
+                ct: ct);
         }
         catch (HttpRequestException ex)
         {
@@ -193,7 +222,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 return FailureDetectionResult.Error("Fetched image is empty");
             }
 
-            return await AnalyzeImageAsync(imageData, obicoServerUrl, apiKey, ct);
+            return await AnalyzeImageAsync(
+                imageData,
+                obicoServerUrl,
+                apiKey,
+                treatLegacyUploadMismatchAsCompatibilityError: true,
+                ct: ct);
         }
         catch (HttpRequestException ex)
         {
@@ -219,6 +253,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         HttpResponseMessage response,
         string obicoServerUrl,
         bool allowLegacyFallback,
+        bool treatLegacyUploadMismatchAsCompatibilityError,
         CancellationToken ct)
     {
         if (!response.IsSuccessStatusCode)
@@ -231,6 +266,16 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                     obicoServerUrl,
                     (int)response.StatusCode);
                 return (false, FailureDetectionResult.Error("Legacy fallback requested"));
+            }
+
+            if (treatLegacyUploadMismatchAsCompatibilityError && ShouldFallbackToLegacyUpload(response.StatusCode))
+            {
+                _logger.LogWarning(
+                    "[ObicoFailureDetection] Legacy upload contract unavailable at {ApiUrl}/p/ (HTTP {StatusCode}): {Error}",
+                    obicoServerUrl,
+                    response.StatusCode,
+                    errorBody);
+                return (true, FailureDetectionResult.Error(CreateUnsupportedPredictionContractMessage(response.StatusCode)));
             }
 
             _logger.LogWarning(
@@ -256,6 +301,17 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         }
 
         return (true, CreateSuccessResult(confidence));
+    }
+
+    /// <summary>
+    /// Builds an actionable user-facing error when neither the upstream snapshot contract nor the legacy upload
+    /// fallback are available at the configured Obico URL.
+    /// </summary>
+    private static string CreateUnsupportedPredictionContractMessage(HttpStatusCode legacyStatusCode)
+    {
+        return
+            $"Configured Obico server is not exposing a supported prediction route (legacy POST /p/ returned HTTP {(int)legacyStatusCode}). " +
+            "Check that the URL points to the Obico ML API root that supports upstream GET /p/?img=... or legacy POST /p/.";
     }
 
     /// <summary>
@@ -431,8 +487,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     /// </summary>
     private static bool ShouldFallbackToLegacyUpload(HttpStatusCode statusCode)
     {
-        return statusCode is HttpStatusCode.BadRequest
-            or HttpStatusCode.MethodNotAllowed
+        return statusCode is HttpStatusCode.MethodNotAllowed
             or HttpStatusCode.NotFound
             or HttpStatusCode.UnsupportedMediaType;
     }

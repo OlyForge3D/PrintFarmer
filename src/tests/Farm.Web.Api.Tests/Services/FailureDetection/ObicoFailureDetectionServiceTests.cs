@@ -97,9 +97,67 @@ public class ObicoFailureDetectionServiceTests
 
         obicoRequests.Should().HaveCount(2);
         obicoRequests[0].Method.Should().Be(HttpMethod.Get);
+        obicoRequests[0].PathAndQuery.Should().StartWith("/p/?img=");
+        Uri.UnescapeDataString(obicoRequests[0].PathAndQuery.Split("img=", 2)[1]).Should().Be(snapshotUrl);
         obicoRequests[1].Method.Should().Be(HttpMethod.Post);
+        obicoRequests[1].PathAndQuery.Should().Be("/p/");
         obicoRequests[1].ContentType.Should().StartWith("multipart/form-data");
         obicoRequests[1].Body.Should().Contain("name=img");
+
+        snapshotRequests.Should().ContainSingle();
+        snapshotRequests[0].Method.Should().Be(HttpMethod.Get);
+        snapshotRequests[0].AbsoluteUri.Should().Be(snapshotUrl);
+    }
+
+    [Fact]
+    public async Task AnalyzeImageFromUrlAsync_WhenLegacyFallbackRouteAlsoReturnsMethodNotAllowed_ReturnsActionableCompatibilityError()
+    {
+        const string snapshotUrl = "http://printer.local/webcam/?action=snapshot";
+        List<CapturedRequest> obicoRequests = [];
+        List<CapturedRequest> snapshotRequests = [];
+
+        using RecordingHandler obicoHandler = new(request =>
+        {
+            obicoRequests.Add(CapturedRequest.From(request));
+            return new HttpResponseMessage(HttpStatusCode.MethodNotAllowed);
+        });
+
+        using RecordingHandler snapshotHandler = new(request =>
+        {
+            snapshotRequests.Add(CapturedRequest.From(request));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([1, 2, 3, 4, 5])
+            };
+        });
+
+        Mock<IHttpClientFactory> httpClientFactory = new(MockBehavior.Strict);
+        httpClientFactory
+            .Setup(factory => factory.CreateClient(It.IsAny<string>()))
+            .Returns((string name) => name switch
+            {
+                "ObicoML" => new HttpClient(obicoHandler, disposeHandler: false),
+                "" => new HttpClient(snapshotHandler, disposeHandler: false),
+                _ => throw new InvalidOperationException($"Unexpected client request: {name}")
+            });
+
+        ObicoFailureDetectionService service = CreateService(httpClientFactory);
+
+        FailureDetectionResult result = await service.AnalyzeImageFromUrlAsync(snapshotUrl, "http://obico.local", null, CancellationToken.None);
+
+        result.ErrorMessage.Should().Be(
+            "Configured Obico server is not exposing a supported prediction route (legacy POST /p/ returned HTTP 405). " +
+            "Check that the URL points to the Obico ML API root that supports upstream GET /p/?img=... or legacy POST /p/.");
+        result.IsFailureDetected.Should().BeFalse();
+        result.Confidence.Should().Be(0m);
+
+        obicoRequests.Should().HaveCount(2);
+        obicoRequests[0].Method.Should().Be(HttpMethod.Get);
+        obicoRequests[0].PathAndQuery.Should().StartWith("/p/?img=");
+        Uri.UnescapeDataString(obicoRequests[0].PathAndQuery.Split("img=", 2)[1]).Should().Be(snapshotUrl);
+        obicoRequests[1].Method.Should().Be(HttpMethod.Post);
+        obicoRequests[1].PathAndQuery.Should().Be("/p/");
+        obicoRequests[1].ContentType.Should().StartWith("multipart/form-data");
 
         snapshotRequests.Should().ContainSingle();
         snapshotRequests[0].Method.Should().Be(HttpMethod.Get);
