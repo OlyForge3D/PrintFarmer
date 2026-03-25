@@ -5312,7 +5312,7 @@ setup_initial_admin() {
     fi
 }
 
-# Generate self-signed TLS certificates if HTTPS is enabled and certs don't exist.
+# Generate TLS certificates if HTTPS is enabled and certs don't exist.
 # Uses scripts/generate-certs.sh if available, otherwise generates inline.
 ensure_tls_certificates() {
     if [ "${HTTPS_PORT:-0}" = "0" ]; then
@@ -5325,27 +5325,104 @@ ensure_tls_certificates() {
         return 0
     fi
 
-    print_info "Generating self-signed TLS certificates for HTTPS (port $HTTPS_PORT)..."
+    print_info "Generating TLS certificates for HTTPS (port $HTTPS_PORT)..."
     if [ -x "./scripts/generate-certs.sh" ]; then
         ./scripts/generate-certs.sh "$cert_dir"
     else
         mkdir -p "$cert_dir"
-        local san="DNS:localhost,IP:127.0.0.1"
-        local lan_ip
+        local temp_dir
+        temp_dir="$(mktemp -d)"
+        local ca_config="$temp_dir/ca.cnf"
+        local server_config="$temp_dir/server.cnf"
+        trap 'rm -rf "$temp_dir"' RETURN
+
+        local san_entries=("localhost" "printfarmer.local" "127.0.0.1")
+        local lan_ip=""
         lan_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
-        if [ -n "$lan_ip" ]; then
-            san="${san},IP:${lan_ip}"
+        if [ -z "$lan_ip" ] && command -v route >/dev/null 2>&1 && command -v ipconfig >/dev/null 2>&1; then
+            local active_interface=""
+            active_interface=$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}' || true)
+            if [ -n "$active_interface" ]; then
+                lan_ip=$(ipconfig getifaddr "$active_interface" 2>/dev/null || true)
+            fi
         fi
-        openssl req -x509 -nodes -newkey rsa:2048 \
-            -days 365 \
-            -keyout "$cert_dir/tls.key" \
-            -out "$cert_dir/tls.crt" \
-            -subj "/CN=PrintFarmer/O=PrintFarmer" \
-            -addext "subjectAltName=${san}" \
-            2>/dev/null
-        chmod 600 "$cert_dir/tls.key"
-        chmod 644 "$cert_dir/tls.crt"
-        print_success "Self-signed certificates generated at $cert_dir"
+        if [ -n "$lan_ip" ]; then
+            san_entries+=("$lan_ip")
+        fi
+        local tailscale_ip=""
+        if command -v tailscale >/dev/null 2>&1; then
+            tailscale_ip=$(tailscale ip -4 2>/dev/null | head -n1 || true)
+        fi
+        if [ -n "$tailscale_ip" ] && [ "$tailscale_ip" != "$lan_ip" ]; then
+            san_entries+=("$tailscale_ip")
+        fi
+
+        cat > "$ca_config" <<EOF
+[ req ]
+distinguished_name = dn
+x509_extensions = v3_ca
+prompt = no
+
+[ dn ]
+CN = PrintFarmer Local CA
+O = PrintFarmer
+
+[ v3_ca ]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+EOF
+
+        {
+            echo "[ req ]"
+            echo "distinguished_name = dn"
+            echo "req_extensions = v3_req"
+            echo "prompt = no"
+            echo
+            echo "[ dn ]"
+            echo "CN = PrintFarmer"
+            echo "O = PrintFarmer"
+            echo
+            echo "[ v3_req ]"
+            echo "basicConstraints = critical,CA:FALSE"
+            echo "keyUsage = critical,digitalSignature,keyEncipherment"
+            echo "extendedKeyUsage = serverAuth"
+            echo "subjectAltName = @alt_names"
+            echo "subjectKeyIdentifier = hash"
+            echo
+            echo "[ alt_names ]"
+
+            local dns_index=1
+            local ip_index=1
+            local san
+            for san in "${san_entries[@]}"; do
+                if [[ "$san" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+                    echo "IP.${ip_index} = ${san}"
+                    ip_index=$((ip_index + 1))
+                else
+                    echo "DNS.${dns_index} = ${san}"
+                    dns_index=$((dns_index + 1))
+                fi
+            done
+        } > "$server_config"
+
+        openssl genrsa -out "$cert_dir/ca.key" 4096 2>/dev/null
+        openssl req -x509 -new -key "$cert_dir/ca.key" -sha256 -days 825 \
+            -out "$cert_dir/ca.crt" -config "$ca_config" 2>/dev/null
+        openssl genrsa -out "$cert_dir/tls.key" 2048 2>/dev/null
+        openssl req -new -key "$cert_dir/tls.key" -out "$temp_dir/tls.csr" \
+            -config "$server_config" 2>/dev/null
+        openssl x509 -req -in "$temp_dir/tls.csr" -CA "$cert_dir/ca.crt" \
+            -CAkey "$cert_dir/ca.key" -CAcreateserial -out "$cert_dir/tls.crt" \
+            -days 365 -sha256 -extfile "$server_config" -extensions v3_req 2>/dev/null
+        cat "$cert_dir/tls.crt" "$cert_dir/ca.crt" > "$cert_dir/tls-fullchain.crt"
+        openssl x509 -in "$cert_dir/ca.crt" -outform der -out "$cert_dir/ca.cer"
+        chmod 600 "$cert_dir/ca.key" "$cert_dir/tls.key"
+        chmod 644 "$cert_dir/ca.crt" "$cert_dir/ca.cer" "$cert_dir/tls.crt" "$cert_dir/tls-fullchain.crt"
+        print_success "TLS certificates generated at $cert_dir"
+        print_info "Install $cert_dir/ca.cer on iPhone/iPad and enable trust in Certificate Trust Settings."
+        print_info "Users can open http://<host>/install-ca to download the CA."
     fi
 }
 

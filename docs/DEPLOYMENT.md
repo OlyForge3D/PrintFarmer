@@ -72,6 +72,30 @@ The script will:
 3. Configure database and networking
 4. Deploy and verify everything works
 
+### iPhone / iPad HTTPS trust
+
+If you are using local HTTPS for the iOS app, generate or regenerate the certificates with:
+
+```bash
+./scripts/generate-certs.sh
+```
+
+This now creates a private CA (`ca.cer`) plus the nginx server certificate (`tls.crt` / `tls.key`).
+
+After deployment, users can open:
+
+```text
+http://<your-server>/install-ca
+```
+
+That page downloads `ca.cer` and walks them through the required iPhone steps:
+
+1. Install the downloaded profile.
+2. Open `Settings > General > About > Certificate Trust Settings`.
+3. Enable trust for `PrintFarmer Local CA`.
+
+The HTTP install page is intentional: users need the CA installed before Safari and the app will trust your local HTTPS endpoint.
+
 ### Docker (Monolithic)
 
 **Best for:** Simple deployments, testing, single-server setups
