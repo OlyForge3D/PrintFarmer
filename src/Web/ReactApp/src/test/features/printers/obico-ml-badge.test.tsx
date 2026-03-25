@@ -278,8 +278,12 @@ describe('CompactPrinterCard monitoring badge', () => {
       />
     );
 
-    expect(screen.getByText('Guarding')).toBeTruthy();
+    // Icon-only badge, no inline text
+    expect(screen.queryByText('Guarding')).not.toBeInTheDocument();
+    // Shield icon with proper aria label should be present
     expect(screen.getByLabelText('Failure detection guarding')).toBeTruthy();
+    // Button should exist with tooltip
+    expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Guarding'));
   });
 
   it('does NOT show guarding badge when printer does not have Obico monitoring enabled', async () => {
@@ -335,7 +339,10 @@ describe('CompactPrinterCard monitoring badge', () => {
       />
     );
 
-    expect(screen.getByText('Ready')).toBeTruthy();
+    // Icon-only badge, no inline text
+    expect(screen.queryByText('Ready')).not.toBeInTheDocument();
+    // Button should exist with tooltip showing "Ready"
+    expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Ready'));
   });
 
   it('shows the bed-clear overlay when auto-dispatch status is PendingReady', async () => {
@@ -463,8 +470,12 @@ describe('DetailedPrinterCard monitoring badge', () => {
       />
     );
 
-    expect(screen.getByText('Guarding')).toBeTruthy();
+    // Icon-only badge, no inline text
+    expect(screen.queryByText('Guarding')).not.toBeInTheDocument();
+    // Shield icon with proper aria label should be present
     expect(screen.getByLabelText('Failure detection guarding')).toBeTruthy();
+    // Button should exist with tooltip
+    expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Guarding'));
   });
 
   it('does NOT show guarding badge when printer does not have Obico monitoring enabled', async () => {

@@ -15,7 +15,6 @@ import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesMo
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
-import { FailureDetectionMonitoringOverlay } from '@/features/printers/components/FailureDetectionMonitoringOverlay';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
@@ -227,13 +226,6 @@ export function CompactPrinterCard({
               cameraSnapshotUrl={cameraSnapshotUrl}
               isPrinting={isPrinting}
               className="mt-2"
-              overlay={
-                <FailureDetectionMonitoringOverlay
-                  enabled={!!printer.obicoEnabled}
-                  status={failureDetectionStatus}
-                  printerName={printer.name}
-                />
-              }
             />
           )}
 

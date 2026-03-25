@@ -4533,3 +4533,143 @@ Overlay was simplified from detailed card layout to compact inline chip. Setup m
 
 ---
 
+
+## Icon-Only Failure Detection Badge Refinement (APPROVED)
+
+**Date:** 2026-03-25  
+**Author:** Ripley (Frontend Dev), Kane (Tester)  
+**Status:** APPROVED WITH TARGETED REGRESSION COVERAGE REQUIRED ✅
+
+### Context
+Failure detection badge in printer card headers displayed as pill with shield icon + inline state text ("Guarding", "Checking", etc.). Refinement request: remove pill border and inline text, show only shield icon, expose state via tooltip.
+
+### Decision
+Refactor `FailureDetectionMonitoringBadge` to be icon-only:
+1. Remove `Badge` wrapper (no pill border)
+2. Remove inline status text span
+3. Expose state via tooltip (`title` attribute)
+4. Keep clickable button wrapper + modal trigger
+5. Apply state-based color mapping to icon
+
+### Implementation (Ripley)
+**Component Changes:**
+- Removed `Badge` wrapper and `<span>{label}</span>` text
+- Applied state-based color classes directly to shield icon
+- Kept button wrapper with aria-labels and tooltip
+- Maintained modal trigger on click
+- Added `hover:bg-white/10` for visual feedback
+
+**Color Mapping:**
+- Monitoring: `text-pf-success` (green)
+- Checking: `text-pf-text-secondary` (gray)
+- Disabled: `text-pf-text-tertiary` (light gray)
+- Error: `text-pf-error` (red)
+
+**Test Coverage:**
+- 6 focused tests in `FailureDetectionMonitoringBadge.test.tsx`
+- 3 updated integration tests in `obico-ml-badge.test.tsx`
+- All 106 printer tests passing
+- Clean lint, 0 build errors
+
+### Review Verdict (Kane)
+**APPROVED ✅** with **3 Mandatory Test Additions** (Tier 1 blocking):
+1. Tooltip content assertions for all states (FailureDetectionMonitoringBadge.test.tsx)
+2. Card header integration assertions (obico-ml-badge.test.tsx) - verify no visible text, icon-only rendering
+3. State-specific styling validation (both files) - ensure visual differentiation for color-blind users
+
+**Tier 2 Recommended:**
+- Tooltip keyboard access test (focus → title announced)
+- Recent failure badge alignment edge case (both badges in header row)
+
+### Accessibility Considerations
+- `aria-label` describes button purpose for screen readers
+- `title` attribute provides tooltip fallback for sighted users on hover
+- Shield icon has descriptive ariaLabel
+- Modal provides full keyboard-accessible detail
+- **Risk**: Color-only state may challenge color-blind users (mitigated by tooltip)
+- **Manual audit required**: Verify screen reader announces title on button focus
+
+### Success Criteria
+✅ All Tier 1 tests pass  
+✅ Tooltip title attribute verified for all states  
+✅ Modal access confirmed post-refactor  
+✅ No text label visible in card header  
+✅ aria-label present for screen readers  
+✅ Manual a11y: screen reader announces title on focus  
+
+### Files Changed
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx`
+- `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx`
+
+### Pattern Alignment
+✅ **compact-status-detail-modal** - Icon as clickable trigger, modal for full detail  
+✅ **monitoring-lifecycle-badges** - State reflects active monitoring lifecycle  
+✅ **Tailwind design tokens** - Uses `pf-*` color tokens consistently
+
+---
+
+## Failure Detection Overlay → Badge Migration (APPROVED FOR IMPLEMENTATION)
+
+**Date:** 2026-03-25  
+**Author:** Kane (Tester), Ripley (Frontend Dev)  
+**Status:** APPROVED FOR IMPLEMENTATION ✅
+
+### Context
+Failure-detection monitoring state was appearing in two places:
+1. Card header badge (always visible)
+2. Camera overlay badge (only visible when camera expanded)
+
+This created visual redundancy and inconsistent UX.
+
+### Decision (Ripley)
+Remove `FailureDetectionMonitoringOverlay` from camera previews in both compact and detailed printer cards. Keep only the header badge (`FailureDetectionMonitoringBadge`) as single source of truth.
+
+**Implementation Details:**
+- Removed `overlay` prop from `PrinterCameraPreview` calls in `CompactPrinterCard` and `DetailedPrinterCard`
+- Removed imports of `FailureDetectionMonitoringOverlay` from both card components
+- Component retained in codebase for potential future use
+- All existing tests remain passing (9/9 tests)
+
+### Rationale
+- **Reduced cognitive load**: Users see state in one predictable location
+- **Always visible**: Header badge doesn't require expanding camera section
+- **Consistent with patterns**: Other secondary status indicators in headers, not overlays
+- **Clean camera view**: Overlay was competing with actual camera feed
+
+### Review Verdict (Kane)
+**✅ APPROVE FOR IMPLEMENTATION** with integration-level regression tests:
+
+**Post-implementation, add 2–3 tests:**
+- DetailedPrinterCard: Badge visible in header, modal opens on click, status updates
+- CompactPrinterCard: Badge visible in header, modal opens on click
+
+**Why approved despite gaps:**
+- Badge component tests comprehensive and solid
+- Overlay component tests solid
+- Gap is purely integration-level (badge + card layout)
+- Overlay removal is layout refactor, not behavior change
+- Core failure detection logic well-tested
+- Risk: low to medium
+
+### Remaining Regression Coverage
+| Risk | Severity | Mitigation |
+|------|----------|-----------|
+| Badge hidden in header | Medium | Integration test: badge clickable and visible |
+| Modal doesn't open from card context | Medium | Integration test: click badge, verify modal appears |
+| Status change doesn't update badge | Medium | Integration test: update status prop, verify label changes |
+| Camera preview broken | Low | Integration test: render card without overlay, verify image visible |
+| Keyboard nav broken | Low | Already tested in badge; unlikely to break in card context |
+
+### Files Affected
+- `src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx`
+- `src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx`
+- `src/Web/ReactApp/src/test/features/printers/DetailedPrinterCard.test.tsx` (add integration tests)
+- `src/Web/ReactApp/src/test/features/printers/CompactPrinterCard.test.tsx` (add integration tests)
+
+### Alternatives Considered
+1. Keep both surfaces - rejected (redundancy, cognitive load)
+2. Keep only overlay - rejected (not always visible)
+3. Add toggle - rejected (over-engineering)
+
+---

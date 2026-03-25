@@ -1,5 +1,42 @@
 ## Learnings
 
+### Icon-Only Shield Badge Refinement Review (2026-03-25)
+- **Change**: Remove pill border and status label text from FailureDetectionMonitoringBadge; tooltip becomes source of truth
+- **Current State**: Badge renders with icon + label in rounded pill; tooltip provides secondary info
+- **Tests Present**: 2 focused tests in FailureDetectionMonitoringBadge.test.tsx (suppression logic, modal interaction)
+- **Gaps Identified**:
+  - No assertion that tooltip title attribute contains expected label
+  - No test that badge renders label-text-free after refactor (icon-only verification)
+  - No visual regression test for compact card header layout with icon-only badge
+  - No confirmation that state differentiation (Guarding/Checking/Ready) remains accessible via tooltip-only context
+- **Decision**: ✅ APPROVED with 3 Mandatory Test Additions (Tier 1)
+  1. Tooltip content assertions for each state (Guarding, Checking, Ready)
+  2. Card header integration: assert no visible text, icon only in place
+  3. Modal access re-confirmed post-refactor
+- **Key Pattern**: Icon-only badges lose implicit affordance; must compensate with strong tooltip + aria-label
+- **File Paths**:
+  - Component: `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
+  - Tests: `src/Web/ReactApp/src/test/features/printers/{FailureDetectionMonitoringBadge,obico-ml-badge}.test.tsx`
+  - Card usage: `src/Web/ReactApp/src/features/printers/components/{CompactPrinterCard,DetailedPrinterCard}.tsx` (lines 175–179, 428–432)
+- **Risk Level**: Medium (integration context, accessibility, layout)
+- **Accessibility Concern**: Tooltip-only state visibility; screen reader announcement of title attribute on focus must be verified manually
+
+### Failure Detection UX Refactor Review (2026-03-25)
+- **Change**: Overlay removal from camera preview; status moves to card header badge only
+- **Current State**: Both Badge and Overlay components ship; Badge in header, Overlay on camera image
+- **Tests Present**:
+  - Badge: 2 focused tests (suppression logic, modal interaction)
+  - Overlay: 6 focused tests (render, styling, states, modal)
+- **Gaps Identified**: 
+  - No integration tests verifying badge is visible/clickable in card header context
+  - No tests for status prop updates in card layout
+  - No tests for camera preview rendering without overlay
+- **Decision**: ✅ Approved with condition: Ripley should add 2-3 integration tests after removal
+- **Key Pattern**: Component unit tests solid; integration-layer gaps emerge when refactoring layout
+- **File Paths**:
+  - Components: `src/Web/ReactApp/src/features/printers/components/{FailureDetectionMonitoring{Overlay,Badge},DetailedPrinterCard,CompactPrinterCard}.tsx`
+  - Tests: `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoring{Overlay,Badge}.test.tsx`
+
 ### Camera Management Phase 1.5 Testing (2026-01-11)
 - **Test Created**: `src/tests/Farm.Web.Api.Tests/Controllers/CameraManagementTests.cs` with 12 comprehensive integration tests
 - **Key Patterns Learned**:
@@ -616,4 +653,43 @@ User reported two camera preview issues:
 - [Ripley] Startup state UI override boundary
 - [Lambert] Failure detection warmup gate + ready-gate dispatch logic
 - [Dallas] Product tradeoff review + incomplete artifact rejection
+
+
+### Icon-Only Shield Badge & Overlay Migration Final Approval (2026-03-25)
+- **Status:** ✅ Reviewed and APPROVED
+- **Date:** 2026-03-25T14:46:45Z
+- **Work Type:** Code review + risk assessment
+- **Agents**: Kane (reviewer), Ripley (implementer)
+
+**Summary:**
+Ripley implemented two linked refinements:
+1. Icon-only failure detection badge (remove pill border, inline text; tooltip shows state)
+2. Overlay removal (consolidate to single header badge surface)
+
+**Kane's Verdict:**
+- ✅ **Icon-only badge**: APPROVED with 3 Mandatory Test Additions (Tier 1)
+  - Tooltip content assertions for all states
+  - Card header integration: icon-only, no visible text
+  - Modal access re-confirmed post-refactor
+  - **Risk**: Medium (integration context, accessibility, layout)
+  - **Accessibility Gate**: Manual screen reader audit required (title attribute announcement on focus)
+  
+- ✅ **Overlay removal**: APPROVED FOR IMPLEMENTATION
+  - Core failure detection logic well-tested (component level)
+  - Integration-layer gaps identified but low-to-medium risk
+  - Ripley to add 2–3 integration tests post-removal
+  - Rationale: Layout refactor, not behavior change
+
+**Test Results:** 106/106 printer tests passing, clean lint, 0 build errors
+
+**Key Learnings:**
+- Icon-only badges require strong compensatory UX (tooltip + aria-label)
+- Component unit tests excellent; integration-layer gaps emerge during layout refactoring
+- Dual-surface redundancy (badge + overlay) creates cognitive load; consolidation improves UX
+- Color-only state indication needs accessibility compensation (tooltip, aria-label) for color-blind users
+
+**Files:**
+- Component: `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
+- Tests: `src/Web/ReactApp/src/test/features/printers/{FailureDetectionMonitoringBadge,obico-ml-badge}.test.tsx`
+- Overlay removal: `{Detailed,Compact}PrinterCard.tsx` (removed `overlay` prop, imports)
 

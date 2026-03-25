@@ -33,7 +33,6 @@ import { getPrinterDisplayState, isPendingReadyState } from '@/common/utils/prin
 import { FailureDetectionAlert } from '@/features/printers/components/FailureDetectionAlert';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
-import { FailureDetectionMonitoringOverlay } from '@/features/printers/components/FailureDetectionMonitoringOverlay';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -546,13 +545,6 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             cameraSnapshotUrl={cameraSnapshotUrl}
             isPrinting={isPrinting}
             className="mt-3 w-full max-w-[40rem]"
-            overlay={
-              <FailureDetectionMonitoringOverlay
-                enabled={!!apiPrinter.obicoEnabled}
-                status={failureDetectionStatus}
-                printerName={printer.name}
-              />
-            }
           />
         )}
       </div>
