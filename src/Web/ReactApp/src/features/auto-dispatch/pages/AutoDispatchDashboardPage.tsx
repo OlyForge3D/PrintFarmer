@@ -52,11 +52,15 @@ const COMMAND_CENTER_STYLES = `
 type AutoDispatchStateFilter = 'all' | 'queued' | 'pendingReady' | 'printing' | 'ready' | 'disabled' | 'idle';
 type AutoDispatchSortMode = 'state' | 'name';
 
+function isDispatchReady(printer: AutoDispatchDetailedStatus): boolean {
+  return printer.isReady || !!printer.bedPreConfirmed;
+}
+
 function getAutoDispatchStatePriority(printer: AutoDispatchDetailedStatus): number {
   if (!printer.enabled) return 4;
   if (printer.state === 'PendingReady') return 0;
   if (printer.currentJobName) return 1;
-  if (printer.isReady) return 2;
+  if (isDispatchReady(printer)) return 2;
   return 3;
 }
 
@@ -79,7 +83,7 @@ function computeFarmStats(printers: AutoDispatchDetailedStatus[]): FarmStats {
     if (!p.enabled) { stats.disabled++; continue; }
     if (p.currentJobName) { stats.printing++; continue; }
     if (p.state === 'PendingReady') { stats.pending++; continue; }
-    if (p.isReady) { stats.ready++; continue; }
+    if (isDispatchReady(p)) { stats.ready++; continue; }
     stats.idle++;
   }
   return stats;
@@ -165,12 +169,13 @@ export function AutoDispatchDashboardPage() {
       list = list.filter(p => {
         const isPrinting = !!p.currentJobName;
         const isPendingReady = p.state === 'PendingReady';
+        const isReady = isDispatchReady(p);
         if (stateFilter === 'queued') return p.queueDepth > 0;
         if (stateFilter === 'disabled') return !p.enabled;
         if (stateFilter === 'printing') return p.enabled && isPrinting;
         if (stateFilter === 'pendingReady') return p.enabled && isPendingReady;
-        if (stateFilter === 'ready') return p.enabled && p.isReady && !isPrinting;
-        if (stateFilter === 'idle') return p.enabled && !isPrinting && !isPendingReady && !p.isReady;
+        if (stateFilter === 'ready') return p.enabled && isReady && !isPrinting;
+        if (stateFilter === 'idle') return p.enabled && !isPrinting && !isPendingReady && !isReady;
         return true;
       });
     }
@@ -366,7 +371,7 @@ type AccentKey = 'disabled' | 'printing' | 'ready' | 'pending' | 'idle';
 function getAccentKey(printer: AutoDispatchDetailedStatus, isPrinting: boolean, isPendingReady: boolean): AccentKey {
   if (!printer.enabled) return 'disabled';
   if (isPrinting) return 'printing';
-  if (printer.isReady) return 'ready';
+  if (isDispatchReady(printer)) return 'ready';
   if (isPendingReady) return 'pending';
   return 'idle';
 }

@@ -420,6 +420,7 @@ describe('AutoDispatchDashboardPage', () => {
 
     expect(screen.getByText('Bed pre-cleared — ready for dispatch')).toBeInTheDocument();
     expect(screen.getByText('Bed Clear Confirmed')).toBeInTheDocument();
+    expect(screen.getAllByText('Ready').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText('Pre-Clear Bed')).not.toBeInTheDocument();
   });
 
@@ -510,5 +511,44 @@ describe('AutoDispatchDashboardPage', () => {
     expect(screen.getByText('Ready Queue')).toBeInTheDocument();
     expect(screen.getByText('Idle Queue')).toBeInTheDocument();
     expect(screen.queryByText('No Queue')).not.toBeInTheDocument();
+  });
+
+  it('includes pre-cleared printers in the Ready filter instead of Idle', async () => {
+    const user = userEvent.setup();
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: {
+        globalEnabled: true,
+        printers: [
+          {
+            ...mockPreClearedStatus,
+            printerId: 'printer-precleared',
+            printerName: 'Pre-Cleared Ready',
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-idle',
+            printerName: 'Actually Idle',
+            state: 'None',
+            queueDepth: 0,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    await user.click(screen.getByRole('radio', { name: /ready/i }));
+    expect(screen.getByText('Pre-Cleared Ready')).toBeInTheDocument();
+    expect(screen.queryByText('Actually Idle')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: /idle/i }));
+    expect(screen.queryByText('Pre-Cleared Ready')).not.toBeInTheDocument();
+    expect(screen.getByText('Actually Idle')).toBeInTheDocument();
   });
 });

@@ -36,6 +36,8 @@ public sealed class AutoDispatchBackgroundService(
     {
         logger.LogInformation("[AutoDispatch] Background service started");
 
+        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             DispatchTriggerEvent triggerEvent;
@@ -55,6 +57,42 @@ public sealed class AutoDispatchBackgroundService(
         }
 
         logger.LogInformation("[AutoDispatch] Background service stopping");
+    }
+
+    private async Task ReconcileStartupEligiblePrintersAsync(CancellationToken ct)
+    {
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        DispatchSettings settings = await db.DispatchSettings.AsNoTracking().FirstAsync(ct);
+        if (!settings.AutoDispatchEnabled || settings.AutoDispatchMode == AutoDispatchMode.Manual)
+        {
+            return;
+        }
+
+        List<Guid> printerIds = await db.Printers
+            .AsNoTracking()
+            .Where(p =>
+                p.IsEnabled
+                && p.IsAvailable
+                && p.AutoPrintEnabled
+                && (p.AutoPrintState == AutoPrintState.Ready || p.BedPreConfirmed)
+                && !db.PrintJobs.Any(j =>
+                    j.AssignedPrinterId == p.Id
+                    && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                && db.PrintJobs.Any(j =>
+                    j.Status == PrintJobStatus.Queued
+                    && (j.AssignedPrinterId == null || j.AssignedPrinterId == p.Id)))
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+
+        foreach (Guid printerId in printerIds)
+        {
+            logger.LogInformation(
+                "[AutoDispatch] Re-queueing eligible printer {PrinterId} during startup reconciliation",
+                printerId);
+            trigger.NotifyJobQueued(printerId);
+        }
     }
 
     private async Task HandlePrinterIdleAsync(Guid printerId, bool skipIdleThreshold, CancellationToken serviceCt)
