@@ -14,7 +14,51 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CERT_DIR="${1:-$REPO_ROOT/deploy/nginx/certs}"
+REPO_CERT_DIR="$REPO_ROOT/deploy/nginx/certs"
+RUNTIME_CERT_DIR="$REPO_ROOT/nginx/certs"
+
+array_contains() {
+    local needle="$1"
+    shift || true
+    local item
+    for item in "$@"; do
+        [[ "$item" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+dedupe_paths() {
+    local unique=()
+    local candidate
+    for candidate in "$@"; do
+        [[ -z "$candidate" ]] && continue
+        if ! array_contains "$candidate" "${unique[@]:-}"; then
+            unique+=("$candidate")
+        fi
+    done
+    printf '%s\n' "${unique[@]:-}"
+}
+
+TARGET_CERT_DIRS=()
+if [[ $# -gt 0 && -n "${1:-}" ]]; then
+    TARGET_CERT_DIRS+=("$1")
+else
+    if [[ -d "$REPO_ROOT/nginx" ]]; then
+        TARGET_CERT_DIRS+=("$RUNTIME_CERT_DIR")
+    fi
+    TARGET_CERT_DIRS+=("$REPO_CERT_DIR")
+fi
+
+DEDUPED_TARGET_CERT_DIRS=()
+while IFS= read -r line; do
+    [[ -n "$line" ]] && DEDUPED_TARGET_CERT_DIRS+=("$line")
+done < <(dedupe_paths "${TARGET_CERT_DIRS[@]}")
+if [[ ${#DEDUPED_TARGET_CERT_DIRS[@]} -eq 0 ]]; then
+    echo "❌ No certificate output directory could be determined."
+    exit 1
+fi
+TARGET_CERT_DIRS=("${DEDUPED_TARGET_CERT_DIRS[@]}")
+CERT_DIR="${TARGET_CERT_DIRS[0]}"
 
 mkdir -p "$CERT_DIR"
 
@@ -148,7 +192,30 @@ openssl x509 -in "$CERT_DIR/ca.crt" -outform der -out "$CERT_DIR/ca.cer"
 chmod 600 "$CERT_DIR/ca.key" "$CERT_DIR/tls.key"
 chmod 644 "$CERT_DIR/ca.crt" "$CERT_DIR/ca.cer" "$CERT_DIR/tls.crt" "$CERT_DIR/tls-fullchain.crt"
 
+if [[ ${#TARGET_CERT_DIRS[@]} -gt 1 ]]; then
+    for mirror_dir in "${TARGET_CERT_DIRS[@]:1}"; do
+        mkdir -p "$mirror_dir"
+        cp "$CERT_DIR/ca.key" "$mirror_dir/ca.key"
+        cp "$CERT_DIR/ca.crt" "$mirror_dir/ca.crt"
+        cp "$CERT_DIR/ca.cer" "$mirror_dir/ca.cer"
+        cp "$CERT_DIR/tls.key" "$mirror_dir/tls.key"
+        cp "$CERT_DIR/tls.crt" "$mirror_dir/tls.crt"
+        cp "$CERT_DIR/tls-fullchain.crt" "$mirror_dir/tls-fullchain.crt"
+        if [[ -f "$CERT_DIR/ca.srl" ]]; then
+            cp "$CERT_DIR/ca.srl" "$mirror_dir/ca.srl"
+        fi
+        chmod 600 "$mirror_dir/ca.key" "$mirror_dir/tls.key"
+        chmod 644 "$mirror_dir/ca.crt" "$mirror_dir/ca.cer" "$mirror_dir/tls.crt" "$mirror_dir/tls-fullchain.crt"
+    done
+fi
+
 echo "Done. Certificates written to $CERT_DIR/"
+if [[ ${#TARGET_CERT_DIRS[@]} -gt 1 ]]; then
+    echo "Mirrored certificates to:"
+    for mirror_dir in "${TARGET_CERT_DIRS[@]:1}"; do
+        echo "  - $mirror_dir"
+    done
+fi
 echo ""
 echo "Use tls.crt + tls.key for nginx."
 echo "Install ca.cer on iPhone/iPad and enable trust in:"
