@@ -12,8 +12,14 @@ SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/pfdev"
 if [[ -L "${BASH_SOURCE[0]}" ]]; then
     SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 fi
-REPO_ROOT="$(dirname "$SCRIPT_PATH")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SYMLINK_PATH="/usr/local/bin/pfdev"
+COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
+DEPLOY_CONFIG_FILE="$REPO_ROOT/.deploy-config"
+COMPOSE_GENERATOR="$REPO_ROOT/scripts/docker/compose-generator.sh"
+CERT_SCRIPT="$REPO_ROOT/scripts/generate-certs.sh"
+CERT_DIR="$REPO_ROOT/deploy/nginx/certs"
 
 # Ensure symlink exists for global access
 ensure_symlink() {
@@ -75,6 +81,123 @@ resolve_service() {
     return 1
 }
 
+load_deployment_env() {
+    if [[ -f "$DEPLOY_CONFIG_FILE" ]]; then
+        set -a
+        # shellcheck disable=SC1090
+        source "$DEPLOY_CONFIG_FILE"
+        set +a
+    fi
+}
+
+generated_stack_needs_refresh() {
+    local compose_input
+
+    if [[ ! -f "$COMPOSE_FILE" || ! -f "$REPO_ROOT/Dockerfile.multistage" || ! -f "$REPO_ROOT/docker-entrypoint-config.sh" ]]; then
+        return 0
+    fi
+
+    for compose_input in \
+        "$COMPOSE_GENERATOR" \
+        "$REPO_ROOT/scripts/docker/compose-replace-db.py" \
+        "$REPO_ROOT/scripts/docker/compose-dedupe.py" \
+        "$DEPLOY_CONFIG_FILE"; do
+        if [[ -f "$compose_input" && "$compose_input" -nt "$COMPOSE_FILE" ]]; then
+            return 0
+        fi
+    done
+
+    while IFS= read -r compose_input; do
+        if [[ -n "$compose_input" && "$compose_input" -nt "$COMPOSE_FILE" ]]; then
+            return 0
+        fi
+    done < <(find "$REPO_ROOT/scripts/docker/compose-templates" -type f 2>/dev/null)
+
+    return 1
+}
+
+ensure_generated_stack() {
+    local needs_refresh=1
+
+    if generated_stack_needs_refresh; then
+        needs_refresh=0
+    fi
+
+    if [[ $needs_refresh -eq 0 ]]; then
+        if [[ ! -x "$COMPOSE_GENERATOR" ]]; then
+            echo "❌ Missing compose generator: $COMPOSE_GENERATOR"
+            exit 1
+        fi
+
+        if [[ ! -f "$DEPLOY_CONFIG_FILE" && ! -f "$COMPOSE_FILE" ]]; then
+            echo "❌ Missing $DEPLOY_CONFIG_FILE and no generated docker-compose.yml is present."
+            echo "   Run ./scripts/deploy-docker.sh first to create the development stack."
+            exit 1
+        fi
+
+        echo "🧩 Refreshing generated docker-compose.yml... [$(date '+%H:%M:%S')]"
+        (
+            cd "$REPO_ROOT"
+            load_deployment_env
+            "$COMPOSE_GENERATOR" --output-dir "$REPO_ROOT"
+        )
+        echo "✅ Refreshed docker-compose.yml [$(date '+%H:%M:%S')]"
+    fi
+}
+
+tls_cert_needs_refresh() {
+    local cert_text
+
+    if [[ ! -f "$CERT_DIR/tls.crt" || ! -f "$CERT_DIR/tls.key" || ! -f "$CERT_DIR/ca.cer" ]]; then
+        return 0
+    fi
+
+    if ! command -v openssl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    cert_text=$(openssl x509 -in "$CERT_DIR/tls.crt" -noout -text 2>/dev/null || true)
+    if [[ -z "$cert_text" ]]; then
+        return 0
+    fi
+
+    if [[ "$cert_text" != *"CA:FALSE"* ]]; then
+        return 0
+    fi
+
+    if [[ "$cert_text" != *"TLS Web Server Authentication"* ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+ensure_tls_certificates() {
+    local requested_service=$1
+
+    case "$requested_service" in
+        nginx|frontend)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+
+    if tls_cert_needs_refresh; then
+        if [[ ! -x "$CERT_SCRIPT" ]]; then
+            echo "❌ Missing certificate generator: $CERT_SCRIPT"
+            exit 1
+        fi
+
+        echo "🔐 Refreshing nginx TLS certificates... [$(date '+%H:%M:%S')]"
+        (
+            cd "$REPO_ROOT"
+            "$CERT_SCRIPT"
+        )
+        echo "✅ Refreshed nginx TLS certificates [$(date '+%H:%M:%S')]"
+    fi
+}
+
 print_usage() {
     cat << EOF
 PrintFarmer Development CLI
@@ -109,6 +232,8 @@ build_image() {
     local compose_service
     local start_time=$(date +%s)
 
+    ensure_generated_stack
+    ensure_tls_certificates "$service"
     compose_service=$(resolve_service "$service")
     
     echo "📦 Building $service... [$(date '+%H:%M:%S')]"
@@ -128,6 +253,8 @@ deploy_service() {
     local compose_service
     local start_time=$(date +%s)
 
+    ensure_generated_stack
+    ensure_tls_certificates "$service"
     compose_service=$(resolve_service "$service")
     
     echo "🚀 Deploying $service... [$(date '+%H:%M:%S')]"
