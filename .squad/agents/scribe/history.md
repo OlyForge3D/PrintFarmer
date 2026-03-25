@@ -129,3 +129,19 @@ Agent Scribe initialized and ready for work. Maintains orchestration log, sessio
 **Outcome:** 
 PendingReady fix fully documented. No pending squad state. Branch clean after push to origin. User directive honored: end-to-end confirmation pending per Jeff Papiez directive.
 
+---
+
+## 2026-03-25 Obico Contract Fix Documentation Sweep
+
+**Task:** Record the Obico self-hosted contract fix landing and consolidate squad records  
+**Timestamp:** 2026-03-25T18:50:21Z
+
+**Actions Completed:**
+1. Wrote orchestration logs for Kane, Dallas, C# rescue, and coordinator verification
+2. Wrote session log `2026-03-25T18-50-21Z-obico-contract-fix.md`
+3. Merged five Obico/runtime decision inbox entries into `.squad/decisions.md` with deduplication
+4. Archived lingering January decision entries out of active `decisions.md`
+5. Refreshed affected agent histories and summarized oversized history files into `## Core Context` form
+
+**Outcome:** Squad documentation now reflects the landed GET-first Obico contract fix, keeps runtime reachability work separate from the route bug, and trims oversized history/decision files back toward maintainable active records.
+

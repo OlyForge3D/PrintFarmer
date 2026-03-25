@@ -106,3 +106,25 @@ Early entries (pre-2026-03-25) summarized for maintainability. See decisions-arc
 **3-Layer Rename Coordination:** Backend route + service + DTO names must match frontend expectations. Break this contract only when backward compatibility is critical (public APIs). For internal-only APIs, prefer clean rename over deprecation period.
 
 ---
+
+## Session: Obico Self-Hosted Contract Final Review (2026-03-25)
+
+**Role:** Lead reviewer  
+**Status:** Approved fix direction; follow-up narrowed
+
+### Work Completed
+- Reviewed the final Obico contract change across runtime client, admin validation probe, and focused backend tests.
+- Confirmed the approved behavior-safe direction: upstream `GET /p/?img=...` first, legacy multipart `POST /p/` only as compatibility fallback.
+- Explicitly narrowed the remaining work so the team does not reopen the route bug after the contract fix landed.
+
+### Remaining Follow-Up
+- Runtime reachability / `detectionTarget` verification from the real API environment
+- Optional stronger health validation with a real reachable snapshot path instead of the current synthetic `img=` probe
+
+---
+
+## Learnings
+
+- Obico self-hosted compatibility must be kept aligned in both the runtime client and the admin health probe: prefer `GET /p/?img=...`, then fall back to the legacy multipart `POST /p/` contract. If only the monitor is updated, settings validation still gives false confidence.
+- Key review files for this contract are `src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs`, `src/api/Controllers/ObicoServerController.cs`, `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs`, and `src/tests/Farm.Web.Api.Tests/Controllers/ObicoServerControllerTests.cs`.
+- The current health validation uses a synthetic `img=` probe URL, so it proves route compatibility but not a real printer-camera fetch path. Treat runtime reachability issues separately from this contract fix.
