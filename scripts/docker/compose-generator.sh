@@ -834,10 +834,11 @@ generate_compose() {
     # API stays on bridge network for service discovery by hostname.
     log_info "Applying microservices adjustments: removing frontend host ports (keep bridge network)"
 
-    python3 - "$compose_file" "$HOST_IP" <<'PY'
+    python3 - "$compose_file" "$HOST_IP" "${HTTPS_PORT-}" <<'PY'
 import sys
 path = sys.argv[1]
 host_ip = sys.argv[2]
+https_port = sys.argv[3].strip()
 txt = open(path,'r').read().splitlines()
 
 def find_block(lines, name):
@@ -884,6 +885,11 @@ if f_start is not None:
 start, end = find_block(txt, 'nginx-proxy')
 if start is not None:
     block = txt[start:end]
+    if https_port == '0':
+        block = [
+            line for line in block
+            if not (line.lstrip().startswith('-') and ':443' in line)
+        ]
     # check if extra_hosts exists
     if not any('extra_hosts:' in l for l in block):
         # try to insert before volumes/ports/environment if present

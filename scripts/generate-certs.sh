@@ -43,10 +43,8 @@ TARGET_CERT_DIRS=()
 if [[ $# -gt 0 && -n "${1:-}" ]]; then
     TARGET_CERT_DIRS+=("$1")
 else
-    if [[ -d "$REPO_ROOT/nginx" ]]; then
-        TARGET_CERT_DIRS+=("$RUNTIME_CERT_DIR")
-    fi
     TARGET_CERT_DIRS+=("$REPO_CERT_DIR")
+    TARGET_CERT_DIRS+=("$RUNTIME_CERT_DIR")
 fi
 
 DEDUPED_TARGET_CERT_DIRS=()

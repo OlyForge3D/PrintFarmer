@@ -87,6 +87,7 @@ prusa_preseed/
 
 # TLS certs
 deploy/nginx/certs/
+/nginx/certs/
 
 # Playwright
 .playwright-mcp/

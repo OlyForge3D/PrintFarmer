@@ -1160,6 +1160,26 @@ test_port_conflict_detection() {
     fi
 }
 
+# Test: HTTPS_PORT=0 disables HTTPS publishing instead of using a random host port
+test_https_port_zero_disables_https_binding() {
+    start_test "HTTPS_PORT=0 disables nginx HTTPS port publishing"
+
+    local test_dir="$TEST_TEMP_DIR/test-https-disabled"
+    assert_command_success "HTTPS_PORT=0 $COMPOSE_GENERATOR --output-dir $test_dir"
+
+    local compose_file="$test_dir/docker-compose.yml"
+    assert_file_exists "$compose_file" "Should create compose file when HTTPS_PORT=0"
+
+    local compose_content
+    compose_content=$(cat "$compose_file")
+
+    assert_contains "$compose_content" '"${HTTP_PORT:-8080}:80"' "HTTP port mapping should remain"
+    assert_not_contains "$compose_content" '"${HTTPS_PORT:-8443}:443"' "HTTPS port mapping should be removed when HTTPS_PORT=0"
+    assert_not_contains "$compose_content" '0:443' "HTTPS port 0 must not publish a random host port"
+
+    pass_test
+}
+
 # Test: database_provider_validation (PHASE 3)
 test_invalid_connection_string() {
     start_test "database provider configuration validation"
@@ -1702,6 +1722,7 @@ run_all_tests() {
     test_read_only_output_directory
     test_duplicate_service_names
     test_port_conflict_detection
+    test_https_port_zero_disables_https_binding
     test_invalid_connection_string
     test_missing_config_files
     test_concurrent_generation_safety
