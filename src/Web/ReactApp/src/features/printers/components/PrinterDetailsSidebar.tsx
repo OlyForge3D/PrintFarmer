@@ -37,6 +37,7 @@ import {
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
+import { getStatusHeaderStyle, getStatusIndicatorColor } from '@/features/printers/utils/statusColors';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
@@ -266,11 +267,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
+  const sidebarShellClassName = layout === 'content'
+    ? `w-full max-w-sm overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
+    : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
 
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
     return (
-      <div className="w-96 h-full bg-pf-sidebar border-l border-pf-border shadow-lg z-30 flex items-center justify-center shrink-0">
+      <div className={`${sidebarShellClassName} z-30 flex items-center justify-center`}>
         <div className="text-pf-text-secondary">Loading...</div>
       </div>
     );
@@ -284,6 +288,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
   const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
+  const headerStyle = getStatusHeaderStyle({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
+  const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
+  const statusLabel = isOnline ? state : 'Offline';
 
   const support = getPrinterSupport(backendCapabilities);
 
@@ -586,36 +593,34 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   };
 
   return (
-    <div
-      className={
-        layout === 'content'
-          ? `w-full max-w-sm bg-pf-sidebar border border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
-          : `w-96 h-full bg-pf-sidebar border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`
-      }
-    >
+    <div className={`${sidebarShellClassName} z-30`}>
       {/* Header */}
-      <div className="flex justify-between items-start p-4 border-b border-pf-border shrink-0 gap-3">
+      <div style={headerStyle} className="flex justify-between items-start px-4 pt-4 pb-3 border-b border-white/10 shrink-0 gap-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-lg font-bold text-pf-text-primary truncate">{printer.name}</h2>
-            <div className={`shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-pf-success' : 'bg-pf-disabled'}`} title={isOnline ? 'Online' : 'Offline'} />
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <h2 className="text-2xl font-bebas uppercase tracking-wide leading-none text-pf-text-primary truncate">{printer.name}</h2>
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
+              <span className={`h-2 w-2 rounded-full ${statusIndicatorClassName}`} aria-hidden="true" />
+              <span className="text-pf-text-primary">{statusLabel}</span>
+            </div>
           </div>
           <p className="text-xs text-pf-text-secondary">{printer.manufacturerName} {printer.modelName}</p>
-          <p className="text-xs text-pf-text-secondary mt-1">{state}</p>
+          <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
         </div>
         <Button
           type="button"
           variant="subtle"
           size="sm"
           onClick={handleClose}
-          className="p-1! h-auto! shrink-0"
+          aria-label="Close sidebar"
+          className="p-1! h-auto! shrink-0 bg-black/20 hover:bg-black/30 border border-white/10"
           title="Close sidebar"
           iconCenter={<CloseIcon className="h-6 w-6" />}
         ></Button>
       </div>
 
       {/* Scrollable Content */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-pf-sidebar">
         {/* Statistics */}
         <CollapsibleSection
           title="Statistics"
