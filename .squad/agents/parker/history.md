@@ -493,3 +493,27 @@ The backend was already broadcasting `autoprintstatechanged` when the printer tr
 3. CompactCard fallback to `requiresBedClearConfirmation()` handles both live and stale row scenarios gracefully
 4. Squad decisions document the "why" — upstream work was verified, so the fix was purely on the UI hydration path
 
+
+## 2026-03-25 Scribe Post-Landing Sync
+
+**Task:** Maintain squad records after Parker's auto-dispatch-rename landing  
+**Outcome:** All squad bookkeeping complete, branch synced
+
+**What Happened:**
+- Parker's inbox note removal confirmed (local tree already clean)
+- decisions.md archived (202KB → removed entries older than 2026-02-23)
+- Agent histories summarized (ash, lambert, kane, ripley, newt, dallas all >12KB)
+- All .squad/ changes committed under `chore: squad sync after parker auto-dispatch landing`
+- Branch verified up to date with origin/development
+
+**Why This Matters:**
+Squad records (decisions, orchestration logs, agent histories) are the project's institutional memory. Keeping them current and bounded prevents decision fatigue and drift. Archive rotation ensures decisions.md stays readable while preserving full history.
+
+**Verification:**
+```
+On branch development
+Your branch is up to date with 'origin/development'.
+nothing to commit, working tree clean
+```
+
+All squad files in sync. Ready for next feature work.

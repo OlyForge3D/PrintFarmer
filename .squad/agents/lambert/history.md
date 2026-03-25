@@ -1,9 +1,19 @@
-# Project Context
+# Lambert History
 
-- **Owner:** Jeff Papiez
-- **Project:** PrintFarmer — React TypeScript dashboard for managing multiple 3D printers
-- **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS, xUnit, Vitest
-- **Created:** 2026-03-06
+## Core Context
+
+Lambert is the backend/infrastructure architect. Key contributions:
+- Discovery probe consolidation & backend plugin system (2026-01 onwards)
+- Multi-database support (PostgreSQL, SQL Server, SQLite, MySQL)
+- Entity Framework Core migrations & database schema management
+- Job queue & cost calculation services
+- API/service architecture refactoring
+- Obico integration & failure detection wave (2026-03-16)
+- Pi deployment infrastructure (2026-03-11)
+
+Early entries (pre-2026-03-11) summarized for file size. See decisions-archive.md for detailed history.
+
+---
 
 ## Pi 4 Deployment Infrastructure (2026-03-11)
 
