@@ -95,7 +95,7 @@ export const PrinterDashboard: React.FC = () => {
       title="Printer Dashboard"
       subtitle="Overview of your 3D printer farm status"
       icon={DashboardIcon}
-      actions={<HelpButton onClick={startTour} />}
+      titleActions={<HelpButton onClick={startTour} />}
     >
       {/* Stats Cards */}
       <div data-tour="stats-cards" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">

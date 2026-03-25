@@ -307,7 +307,7 @@ export function SettingsPage() {
       title="Settings"
       subtitle="Configure PrintFarmer application settings"
       icon={SettingsIcon}
-      actions={<HelpButton onClick={startTour} />}
+      titleActions={<HelpButton onClick={startTour} />}
     >
       {loading ? (
         <div className="text-center text-pf-text-secondary">Loading settings...</div>

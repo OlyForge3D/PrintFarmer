@@ -7,6 +7,8 @@ interface PageTemplateProps {
   subtitle?: string;
   /** Optional icon component to display before title */
   icon?: React.ComponentType<{ className?: string }>;
+  /** Optional control rendered inline to the right of the title */
+  titleActions?: ReactNode;
   /** Optional action buttons or controls for the header */
   actions?: ReactNode;
   /** Main page content */
@@ -32,6 +34,7 @@ interface PageTemplateProps {
  *   title="Printers"
  *   subtitle="Monitor and manage your 3D printers"
  *   icon={PrinterIcon}
+ *   titleActions={<HelpButton onClick={startTour} />}
  *   actions={<AddPrinterButton />}
  * >
  *   <YourPageContent />
@@ -42,6 +45,7 @@ export function PageTemplate({
   title,
   subtitle,
   icon: Icon,
+  titleActions,
   actions,
   children,
   maxWidth = 'max-w-full',
@@ -59,19 +63,22 @@ export function PageTemplate({
       <div className={`${maxWidth} ${padding}`}>
         {/* Page Header */}
         {showHeader && (
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h2 className="text-2xl font-bold text-pf-text-primary flex items-center">
-                {Icon && <Icon className="h-6 w-6 mr-2" aria-hidden="true" />}
-                {title}
-              </h2>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                {Icon && <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />}
+                <h2 className="min-w-0 truncate text-2xl font-bold text-pf-text-primary">
+                  {title}
+                </h2>
+                {titleActions && <div className="shrink-0">{titleActions}</div>}
+              </div>
               {subtitle && (
                 <p className="text-pf-text-secondary mt-1">
                   {subtitle}
                 </p>
               )}
             </div>
-            {actions && <div className="shrink-0">{actions}</div>}
+            {actions && <div className="shrink-0 self-start">{actions}</div>}
           </div>
         )}
 

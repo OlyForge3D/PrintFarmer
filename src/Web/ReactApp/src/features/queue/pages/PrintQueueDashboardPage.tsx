@@ -384,7 +384,7 @@ export function PrintQueueDashboardPage() {
     <PageTemplate
       title="Print Queue Dashboard"
       subtitle="View and manage all queued and printing jobs"
-      actions={<HelpButton onClick={startTour} />}
+      titleActions={<HelpButton onClick={startTour} />}
     >
       {displayError && (
         <Alert type="error" className="mb-4">
