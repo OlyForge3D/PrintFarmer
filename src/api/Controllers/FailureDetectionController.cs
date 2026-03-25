@@ -17,15 +17,18 @@ namespace Farm.Web.Api.Controllers;
 public class FailureDetectionController : ControllerBase
 {
     private readonly IObicoFailureDetectionService _failureDetectionService;
+    private readonly IFailureDetectionMonitorStatus _monitorStatus;
     private readonly IStartupStatus _startupStatus;
     private readonly ILogger<FailureDetectionController> _logger;
 
     public FailureDetectionController(
         IObicoFailureDetectionService failureDetectionService,
+        IFailureDetectionMonitorStatus monitorStatus,
         IStartupStatus startupStatus,
         ILogger<FailureDetectionController> logger)
     {
         _failureDetectionService = failureDetectionService ?? throw new ArgumentNullException(nameof(failureDetectionService));
+        _monitorStatus = monitorStatus ?? throw new ArgumentNullException(nameof(monitorStatus));
         _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -37,9 +40,9 @@ public class FailureDetectionController : ControllerBase
     /// <response code="200">Returns the monitoring status</response>
     /// <response code="503">If the system is still initializing</response>
     [HttpGet("status")]
-    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(typeof(FailureDetectionMonitorStatusDto), 200)]
     [ProducesResponseType(503)]
-    public ActionResult<object> GetStatus()
+    public ActionResult<FailureDetectionMonitorStatusDto> GetStatus()
     {
         try
         {
@@ -48,12 +51,7 @@ public class FailureDetectionController : ControllerBase
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
-            // Return basic status - detailed monitoring stats would require persistence
-            return Ok(new
-            {
-                monitoringEnabled = true,
-                message = "Failure detection service is running. Events are broadcast via SignalR in real-time."
-            });
+            return Ok(_monitorStatus.GetSnapshot());
         }
         catch (Exception ex)
         {

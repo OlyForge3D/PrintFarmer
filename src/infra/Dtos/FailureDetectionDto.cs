@@ -33,6 +33,11 @@ public sealed class FailureDetectionDto
     public DateTime DetectedAt { get; set; }
 
     /// <summary>
+    /// Snapshot URL that triggered the detection event.
+    /// </summary>
+    public string? SnapshotUrl { get; set; }
+
+    /// <summary>
     /// Whether the job was automatically paused after detection.
     /// </summary>
     public bool AutoPaused { get; set; }

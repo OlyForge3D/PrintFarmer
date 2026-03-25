@@ -3534,6 +3534,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async getFailureDetectionStatus(): Promise<import('@/types/api').FailureDetectionMonitorStatusDto> {
+    const response = await this.client.get('/failure-detection/status');
+    return response.data;
+  }
+
   async getMonitoringMetricsSummary(): Promise<import('@/types/api').MonitoringMetricsSummaryDto> {
     const response = await this.client.get('/monitoring/metrics/summary');
     return response.data;

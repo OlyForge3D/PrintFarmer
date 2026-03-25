@@ -16,9 +16,11 @@ import { Button } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
+import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
+import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { useJobQueue } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
@@ -70,6 +72,7 @@ export function CompactPrinterCard({
 
   // Fetch printer tags
   const queryClient = useQueryClient();
+  const { event: recentFailure } = useFailureDetectionAlert(printer.id);
   const { data: printerTags = [] } = useQuery<TagDto[]>({
     queryKey: ['printer-tags', printer.id],
     queryFn: async () => {
@@ -173,6 +176,7 @@ export function CompactPrinterCard({
               <span>ML</span>
             </div>
           )}
+          {recentFailure && <FailureDetectionBadge event={recentFailure} />}
         </div>
         {/* Tags row */}
         {printerTags.length > 0 && (

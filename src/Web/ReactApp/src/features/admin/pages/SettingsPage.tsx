@@ -17,6 +17,7 @@ import {
   SettingGroupMetadata,
 } from '@/services/settingsApi';
 import { ObicoServersSection } from '@/features/admin/components/ObicoServersSection';
+import { FailureDetectionStatusCard } from '@/features/admin/components/FailureDetectionStatusCard';
 
 /** Sidebar navigation item for settings sections */
 interface NavItem {
@@ -374,7 +375,8 @@ export function SettingsPage() {
                         fieldErrors={fieldErrorsBySection[meta.key]}
                       />
                       {meta.key === 'Obico' && (
-                        <div className="mt-4">
+                        <div className="mt-4 space-y-4">
+                          <FailureDetectionStatusCard />
                           <ObicoServersSection />
                         </div>
                       )}

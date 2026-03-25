@@ -14,6 +14,7 @@ import { PrinterActionBar } from '@/features/printers/components/PrinterActionBa
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
+import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
 import { toast } from 'sonner';
 import { Button, LoadedFilamentCard } from '@/common/components/ui';
 import { 
@@ -28,6 +29,8 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
+import { FailureDetectionAlert } from '@/features/printers/components/FailureDetectionAlert';
+import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import {
   canCancel,
   canCooldown,
@@ -88,6 +91,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [step, setStep] = useState(1);
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
+  const { event: recentFailure, clearEvent: clearRecentFailure } = useFailureDetectionAlert(initialPrinter.id);
 
   const expandedProgressRef = useRef<HTMLDivElement>(null);
 
@@ -421,6 +425,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               <span>ML</span>
             </div>
           )}
+          {recentFailure && <FailureDetectionBadge event={recentFailure} />}
         </div>
       </div>
 
@@ -571,6 +576,12 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           showTemperatures={false}
         />
       </div>
+
+      {recentFailure && (
+        <div className="mb-4">
+          <FailureDetectionAlert event={recentFailure} onDismiss={clearRecentFailure} />
+        </div>
+      )}
 
       {/* Temps Section */}
       <TemperatureControlSection

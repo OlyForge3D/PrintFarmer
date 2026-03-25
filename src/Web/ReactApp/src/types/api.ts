@@ -2950,6 +2950,37 @@ export interface MonitoringStatusDto {
   prometheus: MonitoringServiceStatus;
 }
 
+export interface FailureDetectionPrinterStatusDto {
+  printerId: string;
+  printerName: string;
+  state: string;
+  reason: string;
+  isPrinting: boolean;
+  detectionSource: string;
+  detectionTarget?: string;
+  snapshotUrl?: string;
+  lastAnalyzedAt?: string;
+  lastOutcome: string;
+  lastConfidence?: number;
+  lastAutoPaused?: boolean;
+  lastFailureDetectedAt?: string;
+}
+
+export interface FailureDetectionMonitorStatusDto {
+  monitoringEnabled: boolean;
+  confidenceThreshold: number;
+  scanIntervalSeconds: number;
+  autoPauseOnFailure: boolean;
+  configuredPrinterCount: number;
+  activelyMonitoredPrinterCount: number;
+  lastAnalyzedPrinterCount: number;
+  lastFailureCount: number;
+  lastScanStartedAt?: string;
+  lastScanCompletedAt?: string;
+  lastError?: string;
+  printers: FailureDetectionPrinterStatusDto[];
+}
+
 export interface MonitoringMetricsSummaryDto {
   requestsPerSecond: number;
   apiCallsLast24h: number;
@@ -3400,10 +3431,12 @@ export interface FailureDetectionEvent {
   printerName: string;
   /** Job ID if available */
   jobId?: string;
-  /** Confidence percentage (0-100) */
+  /** Confidence score from 0.0 to 1.0 */
   confidence: number;
   /** Detection timestamp (ISO 8601) */
   detectedAt: string;
+  /** Snapshot URL used for the detection */
+  snapshotUrl?: string;
   /** Whether the print was automatically paused */
   autoPaused: boolean;
 }

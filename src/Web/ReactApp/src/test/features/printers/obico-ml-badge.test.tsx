@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import type { Printer } from '@/types/api';
+import { act, render, screen } from '@testing-library/react';
+import type { FailureDetectionEvent, Printer } from '@/types/api';
 
 // ── Mocks for CompactPrinterCard dependencies ──
 
@@ -32,6 +32,22 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 vi.mock('@/services/api', () => ({
   apiClient: {
     getPrinterDetails: vi.fn().mockResolvedValue({}),
+  },
+}));
+
+const failureDetectionListeners: Array<(event: FailureDetectionEvent) => void> = [];
+
+vi.mock('@/services/printer-signalr', () => ({
+  printerSignalRService: {
+    onFailureDetected: vi.fn((callback: (event: FailureDetectionEvent) => void) => {
+      failureDetectionListeners.push(callback);
+      return () => {
+        const index = failureDetectionListeners.indexOf(callback);
+        if (index >= 0) {
+          failureDetectionListeners.splice(index, 1);
+        }
+      };
+    }),
   },
 }));
 
@@ -108,6 +124,14 @@ function makePrinter(overrides: Partial<Printer> = {}): Printer {
   } as Printer;
 }
 
+function emitFailureDetected(event: FailureDetectionEvent) {
+  failureDetectionListeners.forEach(listener => listener(event));
+}
+
+beforeEach(() => {
+  failureDetectionListeners.splice(0, failureDetectionListeners.length);
+});
+
 // ── FailureDetectionEvent type shape test ──
 
 describe('FailureDetectionEvent type', () => {
@@ -116,15 +140,17 @@ describe('FailureDetectionEvent type', () => {
       printerId: 'abc-123',
       printerName: 'My Printer',
       jobId: 'job-1',
-      confidence: 85.5,
+      confidence: 0.855,
       detectedAt: '2026-01-01T00:00:00Z',
+      snapshotUrl: 'http://example.com/snapshot.jpg',
       autoPaused: true,
     } satisfies import('@/types/api').FailureDetectionEvent;
 
     expect(event.printerId).toBe('abc-123');
     expect(event.printerName).toBe('My Printer');
-    expect(event.confidence).toBe(85.5);
+    expect(event.confidence).toBe(0.855);
     expect(event.detectedAt).toBe('2026-01-01T00:00:00Z');
+    expect(event.snapshotUrl).toBe('http://example.com/snapshot.jpg');
     expect(event.autoPaused).toBe(true);
     expect(event.jobId).toBe('job-1');
   });
@@ -133,7 +159,7 @@ describe('FailureDetectionEvent type', () => {
     const event = {
       printerId: 'abc-123',
       printerName: 'Printer',
-      confidence: 50,
+      confidence: 0.5,
       detectedAt: '2026-01-01T00:00:00Z',
       autoPaused: false,
     } satisfies import('@/types/api').FailureDetectionEvent;
@@ -231,6 +257,38 @@ describe('CompactPrinterCard ML badge', () => {
 
     expect(screen.queryByText('ML')).toBeNull();
   });
+
+  it('shows a recent failure badge when a matching failure event arrives', async () => {
+    const { CompactPrinterCard } = await import(
+      '@/features/printers/components/CompactPrinterCard'
+    );
+
+    const printer = makePrinter({
+      obicoEnabled: true,
+      state: 'Printing',
+      isOnline: true,
+    });
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />
+    );
+
+    act(() => {
+      emitFailureDetected({
+        printerId: printer.id,
+        printerName: printer.name,
+        confidence: 0.87,
+        detectedAt: '2026-01-01T00:00:00Z',
+        autoPaused: false,
+        snapshotUrl: 'http://example.com/snapshot.jpg',
+      });
+    });
+
+    expect(screen.getByText('Failure: 87%')).toBeTruthy();
+  });
 });
 
 // ── DetailedPrinterCard ML badge tests ──
@@ -275,5 +333,37 @@ describe('DetailedPrinterCard ML badge', () => {
     );
 
     expect(screen.queryByText('ML')).toBeNull();
+  });
+
+  it('shows a detailed failure alert when a matching failure event arrives', async () => {
+    const { DetailedPrinterCard } = await import(
+      '@/features/printers/components/DetailedPrinterCard'
+    );
+
+    const printer = makePrinter({
+      obicoEnabled: true,
+      state: 'Printing',
+      isOnline: true,
+    });
+
+    render(
+      <DetailedPrinterCard
+        printer={printer}
+      />
+    );
+
+    act(() => {
+      emitFailureDetected({
+        printerId: printer.id,
+        printerName: printer.name,
+        confidence: 0.91,
+        detectedAt: '2026-01-01T00:00:00Z',
+        autoPaused: true,
+        snapshotUrl: 'http://example.com/snapshot.jpg',
+      });
+    });
+
+    expect(screen.getByText('Print auto-paused after failure detection')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'View snapshot' })).toBeTruthy();
   });
 });

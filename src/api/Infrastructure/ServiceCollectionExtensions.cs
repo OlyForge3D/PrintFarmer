@@ -521,6 +521,7 @@ public static class ServiceCollectionExtensions
 
         // Register Obico failure detection service - AI-powered print failure detection
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionMonitorStatus, Farm.Infrastructure.Services.FailureDetection.FailureDetectionMonitorStatusStore>();
 
         // Register Obico server assignment service - auto-assigns printers to healthy servers
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService, Farm.Infrastructure.Services.FailureDetection.ObicoServerAssignmentService>();

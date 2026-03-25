@@ -71,10 +71,16 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         var status = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
 
         status.TryGetProperty("monitoringEnabled", out var monitoringEnabled).Should().BeTrue();
-        monitoringEnabled.GetBoolean().Should().BeTrue();
+        monitoringEnabled.ValueKind.Should().BeOneOf(JsonValueKind.True, JsonValueKind.False);
 
-        status.TryGetProperty("message", out var message).Should().BeTrue();
-        message.GetString().Should().NotBeNullOrEmpty();
+        status.TryGetProperty("configuredPrinterCount", out var configuredPrinterCount).Should().BeTrue();
+        configuredPrinterCount.ValueKind.Should().Be(JsonValueKind.Number);
+
+        status.TryGetProperty("activelyMonitoredPrinterCount", out var activelyMonitoredPrinterCount).Should().BeTrue();
+        activelyMonitoredPrinterCount.ValueKind.Should().Be(JsonValueKind.Number);
+
+        status.TryGetProperty("printers", out var printers).Should().BeTrue();
+        printers.ValueKind.Should().Be(JsonValueKind.Array);
     }
 
     [Fact(DisplayName = "Analyze endpoint returns 503 when not authenticated (requires auth)")]
