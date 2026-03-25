@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
@@ -135,6 +136,8 @@ public class AutoPrintStatusDto
     public string State { get; set; } = "None";
 
     public bool BedPreConfirmed { get; set; }
+
+    public string? AttentionMessage { get; set; }
 }
 
 public class ReadyGateCheckDto
@@ -161,8 +164,11 @@ public class AutoPrintService(
     ILogger<AutoPrintService> logger,
     ISpoolmanService? spoolmanService = null,
     IWebhookService? webhookService = null,
-    Queue.Dispatch.IAutoDispatchTrigger? dispatchTrigger = null) : IAutoPrintService
+    Queue.Dispatch.IAutoDispatchTrigger? dispatchTrigger = null,
+    IDispatchScorer? dispatchScorer = null) : IAutoPrintService
 {
+    private sealed record QueuedJobSelection(PrintJob? NextJob, int QueueDepth);
+
     public async Task TransitionToPendingReadyAsync(Guid printerId, CancellationToken ct = default)
     {
         Printer? printer = await db.Printers.FindAsync([printerId], ct);
@@ -191,11 +197,9 @@ public class AutoPrintService(
             return;
         }
 
-        // Check if there are queued jobs for this printer
-        bool hasQueuedJobs = await db.PrintJobs
-            .AnyAsync(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued, ct);
+        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
 
-        if (!hasQueuedJobs)
+        if (queuedJobs.QueueDepth == 0)
         {
             logger.LogDebug("[AutoPrint] No queued jobs for printer {PrinterId}, staying in None state", printerId);
             printer.AutoPrintState = AutoPrintState.None;
@@ -254,14 +258,8 @@ public class AutoPrintService(
             throw new InvalidOperationException($"Printer {printer.Name} is not in PendingReady state (current: {printer.AutoPrintState})");
         }
 
-        // Find the next queued job for this printer
-        PrintJob? nextJob = await db.PrintJobs
-            .Include(j => j.GcodeFile)
-            .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt)
-            .FirstOrDefaultAsync(ct);
+        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: true, ct);
+        PrintJob? nextJob = queuedJobs.NextJob;
 
         if (nextJob is null)
         {
@@ -397,18 +395,14 @@ public class AutoPrintService(
             throw new InvalidOperationException($"Cannot pre-clear bed while printer {printer.Name} is actively printing");
         }
 
-        bool hasQueuedJobs = await db.PrintJobs
-            .AnyAsync(
-                j => j.Status == PrintJobStatus.Queued
-                     && (j.AssignedPrinterId == null || j.AssignedPrinterId == printerId),
-                ct);
+        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
 
         printer.BedPreConfirmed = true;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("[AutoPrint] Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
 
-        if (hasQueuedJobs)
+        if (queuedJobs.QueueDepth > 0)
         {
             // A pre-cleared idle printer just became eligible for immediate dispatch.
             dispatchTrigger?.NotifyJobQueued(printerId);
@@ -462,18 +456,23 @@ public class AutoPrintService(
     public async Task<AutoPrintGlobalStatusDto> GetAllStatusAsync(CancellationToken ct = default)
     {
         List<Printer> printers = await db.Printers.ToListAsync(ct);
-        Dictionary<Guid, int> queuedCounts = await GetQueuedCountsByPrinterAsync(printers.Select(p => p.Id), ct);
         Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printers.Select(p => p.Id), ct);
 
         bool globalEnabled = printers.Any(p => p.AutoPrintEnabled);
+        List<AutoPrintStatusDto> statuses = [];
+        foreach (Printer printer in printers)
+        {
+            QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printer.Id, includeGcodeFile: false, ct);
+            statuses.Add(BuildStatusDto(
+                printer,
+                queuedJobs.QueueDepth,
+                currentJobs.GetValueOrDefault(printer.Id)));
+        }
 
         return new AutoPrintGlobalStatusDto
         {
             GlobalEnabled = globalEnabled,
-            Printers = printers.Select(p => BuildStatusDto(
-                p,
-                queuedCounts.GetValueOrDefault(p.Id),
-                currentJobs.GetValueOrDefault(p.Id))).ToList(),
+            Printers = statuses,
         };
     }
 
@@ -496,21 +495,18 @@ public class AutoPrintService(
             enabled ? "enabled" : "disabled",
             printers.Count);
 
-        Dictionary<Guid, int> queuedCounts = await GetQueuedCountsByPrinterAsync(printers.Select(p => p.Id), ct);
         Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printers.Select(p => p.Id), ct);
-        return printers.Select(p => BuildStatusDto(
-            p,
-            queuedCounts.GetValueOrDefault(p.Id),
-            currentJobs.GetValueOrDefault(p.Id))).ToList();
-    }
+        List<AutoPrintStatusDto> statuses = [];
+        foreach (Printer printer in printers)
+        {
+            QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printer.Id, includeGcodeFile: false, ct);
+            statuses.Add(BuildStatusDto(
+                printer,
+                queuedJobs.QueueDepth,
+                currentJobs.GetValueOrDefault(printer.Id)));
+        }
 
-    private async Task<Dictionary<Guid, int>> GetQueuedCountsByPrinterAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
-    {
-        List<Guid> ids = printerIds.ToList();
-        return await db.PrintJobs
-            .Where(j => ids.Contains(j.AssignedPrinterId!.Value) && j.Status == PrintJobStatus.Queued)
-            .GroupBy(j => j.AssignedPrinterId!.Value)
-            .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
+        return statuses;
     }
 
     private static AutoPrintStatusDto BuildStatusDto(Printer printer, int queuedJobCount, string? currentJobName = null)
@@ -518,6 +514,7 @@ public class AutoPrintService(
         string now = DateTime.UtcNow.ToString("o");
         bool isReady = printer.AutoPrintEnabled && printer.AutoPrintState == AutoPrintState.Ready;
         var gateChecks = BuildReadyGateChecks(printer, queuedJobCount, now);
+        string? attentionMessage = BuildAttentionMessage(printer, queuedJobCount);
 
         return new AutoPrintStatusDto
         {
@@ -530,13 +527,13 @@ public class AutoPrintService(
             ReadyGateChecks = gateChecks,
             State = printer.AutoPrintState.ToString(),
             BedPreConfirmed = printer.BedPreConfirmed,
+            AttentionMessage = attentionMessage,
         };
     }
 
     private async Task<AutoPrintStatusDto> BuildStatusDtoAsync(Printer printer, CancellationToken ct)
     {
-        int queuedCount = await db.PrintJobs
-            .CountAsync(j => j.AssignedPrinterId == printer.Id && j.Status == PrintJobStatus.Queued, ct);
+        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printer.Id, includeGcodeFile: false, ct);
 
         string? currentJobName = await db.PrintJobs
             .Where(j => j.AssignedPrinterId == printer.Id
@@ -544,7 +541,7 @@ public class AutoPrintService(
             .Select(j => j.Name ?? j.GcodeFile!.Name)
             .FirstOrDefaultAsync(ct);
 
-        return BuildStatusDto(printer, queuedCount, currentJobName);
+        return BuildStatusDto(printer, queuedJobs.QueueDepth, currentJobName);
     }
 
     private static List<ReadyGateCheckDto> BuildReadyGateChecks(Printer printer, int queuedJobCount, string checkedAt)
@@ -598,6 +595,49 @@ public class AutoPrintService(
         return checks;
     }
 
+    private static string? BuildAttentionMessage(
+        Printer printer,
+        int queuedJobCount)
+    {
+        if (!printer.AutoPrintEnabled)
+        {
+            return null;
+        }
+
+        string queuedJobLabel = $"{queuedJobCount} queued job{(queuedJobCount == 1 ? string.Empty : "s")}";
+
+        if (printer.InMaintenance)
+        {
+            return queuedJobCount > 0
+                ? $"Printer is in maintenance mode. {queuedJobLabel} will not start until maintenance is complete and the printer is available."
+                : "Printer is in maintenance mode. Complete maintenance and make the printer available before auto-print can resume.";
+        }
+
+        if (!printer.IsAvailable)
+        {
+            return queuedJobCount > 0
+                ? $"Printer is unavailable. {queuedJobLabel} will not start until the printer is available again."
+                : "Printer is unavailable. Restore printer availability before auto-print can resume.";
+        }
+
+        if (printer.AutoPrintState == AutoPrintState.PendingReady)
+        {
+            return queuedJobCount switch
+            {
+                <= 0 => "Print completed. Clear the bed and confirm ready before queued work can resume.",
+                1 => "Print completed. 1 queued job is blocked until you clear the bed and confirm ready. Once confirmed, the next queued job will start automatically.",
+                _ => $"Print completed. {queuedJobLabel} are blocked until you clear the bed and confirm ready. Once confirmed, the next queued job will start automatically.",
+            };
+        }
+
+        if (queuedJobCount > 0 && (printer.AutoPrintState == AutoPrintState.Ready || printer.BedPreConfirmed))
+        {
+            return "Bed is clear. The next queued job will start automatically.";
+        }
+
+        return null;
+    }
+
     private async Task<Dictionary<Guid, string?>> GetCurrentJobNamesByPrinterAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
     {
         List<Guid> ids = printerIds.ToList();
@@ -609,6 +649,55 @@ public class AutoPrintService(
                 g => g.Key,
                 g => g.OrderByDescending(j => j.ActualStartTime).Select(j => j.Name ?? j.GcodeFile!.Name).FirstOrDefault(),
                 ct);
+    }
+
+    private async Task<QueuedJobSelection> GetQueuedJobSelectionAsync(Guid printerId, bool includeGcodeFile, CancellationToken ct)
+    {
+        IQueryable<PrintJob> assignedQuery = db.PrintJobs
+            .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
+            .OrderBy(j => j.Priority)
+            .ThenBy(j => j.QueuePosition)
+            .ThenBy(j => j.QueuedAt);
+
+        IQueryable<PrintJob> unassignedQuery = db.PrintJobs
+            .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
+            .OrderBy(j => j.Priority)
+            .ThenBy(j => j.QueuePosition)
+            .ThenBy(j => j.QueuedAt);
+
+        if (includeGcodeFile)
+        {
+            assignedQuery = assignedQuery.Include(j => j.GcodeFile);
+            unassignedQuery = unassignedQuery.Include(j => j.GcodeFile);
+        }
+
+        List<PrintJob> assignedJobs = await assignedQuery.ToListAsync(ct);
+        PrintJob? nextJob = assignedJobs.FirstOrDefault();
+        int queueDepth = assignedJobs.Count;
+
+        if (dispatchScorer is null)
+        {
+            return new QueuedJobSelection(nextJob, queueDepth);
+        }
+
+        DispatchSettings? settings = await db.DispatchSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        double minimumScoreThreshold = settings?.MinimumScoreThreshold ?? 0;
+
+        foreach (PrintJob job in await unassignedQuery.ToListAsync(ct))
+        {
+            DispatchScore? printerScore = (await dispatchScorer.ScorePrintersForJobAsync(job.Id, ct))
+                .FirstOrDefault(score => score.PrinterId == printerId);
+
+            if (printerScore is null || printerScore.Eliminated || printerScore.TotalScore < minimumScoreThreshold)
+            {
+                continue;
+            }
+
+            queueDepth++;
+            nextJob ??= job;
+        }
+
+        return new QueuedJobSelection(nextJob, queueDepth);
     }
 
     private async Task<FilamentCheckResult> CheckFilamentAsync(Printer printer, PrintJob nextJob, CancellationToken ct)

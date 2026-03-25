@@ -31,6 +31,10 @@ public sealed class PrintFailureMonitorService : BackgroundService
     private const string PrinterStateIdle = "idle";
     private const string PrinterStateMisconfigured = "misconfigured";
     private const string PrinterStateMonitoring = "monitoring";
+    private static readonly TimeSpan MonitoringStartupGracePeriod = TimeSpan.FromMinutes(2);
+    private const string StartingIdleReason = "Print is starting — monitoring will begin after warmup.";
+    private const string WarmupIdleReason = "Print just started — monitoring will begin shortly.";
+    private const string NotPrintingReason = "Printer is not actively printing.";
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IFailureDetectionMonitorStatus _monitorStatus;
     private readonly IPrinterStatusCacheReader _statusCache;
@@ -96,6 +100,36 @@ public sealed class PrintFailureMonitorService : BackgroundService
         _logger.LogInformation("[PrintFailureMonitor] Service stopped");
     }
 
+    private sealed record ActivePrintWindow(PrintJobStatus Status, DateTime StartedAtUtc);
+
+    internal static (bool ShouldMonitor, string IdleReason) EvaluateMonitoringWindow(
+        PrinterStatusDto? status,
+        PrintJobStatus? activeJobStatus,
+        DateTime? activeJobStartedAtUtc,
+        DateTime utcNow)
+    {
+        if (status is null
+            || !status.IsOnline
+            || !string.Equals(status.State, "Printing", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, NotPrintingReason);
+        }
+
+        if (activeJobStatus == PrintJobStatus.Starting)
+        {
+            return (false, StartingIdleReason);
+        }
+
+        if (activeJobStatus == PrintJobStatus.Printing
+            && activeJobStartedAtUtc.HasValue
+            && activeJobStartedAtUtc.Value >= utcNow - MonitoringStartupGracePeriod)
+        {
+            return (false, WarmupIdleReason);
+        }
+
+        return (true, string.Empty);
+    }
+
     private async Task RunMonitoringCycleAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -127,6 +161,27 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 .Where(p => p.ObicoEnabled)
                 .OrderBy(p => p.Name)
                 .ToListAsync(cancellationToken);
+            List<Guid> configuredPrinterIds = configuredPrinters.Select(p => p.Id).ToList();
+            List<PrintJob> activeJobs = configuredPrinterIds.Count == 0
+                ? []
+                : await dbContext.PrintJobs
+                    .Where(j =>
+                        j.AssignedPrinterId.HasValue
+                        && configuredPrinterIds.Contains(j.AssignedPrinterId.Value)
+                        && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                    .ToListAsync(cancellationToken);
+            Dictionary<Guid, ActivePrintWindow> activeJobsByPrinter = activeJobs
+                .GroupBy(j => j.AssignedPrinterId!.Value)
+                .ToDictionary(
+                    g => g.Key,
+                    g =>
+                    {
+                        PrintJob currentJob = g
+                            .OrderByDescending(j => j.ActualStartTime ?? j.UpdatedAt)
+                            .First();
+                        DateTime startedAtUtc = currentJob.ActualStartTime ?? currentJob.UpdatedAt;
+                        return new ActivePrintWindow(currentJob.Status, startedAtUtc);
+                    });
 
             var printerStatuses = new List<FailureDetectionPrinterStatusDto>(configuredPrinters.Count);
             foreach (Printer printer in configuredPrinters)
@@ -151,7 +206,13 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         snapshotUrl = printer.CameraSnapshotUrl;
                     }
 
-                    bool isPrinting = IsPrinterPrinting(printer.Id);
+                    activeJobsByPrinter.TryGetValue(printer.Id, out ActivePrintWindow? activeJob);
+                    var monitoringWindow = EvaluateMonitoringWindow(
+                        _statusCache.GetStatus(printer.Id),
+                        activeJob?.Status,
+                        activeJob?.StartedAtUtc,
+                        DateTime.UtcNow);
+                    bool isPrinting = monitoringWindow.ShouldMonitor;
                     var (detectionSource, detectionTarget, obicoServerUrl, obicoApiKey) = ResolveDetectionTarget(printer, obicoServers, currentSettings);
 
                     var baseStatus = new FailureDetectionPrinterStatusDto
@@ -200,7 +261,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         printerStatuses.Add(baseStatus with
                         {
                             State = PrinterStateIdle,
-                            Reason = "Printer is not actively printing.",
+                            Reason = monitoringWindow.IdleReason,
                         });
                         continue;
                     }
@@ -340,19 +401,6 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 Printers = previousSnapshot.Printers.Select(status => status with { }).ToArray(),
             });
         }
-    }
-
-    private bool IsPrinterPrinting(Guid printerId)
-    {
-        PrinterStatusDto? status = _statusCache.GetStatus(printerId);
-        if (status == null)
-        {
-            return false;
-        }
-
-        return status.IsOnline &&
-               !string.IsNullOrEmpty(status.State) &&
-               string.Equals(status.State, "printing", StringComparison.OrdinalIgnoreCase);
     }
 
     private FailureDetectionMonitorStatusDto CreateSnapshot(

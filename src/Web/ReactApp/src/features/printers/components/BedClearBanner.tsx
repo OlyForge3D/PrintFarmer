@@ -4,6 +4,7 @@ import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { useConfirmBedClear, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
 import { queryKeys } from '@/common/hooks/useApi';
+import { isPendingReadyState } from '@/common/utils/printerStateDisplay';
 import { toast } from 'sonner';
 import type { AutoDispatchStatus, Printer } from '@/types/api';
 
@@ -19,7 +20,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
   const skipNextJob = useSkipNextJob();
   const cancelAutoDispatch = useCancelAutoDispatch();
 
-  if (autoDispatchStatus.state !== 'PendingReady') return null;
+  if (!isPendingReadyState(autoDispatchStatus.state)) return null;
 
   const isAnyPending = confirmBedClear.isPending || skipNextJob.isPending || cancelAutoDispatch.isPending;
 

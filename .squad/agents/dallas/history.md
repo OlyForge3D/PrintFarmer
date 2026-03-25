@@ -882,3 +882,89 @@ Created: `.squad/orchestration-log/2026-03-16T23-12-05Z-dallas.md`
 - Toast wiring: `src/Web/ReactApp/src/App.tsx` line ~292
 - Printer cards: `CompactPrinterCard.tsx`, `DetailedPrinterCard.tsx` (obicoEnabled badge)
 - Obico servers UI: `src/Web/ReactApp/src/features/admin/components/ObicoServersSection.tsx`
+
+---
+
+## Product Tradeoff Review & Artifact Triage (2026-03-25)
+
+**Status:** ✅ Complete  
+**Duration:** Full session  
+**Role:** Tech Lead oversight + product alignment
+
+### Work Summary
+
+Reviewed team implementation of Spaghetti Watch redesign, validated failure-detection warmup gate product tradeoff, and triaged rejected artifact to guide team toward thorough solution.
+
+### Completed Tasks
+
+1. **Spaghetti Watch Overlay Simplification Approval**
+   - Reviewed simplified overlay design: vague messaging → explicit "why" + "what to do"
+   - Validated camera URL requirement blocks failure-detection enable
+   - Confirmed fix addresses full flow (user directives met)
+
+2. **Failure Detection Warmup Gate Product Tradeoff**
+   - Reviewed backend warmup grace window strategy
+   - Tradeoff: slight monitoring delay vs. false alert prevention during startup
+   - Approved: Keeps attention overlay from surfacing too early
+   - Preserves monitoring once printer settles into active printing
+
+3. **Rejected Overlay Artifact Triage**
+   - Analyzed `kane-spaghetti-overlay-tests.md` incomplete artifact
+   - Identified: Missing integration seam coverage
+   - Guided team toward focused regression testing (`obico-ml-badge`)
+   - Forced later corrected revision with proper coverage
+
+4. **First-Layer Gating Strategy Review**
+   - Validated backend-level gating is correct first layer
+   - UI override boundary is secondary to backend lifecycle
+   - Confirmed team architectural alignment
+
+### Key Product Decisions Reviewed
+
+| Decision | Approval | Rationale |
+|----------|----------|-----------|
+| Explicit messaging | ✅ | Operators know what's wrong + how to fix |
+| Camera URL requirement | ✅ | User safety: prevents unconfigured monitoring |
+| Warmup grace window | ✅ | Production tradeoff acceptable for false alerts |
+| Backend-level gating | ✅ | Cleaner logic, applies to all paths |
+| Startup as override | ✅ | Respects optimistic UI state over stale queries |
+
+### Trade-offs Documented
+
+**Warmup Gate:**
+- **Pro:** Prevents false alerts during printer startup
+- **Con:** Slight monitoring delay on new dispatches
+- **Mitigation:** Grace window tunable, monitoring enabled immediately after startup completes
+
+**Backend vs. UI Gating:**
+- **Pro:** Cleaner logic, centralized, applies consistently
+- **Con:** Requires frontend understanding of warmup states
+- **Mitigation:** Clear API contract documentation
+
+### Team Guidance Provided
+
+- Quality-first rejection principle: incomplete fixes get rejected
+- 3-layer contract requirement for visibility regressions (service → API → UI)
+- Integration seam testing: utility-only tests insufficient for stale-state bugs
+- Startup as UI boundary: respects optimistic state transitions
+
+### Artifacts Reviewed
+
+- ✅ **Approved:** Ripley's failure-detection modal + overlay refinements
+- ✅ **Approved:** Lambert's warmup gate + attention contract alignment
+- ✅ **Approved:** Kane's 3-layer PendingReady regression coverage
+- ❌ **Rejected:** Incomplete startup overlay fix (forced corrected revision)
+
+### Related Decisions Approved
+
+- [Ripley] Startup as UI override boundary
+- [Lambert] Failure detection warmup gate (30s startup grace)
+- [Lambert] Auto-print ready-gate dispatch eligibility
+- [Kane] 3-layer PendingReady visibility contract
+
+### Team Alignment
+
+- All 4 agents aligned on product direction
+- Quality standards enforced: regression coverage > quick fixes
+- Tradeoffs documented for future monitoring tuning
+

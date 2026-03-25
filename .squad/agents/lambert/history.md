@@ -1584,3 +1584,117 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 - **Ripley (Frontend):** Needs history table/list UI + acknowledge modal (DTOs designed)
 - **Open questions:** Auto-pause implementation timing, snapshot storage decision, retention policy, notification preferences
 - **Decision file:** `.squad/decisions/inbox/lambert-spaghetti-backend.md` created for team review
+
+### Auto-Print Ready-Gate Shared Queue Alignment (2026-03-25)
+
+**Problem:** Printers stopped surfacing `PendingReady` when the next available jobs were sitting in the shared queue unassigned instead of being pre-assigned to that printer.
+
+**Root Cause:** `AutoPrintService` had drifted into two different queue models. `MarkPreClearAsync()` already treated shared queued jobs as relevant, but `TransitionToPendingReadyAsync()` and the status builders only looked at `AssignedPrinterId == printerId`. After auto-dispatch started considering unassigned queued jobs, the ready-gate no longer saw those candidates.
+
+**Fix:** `AutoPrintService` now asks the dispatch scorer for the printer's eligible shared-queue jobs and uses that same eligibility when deciding whether a printer should enter `PendingReady`, when building queue depth for auto-print status DTOs, and when choosing the next job preview for `MarkReadyAsync()`.
+
+**Validation:** Focused `AutoPrintServiceTests` pass, including new regression coverage for compatible unassigned queued jobs.
+
+**Key Files:**
+- `src/infra/Services/AutoPrint/AutoPrintService.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs`
+
+## Learnings: Failure Detection Warmup Gate (2026-03-25)
+
+- The camera-view chip text `Attention · Needs attention` comes from failure-detection monitoring, not the auto-print `PendingReady` workflow. The camera surface reads `/api/failure-detection/status`; auto-print state is a separate backend path.
+- `PrintFailureMonitorService` originally treated normalized printer state `Printing` as immediately monitorable. Because printer-state normalization collapses backend `starting` states into `Printing`, warmup and heat-up windows could surface monitoring errors before a print had actually settled.
+- The backend fix gates monitoring on both cached printer state and the tracked `PrintJob` lifecycle. Jobs still in `Starting`, or newly `Printing` jobs inside the startup grace window, now emit `idle` monitoring status with a warmup reason instead of entering attention/error too early.
+- Key files: `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs`, `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/PrintFailureMonitorServiceTests.cs`, `src/infra/Properties/AssemblyInfo.TestsVisible.cs`.
+- Validation: `Farm.Web.Api.Tests` builds clean and targeted `PrintFailureMonitorServiceTests` pass. A full solution build is currently blocked by unrelated slicer contract test compile failures in `src/tests/Farm.Slicer.Module.Tests/ContractTests/SlicerJobsProtoCompilationTests.cs`.
+
+### Auto-Print Attention Message Contract (2026-03-25)
+
+**Problem:** `PendingReady` already exposed detailed `ReadyGateChecks`, but generic UI surfaces still needed a single operator-facing summary that explained both why the printer needed attention and what action would unblock dispatch.
+
+**Fix:** Added computed `AttentionMessage` to `AutoPrintStatusDto` in `src/infra/Services/AutoPrint/AutoPrintService.cs`. The message is derived from auto-print state, queue depth, maintenance, and availability. `LastActivity` was left alone because the frontend already treats it as an ISO timestamp.
+
+**Pattern:** When a state badge is too generic, expose one backend-computed summary field instead of forcing each UI surface to re-derive meaning from `readyGateChecks`.
+
+**Validation:** Focused auto-print tests passed with `dotnet test ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug --no-restore --filter "FullyQualifiedName~AutoPrint"`.
+
+**Key Files:**
+- `src/infra/Services/AutoPrint/AutoPrintService.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Controllers/AutoPrintPendingReadyTests.cs`
+
+## Learnings: Auto-Print Attention Detail Contract (2026-03-25)
+
+- Auto-print status now carries three operator-facing attention fields: `AttentionMessage` for backward-compatible summary text plus `AttentionReason` and `OperatorAction` for click-through modal content.
+- `BuildAttentionDetails()` in `src/infra/Services/AutoPrint/AutoPrintService.cs` is the single source of truth for PendingReady, maintenance, unavailable, and ready/pre-cleared attention copy.
+- The frontend contract mirror for this payload lives in `src/Web/ReactApp/src/types/api.ts`; modal-facing status fields need backend and TypeScript updates together.
+- Focused validation for this area worked reliably with: `dotnet build ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug -m:1 /nr:false`, `dotnet test ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug --no-build --filter "FullyQualifiedName~AutoPrintPendingReadyTests|FullyQualifiedName~AutoPrintServiceTests" -p:CollectCoverage=false`, and `npm run lint`.
+- User preference: move dense attention details out of cramped badges/boxes and expose them as clear modal copy behind the attention icon.
+
+---
+
+## Auto-Print Attention Contract & Failure Detection Warming (2026-03-25)
+
+**Status:** ✅ Complete  
+**Duration:** Full session  
+**Build & Lint:** ✅ Clean  
+**Tests:** +focused API regression tests, all passing
+
+### Deliverables
+
+1. **Auto-Print Attention Contract Alignment**
+   - Centralized `AttentionMessage`, `AttentionReason`, `OperatorAction` in `BuildAttentionDetails()`
+   - Backward-compatible summary + explicit "why" + "what operator should do"
+   - All auto-print states aligned (PendingReady, pre-cleared, maintenance, unavailable)
+
+2. **Failure Detection Warmup Gate**
+   - Modified `PrintFailureMonitorService` to suppress monitoring during startup/warmup
+   - Grace window: If job in `Starting` or just entered `Printing`, report `idle` with warmup reason
+   - Prevents premature red `Attention` badge during dispatch
+
+3. **Auto-Print Ready-Gate Dispatch Eligibility**
+   - Aligned `AutoPrintService` ready-gate with `IDispatchScorer` rules
+   - Counts dispatch-eligible shared jobs, not just printer-assigned
+   - Ensures PendingReady surfaces for all valid next work
+
+4. **Backend Startup/Warmup Gating**
+   - Service transition logic tested separately from API payload
+   - Focused regression coverage: new `AutoPrintPendingReadyTests.cs`
+
+### Files Modified
+
+- `src/infra/Services/AutoPrint/AutoPrintService.cs`
+- `src/infra/Services/PrintMonitoring/PrintFailureMonitorService.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Controllers/AutoPrintPendingReadyTests.cs`
+
+### Key Decisions
+
+- **3-layer contract:** Service → API payload → UI rendering (each tested separately)
+- **Warmup gate location:** Backend lifecycle logic, not UI-only exceptions
+- **Attention details split:** Summary for compact display, reason + action for modal
+- **Grace period:** Intentional monitoring delay during startup vs. premature alerts tradeoff
+
+### Test Coverage
+
+- Service gate checks validated in isolation
+- Bulk auto-print status payload covers dispatch scorer alignment
+- No breaking changes to existing FailureDetectionController tests
+
+### Learnings
+
+- Ready-gate dispatch scoring must align with actual dispatcher behavior
+- Warmup grace window acceptable production tradeoff for false alert prevention
+- Backend-provided attention details eliminate frontend reverse-engineering of logic
+
+### Team Collaboration
+
+- **Ripley:** Frontend attention modal + startup boundary suppression
+- **Kane:** 3-layer regression coverage validation
+- **Dallas:** Product tradeoff review + backend gating strategy approval
+
+### Related Decisions
+
+- [Ripley] Startup state UI override boundary
+- [Kane] PendingReady 3-layer contract
+- [Dallas] Failure detection monitoring delay tradeoff
+

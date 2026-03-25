@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { RotateCw } from 'lucide-react';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Badge } from '@/common/components/ui';
+import { Alert, Button, Badge } from '@/common/components/ui';
 import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
@@ -13,6 +13,7 @@ import {
   getCameraMediaTransformStyle,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
+import { getCameraAttentionContent } from '@/features/cameras/utils/cameraAttention';
 
 /**
  * CamerasPage - Display all enabled cameras in a grid view
@@ -185,6 +186,15 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
     : camera.snapshotUrl;
   const imageError = !!activeUrl && failedUrl === activeUrl;
   const mediaStyle = getCameraMediaTransformStyle(rotation);
+  const cameraAttention = getCameraAttentionContent({
+    healthStatus: camera.healthStatus,
+    healthMessage: camera.healthMessage,
+    hasStream,
+    hasSnapshot,
+    imageError,
+    cameraMode,
+  });
+  const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
 
   return (
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
@@ -211,11 +221,20 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
-            <span className="text-sm">
-              {imageError
-                ? cameraMode === 'snapshot' ? 'Snapshot unavailable' : 'Camera unavailable'
-                : 'No feed URL'}
+            <span className="text-center text-sm font-medium text-pf-text-secondary">
+              {cameraAttention?.title
+                ?? (cameraMode === 'snapshot' ? 'Snapshot preview unavailable' : 'Camera unavailable')}
             </span>
+            {cameraAttention?.issue && (
+              <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+                {cameraAttention.issue}
+              </span>
+            )}
+            {cameraAttention?.action && (
+              <span className="mt-2 max-w-xs text-center text-xs text-pf-text-secondary">
+                Action: {cameraAttention.action}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -247,6 +266,17 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
             </Badge>
           )}
         </div>
+
+        {showInlineAttention && cameraAttention && (
+          <Alert
+            type={cameraAttention.tone}
+            title={cameraAttention.title}
+            className="rounded-lg border px-3 py-2 text-xs leading-5"
+          >
+            <p>{cameraAttention.issue}</p>
+            <p className="mt-1 font-medium">Action: {cameraAttention.action}</p>
+          </Alert>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="inline-flex items-center gap-2 rounded-full bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">

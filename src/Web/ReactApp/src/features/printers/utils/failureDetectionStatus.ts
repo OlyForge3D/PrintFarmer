@@ -1,6 +1,64 @@
 import type { BadgeVariant } from '@/common/components/ui/Badge';
 import type { FailureDetectionPrinterStatusDto } from '@/types/api';
 
+function ensureSentence(value: string | undefined | null, fallback: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function getFailureDetectionAction(
+  status: FailureDetectionPrinterStatusDto,
+  context: 'misconfigured' | 'error' | 'scan-error'
+): string {
+  const normalizedReason = status.reason.toLowerCase();
+
+  if (normalizedReason.includes('snapshot') || normalizedReason.includes('camera')) {
+    return context === 'misconfigured'
+      ? 'Add or enable a snapshot camera for this printer.'
+      : 'Check the camera feed and verify the saved snapshot URL still responds.';
+  }
+
+  if (context === 'scan-error') {
+    return 'Check the camera feed or monitoring service before relying on automatic pause.';
+  }
+
+  if (
+    normalizedReason.includes('obico')
+    || normalizedReason.includes('ml service')
+    || normalizedReason.includes('contact')
+    || normalizedReason.includes('connect')
+    || normalizedReason.includes('network')
+    || normalizedReason.includes('timeout')
+    || normalizedReason.includes('unreachable')
+  ) {
+    return 'Check the failure-detection service connection, then try again.';
+  }
+
+  if (context === 'misconfigured') {
+    return 'Review this printer’s failure-detection settings before the next print.';
+  }
+
+  return 'Open failure-detection settings and review the latest monitor error.';
+}
+
+export function getFailureDetectionDisplayState(
+  status?: FailureDetectionPrinterStatusDto
+): string | undefined {
+  if (!status) {
+    return undefined;
+  }
+
+  if (status.state === 'error' && !status.isPrinting) {
+    return undefined;
+  }
+
+  return status.state;
+}
+
 export function getFailureDetectionStateLabel(state?: string, enabled = false): string {
   switch (state) {
     case 'monitoring':
@@ -10,7 +68,7 @@ export function getFailureDetectionStateLabel(state?: string, enabled = false): 
     case 'misconfigured':
       return 'Needs setup';
     case 'error':
-      return 'Attention';
+      return 'Monitor error';
     case 'disabled':
       return enabled ? 'Standby' : 'Off';
     default:
@@ -66,13 +124,21 @@ export function getFailureDetectionDetail(
   status?: FailureDetectionPrinterStatusDto,
   enabled = false
 ): string {
+  const displayState = getFailureDetectionDisplayState(status);
+
   if (!status) {
     return enabled
       ? 'Checking whether the current print is actively being watched.'
       : 'Failure detection is disabled for this printer.';
   }
 
-  if (status.state !== 'monitoring') {
+  if (!displayState) {
+    return enabled
+      ? 'Checking whether the current print is actively being watched.'
+      : 'Failure detection is disabled for this printer.';
+  }
+
+  if (displayState !== 'monitoring') {
     return status.reason;
   }
 
@@ -92,8 +158,43 @@ export function getFailureDetectionDetail(
     case 'healthy':
       return `Last scan ${scanTime} • no failure detected`;
     case 'error':
-      return `Last scan ${scanTime} • monitoring needs attention`;
+      return `Last scan ${scanTime} • scan failed — check the camera feed or ML service`;
     default:
       return `Last scan ${scanTime} • actively watching this print`;
   }
+}
+
+export function getFailureDetectionAttentionContent(
+  status?: FailureDetectionPrinterStatusDto
+): { issue: string; action: string } | null {
+  if (!status) {
+    return null;
+  }
+
+  if (status.state === 'misconfigured') {
+    return {
+      issue: ensureSentence(status.reason, 'Failure detection is not fully configured.'),
+      action: getFailureDetectionAction(status, 'misconfigured'),
+    };
+  }
+
+  if (status.state === 'error') {
+    return {
+      issue: ensureSentence(status.reason, 'Failure detection reported an error.'),
+      action: getFailureDetectionAction(status, 'error'),
+    };
+  }
+
+  if (status.state === 'monitoring' && status.lastOutcome === 'error') {
+    const scanTime = formatFailureDetectionTimestamp(status.lastAnalyzedAt);
+
+    return {
+      issue: scanTime
+        ? `The last failure-detection scan failed at ${scanTime}.`
+        : 'The last failure-detection scan failed.',
+      action: getFailureDetectionAction(status, 'scan-error'),
+    };
+  }
+
+  return null;
 }

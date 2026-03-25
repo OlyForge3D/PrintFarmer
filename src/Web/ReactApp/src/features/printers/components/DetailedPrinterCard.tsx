@@ -29,6 +29,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
+import { getPrinterDisplayState, isPendingReadyState } from '@/common/utils/printerStateDisplay';
 import { FailureDetectionAlert } from '@/features/printers/components/FailureDetectionAlert';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
@@ -131,6 +132,12 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const isPrinting = isOnline && state === 'Printing';
   const isPaused = state === 'Paused';
   const isShutdown = state === 'Offline' || state === 'Shutdown' || state === 'Halted';
+  const statusLabel = getPrinterDisplayState({
+    printerState: state,
+    autoDispatchState: autoDispatchStatus?.state,
+    isOnline,
+  });
+  const isPendingReady = isPendingReadyState(autoDispatchStatus?.state);
   const support = getPrinterSupport(backendCapabilities);
 
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
@@ -152,10 +159,6 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const homedAxesRaw = printer.homedAxes;
 
   const headerStyle = getStatusHeaderStyle({ state, isOnline, isPrinting, isPaused, isShutdown });
-
-  const toCamelCase = (str: string): string => {
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  };
 
   // Camera URL handling
   const cameraSnapshotUrl = apiPrinter.cameraSnapshotUrl ?? null;
@@ -420,12 +423,13 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           </div>
           <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
             <span className="text-pf-text-primary font-medium">
-              {isOnline ? toCamelCase(state) : 'Offline'}
+              {statusLabel}
             </span>
           </div>
           <FailureDetectionMonitoringBadge
             enabled={!!apiPrinter.obicoEnabled}
             status={failureDetectionStatus}
+            printerName={printer.name}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
         </div>
@@ -546,6 +550,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               <FailureDetectionMonitoringOverlay
                 enabled={!!apiPrinter.obicoEnabled}
                 status={failureDetectionStatus}
+                printerName={printer.name}
               />
             }
           />
@@ -553,7 +558,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       </div>
 
       {/* Bed clear confirmation banner */}
-      {autoDispatchStatus && (
+      {autoDispatchStatus && isPendingReady && (
         <div className="mb-3">
           <BedClearBanner
             printerId={printer.id}

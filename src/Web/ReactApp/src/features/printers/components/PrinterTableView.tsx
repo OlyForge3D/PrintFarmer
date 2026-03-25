@@ -1,13 +1,15 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import styles from './PrinterTableView.module.css';
 import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { Printer } from '@/types/api';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { CloseIcon, DeleteIcon, EditIcon } from '@/common/components/icons/MdiIcons';
 import { CheckIcon, CheckCircleIcon, CircleIcon, AlertIcon, ToolsIcon } from '@/common/components/icons/MdiIcons';
+import { getPrinterDisplayState, isPendingReadyState } from '@/common/utils/printerStateDisplay';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button } from '@/common/components/ui';
 
@@ -34,8 +36,13 @@ export function PrinterTableView({
 }: PrinterTableViewProps) {
   const { hasPermission } = useAuth();
   const displayPrinters = usePrinterDisplays(printers);
+  const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off'>('none');
+  const autoDispatchStatusByPrinterId = useMemo(
+    () => new Map((allAutoDispatchStatuses ?? []).map((status) => [status.printerId, status])),
+    [allAutoDispatchStatuses],
+  );
 
   const toggleSelectAll = useCallback(() => {
     if (selectedPrinters.size === printers.length) {
@@ -79,8 +86,9 @@ export function PrinterTableView({
     setBulkAction('none');
   }, [bulkAction, selectedPrinters, printers, onDelete, onBulkSetMaintenance]);
 
-  const getStatusColor = (isOnline: boolean, state?: string) => {
+  const getStatusColor = (isOnline: boolean, state?: string, autoDispatchState?: string) => {
     if (!isOnline) return 'text-pf-text-tertiary';
+    if (isPendingReadyState(autoDispatchState)) return 'text-pf-warning';
     
     switch (state?.toLowerCase()) {
       case 'printing':
@@ -223,6 +231,13 @@ export function PrinterTableView({
           <tbody className="divide-y divide-pf-border">
             {printers.map((printer, index) => {
               const displayPrinter = displayPrinters[index];
+              const autoDispatchStatus = autoDispatchStatusByPrinterId.get(printer.id);
+              const isPendingReady = isPendingReadyState(autoDispatchStatus?.state);
+              const statusLabel = getPrinterDisplayState({
+                printerState: displayPrinter.state,
+                autoDispatchState: autoDispatchStatus?.state,
+                isOnline: displayPrinter.isOnline ?? false,
+              });
 
               return (
                 <SelectableRow key={printer.id} isSelected={selectedPrinters.has(printer.id)}>
@@ -267,10 +282,16 @@ export function PrinterTableView({
 
                   {/* Status */}
                   <td className="px-4 py-4">
-                    <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline, displayPrinter.state)}`}>
-                      {displayPrinter.isOnline ? (displayPrinter.state || 'Unknown') : 'Offline'}
+                    <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus?.state)}`}>
+                      {statusLabel}
                     </div>
-                    {(displayPrinter.fileName ?? displayPrinter.jobName) && (
+                    {isPendingReady ? (
+                      <div className="text-xs text-pf-warning truncate max-w-40">
+                        {autoDispatchStatus?.queueDepth && autoDispatchStatus.queueDepth > 0
+                          ? `Awaiting bed clear • ${autoDispatchStatus.queueDepth} queued`
+                          : 'Awaiting bed clear'}
+                      </div>
+                    ) : (displayPrinter.fileName ?? displayPrinter.jobName) && (
                       <div className="text-xs text-pf-text-tertiary truncate max-w-32">
                         {displayPrinter.fileName ?? displayPrinter.jobName}
                       </div>

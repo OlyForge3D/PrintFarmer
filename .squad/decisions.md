@@ -4309,3 +4309,227 @@ In this workspace, `docker compose up api` never produced a real application con
 **Rationale:** User request — ensuring single source of truth for deployment configuration
 
 **Status:** CAPTURED ✅
+
+---
+
+## User Directives: Spaghetti Watch & Failure Detection (CAPTURED)
+
+**Date:** 2026-03-25  
+**Author:** Jeff Papiez (via Copilot)  
+**Status:** CAPTURED ✅
+
+### Directive 1: Spaghetti Watch Overlay Simplification
+**What:** The large Spaghetti Watch overlay has too much information and needs to be redesigned to be much simpler.  
+**Why:** User request — captured for team memory  
+**Impact:** Implemented as compact chip format with "Needs setup" label + "Check settings" hint
+
+### Directive 2: Camera URL Requirement
+**What:** Users should be blocked from enabling failure detection unless the printer has a usable camera URL.  
+**Why:** User request — captured for team memory  
+**Impact:** Frontend now validates camera snapshot URL before enabling failure detection
+
+### Directive 3: Thorough Fix
+**What:** The team must be thorough in the Spaghetti Watch fix and address the full flow, not just one symptom.  
+**Why:** User request — captured for team memory  
+**Impact:** Team validated 3-layer PendingReady contract + failure-detection warmup gate
+
+### Directive 4: Explicit Attention Messaging
+**What:** Replace vague "Needs attention" messaging with explicit information about what is wrong and what operator action is required.  
+**Why:** User request — captured for team memory  
+**Impact:** Implemented as modal with `AttentionReason` + `OperatorAction` fields
+
+---
+
+## Auto-Print Attention Details (IMPLEMENTED)
+
+**Date:** 2026-03-25  
+**Author:** Lambert (Backend Dev)  
+**Status:** IMPLEMENTED ✅
+
+### Decision
+- Kept `AttentionMessage` on `AutoPrintStatusDto` for backward-compatible summary copy
+- Added `AttentionReason` and `OperatorAction` alongside it
+- Frontend can open modal with distinct "why" and "what should I do" text
+- Centralized all three strings in `BuildAttentionDetails()` for consistency
+
+### Why
+Backend needs to provide explicit operator guidance without making frontend reverse-engineer gate checks.
+
+### Impact
+- Backend-only contract change, no schema migration
+- UI can render operator guidance directly
+- All auto-print states (PendingReady, pre-cleared, maintenance, unavailable) aligned
+
+### Related Files
+- `src/infra/Services/AutoPrint/AutoPrintService.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs`
+
+---
+
+## Auto-Print Attention Message Summary (IMPLEMENTED)
+
+**Date:** 2026-03-25  
+**Author:** Lambert (Backend Dev)  
+**Status:** IMPLEMENTED ✅
+
+### Decision
+Expose a single computed `AttentionMessage` on `AutoPrintStatusDto` for pending-ready, pre-cleared/ready, maintenance, and unavailable auto-print states.
+
+### Why
+Backend already had low-level `readyGateChecks`, but generic UI surfaces still needed one explicit operator-facing sentence explaining attention requirement.
+
+### Implementation Notes
+- Did NOT repurpose `LastActivity` (frontend treats it as ISO timestamp)
+- Computed per state for consistency
+- Used alongside new `AttentionReason` and `OperatorAction` fields
+
+### Impact
+- Backend-only contract change
+- UI can render operator guidance without reverse-engineering logic
+- All PendingReady/ready states now have explicit operator text
+
+---
+
+## Auto-Print Ready-Gate Dispatch Eligibility (IMPLEMENTED)
+
+**Date:** 2026-03-25  
+**Author:** Lambert (Backend Dev)  
+**Status:** IMPLEMENTED ✅
+
+### Decision
+When auto-print decides whether a printer should enter `PendingReady`, use the same dispatch-eligibility rules as auto-dispatch, not just `AssignedPrinterId == printerId`.
+
+### Why
+Queue is now partly shared: auto-dispatch can select unassigned queued jobs for idle printer. If ready-gate only checks printer-assigned jobs, printers with legitimate next work stay in `None` and operators never see bed-clear confirmation.
+
+### Implementation Notes
+- `AutoPrintService` now consults `IDispatchScorer` + `DispatchSettings.MinimumScoreThreshold`
+- Explicitly assigned jobs still take priority for previewed "next job"
+- Auto-print status queue depth now counts dispatch-eligible shared jobs
+
+### Files Modified
+- `src/infra/Services/AutoPrint/AutoPrintService.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs`
+
+---
+
+## Failure Detection Warmup Gate (IMPLEMENTED)
+
+**Date:** 2026-03-25  
+**Author:** Lambert (Backend Dev)  
+**Status:** IMPLEMENTED ✅
+
+### Context
+Operators were seeing red `Attention · Needs attention` chip on printer camera view immediately after dispatch, while printer was still in startup/warmup phase.
+
+### Decision
+Treat newly dispatched prints as warmup window in backend failure-detection state evaluation.
+- `PrintFailureMonitorService` combines cached printer state with active `PrintJob` lifecycle
+- If tracked job still `Starting` or just entered `Printing` within grace window, report `idle` with warmup reason
+- Keeps camera overlay from surfacing attention too early while preserving monitoring once print settles
+
+### Consequences
+
+**Positive**
+- Removes premature backend attention state during dispatch startup
+- Keeps fix in backend lifecycle logic, not spread across UI exceptions
+- Preserves monitoring for manual/older prints once genuinely underway
+
+**Trade-off**
+- Failure detection intentionally waits short grace period before active monitoring starts on tracked jobs
+
+### Files Modified
+- `src/infra/Services/PrintMonitoring/PrintFailureMonitorService.cs`
+
+---
+
+## Printer Startup as UI Override Boundary (IMPLEMENTED)
+
+**Date:** 2026-03-25  
+**Author:** Ripley (Frontend Dev)  
+**Status:** IMPLEMENTED ✅
+
+### Context
+Regression showed printer card in `Starting...` state still rendering stale red `Attention · Needs attention` monitoring overlay, while BedClearBanner had already advanced state optimistically.
+
+### Decision
+Treat printer startup as UI override boundary for failure-detection attention overlays.
+- When printer card in `Starting...` state, suppress failure-detection overlay
+- Allows optimistic BedClearBanner state to take priority
+- Failure-detection query can lag behind printer cache state
+
+### Why
+Separate failure-detection query has independent lifecycle. BedClearBanner writes optimistic state immediately on dispatch, while failure-detection query hasn't refreshed yet. UI should reflect printer's actual operational state, not stale secondary query.
+
+### Implementation Notes
+- Suppression is at UI layer, not API layer (backend still provides state)
+- When printer exits startup, normal failure-detection overlay rendering resumes
+- Tests validate integration seam, not just component in isolation
+
+### Files Modified
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx`
+- `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx` (regression)
+
+---
+
+## PendingReady Regression Coverage: 3-Layer Contract (IMPLEMENTED)
+
+**Date:** 2026-03-25  
+**Author:** Kane (QA)  
+**Status:** IMPLEMENTED ✅
+
+### Decision
+Treat PendingReady visibility regressions as three-layer contract:
+1. **Service transition logic:** `TransitionToPendingReadyAsync`, `MarkReadyAsync`, `SkipNextJobAsync`
+2. **Bulk status payloads:** `GET /api/auto-print/status` and printer status
+3. **Printer card rendering:** `CompactPrinterCard` overlay and bed-clear prompt
+
+### Why
+Printers page and global navigation derive attention state from bulk auto-print status, while printer card overlay depends on per-printer auto-dispatch state. Testing only one layer can miss regression where backend state correct but UI never surfaces it, or UI correct but backend never emits PendingReady.
+
+### Coverage Added
+- `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Controllers/AutoPrintPendingReadyTests.cs`
+- `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx`
+
+### Notes
+- Utility-only tests insufficient for integration seam bugs
+- Each layer tested independently before integration
+- 3-layer model ensures no silent regressions
+
+---
+
+## Spaghetti Watch Overlay Simplification Test Coverage (IMPLEMENTED)
+
+**Date:** 2026-03-25  
+**Author:** Kane (QA)  
+**Status:** IMPLEMENTED ✅
+
+### Context
+Overlay was simplified from detailed card layout to compact inline chip. Setup messaging revised to "Needs setup" + "Check settings" hint.
+
+### Coverage Implemented
+- **14 React component tests** (FailureDetectionMonitoringOverlay.test.tsx)
+  - All state labels, hints, and styling validated
+  - "Needs setup" label for misconfigured state confirmed
+  - "Check settings" hint for misconfigured state confirmed
+  - Compact chip format (inline-flex, rounded-full) validated
+
+- **39 utility function tests** (failureDetectionStatus.test.ts)
+  - Comprehensive state label mappings
+  - Badge variant mappings
+  - Source label handling (pooled/global)
+  - Timestamp formatting edge cases
+  - Detail message formatting (confidence, auto-pause, scan times)
+
+### Key Testing Patterns Documented
+1. **SVG className:** Use `element.classList.contains()` not `element.className.toContain()` (SVG className is SVGAnimatedString)
+2. **Hint text with separators:** Use regex matchers (`/Check settings/`) to handle bullet separators
+3. **State consistency:** Test both label and variant for each state to ensure visual consistency
+
+### Files
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx`
+- `src/Web/ReactApp/src/test/features/printers/failureDetectionStatus.test.ts`
+
+---
+

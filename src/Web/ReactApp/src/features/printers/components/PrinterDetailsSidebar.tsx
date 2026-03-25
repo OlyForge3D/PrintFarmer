@@ -5,7 +5,7 @@ import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
-import { formatPrinterState } from '@/common/utils/printerStateDisplay';
+import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
 import { PrinterBackend, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
@@ -66,6 +66,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
+import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 
 // Animation styles
 // Use unique keyframe/class names to avoid collisions with other injected styles.
@@ -127,6 +128,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
   const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
+  const { data: autoDispatchStatus } = useAutoDispatchStatus(printerId ?? '');
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
 
@@ -284,13 +286,16 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const isOnline = displayPrinter?.isOnline ?? false;
   const isEnabled = displayPrinter?.isEnabled ?? true;
   const rawState = displayPrinter?.state ?? 'unknown';
-  const state = formatPrinterState(rawState);
+  const statusLabel = getPrinterDisplayState({
+    printerState: rawState,
+    autoDispatchState: autoDispatchStatus?.state,
+    isOnline,
+  });
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
   const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
   const headerStyle = getStatusHeaderStyle({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
   const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
-  const statusLabel = isOnline ? state : 'Offline';
 
   const support = getPrinterSupport(backendCapabilities);
 

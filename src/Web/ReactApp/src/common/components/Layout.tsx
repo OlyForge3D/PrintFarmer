@@ -44,6 +44,7 @@ import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
+import { isPendingReadyState } from '@/common/utils/printerStateDisplay';
 import type { AutoDispatchStatus } from '@/types/api';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinterSignalRPanel';
@@ -261,7 +262,7 @@ export function Layout() {
   const navigate = useNavigate();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const pendingAttentionCount = useMemo(
-    () => ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter(s => s.state === 'PendingReady').length,
+    () => ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter(s => isPendingReadyState(s.state)).length,
     [allAutoDispatchStatuses]
   );
   const location = useLocation();

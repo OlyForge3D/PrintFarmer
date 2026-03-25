@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getFailureDetectionDisplayState,
+  getFailureDetectionAttentionContent,
   getFailureDetectionStateLabel,
   getFailureDetectionStateVariant,
   getFailureDetectionSourceLabel,
@@ -9,6 +11,46 @@ import {
 import type { FailureDetectionPrinterStatusDto } from '@/types/api';
 
 describe('failureDetectionStatus utilities', () => {
+  describe('getFailureDetectionDisplayState', () => {
+    it('returns undefined when status is missing', () => {
+      expect(getFailureDetectionDisplayState(undefined)).toBeUndefined();
+    });
+
+    it('suppresses attention state before monitoring starts', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'error',
+        reason: 'Failed to contact Obico ML service.',
+        isPrinting: false,
+        detectionSource: 'global',
+        lastOutcome: 'error',
+        lastAnalyzedAt: '2026-01-15T10:30:00Z',
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      expect(getFailureDetectionDisplayState(status)).toBeUndefined();
+    });
+
+    it('preserves error state while a print is actively being monitored', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'error',
+        reason: 'Failed to contact Obico ML service.',
+        isPrinting: true,
+        detectionSource: 'global',
+        lastOutcome: 'error',
+        lastAnalyzedAt: '2026-01-15T10:30:00Z',
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      expect(getFailureDetectionDisplayState(status)).toBe('error');
+    });
+  });
+
   describe('getFailureDetectionStateLabel', () => {
     it('returns "Guarding" for monitoring state', () => {
       expect(getFailureDetectionStateLabel('monitoring')).toBe('Guarding');
@@ -22,8 +64,8 @@ describe('failureDetectionStatus utilities', () => {
       expect(getFailureDetectionStateLabel('misconfigured')).toBe('Needs setup');
     });
 
-    it('returns "Attention" for error state', () => {
-      expect(getFailureDetectionStateLabel('error')).toBe('Attention');
+    it('returns "Monitor error" for error state', () => {
+      expect(getFailureDetectionStateLabel('error')).toBe('Monitor error');
     });
 
     it('returns "Standby" for disabled state when enabled is true', () => {
@@ -174,6 +216,8 @@ describe('failureDetectionStatus utilities', () => {
 
       it('returns reason for error state', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'error',
           reason: 'Failed to contact Obico ML service.',
           isPrinting: true,
@@ -186,6 +230,25 @@ describe('failureDetectionStatus utilities', () => {
 
         expect(getFailureDetectionDetail(status, true)).toBe(
           'Failed to contact Obico ML service.'
+        );
+      });
+
+      it('returns checking detail for non-printing error state', () => {
+        const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
+          state: 'error',
+          reason: 'Failed to contact Obico ML service.',
+          isPrinting: false,
+          detectionSource: 'global',
+          lastOutcome: 'error',
+          lastAnalyzedAt: '2026-01-15T10:30:00Z',
+          lastConfidence: null,
+          lastAutoPaused: false,
+        };
+
+        expect(getFailureDetectionDetail(status, true)).toBe(
+          'Checking whether the current print is actively being watched.'
         );
       });
     });
@@ -286,7 +349,7 @@ describe('failureDetectionStatus utilities', () => {
         };
 
         const detail = getFailureDetectionDetail(status, true);
-        expect(detail).toMatch(/Last scan .* • monitoring needs attention/);
+        expect(detail).toMatch(/Last scan .* • scan failed — check the camera feed or ML service/);
       });
 
       it('returns actively watching message for unknown outcome', () => {
@@ -320,6 +383,87 @@ describe('failureDetectionStatus utilities', () => {
         const detail = getFailureDetectionDetail(status, true);
         expect(detail).toMatch(/Last scan .* • actively watching this print/);
       });
+    });
+  });
+
+  describe('getFailureDetectionAttentionContent', () => {
+    it('returns explicit issue and action for misconfigured printers', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'misconfigured',
+        reason: 'No enabled camera snapshot URL is configured.',
+        isPrinting: false,
+        detectionSource: 'none',
+        lastOutcome: 'none',
+        lastAnalyzedAt: null,
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      expect(getFailureDetectionAttentionContent(status)).toEqual({
+        issue: 'No enabled camera snapshot URL is configured.',
+        action: 'Add or enable a snapshot camera for this printer.',
+      });
+    });
+
+    it('returns explicit issue and action for service errors', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'error',
+        reason: 'Failed to contact Obico ML service.',
+        isPrinting: true,
+        detectionSource: 'global',
+        lastOutcome: 'error',
+        lastAnalyzedAt: '2026-01-15T10:30:00Z',
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      expect(getFailureDetectionAttentionContent(status)).toEqual({
+        issue: 'Failed to contact Obico ML service.',
+        action: 'Check the failure-detection service connection, then try again.',
+      });
+    });
+
+    it('returns failed-scan guidance when monitoring stays active', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'monitoring',
+        reason: 'Monitoring via global Obico ML settings.',
+        isPrinting: true,
+        detectionSource: 'global',
+        lastOutcome: 'error',
+        lastAnalyzedAt: '2026-01-15T10:30:00Z',
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      const attention = getFailureDetectionAttentionContent(status);
+
+      expect(attention?.issue).toMatch(/The last failure-detection scan failed at/);
+      expect(attention?.action).toBe(
+        'Check the camera feed or monitoring service before relying on automatic pause.'
+      );
+    });
+
+    it('returns null when no action is needed', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'monitoring',
+        reason: 'Monitoring via global Obico ML settings.',
+        isPrinting: true,
+        detectionSource: 'global',
+        lastOutcome: 'healthy',
+        lastAnalyzedAt: '2026-01-15T10:30:00Z',
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      expect(getFailureDetectionAttentionContent(status)).toBeNull();
     });
   });
 });

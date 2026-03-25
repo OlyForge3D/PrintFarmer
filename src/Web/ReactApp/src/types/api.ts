@@ -3330,6 +3330,9 @@ export interface AutoDispatchDetailedStatus {
   /** Auto-dispatch workflow state: "None", "PendingReady", or "Ready" */
   state: string;
   bedPreConfirmed?: boolean;
+  attentionMessage?: string;
+  attentionReason?: string;
+  operatorAction?: string;
 }
 
 export interface AutoDispatchGlobalStatus {

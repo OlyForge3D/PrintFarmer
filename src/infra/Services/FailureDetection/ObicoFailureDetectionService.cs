@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;

@@ -1832,3 +1832,158 @@ Events are transient. Refreshing page clears detection state. This is acceptable
 - Initial implementation provided foundation for final solution
 - Clear reviewer feedback from Kane enabled quick revision
 - Testing strategy (regression tests) valuable for catching subtle CSS issues
+
+## Learnings — 2026-03-25: PendingReady Status Surfacing
+
+**Task:** Investigate why printers waiting for bed-clear confirmation were no longer clearly surfaced in the frontend.
+
+**Finding:** PendingReady is carried by auto-dispatch status, not by the base `printer.state` field. Compact cards already surfaced the banner, but table view and some status labels still read only `printer.state`, so PendingReady printers could appear as `Complete`/`Idle` instead of operator-attention states.
+
+**Fix Pattern:**
+- Added shared display helpers in `src/Web/ReactApp/src/common/utils/printerStateDisplay.ts`
+- `getPrinterDisplayState()` now lets auto-dispatch PendingReady override the displayed printer label
+- `isPendingReadyState()` normalizes casing/separators so UI checks do not rely on one exact string shape
+
+**Files Touched:**
+- `src/Web/ReactApp/src/common/utils/printerStateDisplay.ts`
+- `src/Web/ReactApp/src/features/printers/components/PrinterTableView.tsx`
+- `src/Web/ReactApp/src/features/printers/components/PrinterDetailsSidebar.tsx`
+- `src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx`
+- `src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx`
+- `src/Web/ReactApp/src/features/printers/pages/PrintersPage.tsx`
+- `src/Web/ReactApp/src/common/components/Layout.tsx`
+
+**Regression Coverage:**
+- `src/common/utils/__tests__/printerStateDisplay.test.ts`
+- `src/test/features/printers/PrinterTableView.maintenance.test.tsx`
+
+## Learnings — 2026-03-29: Failure Detection Startup Badge Gating
+
+**Task:** Investigate why the printer camera view could show `Attention · Needs attention` immediately after a print was dispatched but before monitoring had actually started.
+
+**Finding:** That chip does **not** come from `printer.state` or `printerStateDisplay.ts`. It comes from the failure-detection UI path:
+- `usePrinterFailureDetectionStatus()` pulls `FailureDetectionPrinterStatusDto`
+- `FailureDetectionMonitoringBadge.tsx` and `FailureDetectionMonitoringOverlay.tsx` render the label/chip on printer cards and camera surfaces
+- The DTO already includes `isPrinting`, but the frontend previously ignored it and treated any `state === 'error'` as operator attention
+
+**Fix Pattern:**
+- Add a shared normalization layer before rendering status chips: `getFailureDetectionDisplayState(status)`
+- If failure detection reports `state === 'error'` while `isPrinting === false`, treat it as a neutral pre-monitoring state instead of operator attention
+- Keep true error/attention rendering for active prints, where monitoring is expected to be live
+
+**Files Touched:**
+- `src/Web/ReactApp/src/features/printers/utils/failureDetectionStatus.ts`
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx`
+- `src/Web/ReactApp/src/test/features/printers/failureDetectionStatus.test.ts`
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx`
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx`
+
+**Validation:**
+- React build ✅
+- ESLint ✅
+- Vitest suite ✅ (`141 passed / 1 skipped`, `1569 passed / 12 skipped`)
+
+## Learnings — 2026-03-29: Explicit Attention Copy for Cameras + Monitoring
+
+**Task:** Replace vague `needs attention` messaging with explicit issue/action copy in the printer and camera UI.
+
+**Finding:** The main surfaces already had enough data to be specific:
+- `FailureDetectionPrinterStatusDto` carries `reason`, `isPrinting`, `lastOutcome`, and `lastAnalyzedAt`, which is enough to explain the monitoring problem and the next operator action.
+- `DisplayCameraDto` carries `healthMessage`, which is enough to turn degraded/unhealthy camera states into concrete issue/action copy on the cameras page.
+- `CameraDto` still does **not** carry `healthMessage`, so printer camera-grid surfaces that only fetch `CameraDto` cannot show the same precise backend reason without an API shape change.
+
+**Fix Pattern:**
+- Centralize operator-facing attention copy in shared helpers instead of hardcoding `Attention` / `Needs attention` in components.
+- Use backend-provided reason fields as the “what’s wrong” sentence, and let the frontend derive a short `Action:` sentence from that plus local UI state.
+- For dense UI affordances (camera overlays, chips, buttons), keep a short status header but add inline issue/action copy when the state actually needs intervention.
+- When the UI itself knows about a broken preview (`imageError`, missing URLs, stream/snapshot fallback), combine that local failure context with backend health data so the operator gets both the failure mode and the recovery step.
+
+**Files Touched:**
+- `src/Web/ReactApp/src/features/printers/utils/failureDetectionStatus.ts`
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx`
+- `src/Web/ReactApp/src/features/cameras/utils/cameraAttention.ts`
+- `src/Web/ReactApp/src/features/cameras/pages/CamerasPage.tsx`
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx`
+- `src/Web/ReactApp/src/test/features/printers/failureDetectionStatus.test.ts`
+- `src/Web/ReactApp/src/test/features/cameras/cameraAttention.test.ts`
+
+**Validation:**
+- `npm run lint`
+- `npm run build`
+- `npm run test:run -- src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx src/test/features/printers/failureDetectionStatus.test.ts src/test/features/cameras/cameraAttention.test.ts`
+
+### 2026-03-25 - Failure Detection Detail Modal Trigger
+
+- Dense monitoring affordances should stay compact and open a shared detail modal instead of inlining issue/action copy inside the chip. The shared operator surface lives in `src/Web/ReactApp/src/features/printers/components/FailureDetectionStatusModal.tsx`.
+- `FailureDetectionMonitoringBadge` and `FailureDetectionMonitoringOverlay` both need an explicit `printerName` fallback so status-less/loading states still produce accessible trigger labels and modal copy.
+- Relevant files for this pattern: `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`, `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx`, `src/Web/ReactApp/src/features/printers/components/FailureDetectionStatusModal.tsx`, `src/Web/ReactApp/src/features/printers/utils/failureDetectionStatus.ts`, and `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx`.
+- Current frontend payload is sufficient for operator-facing detail (`reason`, `detectionSource`, `detectionTarget`, `snapshotUrl`, `lastAnalyzedAt`, `lastOutcome`, `lastConfidence`, `lastAutoPaused`, `lastFailureDetectedAt`); no Lambert blocker surfaced for this modal flow.
+
+---
+
+## Failure Detection UI Overhaul (2026-03-25)
+
+**Status:** ✅ Complete  
+**Duration:** Full session  
+**Build & Lint:** ✅ Clean  
+**Tests:** +54 React tests, all passing
+
+### Deliverables
+
+1. **Attention Modal Component**
+   - Surfaces `AttentionReason` ("why") and `OperatorAction` ("what to do")
+   - Replaces vague "Needs attention" with explicit operator guidance
+   - Integrates with backend auto-print attention contract
+
+2. **Failure Detection Overlay Refinement**
+   - Badge simplified to compact chip format (inline-flex, rounded-full)
+   - State labels updated: "Needs setup" for misconfigured state
+   - Hint text: "Check settings" for camera setup required
+   - Styling consistent across all states
+
+3. **Startup State Frontend Fix**
+   - Suppressed stale failure-detection overlay during printer `Starting...` state
+   - Allows optimistic BedClearBanner state to take priority
+   - Fixes integration seam: printer cache vs. stale secondary query
+
+### Files Modified
+
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx`
+- `src/Web/ReactApp/src/features/printers/utils/failureDetectionStatus.ts`
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx` (14 tests)
+- `src/Web/ReactApp/src/test/features/printers/failureDetectionStatus.test.ts` (39 tests)
+- `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx` (1 regression)
+
+### Key Decisions
+
+- **Startup boundary:** Printer startup (`Starting...`) suppresses failure-detection overlays
+- **Explicit copy:** Replace generic "Needs attention" with reason + action
+- **Modal pattern:** Frontend reads `AttentionReason` + `OperatorAction` from backend
+- **Backward compatibility:** Kept `AttentionMessage` field for existing UI
+
+### Test Coverage
+
+- **Component tests:** All state labels, hints, styling (14 tests)
+- **Utility tests:** All badge variants, state mappings, edge cases (39 tests)
+- **Regression:** Printer startup + stale attention overlay (1 focused test)
+- **Patterns:** SVG className handling, hint text separators documented
+
+### Learning: SVG ClassName Testing
+
+- SVG `className` is `SVGAnimatedString`, not plain string
+- Use `element.classList.contains()` not `element.className.toContain()`
+- Regex matchers handle separator bullets: `/Check settings/`
+
+### Team Collaboration
+
+- **Lambert:** Backend attention contract + warmup gate
+- **Kane:** Regression coverage + SVG testing patterns
+- **Dallas:** Product tradeoff review + startup boundary validation
+
+### Related Decisions
+
+- [Lambert] Failure Detection Warmup Gate
+- [Lambert] Auto-Print Attention Details
+- [Kane] PendingReady 3-layer contract
+

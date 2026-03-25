@@ -33,6 +33,7 @@ import {
 import { getStatusHeaderStyle } from '@/features/printers/utils/statusColors';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
+import { getPrinterDisplayState, isPendingReadyState } from '@/common/utils/printerStateDisplay';
 import type { TagDto } from '@/services/tagService';
 
 interface CompactPrinterCardProps {
@@ -117,6 +118,12 @@ export function CompactPrinterCard({
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
+  const isPendingReady = isPendingReadyState(autoDispatchStatus?.state);
+  const statusLabel = getPrinterDisplayState({
+    printerState: state,
+    autoDispatchState: autoDispatchStatus?.state,
+    isOnline,
+  });
 
   // Queue label: "1 of 3" when printing with more jobs queued
   const printingIndex = activeQueueJobs.findIndex(j => {
@@ -140,14 +147,10 @@ export function CompactPrinterCard({
 
   const headerStyle = getStatusHeaderStyle({ state, isOnline, isPrinting, isPaused, isShutdown });
 
-  const toCamelCase = (str: string): string => {
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  };
-
   return (
     <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
       {/* Bed clear banner — overlay on top of card */}
-      {autoDispatchStatus && autoDispatchStatus.state === 'PendingReady' && (
+      {autoDispatchStatus && isPendingReady && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-black/75">
           <div className="w-[90%]">
             <BedClearBanner
@@ -167,12 +170,13 @@ export function CompactPrinterCard({
           </div>
           <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
             <span className="text-pf-text-primary font-medium">
-              {isOnline ? toCamelCase(state) : 'Offline'}
+              {statusLabel}
             </span>
           </div>
           <FailureDetectionMonitoringBadge
             enabled={!!printer.obicoEnabled}
             status={failureDetectionStatus}
+            printerName={printer.name}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
         </div>
@@ -227,6 +231,7 @@ export function CompactPrinterCard({
                 <FailureDetectionMonitoringOverlay
                   enabled={!!printer.obicoEnabled}
                   status={failureDetectionStatus}
+                  printerName={printer.name}
                 />
               }
             />

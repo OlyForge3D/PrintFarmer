@@ -1,12 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import type {
+  AutoDispatchStatus,
   FailureDetectionEvent,
   FailureDetectionMonitorStatusDto,
+  FailureDetectionPrinterStatusDto,
   Printer,
 } from '@/types/api';
 
 let failureDetectionStatusMock: FailureDetectionMonitorStatusDto | undefined;
+let failureDetectionPrinterStatusMock: FailureDetectionPrinterStatusDto | undefined;
+let autoDispatchStatusMock: AutoDispatchStatus | null = null;
 
 // ── Mocks for CompactPrinterCard dependencies ──
 
@@ -31,7 +36,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
-  useAutoDispatchStatus: () => ({ data: null, isLoading: false }),
+  useAutoDispatchStatus: () => ({ data: autoDispatchStatusMock, isLoading: false }),
   useSetAutoDispatchEnabled: () => ({ mutateAsync: vi.fn() }),
 }));
 
@@ -43,10 +48,22 @@ vi.mock('@/services/api', () => ({
 
 vi.mock('@/features/printers/hooks/usePrinterFailureDetectionStatus', () => ({
   usePrinterFailureDetectionStatus: () => ({
-    printerStatus: failureDetectionStatusMock?.printers[0],
+    printerStatus: failureDetectionPrinterStatusMock ?? failureDetectionStatusMock?.printers[0],
     data: failureDetectionStatusMock,
     isLoading: false,
   }),
+}));
+
+vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({
+  PrinterCameraPreview: ({
+    overlay,
+  }: {
+    overlay?: ReactNode;
+  }) => (
+    <div data-testid="camera-preview">
+      {overlay}
+    </div>
+  ),
 }));
 
 const failureDetectionListeners: Array<(event: FailureDetectionEvent) => void> = [];
@@ -145,6 +162,8 @@ function emitFailureDetected(event: FailureDetectionEvent) {
 beforeEach(() => {
   failureDetectionListeners.splice(0, failureDetectionListeners.length);
   failureDetectionStatusMock = undefined;
+  failureDetectionPrinterStatusMock = undefined;
+  autoDispatchStatusMock = null;
 });
 
 // ── FailureDetectionEvent type shape test ──
@@ -317,6 +336,77 @@ describe('CompactPrinterCard monitoring badge', () => {
     );
 
     expect(screen.getByText('Ready')).toBeTruthy();
+  });
+
+  it('shows the bed-clear overlay when auto-dispatch status is PendingReady', async () => {
+    const { CompactPrinterCard } = await import(
+      '@/features/printers/components/CompactPrinterCard'
+    );
+
+    const printer = makePrinter({
+      state: 'Idle',
+      isOnline: true,
+    });
+    autoDispatchStatusMock = {
+      printerId: printer.id,
+      printerName: printer.name,
+      enabled: true,
+      isReady: false,
+      queueDepth: 2,
+      readyGateChecks: [],
+      state: 'PendingReady',
+      bedPreConfirmed: false,
+    };
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />
+    );
+
+    const banner = screen.getByTestId('bed-clear-banner');
+    expect(banner).toBeInTheDocument();
+    expect(banner.parentElement?.parentElement).toHaveClass('absolute', 'inset-0', 'z-10');
+  });
+
+  it('does not show attention on the camera preview while a dispatched print is starting', async () => {
+    const { CompactPrinterCard } = await import(
+      '@/features/printers/components/CompactPrinterCard'
+    );
+
+    const printer = makePrinter({
+      state: 'Starting...',
+      isOnline: true,
+      obicoEnabled: true,
+      cameraSnapshotUrl: 'http://printer.local/webcam/?action=snapshot',
+    });
+
+    failureDetectionPrinterStatusMock = {
+      printerId: printer.id,
+      printerName: printer.name,
+      state: 'error',
+      reason: 'Failed to contact Obico ML service.',
+      isPrinting: true,
+      detectionSource: 'global',
+      lastOutcome: 'error',
+      lastAnalyzedAt: '2026-01-01T00:00:00Z',
+      lastConfidence: null,
+      lastAutoPaused: false,
+    };
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show camera preview' }));
+
+    expect(screen.getByTestId('camera-preview')).toBeInTheDocument();
+    expect(screen.queryByText('Attention')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Needs attention/)).not.toBeInTheDocument();
   });
 
   it('shows a recent failure badge when a matching failure event arrives', async () => {

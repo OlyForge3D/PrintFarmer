@@ -1,12 +1,19 @@
+import { useState } from 'react';
 import clsx from 'clsx';
 import { ShieldIcon } from '@/common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui';
 import type { FailureDetectionPrinterStatusDto } from '@/types/api';
-import { getFailureDetectionStateLabel } from '@/features/printers/utils/failureDetectionStatus';
+import {
+  getFailureDetectionDisplayState,
+  getFailureDetectionStateLabel,
+} from '@/features/printers/utils/failureDetectionStatus';
+import { FailureDetectionStatusModal } from '@/features/printers/components/FailureDetectionStatusModal';
 
 interface FailureDetectionMonitoringOverlayProps {
   enabled: boolean;
   status?: FailureDetectionPrinterStatusDto;
   className?: string;
+  printerName?: string;
 }
 
 function getChipStyles(state?: string): { border: string; glow: string; icon: string } {
@@ -44,40 +51,50 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
   }
 }
 
-function getCompactHint(state?: string, enabled = false): string | null {
-  if (state === 'misconfigured') return 'Check settings';
-  if (state === 'error') return 'Needs attention';
-  if (!state && enabled) return 'Connecting…';
-  return null;
-}
-
 export function FailureDetectionMonitoringOverlay({
   enabled,
   status,
   className,
+  printerName,
 }: FailureDetectionMonitoringOverlayProps) {
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+
   if (!enabled && !status) {
     return null;
   }
 
-  const label = getFailureDetectionStateLabel(status?.state, enabled);
-  const hint = getCompactHint(status?.state, enabled);
-  const styles = getChipStyles(status?.state);
+  const displayState = getFailureDetectionDisplayState(status);
+  const label = getFailureDetectionStateLabel(displayState, enabled);
+  const styles = getChipStyles(displayState);
+  const resolvedPrinterName = status?.printerName ?? printerName;
 
   return (
-    <div
-      className={clsx(
-        'pointer-events-none inline-flex items-center gap-1.5 rounded-full border bg-slate-950/80 px-2.5 py-1 backdrop-blur-sm',
-        styles.border,
-        styles.glow,
-        className
-      )}
-    >
-      <ShieldIcon className={clsx('h-3.5 w-3.5', styles.icon)} ariaLabel="Spaghetti detection" />
-      <span className="text-[11px] font-medium text-white">{label}</span>
-      {hint && (
-        <span className="text-[10px] text-white/50">· {hint}</span>
-      )}
-    </div>
+    <>
+      <Button
+        type="button"
+        variant="unstyled"
+        onClick={() => setIsDetailsOpen(true)}
+        className={clsx(
+          'inline-flex items-center gap-1.5 rounded-full border bg-slate-950/80 px-2.5 py-1 backdrop-blur-sm pointer-events-auto transition-colors hover:bg-slate-950/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-white/70',
+          styles.border,
+          styles.glow,
+          className
+        )}
+        aria-label={`Open spaghetti detection details${resolvedPrinterName ? ` for ${resolvedPrinterName}` : ''}`}
+        aria-haspopup="dialog"
+        aria-expanded={isDetailsOpen}
+        title={`${label} • open spaghetti detection details`}
+        iconLeft={<ShieldIcon className={clsx('h-3.5 w-3.5', styles.icon)} ariaLabel="Spaghetti detection" />}
+      >
+        {label}
+      </Button>
+      <FailureDetectionStatusModal
+        isOpen={isDetailsOpen}
+        onClose={() => setIsDetailsOpen(false)}
+        enabled={enabled}
+        status={status}
+        printerName={resolvedPrinterName}
+      />
+    </>
   );
 }

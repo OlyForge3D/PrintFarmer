@@ -310,7 +310,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         {
             foreach (var printer in printers.EnumerateArray())
             {
-                if (printer.TryGetProperty("state", out var state) && 
+                if (printer.TryGetProperty("state", out var state) &&
                     state.GetString() == "disabled")
                 {
                     printer.TryGetProperty("reason", out var reason).Should().BeTrue();
@@ -341,12 +341,12 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         // If any printer is in "misconfigured" state, the reason must reference camera setup
         foreach (var printer in printers.EnumerateArray())
         {
-            if (printer.TryGetProperty("state", out var state) && 
+            if (printer.TryGetProperty("state", out var state) &&
                 state.GetString() == "misconfigured")
             {
                 printer.TryGetProperty("reason", out var reason).Should().BeTrue();
                 var reasonText = reason.GetString() ?? string.Empty;
-                reasonText.Should().Contain("camera", 
+                reasonText.Should().Contain("camera",
                     "Misconfigured state should only be used for camera-related issues that users can fix");
                 reasonText.Should().NotContain("administrator",
                     "Misconfigured state should not reference administrator actions");
@@ -411,10 +411,10 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         {
             printer.TryGetProperty("reason", out var reason).Should().BeTrue();
             var reasonText = reason.GetString();
-            
+
             reasonText.Should().NotBeNullOrWhiteSpace("All printers should have a status reason");
             reasonText!.Length.Should().BeGreaterThan(10, "Status messages should be descriptive");
-            
+
             // Messages should not contain internal jargon or technical field names
             reasonText.Should().NotContain("SnapshotUrl", "Messages should not expose internal field names");
             reasonText.Should().NotContain("ObicoApiUrl", "Messages should not expose internal field names");
@@ -444,8 +444,8 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         // if the legacy field is populated.
         foreach (var printer in printers.EnumerateArray())
         {
-            if (printer.TryGetProperty("snapshotUrl", out var snapshotUrl) && 
-                snapshotUrl.ValueKind == JsonValueKind.String && 
+            if (printer.TryGetProperty("snapshotUrl", out var snapshotUrl) &&
+                snapshotUrl.ValueKind == JsonValueKind.String &&
                 !string.IsNullOrWhiteSpace(snapshotUrl.GetString()))
             {
                 // If a snapshot URL is present in the status, the state should not be "misconfigured"

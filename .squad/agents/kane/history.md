@@ -529,3 +529,91 @@ User reported two camera preview issues:
 - Early regression testing enabled fast iteration and verification
 - Specific feedback with line numbers and code examples speeds revision
 - Re-review confirmed fixes without need for further cycles
+
+### PendingReady Regression Coverage (2026-03-25)
+- Added backend regression coverage in `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs` for `TransitionToPendingReadyAsync`, `MarkReadyAsync`, and `SkipNextJobAsync`.
+- Added API integration coverage in `src/tests/Farm.Web.Api.Tests/Controllers/AutoPrintPendingReadyTests.cs` to prove `/api/auto-print/status` and `/api/auto-print/{printerId}/status` surface `PendingReady`, queue depth, and the waiting-for-operator ready gate.
+- Added frontend coverage in `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx` to prove `CompactPrinterCard` renders the bed-clear overlay when auto-dispatch status is `PendingReady`.
+- Key path learned: printers-page attention and layout badges rely on the bulk `useAllAutoDispatchStatuses` query plus `isPendingReadyState(...)`, while the card overlay still depends on `useAutoDispatchStatus(printer.id)`.
+- Validation: targeted API build + 6 targeted .NET tests passed; targeted React run passed 26 tests across `BedClearBanner` and `obico-ml-badge` suites.
+
+### Startup Attention Regression (2026-03-25)
+- Added a focused frontend regression in `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx` to prove the `CompactPrinterCard` camera overlay must not keep showing `Attention · Needs attention` once the printer has been optimistically moved to `Starting...`.
+- Reused the existing startup path from `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx`, which already proves bed-clear confirmation updates the printer cache to `Starting...`.
+- Key path learned: `BedClearBanner` updates the printer list/detail cache immediately, but `CompactPrinterCard` gets failure-detection state from the separate `usePrinterFailureDetectionStatus` query, so stale monitoring data can outlive the optimistic startup state unless the UI suppresses it explicitly.
+- Validation: focused React run against `src/test/features/printers/obico-ml-badge.test.tsx` and `src/features/printers/__tests__/BedClearBanner.test.tsx` produced 1 failing regression and 26 passing tests; the new failure is the expected proof that the startup attention bug still exists.
+
+---
+
+## Regression Coverage & Test Patterns (2026-03-25)
+
+**Status:** ✅ Complete  
+**Duration:** Full session  
+**Tests:** +54 React tests + focused API regression tests, all passing
+
+### Deliverables
+
+1. **PendingReady 3-Layer Regression Coverage**
+   - Service transition logic: `TransitionToPendingReadyAsync`, `MarkReadyAsync`, `SkipNextJobAsync`
+   - Bulk status payloads: `GET /api/auto-print/status` and printer SignalR updates
+   - UI rendering: `CompactPrinterCard` overlay and bed-clear prompt
+   - Tests: `AutoPrintServiceTests.cs`, `AutoPrintPendingReadyTests.cs`
+
+2. **Failure Detection Overlay State Coverage**
+   - 14 React component tests: state labels, hints, styling
+   - 39 utility function tests: badge variants, state mappings, edge cases
+   - "Needs setup" label for misconfigured state
+   - "Check settings" hint text handling
+
+3. **Startup Regression Focused Coverage**
+   - Created `obico-ml-badge.test.tsx` regression test
+   - Printer in `Starting...` with stale failure-detection attention
+   - Validated integration seam: optimistic printer state vs. stale secondary query
+
+4. **Incomplete Overlay Artifact Rejection**
+   - Rejected `kane-spaghetti-overlay-tests.md` (incomplete startup fix)
+   - Identified missing integration seam coverage
+   - Forced later corrected revision with focused regression test
+
+### Files Modified
+
+- `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Controllers/AutoPrintPendingReadyTests.cs`
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx`
+- `src/Web/ReactApp/src/test/features/printers/failureDetectionStatus.test.ts`
+- `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx`
+
+### Key Decisions
+
+- **3-layer contract:** Testing only one layer misses regressions (backend correct, UI never surfaces it)
+- **Integration seam bugs:** Utility-only tests insufficient; need integration validation
+- **Startup boundary:** Printer startup is override boundary for failure-detection overlays
+- **Quality first:** Reject incomplete fixes, force team toward thorough solution
+
+### Test Coverage
+
+- +2 focused API regression tests
+- +54 React tests (0 failures)
+- 0 breaking changes to existing tests
+- SVG className testing pattern documented
+- Hint text separator handling pattern documented
+
+### Testing Patterns Documented
+
+1. **SVG className:** Use `classList.contains()` not `className.toContain()`
+2. **Hint separators:** Use regex matchers to handle bullet separators
+3. **State consistency:** Test both label and variant for each state
+4. **Integration seams:** Cache + secondary query interactions require integration testing
+
+### Team Collaboration
+
+- **Ripley:** Frontend implementation feedback on test patterns
+- **Lambert:** Backend startup logic validation
+- **Dallas:** Artifact triage guidance + quality decision support
+
+### Related Decisions
+
+- [Ripley] Startup state UI override boundary
+- [Lambert] Failure detection warmup gate + ready-gate dispatch logic
+- [Dallas] Product tradeoff review + incomplete artifact rejection
+
