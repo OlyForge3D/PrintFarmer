@@ -468,3 +468,28 @@ Successfully committed and pushed spaghetti detection discoverability improvemen
 - ✅ Working tree clean, no leftovers
 
 **Learning:** Squad bookkeeping commits (Scribe's history + decision consolidation) are safe to push immediately after creation—they are non-breaking documentation-only changes that should stay synchronized across team sessions.
+
+## Landing: Auto-Dispatch Live Cache Sync (2026-03-25)
+
+**Commit:** `fb6ccf02` — feat(auto-dispatch): sync live autoprintstatechanged into compact-card cache and bed-clear flow
+
+**What landed:**
+- SignalR handler for `autoprintstatechanged` event in `printer-signalr.ts`
+- `useAutoDispatchSignalRSync` hook that subscribes to live updates and keeps React Query caches in sync across all active QueryClients
+- Updated `CompactPrinterCard` and `BedClearBanner` to check `readyGateChecks["Bed Clear Confirmed"]` as fallback for stale/flattened row state
+- Comprehensive live-update regression test (`compact-printer-pendingready-live.test.tsx`)
+
+**Why it matters:**
+The backend was already broadcasting `autoprintstatechanged` when the printer transitioned to `PendingReady`, but the frontend only refreshed its cache on a 10-second poll interval. This left a real gap where the bed-clear banner and compact card could stay stale for up to 10 seconds, making operators think the state change never arrived.
+
+**Validation:**
+- Kane confirmed 29/29 React regressions pass
+- 9/9 auto-dispatch API/service tests pass  
+- All three decision documents in `.squad/decisions/inbox/` logged and landed
+
+**Lessons for future cache sync work:**
+1. Keep callbacks in a Set, clean up when all subscribers unsubscribe (prevents memory leaks in SPA)
+2. Use `syncAutoDispatchCaches()` to atomically update all related query keys (allStatuses, status(id), globalStatus)
+3. CompactCard fallback to `requiresBedClearConfirmation()` handles both live and stale row scenarios gracefully
+4. Squad decisions document the "why" — upstream work was verified, so the fix was purely on the UI hydration path
+
