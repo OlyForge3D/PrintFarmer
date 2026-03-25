@@ -121,6 +121,8 @@ export interface PrinterConnection {
 export interface PrinterMetadata {
   /** User notes/description */
   notes?: string;
+  /** Whether Obico AI failure detection is enabled for this printer. */
+  obicoEnabled?: boolean;
   /** Manufacturer ID (foreign key) */
   manufacturerId?: string;
   /** Manufacturer name (e.g., "Prusa", "Creality") */

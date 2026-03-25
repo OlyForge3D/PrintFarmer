@@ -1,8 +1,13 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { RotateCw } from 'lucide-react';
 import { Printer, CameraHealthStatus } from '@/types/api';
-import { CameraIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
+import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Badge } from '@/common/components/ui';
 import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
+import {
+  getCameraMediaTransformStyle,
+  useCameraViewPreferences,
+} from '@/features/cameras/hooks/useCameraViewPreferences';
 
 interface CameraCardProps {
   printer: Printer;
@@ -15,8 +20,7 @@ interface CameraCardProps {
 export function CameraCard({
   printer: p,
 }: CameraCardProps) {
-  const [imageError, setImageError] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('stream');
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const isOnline = p.isOnline ?? false;
   const state = p.state ?? '';
   const isPrinting = state.toLowerCase().includes('printing');
@@ -27,6 +31,18 @@ export function CameraCard({
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
   const hasSnapshot = !!cameraSnapshotUrl;
   const hasStream = !!cameraStreamUrl;
+  const {
+    cameraMode,
+    setCameraMode,
+    rotation,
+    rotateClockwise,
+    hasModeToggle,
+  } = useCameraViewPreferences({
+    preferenceKey: `printer:${p.id}`,
+    defaultMode: hasStream ? 'stream' : 'snapshot',
+    hasStream,
+    hasSnapshot,
+  });
 
   // Fetch cameras for this printer to get health status
   const { data: printerCameras } = usePrinterCameras(p.id);
@@ -41,6 +57,8 @@ export function CameraCard({
     : hasStream 
     ? cameraStreamUrl 
     : cameraSnapshotUrl;
+  const imageError = !!activeUrl && failedUrl === activeUrl;
+  const mediaStyle = getCameraMediaTransformStyle(rotation);
 
   // Health status dot color
   const getHealthDotColor = (health: CameraHealthStatus) => {
@@ -56,13 +74,23 @@ export function CameraCard({
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
       {/* Camera feed - main content */}
       <div className="relative w-full aspect-video bg-pf-bg-2">
-        {hasCameraUrls && !imageError ? (
+        {cameraMode === 'stream' && hasStream && activeUrl ? (
+          <iframe
+            src={activeUrl}
+            title={`${p.name} live camera feed`}
+            className="border-0 bg-black"
+            style={mediaStyle}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+          />
+        ) : hasCameraUrls && !imageError ? (
           <img
             src={activeUrl ?? ''}
             alt={`${p.name} camera feed`}
-            className="absolute inset-0 w-full h-full object-cover"
+            className="object-cover"
+            style={mediaStyle}
             loading="lazy"
-            onError={() => setImageError(true)}
+            onError={() => setFailedUrl(activeUrl ?? '')}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
@@ -73,6 +101,18 @@ export function CameraCard({
         
         {/* Status overlay - top right */}
         <div className="absolute top-2 right-2 flex gap-1">
+          {activeUrl && (
+            <a
+              href={cameraMode === 'stream' && hasStream ? cameraStreamUrl ?? activeUrl : activeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/40 text-white backdrop-blur-xs transition hover:border-white/20 hover:bg-black/60"
+              title={`Open ${p.name} camera in a new tab`}
+              aria-label={`Open ${p.name} camera in a new tab`}
+            >
+              <ExternalLinkIcon className="w-4 h-4" />
+            </a>
+          )}
           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium backdrop-blur-xs ${
             isOnline 
               ? 'bg-pf-status-online-bg/80 text-pf-status-online-text' 
@@ -102,8 +142,20 @@ export function CameraCard({
           </div>
         )}
 
+        <div className="absolute bottom-2 left-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={rotateClockwise}
+            className="h-8 w-8 rounded-full border border-white/10 bg-black/50 p-0 text-white backdrop-blur-xs enabled:hover:bg-black/70"
+            title="Rotate camera clockwise"
+            aria-label="Rotate camera clockwise"
+            iconCenter={<RotateCw className="w-4 h-4" />}
+          />
+        </div>
         {/* Camera mode toggle - bottom right (only if both modes available) */}
-        {hasSnapshot && hasStream && (
+        {hasModeToggle && (
           <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
             <Button
               type="button"

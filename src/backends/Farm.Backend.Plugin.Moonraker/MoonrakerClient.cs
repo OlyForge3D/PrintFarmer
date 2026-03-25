@@ -586,7 +586,8 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             SpoolInfo: spoolInfo,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
-            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)));
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
+            ObicoEnabled: printer.ObicoEnabled));
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)

@@ -36,6 +36,7 @@ namespace Farm.Infrastructure;
 /// <param name="BackendUrl">Calculated backend URL with port (7125 for Moonraker, etc).</param>
 /// <param name="FrontendUrl">Calculated frontend URL (typically port 80 for web UI).</param>
 /// <param name="Location">Location information (farm location assignment).</param>
+/// <param name="ObicoEnabled">Whether Obico AI failure detection is enabled for the printer.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -67,4 +68,5 @@ public record PrinterDto(
     PrinterSpoolInfoDto? SpoolInfo = null,
     string? BackendUrl = null,
     string? FrontendUrl = null,
-    LocationSummaryDto? Location = null);
+    LocationSummaryDto? Location = null,
+    bool ObicoEnabled = false);

@@ -1,6 +1,14 @@
-﻿using System.Net;
+﻿using System;
+using System.Linq;
+using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.Integration;
 
@@ -152,5 +160,47 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
         HttpResponseMessage response = await authClient.GetAsync("/api/printers");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task PrintersEndpoint_WhenPrinterHasObicoEnabled_ReturnsObicoEnabledFlag()
+    {
+        using AsyncServiceScope scope = _factory!.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        Manufacturer manufacturer = await db.Manufacturers.FirstOrDefaultAsync()
+            ?? db.Manufacturers.Add(new Manufacturer { Id = Guid.NewGuid(), Name = "Test Manufacturer" }).Entity;
+        await db.SaveChangesAsync();
+
+        PrinterModel model = await db.PrinterModels.FirstOrDefaultAsync()
+            ?? db.PrinterModels.Add(new PrinterModel { Id = Guid.NewGuid(), Name = "Test Model", ManufacturerId = manufacturer.Id }).Entity;
+        await db.SaveChangesAsync();
+
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "obico-printer",
+            ServerUrl = "http://obico-printer.local",
+            BackendPort = 7125,
+            Backend = (int)PrinterBackend.Moonraker,
+            ManufacturerId = manufacturer.Id,
+            ModelId = model.Id,
+            ObicoEnabled = true
+        };
+
+        db.Printers.Add(printer);
+        await db.SaveChangesAsync();
+
+        HttpClient authClient = await _factory.CreateAuthenticatedClientAsync();
+        HttpResponseMessage response = await authClient.GetAsync("/api/printers");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement printerJson = document.RootElement.EnumerateArray()
+            .First(element => element.GetProperty("id").GetGuid() == printer.Id);
+
+        printerJson.TryGetProperty("obicoEnabled", out JsonElement obicoEnabled).Should().BeTrue();
+        obicoEnabled.GetBoolean().Should().BeTrue();
     }
 }

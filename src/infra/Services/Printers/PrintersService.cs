@@ -804,7 +804,8 @@ public class PrintersService(
                     SpoolInfo: status.SpoolInfo ?? await BuildDbSpoolInfoAsync(p, ct),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
-                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
+                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
+                    ObicoEnabled: p.ObicoEnabled));
             }
             catch (Exception ex)
             {
@@ -848,7 +849,8 @@ public class PrintersService(
                     SpoolInfo: await BuildDbSpoolInfoAsync(p, ct),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
-                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
+                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
+                    ObicoEnabled: p.ObicoEnabled));
             }
         }
 
@@ -1263,7 +1265,8 @@ public class PrintersService(
             SpoolInfo: null,
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
-            Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description));
+            Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
+            ObicoEnabled: p.ObicoEnabled);
     }
 
     /// <summary>

@@ -1536,7 +1536,8 @@ public class PrintersController(
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
-            FrontendUrl: p.FrontendUrl);
+            FrontendUrl: p.FrontendUrl,
+            ObicoEnabled: p.ObicoEnabled);
 
         return Ok(dtoResponse);
     }

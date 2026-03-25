@@ -1,13 +1,18 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { RotateCw } from 'lucide-react';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Badge } from '@/common/components/ui';
-import { CameraIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
 import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
 import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
+import {
+  getCameraMediaTransformStyle,
+  useCameraViewPreferences,
+} from '@/features/cameras/hooks/useCameraViewPreferences';
 
 /**
  * CamerasPage - Display all enabled cameras in a grid view
@@ -153,11 +158,22 @@ const cameraTypeLabels: Record<CameraType, string> = {
  * CameraViewCard - Individual camera feed card
  */
 function CameraViewCard({ camera }: CameraViewCardProps) {
-  const [imageError, setImageError] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('stream');
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   const hasSnapshot = !!camera.snapshotUrl;
   const hasStream = !!camera.streamUrl;
+  const {
+    cameraMode,
+    setCameraMode,
+    rotation,
+    rotateClockwise,
+    hasModeToggle,
+  } = useCameraViewPreferences({
+    preferenceKey: `camera:${camera.id}`,
+    defaultMode: hasStream ? 'stream' : 'snapshot',
+    hasStream,
+    hasSnapshot,
+  });
 
   // Determine which URL to show
   const activeUrl = cameraMode === 'stream' && hasStream
@@ -167,23 +183,39 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
     : hasStream
     ? camera.streamUrl
     : camera.snapshotUrl;
+  const imageError = !!activeUrl && failedUrl === activeUrl;
+  const mediaStyle = getCameraMediaTransformStyle(rotation);
 
   return (
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
       {/* Camera feed */}
       <div className="relative w-full aspect-video bg-pf-bg-2">
-        {activeUrl && !imageError ? (
+        {cameraMode === 'stream' && hasStream && activeUrl ? (
+          <iframe
+            src={activeUrl}
+            title={`${camera.name} live camera feed`}
+            className="border-0 bg-black"
+            style={mediaStyle}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+          />
+        ) : activeUrl && !imageError ? (
           <img
             src={activeUrl}
             alt={`${camera.name} camera feed`}
-            className="absolute inset-0 w-full h-full object-cover"
+            className="object-cover"
+            style={mediaStyle}
             loading="lazy"
-            onError={() => setImageError(true)}
+            onError={() => setFailedUrl(activeUrl ?? '')}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
-            <span className="text-sm">{imageError ? 'Camera unavailable' : 'No feed URL'}</span>
+            <span className="text-sm">
+              {imageError
+                ? cameraMode === 'snapshot' ? 'Snapshot unavailable' : 'Camera unavailable'
+                : 'No feed URL'}
+            </span>
           </div>
         )}
 
@@ -193,14 +225,38 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
         </div>
 
         {/* Source badge - top right */}
-        <div className="absolute top-2 right-2">
+        <div className="absolute top-2 right-2 flex items-center gap-1">
           <Badge variant="default" size="sm" className="backdrop-blur-sm bg-pf-bg-1/80">
             {sourceLabels[camera.source]}
           </Badge>
+          {activeUrl && (
+            <a
+              href={cameraMode === 'stream' && hasStream ? camera.streamUrl : activeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-pf-bg-1/80 text-pf-text-primary backdrop-blur-sm transition hover:border-white/20 hover:bg-pf-bg-1"
+              title={`Open ${camera.name} in a new tab`}
+              aria-label={`Open ${camera.name} in a new tab`}
+            >
+              <ExternalLinkIcon className="w-4 h-4" />
+            </a>
+          )}
         </div>
 
-        {/* Camera mode toggle - bottom right (only if both modes available) */}
-        {hasSnapshot && hasStream && (
+        {/* Camera controls */}
+        <div className="absolute bottom-2 left-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={rotateClockwise}
+            className="h-8 w-8 rounded-full border border-white/10 bg-black/50 p-0 text-white backdrop-blur-xs enabled:hover:bg-black/70"
+            title="Rotate camera clockwise"
+            aria-label="Rotate camera clockwise"
+            iconCenter={<RotateCw className="w-4 h-4" />}
+          />
+        </div>
+        {hasModeToggle && (
           <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
             <Button
               type="button"

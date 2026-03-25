@@ -195,7 +195,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
-            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description));
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
+            ObicoEnabled: printer.ObicoEnabled);
     }
 
     public Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
