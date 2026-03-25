@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
-import type { FailureDetectionEvent, Printer } from '@/types/api';
+import type {
+  FailureDetectionEvent,
+  FailureDetectionMonitorStatusDto,
+  Printer,
+} from '@/types/api';
+
+let failureDetectionStatusMock: FailureDetectionMonitorStatusDto | undefined;
 
 // ── Mocks for CompactPrinterCard dependencies ──
 
@@ -33,6 +39,14 @@ vi.mock('@/services/api', () => ({
   apiClient: {
     getPrinterDetails: vi.fn().mockResolvedValue({}),
   },
+}));
+
+vi.mock('@/features/printers/hooks/usePrinterFailureDetectionStatus', () => ({
+  usePrinterFailureDetectionStatus: () => ({
+    printerStatus: failureDetectionStatusMock?.printers[0],
+    data: failureDetectionStatusMock,
+    isLoading: false,
+  }),
 }));
 
 const failureDetectionListeners: Array<(event: FailureDetectionEvent) => void> = [];
@@ -130,6 +144,7 @@ function emitFailureDetected(event: FailureDetectionEvent) {
 
 beforeEach(() => {
   failureDetectionListeners.splice(0, failureDetectionListeners.length);
+  failureDetectionStatusMock = undefined;
 });
 
 // ── FailureDetectionEvent type shape test ──
@@ -191,10 +206,41 @@ describe('ShieldIcon', () => {
   });
 });
 
-// ── CompactPrinterCard ML badge tests ──
+function makeFailureDetectionStatus(
+  printerId: string,
+  printerName = 'Test Printer'
+): FailureDetectionMonitorStatusDto {
+  return {
+    monitoringEnabled: true,
+    confidenceThreshold: 0.8,
+    scanIntervalSeconds: 30,
+    autoPauseOnFailure: true,
+    configuredPrinterCount: 1,
+    activelyMonitoredPrinterCount: 1,
+    lastAnalyzedPrinterCount: 1,
+    lastFailureCount: 0,
+    lastScanCompletedAt: '2026-01-01T00:00:00Z',
+    printers: [
+      {
+        printerId,
+        printerName,
+        state: 'monitoring',
+        reason: 'Monitoring via pooled server.',
+        isPrinting: true,
+        detectionSource: 'pooled',
+        detectionTarget: 'Primary',
+        lastAnalyzedAt: '2026-01-01T00:00:00Z',
+        lastOutcome: 'healthy',
+        lastConfidence: 0.12,
+      },
+    ],
+  };
+}
 
-describe('CompactPrinterCard ML badge', () => {
-  it('shows ML badge when printer has Obico monitoring enabled and is printing', async () => {
+// ── CompactPrinterCard monitoring badge tests ──
+
+describe('CompactPrinterCard monitoring badge', () => {
+  it('shows guarding badge when printer is actively monitored', async () => {
     const { CompactPrinterCard } = await import(
       '@/features/printers/components/CompactPrinterCard'
     );
@@ -204,6 +250,7 @@ describe('CompactPrinterCard ML badge', () => {
       state: 'Printing',
       isOnline: true,
     });
+    failureDetectionStatusMock = makeFailureDetectionStatus(printer.id, printer.name);
 
     render(
       <CompactPrinterCard
@@ -212,11 +259,11 @@ describe('CompactPrinterCard ML badge', () => {
       />
     );
 
-    expect(screen.getByText('ML')).toBeTruthy();
-    expect(screen.getByLabelText('ML Monitoring Active')).toBeTruthy();
+    expect(screen.getByText('Guarding')).toBeTruthy();
+    expect(screen.getByLabelText('Failure detection guarding')).toBeTruthy();
   });
 
-  it('does NOT show ML badge when printer does not have Obico monitoring enabled', async () => {
+  it('does NOT show guarding badge when printer does not have Obico monitoring enabled', async () => {
     const { CompactPrinterCard } = await import(
       '@/features/printers/components/CompactPrinterCard'
     );
@@ -234,10 +281,10 @@ describe('CompactPrinterCard ML badge', () => {
       />
     );
 
-    expect(screen.queryByText('ML')).toBeNull();
+    expect(screen.queryByText('Guarding')).toBeNull();
   });
 
-  it('does NOT show ML badge when printer is idle even with Obico monitoring enabled', async () => {
+  it('shows a ready badge when monitoring is enabled but the printer is idle', async () => {
     const { CompactPrinterCard } = await import(
       '@/features/printers/components/CompactPrinterCard'
     );
@@ -247,6 +294,20 @@ describe('CompactPrinterCard ML badge', () => {
       state: 'Idle',
       isOnline: true,
     });
+    failureDetectionStatusMock = {
+      ...makeFailureDetectionStatus(printer.id, printer.name),
+      activelyMonitoredPrinterCount: 0,
+      printers: [
+        {
+          ...makeFailureDetectionStatus(printer.id, printer.name).printers[0],
+          state: 'idle',
+          isPrinting: false,
+          reason: 'Printer is not actively printing.',
+          lastOutcome: 'none',
+          lastAnalyzedAt: undefined,
+        },
+      ],
+    };
 
     render(
       <CompactPrinterCard
@@ -255,7 +316,7 @@ describe('CompactPrinterCard ML badge', () => {
       />
     );
 
-    expect(screen.queryByText('ML')).toBeNull();
+    expect(screen.getByText('Ready')).toBeTruthy();
   });
 
   it('shows a recent failure badge when a matching failure event arrives', async () => {
@@ -291,10 +352,10 @@ describe('CompactPrinterCard ML badge', () => {
   });
 });
 
-// ── DetailedPrinterCard ML badge tests ──
+// ── DetailedPrinterCard monitoring badge tests ──
 
-describe('DetailedPrinterCard ML badge', () => {
-  it('shows ML badge when printer has Obico monitoring enabled and is printing', async () => {
+describe('DetailedPrinterCard monitoring badge', () => {
+  it('shows guarding badge when printer is actively monitored', async () => {
     const { DetailedPrinterCard } = await import(
       '@/features/printers/components/DetailedPrinterCard'
     );
@@ -304,6 +365,7 @@ describe('DetailedPrinterCard ML badge', () => {
       state: 'Printing',
       isOnline: true,
     });
+    failureDetectionStatusMock = makeFailureDetectionStatus(printer.id, printer.name);
 
     render(
       <DetailedPrinterCard
@@ -311,11 +373,11 @@ describe('DetailedPrinterCard ML badge', () => {
       />
     );
 
-    expect(screen.getByText('ML')).toBeTruthy();
-    expect(screen.getByLabelText('ML Monitoring Active')).toBeTruthy();
+    expect(screen.getByText('Guarding')).toBeTruthy();
+    expect(screen.getByLabelText('Failure detection guarding')).toBeTruthy();
   });
 
-  it('does NOT show ML badge when printer does not have Obico monitoring enabled', async () => {
+  it('does NOT show guarding badge when printer does not have Obico monitoring enabled', async () => {
     const { DetailedPrinterCard } = await import(
       '@/features/printers/components/DetailedPrinterCard'
     );
@@ -332,7 +394,7 @@ describe('DetailedPrinterCard ML badge', () => {
       />
     );
 
-    expect(screen.queryByText('ML')).toBeNull();
+    expect(screen.queryByText('Guarding')).toBeNull();
   });
 
   it('shows a detailed failure alert when a matching failure event arrives', async () => {

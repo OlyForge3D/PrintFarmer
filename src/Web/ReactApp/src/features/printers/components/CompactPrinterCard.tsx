@@ -6,21 +6,22 @@ import {
   EditIcon,
   CameraIcon,
   ExternalLinkIcon,
-  ImageIcon,
-  VideoIcon,
   MoreVerticalIcon,
   TagIcon,
-  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
+import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
+import { FailureDetectionMonitoringOverlay } from '@/features/printers/components/FailureDetectionMonitoringOverlay';
+import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
+import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { useJobQueue } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
@@ -50,7 +51,6 @@ export function CompactPrinterCard({
   // Merge with realtime SignalR updates
   const printer = printerProp; // printerProp already includes display data
   const [showCamera, setShowCamera] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -73,6 +73,10 @@ export function CompactPrinterCard({
   // Fetch printer tags
   const queryClient = useQueryClient();
   const { event: recentFailure } = useFailureDetectionAlert(printer.id);
+  const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
+    printer.id,
+    !!printer.obicoEnabled
+  );
   const { data: printerTags = [] } = useQuery<TagDto[]>({
     queryKey: ['printer-tags', printer.id],
     queryFn: async () => {
@@ -140,10 +144,6 @@ export function CompactPrinterCard({
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
-  // Show Obico ML monitoring badge when monitoring is enabled and the printer is printing,
-  // regardless of whether it is using a pooled server or the global fallback configuration.
-  const showObicoMonitoringBadge = !!printer.obicoEnabled && isPrinting;
-
   return (
     <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
       {/* Bed clear banner — overlay on top of card */}
@@ -160,7 +160,7 @@ export function CompactPrinterCard({
       )}
       {/* Colored header — background tinted by printer state */}
       <div style={headerStyle} className="px-3 pt-3 pb-2 rounded-t-xl">
-        {/* Top row: Name + Status Pill + ML Badge */}
+          {/* Top row: Name + Status Pill + failure-detection status */}
         <div className="flex items-center gap-2">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
             {printer.name}
@@ -170,12 +170,10 @@ export function CompactPrinterCard({
               {isOnline ? toCamelCase(state) : 'Offline'}
             </span>
           </div>
-          {showObicoMonitoringBadge && (
-            <div className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium shrink-0 bg-pf-accent-bg/20 border border-pf-accent/30 text-pf-accent">
-              <ShieldIcon className="h-3 w-3 mr-0.5" ariaLabel="ML Monitoring Active" />
-              <span>ML</span>
-            </div>
-          )}
+          <FailureDetectionMonitoringBadge
+            enabled={!!printer.obicoEnabled}
+            status={failureDetectionStatus}
+          />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
         </div>
         {/* Tags row */}
@@ -218,51 +216,20 @@ export function CompactPrinterCard({
 
           {/* Camera view — centered, between progress bar and footer */}
           {showCamera && (
-            <div className="mt-2 w-full flex flex-col bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
-              {hasCameraUrls && cameraSnapshotUrl && cameraStreamUrl && (
-                <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1/50">
-                  <Button
-                    type="button"
-                    onClick={() => setCameraMode('snapshot')}
-                    title="Snapshot"
-                    aria-label="Snapshot"
-                    variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
-                    size="sm"
-                    className="flex-1"
-                    iconCenter={<ImageIcon className="h-4 w-4" />}
-                  />
-                  <Button
-                    type="button"
-                    onClick={() => setCameraMode('stream')}
-                    title="Stream"
-                    aria-label="Stream"
-                    variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
-                    size="sm"
-                    className="flex-1"
-                    iconCenter={<VideoIcon className="h-4 w-4" />}
-                  />
-                </div>
-              )}
-              <div className="w-full aspect-video bg-pf-bg-0 flex items-center justify-center overflow-hidden">
-                {hasCameraUrls ? (
-                  (cameraMode === 'snapshot' && cameraSnapshotUrl) || (!cameraStreamUrl && cameraSnapshotUrl) ? (
-                    <img src={cameraSnapshotUrl} alt="webcam snapshot" className="w-full h-full object-cover" />
-                  ) : (cameraMode === 'stream' && cameraStreamUrl) || (!cameraSnapshotUrl && cameraStreamUrl) ? (
-                    <img src={cameraStreamUrl} alt="webcam stream" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="text-center text-pf-text-secondary p-4">
-                      <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">Camera mode not available</p>
-                    </div>
-                  )
-                ) : (
-                  <div className="text-center text-pf-text-secondary p-4 w-full">
-                    <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No camera configured</p>
-                  </div>
-                )}
-              </div>
-            </div>
+            <PrinterCameraPreview
+              printerId={printer.id}
+              printerName={printer.name}
+              cameraStreamUrl={cameraStreamUrl}
+              cameraSnapshotUrl={cameraSnapshotUrl}
+              isPrinting={isPrinting}
+              className="mt-2"
+              overlay={
+                <FailureDetectionMonitoringOverlay
+                  enabled={!!printer.obicoEnabled}
+                  status={failureDetectionStatus}
+                />
+              }
+            />
           )}
 
         </div>
@@ -290,8 +257,8 @@ export function CompactPrinterCard({
             onClick={() => setShowCamera(!showCamera)}
             disabled={!hasCameraUrls || !isEnabled}
             className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-            aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera available' : 'No camera configured'}
+            aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
+            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
           <Button

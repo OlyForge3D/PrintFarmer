@@ -15,6 +15,7 @@ import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
+import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
 import { toast } from 'sonner';
 import { Button, LoadedFilamentCard } from '@/common/components/ui';
 import { 
@@ -25,12 +26,14 @@ import {
   FileIcon,
   FilamentChangeIcon,
   EjectIcon,
-  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { FailureDetectionAlert } from '@/features/printers/components/FailureDetectionAlert';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
+import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
+import { FailureDetectionMonitoringOverlay } from '@/features/printers/components/FailureDetectionMonitoringOverlay';
+import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
   canCooldown,
@@ -92,6 +95,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
   const { event: recentFailure, clearEvent: clearRecentFailure } = useFailureDetectionAlert(initialPrinter.id);
+  const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
+    initialPrinter.id,
+    !!apiPrinter.obicoEnabled
+  );
 
   const expandedProgressRef = useRef<HTMLDivElement>(null);
 
@@ -150,13 +157,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
-  // Show Obico ML monitoring badge when monitoring is enabled and the printer is printing,
-  // regardless of whether it is using a pooled server or the global fallback configuration.
-  const showObicoMonitoringBadge = !!apiPrinter.obicoEnabled && isPrinting;
-
   // Camera URL handling
+  const cameraSnapshotUrl = apiPrinter.cameraSnapshotUrl ?? null;
   const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
-  const hasCameraUrls = !!cameraStreamUrl;
+  const hasCameraUrls = !!(cameraStreamUrl || cameraSnapshotUrl);
 
   const handleControlAction = async (action: string) => {
     if (controlActionPending) {
@@ -419,12 +423,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               {isOnline ? toCamelCase(state) : 'Offline'}
             </span>
           </div>
-          {showObicoMonitoringBadge && (
-            <div className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium shrink-0 bg-pf-accent-bg/20 border border-pf-accent/30 text-pf-accent">
-              <ShieldIcon className="h-3 w-3 mr-0.5" ariaLabel="ML Monitoring Active" />
-              <span>ML</span>
-            </div>
-          )}
+          <FailureDetectionMonitoringBadge
+            enabled={!!apiPrinter.obicoEnabled}
+            status={failureDetectionStatus}
+          />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
         </div>
       </div>
@@ -453,8 +455,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               onClick={() => setShowCamera(!showCamera)}
               disabled={!hasCameraUrls || !isEnabled}
               className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-              aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera available' : 'No camera configured'}
+              aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
+              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
               iconCenter={<CameraIcon className="h-4 w-4" />}
             >
             </Button>
@@ -533,24 +535,20 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         </div>
 
         {showCamera && (
-          <div className="mt-3 w-52 aspect-video flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
-            {cameraStreamUrl ? (
-              <img
-                src={cameraStreamUrl}
-                alt="webcam stream"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  // Avoid broken-image icon; fall back to "No camera" message.
-                  (e.currentTarget as HTMLImageElement).src = '';
-                }}
+          <PrinterCameraPreview
+            printerId={printer.id}
+            printerName={printer.name}
+            cameraStreamUrl={cameraStreamUrl}
+            cameraSnapshotUrl={cameraSnapshotUrl}
+            isPrinting={isPrinting}
+            className="mt-3 w-52"
+            overlay={
+              <FailureDetectionMonitoringOverlay
+                enabled={!!apiPrinter.obicoEnabled}
+                status={failureDetectionStatus}
               />
-            ) : (
-              <div className="text-center text-pf-text-secondary p-4">
-                <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No camera configured</p>
-              </div>
-            )}
-          </div>
+            }
+          />
         )}
       </div>
 
