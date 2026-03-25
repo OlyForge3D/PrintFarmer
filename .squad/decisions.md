@@ -3068,3 +3068,87 @@ Backend coverage already proved the PendingReady transition and SignalR broadcas
 - React regression tests: 29/29 PASSING
 - Targeted PendingReady API/service tests: 9/9 PASSING
 
+
+---
+
+## PendingReady Regression: Null State Backend Fix (APPROVED)
+
+**Date:** 2026-03-25  
+**Author:** Lambert (Backend Dev)  
+**Status:** APPROVED — Implementation Complete
+
+### Decision
+
+Normalize stale auto-dispatch `None` rows to an effective `PendingReady` status when the printer is idle, available, auto-dispatch-enabled, not pre-cleared, and queued work is waiting.
+
+### Why
+
+The backend was capable of returning `queueDepth > 0` alongside a failed/red `Bed Clear Confirmed` gate while still exposing `state = None`, which prevented the frontend from consistently mounting PendingReady banner/alert behavior. This was a stale contract state representing a transient DB condition.
+
+### Implementation
+
+- `AutoDispatchService` now resolves an effective state for DTOs and `MarkReadyAsync()`
+- `CancelAutoAsync()` persists a new internal `AutoDispatchState.Dismissed` sentinel so operator dismissal still suppresses the banner until a later queue/completion transition re-arms it
+- Contract impact: If backend says `state = PendingReady`, or emits a failed `Bed Clear Confirmed` gate with the waiting-for-operator message, the UI can safely treat that as actionable bed-clear confirmation
+- Canonical `None` rows now report `Bed Clear Confirmed` as passed with `No confirmation needed yet`
+
+### Test Coverage
+
+- `AutoDispatchPendingReadyTests.GetAllStatus_WhenPrinterIsPendingReady_IncludesPrinterInBulkStatusPayload` (PASS)
+- `AutoDispatchReadyGateServiceTests` updates (PASS)
+
+---
+
+## PendingReady Cache Propagation: Preserve Detail Across Live Updates (APPROVED)
+
+**Date:** 2026-03-26  
+**Author:** Ripley (Frontend Dev)  
+**Status:** APPROVED — Implementation Complete
+
+### Decision
+
+Frontend auto-dispatch cache merges now retain previously fetched `readyGateChecks`, `attentionMessage`, `attentionReason`, and related optional fields when an `autodispatchstatechanged` SignalR payload omits them.
+
+### Why
+
+The printers page was losing the compact Pending Ready overlay when live payloads carried only the changed summary fields. Auto-dispatch detail and compact cards must agree on the last known bed-clear requirement until the backend explicitly clears it.
+
+### Implementation
+
+- Compact-card regression added: starts from a red bed-clear snapshot and verifies a partial live update does not hide the Pending Ready banner
+- Cache merge logic preserves detail fields across partial updates
+- Multi-surface consistency maintained (compact cards, tables, nav)
+
+### Test Coverage
+
+- Compact-card live regression test (PASS)
+
+---
+
+## Final PendingReady Verification & Contract Approval
+
+**Date:** 2026-03-25  
+**Author:** Kane (Tester/Validator)  
+**Status:** APPROVED — All Focused Tests Passing
+
+### Decision
+
+APPROVE the user-facing compact-card PendingReady contract with the combination of Ripley's fallback logic, Lambert's backend normalization, and proper cache propagation.
+
+### Verdict
+
+Coverage now locks the exact compact-card contract for a queued printer blocked on bed-clear confirmation:
+- Initial bulk auto-dispatch snapshot with a red `Bed Clear Confirmed` gate shows `Pending Ready` + alert/banner
+- Partial `autodispatchstatechanged` updates that omit `readyGateChecks` keep the banner visible
+- Blank gate-copy regressions still render the alert when queued work remains
+
+### Test Evidence
+
+- **React Focused Tests:** 44/44 PASS
+- **API Focused Tests:** 22/22 PASS
+- **Earlier Backend Suite:** 28/28 PASS
+
+### User Directive
+
+**Do not call this fixed until confirmed end-to-end** (captured for team memory; awaiting final E2E confirmation before declaring spawn complete).
+

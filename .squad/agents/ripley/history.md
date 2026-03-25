@@ -62,6 +62,20 @@ Early entries (pre-2026-03-25) summarized for brevity. See decisions-archive.md 
 
 ## Learnings
 
+### 2026-03-26: Failed red bed-clear gate with queued work must still surface Pending Ready
+
+**Context:** A printer could show `Bed Clear Confirmed` in red inside auto-dispatch while the compact printer UI stayed quiet if the status row carried `state: None` and the gate copy was blank/missing.
+
+**Decision:** `requiresBedClearConfirmation()` now treats a failed `Bed Clear Confirmed` gate plus queued work as actionable even when the gate message is missing, while still honoring the explicit `"No confirmation needed yet"` backend opt-out.
+
+**Files:**
+- `src/Web/ReactApp/src/common/utils/printerStateDisplay.ts`
+- `src/Web/ReactApp/src/common/utils/__tests__/printerStateDisplay.test.ts`
+- `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx`
+- `src/Web/ReactApp/src/test/features/printers/compact-printer-pendingready-live.test.tsx`
+
+**Why it matters:** The red ready-gate is already an operator-facing signal. Compact cards and banners should not depend on descriptive copy being present before surfacing the required bed-clear confirmation.
+
 ### 2025-01-15: Consolidated failure-detection status to header badge only
 
 **Context:** Duplicate failure-detection shield/state was appearing in both the card header badge and the camera overlay, creating visual redundancy.
@@ -216,3 +230,48 @@ Fixed `CompactPrinterCard` and `BedClearBanner` to derive bed-clear confirmation
 - `src/Web/ReactApp/src/test/services/api.test.ts`
 
 **Why it matters:** Ensures the frontend now exclusively speaks the canonical auto-dispatch contract end-to-end, removing confusion and eliminating legacy seams.
+
+### 2026-03-26: Auto-dispatch SignalR merges must preserve prior ready-gate detail
+
+**Context:** The compact printer card and bed-clear banner read `useAutoDispatchStatus()`, which hydrates from `/auto-dispatch/status` and then applies `autodispatchstatechanged` SignalR patches. Partial live payloads could omit `readyGateChecks` and attention copy, wiping the cached failed gate and hiding the Pending Ready overlay even though the operator still needed to clear the bed.
+
+**Decision:** `mergeStatusSnapshot()` in `useAutoDispatch.ts` now preserves prior optional fields when a live update omits them, so compact cards keep showing the red bed-clear confirmation state until the backend explicitly clears it.
+
+**Files:**
+- `src/Web/ReactApp/src/features/printers/hooks/useAutoDispatch.ts`
+- `src/Web/ReactApp/src/test/features/printers/compact-printer-pendingready-live.test.tsx`
+
+**Why it matters:** The compact card now stays aligned with the last known auto-dispatch gate state instead of dropping the banner on partial SignalR payloads. If Lambert sees any remaining misses after this, the backend needs to ensure a fresh client gets either `state: PendingReady` or a failed `Bed Clear Confirmed` gate in its first snapshot/event.
+
+---
+
+## PendingReady Regression Fix: Frontend Fallback & Cache Propagation (2026-03-25)
+
+**Topic:** PendingReady / bed-clear confirmation regression on compact printer card  
+**Role:** Frontend Dev (bug discovery + fix implementation)  
+**Status:** ✅ COMPLETE — All focused tests passing (44/44 React)
+
+### Work Completed
+
+1. **Frontend Renderer Fallback Bug** (FIXED)
+   - Compact printer card & BedClearBanner now treat failed `readyGateChecks["Bed Clear Confirmed"]` as equivalent to `PendingReady`
+   - Handles blank gate-copy edge case where summary `state` is stale/flattened
+   - Files touched: `src/common/utils/printerStateDisplay.ts`, `src/features/printers/components/CompactPrinterCard.tsx`, `src/features/printers/components/BedClearBanner.tsx`
+
+2. **SignalR/Cache Freshness Bug** (FIXED)
+   - Partial `autodispatchstatechanged` updates no longer wipe `readyGateChecks`, `attentionMessage`, `attentionReason`
+   - React Query auto-dispatch caches now merge detail fields across live updates
+   - Prevents banner from hiding when partial updates carry only summary changes
+
+3. **Regression Test Coverage** (ADDED)
+   - Compact-card snapshot test: red bed-clear gate with queued work shows Pending Ready banner
+   - Compact-card live update test: partial payload does not hide banner (detail fields retained)
+   - Total: 29/29 React regression tests PASSING
+
+### Team Collaboration
+- **Lambert:** Backend state normalization (None → PendingReady with queued work)
+- **Kane:** Final regression verification + user contract approval
+
+### User Directive
+Per Jeff Papiez: Do not call fixed until confirmed end-to-end (once and for all).
+
