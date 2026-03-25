@@ -189,80 +189,81 @@ export function PrinterCameraPreview({
           </div>
         )}
 
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/72 via-transparent to-slate-950/28" />
-
         {overlay && (
           <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-6rem)]">
             {overlay}
           </div>
         )}
+      </div>
 
-        {externalUrl && (
-          <a
-            href={externalUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 rounded-full border border-white/10 bg-slate-950/70 px-2.5 py-1 text-[11px] font-semibold text-white shadow-lg shadow-black/30 backdrop-blur-sm transition hover:border-white/20 hover:bg-slate-950/82"
-            title="Open camera feed in a new tab"
-            aria-label={`Open ${printerName} camera feed in a new tab`}
-          >
-            <ExternalLinkIcon className="h-3.5 w-3.5" />
-            <span>Open live</span>
-          </a>
-        )}
+      {hasCameraSource && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-pf-border bg-pf-bg-1/90 px-3 py-2">
+          <div className="inline-flex items-center gap-2 rounded-full bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
+            <span
+              className={clsx(
+                'h-1.5 w-1.5 rounded-full',
+                showLiveStream ? 'bg-pf-success' : 'bg-pf-accent'
+              )}
+              aria-hidden="true"
+            />
+            <span>{showLiveStream ? 'Live stream' : 'Snapshot preview'}</span>
+          </div>
 
-        {(showLiveStream || previewSrc) && (
-          <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/70 px-2.5 py-1 text-[11px] text-white/78 shadow-lg shadow-black/25 backdrop-blur-sm">
-              <span
-                className={clsx(
-                  'h-1.5 w-1.5 rounded-full',
-                  showLiveStream ? 'bg-pf-success' : 'bg-pf-accent'
-                )}
-                aria-hidden="true"
-              />
-              <span>{showLiveStream ? 'Embedded live stream' : 'Auto-refreshing preview'}</span>
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
             {hasMedia && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={rotateClockwise}
-                className="h-8 w-8 rounded-full border border-white/10 bg-slate-950/70 p-0 text-white shadow-lg shadow-black/25 backdrop-blur-sm enabled:hover:bg-slate-950/82"
+                className="h-8 w-8 rounded-full p-0"
                 title="Rotate camera clockwise"
                 aria-label="Rotate camera clockwise"
                 iconCenter={<RotateCw className="h-3.5 w-3.5" />}
               />
             )}
-          </div>
-        )}
 
-        {hasModeToggle && (
-          <div className="absolute bottom-3 right-3 z-10 flex gap-1 rounded-full border border-white/10 bg-slate-950/70 p-1 shadow-lg shadow-black/25 backdrop-blur-sm">
-            <Button
-              type="button"
-              variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setCameraMode('snapshot')}
-              className="h-8 w-8 rounded-full p-0 text-white enabled:hover:bg-slate-900/80"
-              title="Show snapshot preview"
-              aria-label="Show snapshot preview"
-              iconCenter={<ImageIcon className="h-3.5 w-3.5" />}
-            />
-            <Button
-              type="button"
-              variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setCameraMode('stream')}
-              className="h-8 w-8 rounded-full p-0 text-white enabled:hover:bg-slate-900/80"
-              title="Show live stream"
-              aria-label="Show live stream"
-              iconCenter={<VideoIcon className="h-3.5 w-3.5" />}
-            />
+            {hasModeToggle && (
+              <div className="flex gap-1 rounded-full border border-pf-border bg-pf-bg-2 p-1">
+                <Button
+                  type="button"
+                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCameraMode('snapshot')}
+                  className="h-8 w-8 rounded-full p-0"
+                  title="Show snapshot preview"
+                  aria-label="Show snapshot preview"
+                  iconCenter={<ImageIcon className="h-3.5 w-3.5" />}
+                />
+                <Button
+                  type="button"
+                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCameraMode('stream')}
+                  className="h-8 w-8 rounded-full p-0"
+                  title="Show live stream"
+                  aria-label="Show live stream"
+                  iconCenter={<VideoIcon className="h-3.5 w-3.5" />}
+                />
+              </div>
+            )}
+
+            {externalUrl && (
+              <a
+                href={externalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-full border border-pf-border bg-pf-bg-2 px-2.5 py-1 text-[11px] font-semibold text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
+                title="Open camera feed in a new tab"
+                aria-label={`Open ${printerName} camera feed in a new tab`}
+              >
+                <ExternalLinkIcon className="h-3.5 w-3.5" />
+                <span>Open</span>
+              </a>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

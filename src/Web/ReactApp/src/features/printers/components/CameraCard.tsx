@@ -98,98 +98,10 @@ export function CameraCard({
             <span className="text-sm">{hasCameraUrls ? 'Camera unavailable' : 'No camera configured'}</span>
           </div>
         )}
-        
-        {/* Status overlay - top right */}
-        <div className="absolute top-2 right-2 flex gap-1">
-          {activeUrl && (
-            <a
-              href={cameraMode === 'stream' && hasStream ? cameraStreamUrl ?? activeUrl : activeUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/40 text-white backdrop-blur-xs transition hover:border-white/20 hover:bg-black/60"
-              title={`Open ${p.name} camera in a new tab`}
-              aria-label={`Open ${p.name} camera in a new tab`}
-            >
-              <ExternalLinkIcon className="w-4 h-4" />
-            </a>
-          )}
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium backdrop-blur-xs ${
-            isOnline 
-              ? 'bg-pf-status-online-bg/80 text-pf-status-online-text' 
-              : 'bg-pf-border-medium/80 text-pf-text-secondary'
-          }`}>
-            {isOnline ? 'Online' : 'Offline'}
-          </span>
-          {isPrinting && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-pf-warning/80 text-pf-text-primary backdrop-blur-xs">
-              Printing
-            </span>
-          )}
-        </div>
-
-        {/* Camera health indicator & count - top left */}
-        {primaryCamera && (
-          <div className="absolute top-2 left-2 flex items-center gap-1.5">
-            <span 
-              className={`w-2.5 h-2.5 rounded-full ${getHealthDotColor(primaryCamera.healthStatus)}`}
-              title={`Camera health: ${primaryCamera.healthStatus}`}
-            />
-            {cameraCount > 1 && (
-              <Badge variant="default" size="sm" className="backdrop-blur-sm bg-pf-bg-1/80">
-                {cameraCount} cameras
-              </Badge>
-            )}
-          </div>
-        )}
-
-        <div className="absolute bottom-2 left-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={rotateClockwise}
-            className="h-8 w-8 rounded-full border border-white/10 bg-black/50 p-0 text-white backdrop-blur-xs enabled:hover:bg-black/70"
-            title="Rotate camera clockwise"
-            aria-label="Rotate camera clockwise"
-            iconCenter={<RotateCw className="w-4 h-4" />}
-          />
-        </div>
-        {/* Camera mode toggle - bottom right (only if both modes available) */}
-        {hasModeToggle && (
-          <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
-            <Button
-              type="button"
-              variant={cameraMode === 'snapshot' ? 'primary' : 'subtle'}
-              size="sm"
-              onClick={() => setCameraMode('snapshot')}
-              className="!p-1 !h-auto"
-              title="Snapshot"
-              aria-label="Snapshot mode"
-              iconCenter={<ImageIcon className="w-4 h-4" />}
-            />
-            <Button
-              type="button"
-              variant={cameraMode === 'stream' ? 'primary' : 'subtle'}
-              size="sm"
-              onClick={() => setCameraMode('stream')}
-              className="!p-1 !h-auto"
-              title="Stream"
-              aria-label="Stream mode"
-              iconCenter={<VideoIcon className="w-4 h-4" />}
-            />
-          </div>
-        )}
-
-        {/* Camera indicator - only if we don't have camera data yet */}
-        {hasCameraUrls && !imageError && !primaryCamera && (
-          <div className="absolute top-2 left-2">
-            <CameraIcon className="w-5 h-5 text-white/70 drop-shadow-sm" />
-          </div>
-        )}
       </div>
 
       {/* Footer - printer name and info */}
-      <div className="p-3">
+      <div className="space-y-3 p-3">
         <div className="font-bold text-base text-pf-text-primary font-bebas uppercase truncate">
           {p.name}
         </div>
@@ -198,6 +110,89 @@ export function CameraCard({
             {p.modelName}
           </div>
         )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            variant={isOnline ? 'success' : 'default'}
+            size="sm"
+          >
+            {isOnline ? 'Online' : 'Offline'}
+          </Badge>
+          {isPrinting && (
+            <Badge variant="warning" size="sm">
+              Printing
+            </Badge>
+          )}
+          {primaryCamera && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-pf-bg-2 px-2 py-1 text-[11px] text-pf-text-secondary">
+              <span
+                className={`h-2 w-2 rounded-full ${getHealthDotColor(primaryCamera.healthStatus)}`}
+                title={`Camera health: ${primaryCamera.healthStatus}`}
+              />
+              <span>{primaryCamera.healthStatus}</span>
+            </span>
+          )}
+          {cameraCount > 1 && (
+            <Badge variant="default" size="sm">
+              {cameraCount} cameras
+            </Badge>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex items-center gap-2 rounded-full bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
+            <span>{cameraMode === 'stream' ? 'Live stream' : 'Snapshot preview'}</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={rotateClockwise}
+              className="h-8 w-8 rounded-full p-0"
+              title="Rotate camera clockwise"
+              aria-label="Rotate camera clockwise"
+              iconCenter={<RotateCw className="w-4 h-4" />}
+            />
+            {hasModeToggle && (
+              <div className="flex gap-1 rounded-full border border-pf-border bg-pf-bg-2 p-1">
+                <Button
+                  type="button"
+                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCameraMode('snapshot')}
+                  className="h-8 w-8 rounded-full p-0"
+                  title="Snapshot"
+                  aria-label="Snapshot mode"
+                  iconCenter={<ImageIcon className="w-4 h-4" />}
+                />
+                <Button
+                  type="button"
+                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCameraMode('stream')}
+                  className="h-8 w-8 rounded-full p-0"
+                  title="Stream"
+                  aria-label="Stream mode"
+                  iconCenter={<VideoIcon className="w-4 h-4" />}
+                />
+              </div>
+            )}
+            {activeUrl && (
+              <a
+                href={cameraMode === 'stream' && hasStream ? cameraStreamUrl ?? activeUrl : activeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-8 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
+                title={`Open ${p.name} camera in a new tab`}
+                aria-label={`Open ${p.name} camera in a new tab`}
+              >
+                <ExternalLinkIcon className="w-4 h-4" />
+              </a>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

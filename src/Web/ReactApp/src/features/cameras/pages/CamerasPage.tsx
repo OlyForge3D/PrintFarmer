@@ -218,72 +218,10 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
             </span>
           </div>
         )}
-
-        {/* Health status - top left */}
-        <div className="absolute top-2 left-2">
-          <CameraHealthBadge healthStatus={camera.healthStatus} size="sm" />
-        </div>
-
-        {/* Source badge - top right */}
-        <div className="absolute top-2 right-2 flex items-center gap-1">
-          <Badge variant="default" size="sm" className="backdrop-blur-sm bg-pf-bg-1/80">
-            {sourceLabels[camera.source]}
-          </Badge>
-          {activeUrl && (
-            <a
-              href={cameraMode === 'stream' && hasStream ? camera.streamUrl : activeUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-pf-bg-1/80 text-pf-text-primary backdrop-blur-sm transition hover:border-white/20 hover:bg-pf-bg-1"
-              title={`Open ${camera.name} in a new tab`}
-              aria-label={`Open ${camera.name} in a new tab`}
-            >
-              <ExternalLinkIcon className="w-4 h-4" />
-            </a>
-          )}
-        </div>
-
-        {/* Camera controls */}
-        <div className="absolute bottom-2 left-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={rotateClockwise}
-            className="h-8 w-8 rounded-full border border-white/10 bg-black/50 p-0 text-white backdrop-blur-xs enabled:hover:bg-black/70"
-            title="Rotate camera clockwise"
-            aria-label="Rotate camera clockwise"
-            iconCenter={<RotateCw className="w-4 h-4" />}
-          />
-        </div>
-        {hasModeToggle && (
-          <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
-            <Button
-              type="button"
-              variant={cameraMode === 'snapshot' ? 'primary' : 'subtle'}
-              size="sm"
-              onClick={() => setCameraMode('snapshot')}
-              className="!p-1 !h-auto"
-              title="Snapshot"
-              aria-label="Snapshot mode"
-              iconCenter={<ImageIcon className="w-4 h-4" />}
-            />
-            <Button
-              type="button"
-              variant={cameraMode === 'stream' ? 'primary' : 'subtle'}
-              size="sm"
-              onClick={() => setCameraMode('stream')}
-              className="!p-1 !h-auto"
-              title="Stream"
-              aria-label="Stream mode"
-              iconCenter={<VideoIcon className="w-4 h-4" />}
-            />
-          </div>
-        )}
       </div>
 
       {/* Camera info */}
-      <div className="p-3 bg-pf-bg-1">
+      <div className="space-y-3 p-3 bg-pf-bg-1">
         <div className="flex items-center gap-2 mb-1">
           <CameraIcon className="w-4 h-4 text-pf-text-tertiary shrink-0" />
           <div className="min-w-0 flex-1">
@@ -298,13 +236,72 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
             )}
           </div>
         </div>
-        {camera.cameraType !== 'General' && (
-          <div className="mt-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <CameraHealthBadge healthStatus={camera.healthStatus} size="sm" />
+          <Badge variant="default" size="sm">
+            {sourceLabels[camera.source]}
+          </Badge>
+          {camera.cameraType !== 'General' && (
             <Badge variant="default" size="sm">
               {cameraTypeLabels[camera.cameraType]}
             </Badge>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex items-center gap-2 rounded-full bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
+            <span>{cameraMode === 'stream' ? 'Live stream' : 'Snapshot preview'}</span>
           </div>
-        )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={rotateClockwise}
+              className="h-8 w-8 rounded-full p-0"
+              title="Rotate camera clockwise"
+              aria-label="Rotate camera clockwise"
+              iconCenter={<RotateCw className="w-4 h-4" />}
+            />
+            {hasModeToggle && (
+              <div className="flex gap-1 rounded-full border border-pf-border bg-pf-bg-2 p-1">
+                <Button
+                  type="button"
+                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCameraMode('snapshot')}
+                  className="h-8 w-8 rounded-full p-0"
+                  title="Snapshot"
+                  aria-label="Snapshot mode"
+                  iconCenter={<ImageIcon className="w-4 h-4" />}
+                />
+                <Button
+                  type="button"
+                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCameraMode('stream')}
+                  className="h-8 w-8 rounded-full p-0"
+                  title="Stream"
+                  aria-label="Stream mode"
+                  iconCenter={<VideoIcon className="w-4 h-4" />}
+                />
+              </div>
+            )}
+            {activeUrl && (
+              <a
+                href={cameraMode === 'stream' && hasStream ? camera.streamUrl : activeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-8 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
+                title={`Open ${camera.name} in a new tab`}
+                aria-label={`Open ${camera.name} in a new tab`}
+              >
+                <ExternalLinkIcon className="w-4 h-4" />
+              </a>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
