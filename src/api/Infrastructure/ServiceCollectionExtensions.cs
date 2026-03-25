@@ -186,6 +186,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.Dispatch.IAutoDispatchTrigger>(autoDispatchTrigger);
 
         _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
+        _ = services.Configure<Farm.Infrastructure.Settings.ObicoSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ObicoSettings.SectionName));
         RegisterBackendClientPlugins(services, configuration);  // Register backend client plugins FIRST - they register HTTP clients
         RegisterHttpClients(services);
         RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients

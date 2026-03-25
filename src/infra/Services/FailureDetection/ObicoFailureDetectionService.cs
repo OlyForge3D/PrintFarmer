@@ -1,8 +1,7 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.FailureDetection;
 
@@ -14,24 +13,25 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ObicoFailureDetectionService> _logger;
-    private readonly ObicoSettings _settings;
+    private readonly ISettingsService _settingsService;
 
     private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(15);
 
     public ObicoFailureDetectionService(
         IHttpClientFactory httpClientFactory,
-        IOptions<ObicoSettings> settings,
+        ISettingsService settingsService,
         ILogger<ObicoFailureDetectionService> logger)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _settings = settings?.Value ?? throw new ArgumentNullException(nameof(settings));
+        _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc/>
     public Task<FailureDetectionResult> AnalyzeImageAsync(byte[] imageData, CancellationToken ct = default)
     {
-        return AnalyzeImageAsync(imageData, _settings.ObicoApiUrl, apiKey: null, ct);
+        string obicoApiUrl = _settingsService.Get<ObicoSettings>().ObicoApiUrl;
+        return AnalyzeImageAsync(imageData, obicoApiUrl, apiKey: null, ct);
     }
 
     /// <inheritdoc/>
@@ -92,11 +92,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             }
 
             decimal confidence = (decimal)apiResponse.Result.P;
-            bool isFailure = confidence >= _settings.ConfidenceThreshold;
+            decimal confidenceThreshold = _settingsService.Get<ObicoSettings>().ConfidenceThreshold;
+            bool isFailure = confidence >= confidenceThreshold;
 
             _logger.LogInformation(
                 "[ObicoFailureDetection] Analysis complete: confidence={Confidence:F3}, threshold={Threshold:F3}, failure={IsFailure}",
-                confidence, _settings.ConfidenceThreshold, isFailure);
+                confidence, confidenceThreshold, isFailure);
 
             return FailureDetectionResult.Success(confidence, isFailure);
         }
@@ -125,7 +126,8 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     /// <inheritdoc/>
     public Task<FailureDetectionResult> AnalyzeImageFromUrlAsync(string snapshotUrl, CancellationToken ct = default)
     {
-        return AnalyzeImageFromUrlAsync(snapshotUrl, _settings.ObicoApiUrl, apiKey: null, ct);
+        string obicoApiUrl = _settingsService.Get<ObicoSettings>().ObicoApiUrl;
+        return AnalyzeImageFromUrlAsync(snapshotUrl, obicoApiUrl, apiKey: null, ct);
     }
 
     /// <inheritdoc/>
