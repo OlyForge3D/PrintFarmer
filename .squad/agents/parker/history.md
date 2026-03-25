@@ -446,3 +446,25 @@ Successfully committed and pushed spaghetti detection discoverability improvemen
   - Final state: `development` branch up-to-date with `origin/development`
 - **Key Insight:** Squad file updates (decisions.md, agent histories, skills) should travel with the feature commits they document. These provide context for future readers and trace back to implementation choices.
 - **Pattern Verified:** Icon-only designs need strong tooltip + aria-label to avoid accessibility loss. Tooltip is NOT optional; it becomes the information source, not a convenience feature.
+
+## 2026-03-25 Scribe Squad Sync Commit Landing
+
+**Task:** Push pending squad bookkeeping commit created by Scribe following icon-only shield decision merge.  
+**Commit:** `8a66c651` `chore: sync squad decisions and orchestration logs`
+
+**Inspection:**
+- Branch was 1 commit ahead of origin/development
+- Commit contained Scribe's post-merge documentation: updated `scribe/history.md` with decision merge summary and updated `decisions.md` with icon-only shield decision entry
+- Working tree clean, no local changes
+- Remote check (fetch --dry-run) showed no new commits on origin
+
+**Push Action:**
+- `git push origin development` — pushed commit 8a66c651 (eaaa8bcb..8a66c651)
+- Remote accepted cleanly; GitHub reported 2 existing vulnerabilities in default branch (unrelated to this change)
+
+**Final State:**
+- ✅ Branch is now up to date with origin/development
+- ✅ Commit 8a66c651 is visible on remote
+- ✅ Working tree clean, no leftovers
+
+**Learning:** Squad bookkeeping commits (Scribe's history + decision consolidation) are safe to push immediately after creation—they are non-breaking documentation-only changes that should stay synchronized across team sessions.
