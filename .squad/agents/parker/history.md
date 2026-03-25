@@ -355,3 +355,60 @@ Merged `docker-publish.yml` (release pipeline, multistage Dockerfile) and `conta
 - Actual `docker-compose.yml` provides: `database`, `api`, `frontend`, `nginx-proxy`, `printer-discovery`
 
 **Observation:** The `pfdev` script appears outdated relative to the current Compose file structure. It's a development-only tool (for Docker Compose rebuilds), not the primary deployment mechanism. Users should use `deploy-docker.sh` for orchestrated deployments or `docker compose restart nginx-proxy` for quick restarts.
+
+## Learnings
+
+### UI Component Integration Pattern (2026-01-11)
+
+**Context:** Ripley (Frontend) completed discoverability improvements for spaghetti detection monitoring.
+
+**Components Shipped:**
+- `FailureDetectionMonitoringBadge` — transient alert badge for card surfaces
+- `FailureDetectionMonitoringOverlay` — modal-style failure context viewer with camera snapshot
+- `PrinterCameraPreview` — snapshot widget with fallback to static URL (reliability improvement)
+- Updated card integration points on both Compact and Detailed printer cards
+- `usePrinterFailureDetectionStatus` hook for real-time state management
+
+**Key Pattern Observed:**
+- **Snapshot reliability:** Component now gracefully falls back from live camera to snapshot URL when live stream unavailable
+- **Overlay composition:** Overlay handles both quick-view (badge click) and detailed inspection flows
+- **Card integration:** Minimal invasiveness — badge slots into existing card layouts without restructuring
+
+**Tests:** All 365 React tests passing after integration; no new linting issues after path casing and ESLint checks
+
+**Commit:** `989b8f61` pushed to origin/development  
+**Bead Status:** Work complete; separate nginx alias fix (pfdev → docker-compose service name) remains pending
+
+**Decision for next phase:** Camera snapshot fallback strategy may be useful pattern for other printer backends (OctoPrint, PrusaLink, etc.) if they adopt similar monitoring visualizations.
+
+
+## 2026-03-25: Spaghetti Detection & Camera Preview Reliability Push
+
+**Date:** 2026-03-25T05:56:29Z  
+**Mode:** Background (Orchestration)  
+**Branch:** development  
+**Commit:** 989b8f61  
+
+### Summary
+Successfully committed and pushed spaghetti detection discoverability improvements and camera preview reliability fixes to the development branch. All changes validated and staged for merge to main.
+
+### Changes Completed
+- Spaghetti detection backend integration with auto-pause wiring
+- Camera preview URL enrichment in failure detection DTO
+- Status endpoint return real monitoring state (monitored count, scan interval, threshold)
+- Frontend toast improvements with snapshot preview
+- Printer card warning badge for active detections
+- Settings monitoring status card with live metrics
+
+### Status
+✅ **Complete & Ready for Review**
+- All tests passing
+- Code reviewed and staged
+- Documentation updated
+- Pending: nginx alias fix in scripts/pf-dev.sh (separate PR)
+
+### Notes
+- Separate PR pending for pf-dev.sh nginx alias enhancement
+- Development branch fully validated
+- Ready for merge to main after final review
+
