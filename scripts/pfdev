@@ -248,14 +248,24 @@ deploy_service() {
     local service=$1
     local compose_service
     local start_time=$(date +%s)
+    local compose_args=(-d --remove-orphans)
 
     check_required_files
     ensure_tls_certificates "$service"
     compose_service=$(resolve_service "$service")
+
+    if [[ "$service" == "nginx" ]]; then
+        compose_args+=(--force-recreate)
+    fi
     
     echo "🚀 Deploying $service... [$(date '+%H:%M:%S')]"
     cd "$REPO_ROOT"
-    docker compose up -d --remove-orphans "$compose_service"
+    docker compose up "${compose_args[@]}" "$compose_service"
+
+    if [[ "$service" == "nginx" ]] && docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
+        echo "🔄 Reloading nginx TLS/config after deploy... [$(date '+%H:%M:%S')]"
+        docker exec printfarmer-nginx-proxy nginx -s reload >/dev/null 2>&1 || true
+    fi
     
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
