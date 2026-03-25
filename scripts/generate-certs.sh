@@ -16,6 +16,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_CERT_DIR="$REPO_ROOT/deploy/nginx/certs"
 RUNTIME_CERT_DIR="$REPO_ROOT/nginx/certs"
+DEPLOY_CONFIG_FILE="$REPO_ROOT/.deploy-config"
+
+if [[ -z "${HTTPS_PORT:-}" && -f "$DEPLOY_CONFIG_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$DEPLOY_CONFIG_FILE"
+    set +a
+fi
 
 array_contains() {
     local needle="$1"
