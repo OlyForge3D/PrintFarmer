@@ -215,7 +215,7 @@ if [[ ${#TARGET_CERT_DIRS[@]} -gt 1 ]]; then
     done
 fi
 echo ""
-echo "Use tls.crt + tls.key for nginx."
+echo "Use tls-fullchain.crt + tls.key for nginx."
 echo "Install ca.cer on iPhone/iPad and enable trust in:"
 echo "  Settings > General > About > Certificate Trust Settings"
 echo "Users can open http://<host>/install-ca to download the CA."

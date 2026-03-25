@@ -5314,15 +5314,45 @@ setup_initial_admin() {
 
 # Generate TLS certificates if HTTPS is enabled and certs don't exist.
 # Uses scripts/generate-certs.sh if available, otherwise generates inline.
+tls_certificate_is_valid() {
+    local cert_dir="$1"
+    local cert_file="$cert_dir/tls.crt"
+    local key_file="$cert_dir/tls.key"
+    local fullchain_file="$cert_dir/tls-fullchain.crt"
+
+    if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
+        return 1
+    fi
+
+    if ! openssl x509 -in "$cert_file" -noout -text 2>/dev/null | grep -q "CA:FALSE"; then
+        return 1
+    fi
+
+    if ! openssl x509 -in "$cert_file" -noout -text 2>/dev/null | grep -q "TLS Web Server Authentication"; then
+        return 1
+    fi
+
+    if [ ! -f "$fullchain_file" ]; then
+        return 1
+    fi
+
+    return 0
+}
+
 ensure_tls_certificates() {
     if [ "${HTTPS_PORT:-0}" = "0" ]; then
         return 0
     fi
 
     local cert_dir="./deploy/nginx/certs"
-    if [ -f "$cert_dir/tls.crt" ] && [ -f "$cert_dir/tls.key" ]; then
-        print_info "TLS certificates already exist at $cert_dir"
+    if tls_certificate_is_valid "$cert_dir"; then
+        print_info "TLS certificates already exist at $cert_dir and passed validation"
         return 0
+    fi
+
+    if [ -f "$cert_dir/tls.crt" ] || [ -f "$cert_dir/tls.key" ]; then
+        print_warning "Existing TLS certificates at $cert_dir are invalid or incomplete; regenerating"
+        rm -f "$cert_dir/tls.crt" "$cert_dir/tls.key" "$cert_dir/tls-fullchain.crt" "$cert_dir/ca.crt" "$cert_dir/ca.cer" "$cert_dir/ca.key" "$cert_dir/ca.srl"
     fi
 
     print_info "Generating TLS certificates for HTTPS (port $HTTPS_PORT)..."
