@@ -709,3 +709,17 @@ Ripley implemented two linked refinements:
 - Component: `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
 - Tests: `src/Web/ReactApp/src/test/features/printers/{FailureDetectionMonitoringBadge,obico-ml-badge}.test.tsx`
 - Overlay removal: `{Detailed,Compact}PrinterCard.tsx` (removed `overlay` prop, imports)
+
+## 2026-03-25: PendingReady live-state gap validation and fix
+
+**Role:** Tester  
+**Status:** ✅ Complete
+
+Reproduced real live-state gap in compact cards; identified root cause as missing SignalR sync of `autoprintstatechanged` into React Query cache (10s poll delay). Validated fix: immediate cache invalidation on event syncs cards to Pending Ready state without poll lag.
+
+**Test Coverage:** 
+- React regression 29/29 PASSING
+- API/service PendingReady tests 9/9 PASSING
+
+**Decision Output:** `.squad/decisions.md` → "PendingReady SignalR Sync to React Query Cache"
+

@@ -361,3 +361,14 @@ This section summarizes foundational knowledge and design patterns across Ripley
 2. Manual a11y audit with screen reader (verify title announcement)
 3. Visual regression check (both card layouts, mobile + desktop)
 4. Merge after Kane re-approval
+
+## 2026-03-25: PendingReady compact-card fallback fix
+
+**Role:** Frontend Dev  
+**Status:** ✅ Complete
+
+Fixed `CompactPrinterCard` and `BedClearBanner` to derive bed-clear confirmation from `readyGateChecks` when bulk auto-dispatch state is stale/flattened. Updated consistency surfaces across printer views.
+
+**Test Coverage:** React regression 29/29 PASSING  
+**Decision Output:** `.squad/decisions.md` → "Pending Ready compact-card fallback"
+

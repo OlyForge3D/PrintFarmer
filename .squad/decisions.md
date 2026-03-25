@@ -4673,3 +4673,97 @@ Remove `FailureDetectionMonitoringOverlay` from camera previews in both compact 
 3. Add toggle - rejected (over-engineering)
 
 ---
+
+---
+
+## Compact Card PendingReady Backend Verification (APPROVED)
+
+**Date:** 2026-03-25  
+**Author:** Lambert (Backend Dev)  
+**Status:** APPROVED — Backend verified, issue is UI-path
+
+### Decision
+
+Treat the current compact-card PendingReady gap as a UI-path issue unless someone can show that `/api/auto-print/status` is missing `state = PendingReady` for the affected printer.
+
+### Why
+
+- `JobQueueService.AddJobToQueueAsync()` still calls `IAutoPrintService.TransitionToPendingReadyAsync()` after queueing an assigned job, so the first-upload / queued-job path still enters the ready gate.
+- `AutoPrintService.TransitionToPendingReadyAsync()` persists `AutoPrintState.PendingReady` and broadcasts `autoprintstatechanged`.
+- `AutoPrintController` exposes the same status through both `/api/auto-print/{printerId}/status` and `/api/auto-print/status`.
+- `CompactPrinterCard` shows the overlay strictly from the bulk hook path: `useAutoDispatchStatus()` → `/api/auto-print/status` → `isPendingReadyState(status.state)`.
+
+### Evidence
+
+- Focused backend validation passed for the auto-print service + controller regression tests.
+- `CompactPrinterCard` does not depend on `AttentionMessage` for the bed-clear overlay; it keys only off `state`.
+
+### Follow-up
+
+Ripley/Kane should inspect the UI data path around `useAutoDispatchStatus()` query hydration/invalidation and the compact-card render flow, because the backend contract currently matches what the banner expects.
+
+---
+
+## Pending Ready compact-card fallback (APPROVED)
+
+**Date:** 2026-03-25  
+**Author:** Ripley (Frontend Dev)  
+**Status:** APPROVED — Implementation Complete
+
+### Context
+
+`CompactPrinterCard` and `BedClearBanner` were only keying off `autoDispatchStatus.state === PendingReady`.
+
+### Decision
+
+Treat a failed `readyGateChecks["Bed Clear Confirmed"]` gate as the same operator-facing state as `PendingReady`.
+
+### Why
+
+The backend's bulk/per-printer auto-dispatch payload already carries the real operator gate and attention message. If the row's summary `state` is stale or flattened, the UI must still show `Pending Ready` and mount the banner.
+
+### Implementation
+
+Touched paths:
+- `src/Web/ReactApp/src/common/utils/printerStateDisplay.ts`
+- `src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx`
+- `src/Web/ReactApp/src/features/printers/components/BedClearBanner.tsx`
+- Related consistency surfaces: `DetailedPrinterCard`, `PrinterTableView`, `PrinterDetailsSidebar`, `PrintersPage`, `Layout`
+
+### Test Coverage
+
+React regression tests: 29/29 PASSING
+
+---
+
+## PendingReady SignalR Sync to React Query Cache (APPROVED)
+
+**Date:** 2026-03-25  
+**Author:** Kane (Tester/Validator)  
+**Status:** APPROVED — Implementation Complete and Validated
+
+### Decision
+
+Treat `autoprintstatechanged` as the authoritative live update for PendingReady / bed-clear UI, and immediately sync that event into the React Query auto-dispatch caches used by compact cards, tables, and nav attention counts.
+
+### Why
+
+Backend coverage already proved the PendingReady transition and SignalR broadcast existed, but the frontend only refreshed `/api/auto-print/status` on a 10-second poll. That left a real gap where the compact card could stay on `Idle` long enough for operators to conclude the banner/state change never arrived.
+
+### Evidence
+
+- Backend service test: `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs`
+- Backend API test: `src/tests/Farm.Web.Api.Tests/Controllers/AutoPrintPendingReadyTests.cs`
+- Frontend live regression: `src/Web/ReactApp/src/test/features/printers/compact-printer-pendingready-live.test.tsx`
+
+### Impact
+
+- Compact printer cards update to `Pending Ready` immediately after the workflow transition.
+- `BedClearBanner` mounts without waiting for the next polling interval.
+- Shared auto-dispatch caches stay aligned across compact cards and any other surface reading the same query keys.
+
+### Test Coverage
+
+- React regression tests: 29/29 PASSING
+- Targeted PendingReady API/service tests: 9/9 PASSING
+

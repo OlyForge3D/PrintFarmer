@@ -1703,3 +1703,13 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 - `JobQueueService.AddJobToQueueAsync()` still primes the first-upload path by calling `IAutoPrintService.TransitionToPendingReadyAsync()` immediately after an assigned job is queued, so assigned compact-card queue actions do not have to wait for a prior print-completion event before `PendingReady` can surface.
 - `CompactPrinterCard` does not use `AttentionMessage` for the overlay. It reads `useAutoDispatchStatus()` from the bulk `GET /api/auto-print/status` payload and renders `BedClearBanner` only when `isPendingReadyState(autoDispatchStatus.state)` returns true. Relevant files: `src/Web/ReactApp/src/features/printers/hooks/useAutoDispatch.ts`, `src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx`, `src/Web/ReactApp/src/common/utils/printerStateDisplay.ts`.
 - The backend PendingReady contract for compact cards is intact: `AutoPrintService.TransitionToPendingReadyAsync()` broadcasts `autoprintstatechanged`, and both `GET /api/auto-print/{printerId}/status` plus `GET /api/auto-print/status` are covered by focused regression tests in `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoPrintServiceTests.cs` and `src/tests/Farm.Web.Api.Tests/Controllers/AutoPrintPendingReadyTests.cs`.
+
+## 2026-03-25: PendingReady Regression Validation
+
+**Role:** Backend Dev  
+**Status:** ✅ Complete
+
+Validated backend auto-print service still correctly emits `PendingReady` state and broadcasts `autoprintstatechanged` event. Confirmed the compact-card state gap was a UI-path issue, not a backend regression. Backend contract verified against `/api/auto-print/status`.
+
+**Decision Output:** `.squad/decisions.md` → "Compact Card PendingReady Backend Verification"
+
