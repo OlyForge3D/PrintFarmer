@@ -397,10 +397,22 @@ public class AutoPrintService(
             throw new InvalidOperationException($"Cannot pre-clear bed while printer {printer.Name} is actively printing");
         }
 
+        bool hasQueuedJobs = await db.PrintJobs
+            .AnyAsync(
+                j => j.Status == PrintJobStatus.Queued
+                     && (j.AssignedPrinterId == null || j.AssignedPrinterId == printerId),
+                ct);
+
         printer.BedPreConfirmed = true;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("[AutoPrint] Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
+
+        if (hasQueuedJobs)
+        {
+            // A pre-cleared idle printer just became eligible for immediate dispatch.
+            dispatchTrigger?.NotifyJobQueued(printerId);
+        }
 
         var status = await BuildStatusDtoAsync(printer, ct);
         await hub.Clients.All.SendAsync("autoprintstatechanged", status, ct);
@@ -571,10 +583,11 @@ public class AutoPrintService(
             checks.Add(new ReadyGateCheckDto
             {
                 Name = "Bed Clear Confirmed",
-                Passed = printer.AutoPrintState == AutoPrintState.Ready,
+                Passed = printer.AutoPrintState == AutoPrintState.Ready || printer.BedPreConfirmed,
                 Message = printer.AutoPrintState switch
                 {
                     AutoPrintState.Ready => "Operator confirmed bed is clear",
+                    _ when printer.BedPreConfirmed => "Bed pre-cleared for immediate dispatch",
                     AutoPrintState.PendingReady => "Waiting for operator to confirm bed is clear",
                     _ => "No confirmation needed yet",
                 },

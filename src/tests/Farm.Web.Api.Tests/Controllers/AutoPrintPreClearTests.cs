@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -196,5 +197,29 @@ public class AutoPrintPreClearTests : IAsyncLifetime
 
         var status = await second.Content.ReadFromJsonAsync<AutoPrintStatusDto>(JsonOptions);
         status!.BedPreConfirmed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetStatus_AfterPreClear_MarksBedClearConfirmedGateAsPassed()
+    {
+        Printer printer = await CreateTestPrinterAsync(autoPrintEnabled: true);
+
+        HttpResponseMessage preClearResponse = await _client!.PostAsync(
+            $"/api/auto-print/{printer.Id}/pre-clear", null);
+        preClearResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        HttpResponseMessage statusResponse = await _client.GetAsync(
+            $"/api/auto-print/{printer.Id}/status");
+        statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        AutoPrintStatusDto? status = await statusResponse.Content.ReadFromJsonAsync<AutoPrintStatusDto>(JsonOptions);
+        status.Should().NotBeNull();
+
+        ReadyGateCheckDto? bedClearGate = status!.ReadyGateChecks
+            .FirstOrDefault(check => check.Name == "Bed Clear Confirmed");
+
+        bedClearGate.Should().NotBeNull();
+        bedClearGate!.Passed.Should().BeTrue();
+        bedClearGate.Message.Should().Contain("pre-cleared");
     }
 }

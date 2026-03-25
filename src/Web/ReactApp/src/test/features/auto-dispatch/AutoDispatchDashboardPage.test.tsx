@@ -65,6 +65,18 @@ describe('AutoDispatchDashboardPage', () => {
     state: 'None',
   };
 
+  const mockPreClearedStatus = {
+    ...mockPrinterStatus,
+    state: 'None',
+    bedPreConfirmed: true,
+    readyGateChecks: [
+      { name: 'Printer Online', passed: true, message: 'Printer is online', checkedAt: '2025-01-15T10:00:00Z' },
+      { name: 'Not Printing', passed: true, message: 'Printer is idle', checkedAt: '2025-01-15T10:00:00Z' },
+      { name: 'Bed Clear Confirmed', passed: true, message: 'Bed pre-cleared for immediate dispatch', checkedAt: '2025-01-15T10:00:00Z' },
+      { name: 'Temperature OK', passed: true, message: 'Temperature in range', checkedAt: '2025-01-15T10:00:00Z' },
+    ],
+  };
+
   const mockGlobalStatus = {
     globalEnabled: true,
     printers: [mockPrinterStatus],
@@ -391,5 +403,23 @@ describe('AutoDispatchDashboardPage', () => {
     );
 
     expect(screen.getByText('Awaiting Bed Clear')).toBeInTheDocument();
+  });
+
+  it('shows pre-cleared readiness state without a failed bed-clear diagnostic', () => {
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: { globalEnabled: true, printers: [mockPreClearedStatus] },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    expect(screen.getByText('Bed pre-cleared — ready for dispatch')).toBeInTheDocument();
+    expect(screen.getByText('Bed Clear Confirmed')).toBeInTheDocument();
+    expect(screen.queryByText('Pre-Clear Bed')).not.toBeInTheDocument();
   });
 });
