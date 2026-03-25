@@ -254,6 +254,55 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetStatusAsync_WhenQueuedJobsExistAndPersistedStateIsNone_CanonicalizesPendingReady()
+    {
+        Printer printer = await CreatePrinterAsync();
+        await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance);
+
+        AutoDispatchStatusDto status = await service.GetStatusAsync(printer.Id);
+
+        status.State.Should().Be(nameof(AutoDispatchState.PendingReady));
+        status.AttentionMessage.Should().Be("Print completed. 1 queued job is blocked until you clear the bed and confirm ready. Once confirmed, the next queued job will start automatically.");
+        status.ReadyGateChecks.Should().Contain(check =>
+            check.Name == "Bed Clear Confirmed"
+            && !check.Passed
+            && check.Message.Contains("Waiting for operator"));
+    }
+
+    [Fact]
+    public async Task CancelAutoAsync_WhenQueuedJobsRemain_SuppressesPendingReadyUntilRearmed()
+    {
+        Printer printer = await CreatePrinterAsync();
+        await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance);
+
+        await service.TransitionToPendingReadyAsync(printer.Id);
+
+        AutoDispatchStatusDto cancelledStatus = await service.CancelAutoAsync(printer.Id);
+        AutoDispatchStatusDto refreshedStatus = await service.GetStatusAsync(printer.Id);
+        Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
+
+        cancelledStatus.State.Should().Be(nameof(AutoDispatchState.None));
+        refreshedStatus.State.Should().Be(nameof(AutoDispatchState.None));
+        refreshedStatus.ReadyGateChecks.Should().Contain(check =>
+            check.Name == "Bed Clear Confirmed"
+            && check.Passed
+            && check.Message == "No confirmation needed yet");
+        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.Dismissed);
+    }
+
+    [Fact]
     public async Task MarkPreClearAsync_WhenQueuedJobExists_PopulatesReadyAttentionMessage()
     {
         Printer printer = await CreatePrinterAsync();

@@ -23,14 +23,14 @@ function mergeStatusSnapshot<T extends AutoDispatchStatus>(
     ...previousStatus,
     ...nextStatus,
     printerName: nextStatus.printerName ?? previousStatus?.printerName,
-    isReady: nextStatus.isReady,
-    currentJobName: nextStatus.currentJobName,
-    lastActivity: nextStatus.lastActivity,
-    bedPreConfirmed: nextStatus.bedPreConfirmed,
-    readyGateChecks: nextStatus.readyGateChecks,
-    attentionMessage: nextStatus.attentionMessage,
-    attentionReason: nextStatus.attentionReason,
-    operatorAction: nextStatus.operatorAction,
+    isReady: nextStatus.isReady ?? previousStatus?.isReady,
+    currentJobName: nextStatus.currentJobName ?? previousStatus?.currentJobName,
+    lastActivity: nextStatus.lastActivity ?? previousStatus?.lastActivity,
+    bedPreConfirmed: nextStatus.bedPreConfirmed ?? previousStatus?.bedPreConfirmed,
+    readyGateChecks: nextStatus.readyGateChecks ?? previousStatus?.readyGateChecks,
+    attentionMessage: nextStatus.attentionMessage ?? previousStatus?.attentionMessage,
+    attentionReason: nextStatus.attentionReason ?? previousStatus?.attentionReason,
+    operatorAction: nextStatus.operatorAction ?? previousStatus?.operatorAction,
   } as T;
 }
 

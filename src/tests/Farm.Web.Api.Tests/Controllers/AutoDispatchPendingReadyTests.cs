@@ -119,7 +119,30 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetStatus_WhenQueuedJobsExistButStateIsNone_ReadyEndpointRejectsCurrentNone()
+    public async Task GetAllStatus_WhenQueuedJobsExistButPersistedStateIsNone_CanonicalizesPendingReadyInBulkPayload()
+    {
+        Printer printer = await CreateTestPrinterAsync(name: "bulk-none-state-printer");
+        await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
+
+        HttpResponseMessage response = await _client!.GetAsync($"{CurrentRouteBase}/status");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        AutoDispatchGlobalStatusDto? payload = await response.Content.ReadFromJsonAsync<AutoDispatchGlobalStatusDto>(JsonOptions);
+        payload.Should().NotBeNull();
+
+        AutoDispatchStatusDto status = payload!.Printers.Single(p => p.PrinterId == printer.Id);
+        status.State.Should().Be("PendingReady");
+        status.QueueDepth.Should().Be(1);
+        status.AttentionMessage.Should().Be("Print completed. 1 queued job is blocked until you clear the bed and confirm ready. Once confirmed, the next queued job will start automatically.");
+        status.ReadyGateChecks.Should().Contain(check =>
+            check.Name == "Bed Clear Confirmed"
+            && !check.Passed
+            && check.Message.Contains("Waiting for operator"));
+    }
+
+    [Fact]
+    public async Task GetStatus_WhenQueuedJobsExistButPersistedStateIsNone_CanonicalizesPendingReadyAndAllowsReady()
     {
         Printer printer = await CreateTestPrinterAsync(name: "none-state-printer");
         await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
@@ -130,18 +153,20 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
 
         AutoDispatchStatusDto? status = await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
         status.Should().NotBeNull();
-        status!.State.Should().Be("None");
+        status!.State.Should().Be("PendingReady");
         status.QueueDepth.Should().Be(1);
+        status.AttentionMessage.Should().Be("Print completed. 1 queued job is blocked until you clear the bed and confirm ready. Once confirmed, the next queued job will start automatically.");
         status.ReadyGateChecks.Should().Contain(check =>
             check.Name == "Bed Clear Confirmed"
             && !check.Passed
-            && check.Message.Contains("No confirmation needed yet"));
+            && check.Message.Contains("Waiting for operator"));
 
         HttpResponseMessage readyResponse = await _client.PostAsync($"{CurrentRouteBase}/{printer.Id}/ready", null);
 
-        readyResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        string body = await readyResponse.Content.ReadAsStringAsync();
-        body.Should().Contain("current: None");
+        readyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        AutoDispatchReadyResult? readyResult = await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
+        readyResult.Should().NotBeNull();
+        readyResult!.Status.State.Should().Be("Ready");
     }
 
     private async Task<Printer> CreateTestPrinterAsync(string name)

@@ -21,4 +21,11 @@ public enum AutoDispatchState
     /// will be dispatched after passing filament pre-flight checks.
     /// </summary>
     Ready = 2,
+
+    /// <summary>
+    /// The operator intentionally dismissed the current ready-gate prompt.
+    /// Internally this suppresses stale PendingReady normalization until the
+    /// next queueing or completion transition explicitly re-arms the gate.
+    /// </summary>
+    Dismissed = 3,
 }

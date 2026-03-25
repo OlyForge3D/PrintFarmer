@@ -93,8 +93,10 @@ function isWaitingForBedClearConfirmationText(value: string | undefined | null):
  * Prefer the explicit PendingReady state, but fall back to the failed
  * "Bed Clear Confirmed" gate from the detailed/global auto-dispatch payload so
  * UI surfaces still show the operator-facing state when the summary row is stale.
- * Ignore the backend's "No confirmation needed yet" gate message so a canonical
- * None state does not keep rendering a stale Pending Ready overlay.
+ * Treat a failed bed-clear gate with queued work as actionable even when the
+ * gate copy is missing, but still ignore the backend's explicit
+ * "No confirmation needed yet" message so a canonical None state does not keep
+ * rendering a stale Pending Ready overlay.
  *
  * @param status - Auto-dispatch status row from the bulk or per-printer endpoint
  * @returns True when the operator must clear the bed before queued work can resume
@@ -117,14 +119,18 @@ export function requiresBedClearConfirmation(status: AutoDispatchStatus | undefi
   }
 
   const gateMessage = normalizeStatusMessage(bedClearGate.message);
-  if (!gateMessage || gateMessage === 'no confirmation needed yet') {
+  if (gateMessage === 'no confirmation needed yet') {
     return false;
   }
 
-  return isWaitingForBedClearConfirmationText(bedClearGate.message)
+  if (isWaitingForBedClearConfirmationText(bedClearGate.message)
     || isWaitingForBedClearConfirmationText(status.attentionMessage)
     || isWaitingForBedClearConfirmationText(status.attentionReason)
-    || isWaitingForBedClearConfirmationText(status.operatorAction);
+    || isWaitingForBedClearConfirmationText(status.operatorAction)) {
+    return true;
+  }
+
+  return status.queueDepth > 0;
 }
 
 /**

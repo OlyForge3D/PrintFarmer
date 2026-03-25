@@ -172,6 +172,45 @@ describe('CompactPrinterCard PendingReady live updates', () => {
     });
   });
 
+  it('shows Pending Ready status and bed-clear banner from the initial bulk status snapshot when the bed-clear gate is red', async () => {
+    const printer = makePrinter();
+    vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValueOnce({
+      printers: [
+        {
+          printerId: printer.id,
+          printerName: printer.name,
+          enabled: true,
+          isReady: false,
+          queueDepth: 1,
+          state: 'None',
+          bedPreConfirmed: false,
+          readyGateChecks: [
+            {
+              name: 'Bed Clear Confirmed',
+              passed: false,
+              message: 'Waiting for operator to confirm bed is clear',
+              checkedAt: '2026-03-25T00:00:00Z',
+            },
+          ],
+          attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
+        },
+      ],
+    });
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    expect(await screen.findByText('Pending Ready')).toBeInTheDocument();
+    expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
+    expect(screen.getByText('Print complete — confirm bed is clear')).toBeInTheDocument();
+    expect(screen.getByText('1 job queued')).toBeInTheDocument();
+  });
+
   it('shows Pending Ready status and bed-clear banner after an auto-dispatch SignalR update', async () => {
     const printer = makePrinter();
 
@@ -210,6 +249,59 @@ describe('CompactPrinterCard PendingReady live updates', () => {
     expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
     expect(screen.getByText('Print complete — confirm bed is clear')).toBeInTheDocument();
     expect(screen.getByText('2 jobs queued')).toBeInTheDocument();
+  });
+
+  it('keeps the Pending Ready banner when a partial live update omits ready-gate details', async () => {
+    const printer = makePrinter();
+    vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValueOnce({
+      printers: [
+        {
+          printerId: printer.id,
+          printerName: printer.name,
+          enabled: true,
+          isReady: false,
+          queueDepth: 1,
+          state: 'None',
+          bedPreConfirmed: false,
+          readyGateChecks: [
+            {
+              name: 'Bed Clear Confirmed',
+              passed: false,
+              message: 'Waiting for operator to confirm bed is clear',
+              checkedAt: '2026-03-25T00:00:00Z',
+            },
+          ],
+          attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
+        },
+      ],
+    });
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    expect(await screen.findByText('Pending Ready')).toBeInTheDocument();
+    expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
+
+    emitAutoDispatchStateChanged({
+      printerId: printer.id,
+      printerName: printer.name,
+      enabled: true,
+      isReady: false,
+      queueDepth: 1,
+      state: 'None',
+      bedPreConfirmed: false,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Pending Ready')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
+    expect(screen.getByText('1 job queued')).toBeInTheDocument();
   });
 
   it('clears the Pending Ready overlay when the backend returns None with no confirmation needed', async () => {
@@ -309,5 +401,43 @@ describe('CompactPrinterCard PendingReady live updates', () => {
     });
     expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
     expect(screen.getByText('2 jobs queued')).toBeInTheDocument();
+  });
+
+  it('shows Pending Ready status and bed-clear banner when the live row only reports a failed red bed-clear gate with queued work', async () => {
+    const printer = makePrinter();
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    expect(await screen.findByText('Idle')).toBeInTheDocument();
+
+    emitAutoDispatchStateChanged({
+      printerId: printer.id,
+      printerName: printer.name,
+      enabled: true,
+      isReady: false,
+      queueDepth: 1,
+      state: 'None',
+      bedPreConfirmed: false,
+      readyGateChecks: [
+        {
+          name: 'Bed Clear Confirmed',
+          passed: false,
+          message: '',
+          checkedAt: '2026-03-25T00:00:00Z',
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Pending Ready')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
+    expect(screen.getByText('1 job queued')).toBeInTheDocument();
   });
 });

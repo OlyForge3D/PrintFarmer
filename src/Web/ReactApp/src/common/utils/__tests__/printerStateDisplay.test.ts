@@ -174,5 +174,30 @@ describe('printerStateDisplay utils', () => {
         isOnline: true,
       })).toBe('Pending Ready');
     });
+
+    it('treats a failed bed-clear gate with queued work as Pending Ready even when the gate copy is missing', () => {
+      const autoDispatchStatus: AutoDispatchStatus = {
+        printerId: 'printer-1',
+        enabled: true,
+        state: 'None',
+        queueDepth: 1,
+        readyGateChecks: [
+          {
+            name: 'Bed Clear Confirmed',
+            passed: false,
+            message: '',
+            checkedAt: '2026-03-25T00:00:00Z',
+          },
+        ],
+      };
+
+      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(true);
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: autoDispatchStatus.state,
+        autoDispatchStatus,
+        isOnline: true,
+      })).toBe('Pending Ready');
+    });
   });
 });

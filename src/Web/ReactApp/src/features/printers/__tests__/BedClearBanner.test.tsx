@@ -174,6 +174,31 @@ describe('BedClearBanner', () => {
     expect(screen.getByText(/1 job queued/)).toBeInTheDocument();
   });
 
+  it('renders from a failed bed-clear gate with queued work even when the gate copy is blank', () => {
+    const status: AutoDispatchStatus = {
+      printerId: 'printer-1',
+      enabled: true,
+      state: 'None',
+      queueDepth: 1,
+      readyGateChecks: [
+        {
+          name: 'Bed Clear Confirmed',
+          passed: false,
+          message: '',
+          checkedAt: '2026-03-25T00:00:00Z',
+        },
+      ],
+    };
+
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={status} />,
+      { wrapper: createWrapper() },
+    );
+
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(/1 job queued/)).toBeInTheDocument();
+  });
+
   it('renders nothing when state is Ready', () => {
     const status = { ...baseStatus, state: 'Ready' as const };
     const { container } = render(

@@ -290,6 +290,8 @@ public class Printer
     /// None = feature disabled or no pending action.
     /// PendingReady = job completed, waiting for operator "bed clear" confirmation.
     /// Ready = operator confirmed, next queued job will be dispatched.
+    /// Dismissed = operator intentionally dismissed the current prompt until the
+    /// next queue/completion transition re-arms it.
     /// </summary>
     public AutoDispatchState AutoDispatchState { get; set; } = AutoDispatchState.None;
 

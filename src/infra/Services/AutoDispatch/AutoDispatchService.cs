@@ -258,8 +258,15 @@ public class AutoDispatchService(
             throw new InvalidOperationException($"Auto-dispatch is not enabled for printer {printer.Name}");
         }
 
-        bool hasReadyConfirmation = printer.AutoDispatchState == AutoDispatchState.PendingReady
-            || printer.AutoDispatchState == AutoDispatchState.Ready
+        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: true, ct);
+        bool hasActiveJob = await db.PrintJobs
+            .AnyAsync(
+                j => j.AssignedPrinterId == printerId
+                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                ct);
+        AutoDispatchState effectiveState = ResolveEffectiveState(printer, queuedJobs.QueueDepth, hasActiveJob);
+        bool hasReadyConfirmation = effectiveState == AutoDispatchState.PendingReady
+            || effectiveState == AutoDispatchState.Ready
             || printer.BedPreConfirmed;
 
         if (!hasReadyConfirmation)
@@ -267,7 +274,6 @@ public class AutoDispatchService(
             throw new InvalidOperationException($"Printer {printer.Name} is not in PendingReady state (current: {printer.AutoDispatchState})");
         }
 
-        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: true, ct);
         PrintJob? nextJob = queuedJobs.NextJob;
 
         if (nextJob is null)
@@ -370,7 +376,7 @@ public class AutoDispatchService(
             throw new InvalidOperationException($"Printer {printerId} not found");
         }
 
-        printer.AutoDispatchState = AutoDispatchState.None;
+        printer.AutoDispatchState = AutoDispatchState.Dismissed;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(ReadyGateLogPrefix + " Auto-dispatch ready gate cancelled for printer {PrinterId} ({Name})", printerId, printer.Name);
@@ -523,9 +529,11 @@ public class AutoDispatchService(
     private static AutoDispatchStatusDto BuildStatusDto(Printer printer, int queuedJobCount, string? currentJobName = null)
     {
         string now = DateTime.UtcNow.ToString("o");
-        bool isReady = printer.AutoDispatchEnabled && printer.AutoDispatchState == AutoDispatchState.Ready;
-        var gateChecks = BuildReadyGateChecks(printer, queuedJobCount, now);
-        string? attentionMessage = BuildAttentionMessage(printer, queuedJobCount);
+        bool hasActiveJob = !string.IsNullOrWhiteSpace(currentJobName);
+        AutoDispatchState effectiveState = ResolveEffectiveState(printer, queuedJobCount, hasActiveJob);
+        bool isReady = printer.AutoDispatchEnabled && effectiveState == AutoDispatchState.Ready;
+        var gateChecks = BuildReadyGateChecks(printer, queuedJobCount, effectiveState, now);
+        string? attentionMessage = BuildAttentionMessage(printer, queuedJobCount, effectiveState);
 
         return new AutoDispatchStatusDto
         {
@@ -536,7 +544,7 @@ public class AutoDispatchService(
             CurrentJobName = currentJobName,
             QueueDepth = queuedJobCount,
             ReadyGateChecks = gateChecks,
-            State = printer.AutoDispatchState.ToString(),
+            State = effectiveState.ToString(),
             BedPreConfirmed = printer.BedPreConfirmed,
             AttentionMessage = attentionMessage,
         };
@@ -555,7 +563,36 @@ public class AutoDispatchService(
         return BuildStatusDto(printer, queuedJobs.QueueDepth, currentJobName);
     }
 
-    private static List<ReadyGateCheckDto> BuildReadyGateChecks(Printer printer, int queuedJobCount, string checkedAt)
+    private static AutoDispatchState ResolveEffectiveState(Printer printer, int queuedJobCount, bool hasActiveJob)
+    {
+        if (printer.AutoDispatchState == AutoDispatchState.Dismissed)
+        {
+            return AutoDispatchState.None;
+        }
+
+        if (printer.AutoDispatchState != AutoDispatchState.None)
+        {
+            return printer.AutoDispatchState;
+        }
+
+        if (!printer.AutoDispatchEnabled
+            || printer.BedPreConfirmed
+            || queuedJobCount <= 0
+            || hasActiveJob
+            || !printer.IsAvailable
+            || printer.InMaintenance)
+        {
+            return AutoDispatchState.None;
+        }
+
+        return AutoDispatchState.PendingReady;
+    }
+
+    private static List<ReadyGateCheckDto> BuildReadyGateChecks(
+        Printer printer,
+        int queuedJobCount,
+        AutoDispatchState effectiveState,
+        string checkedAt)
     {
         var checks = new List<ReadyGateCheckDto>
         {
@@ -588,11 +625,12 @@ public class AutoDispatchService(
 
         if (printer.AutoDispatchEnabled)
         {
+            bool confirmationRequired = effectiveState == AutoDispatchState.PendingReady;
             checks.Add(new ReadyGateCheckDto
             {
                 Name = "Bed Clear Confirmed",
-                Passed = printer.AutoDispatchState == AutoDispatchState.Ready || printer.BedPreConfirmed,
-                Message = printer.AutoDispatchState switch
+                Passed = !confirmationRequired,
+                Message = effectiveState switch
                 {
                     AutoDispatchState.Ready => "Operator confirmed bed is clear",
                     _ when printer.BedPreConfirmed => "Bed pre-cleared for immediate dispatch",
@@ -608,7 +646,8 @@ public class AutoDispatchService(
 
     private static string? BuildAttentionMessage(
         Printer printer,
-        int queuedJobCount)
+        int queuedJobCount,
+        AutoDispatchState effectiveState)
     {
         if (!printer.AutoDispatchEnabled)
         {
@@ -631,7 +670,7 @@ public class AutoDispatchService(
                 : "Printer is unavailable. Restore printer availability before auto-dispatch can resume.";
         }
 
-        if (printer.AutoDispatchState == AutoDispatchState.PendingReady)
+        if (effectiveState == AutoDispatchState.PendingReady)
         {
             return queuedJobCount switch
             {
@@ -641,7 +680,7 @@ public class AutoDispatchService(
             };
         }
 
-        if (queuedJobCount > 0 && (printer.AutoDispatchState == AutoDispatchState.Ready || printer.BedPreConfirmed))
+        if (queuedJobCount > 0 && (effectiveState == AutoDispatchState.Ready || printer.BedPreConfirmed))
         {
             return "Bed is clear. The next queued job will start automatically.";
         }
