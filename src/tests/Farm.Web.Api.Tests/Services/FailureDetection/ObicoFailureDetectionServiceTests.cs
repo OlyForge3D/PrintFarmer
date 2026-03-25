@@ -357,6 +357,71 @@ public class ObicoFailureDetectionServiceTests
         snapshotRequests[0].AbsoluteUri.Should().Be(snapshotUrl);
     }
 
+    [Fact]
+    public async Task AnalyzeImageFromUrlAsync_WhenObicoCannotReachSnapshotUrlAndLegacyFallbackIsUnavailable_ReturnsReachabilitySpecificError()
+    {
+        const string snapshotUrl = "http://printer.local/webcam/?action=snapshot";
+        List<CapturedRequest> obicoRequests = [];
+        List<CapturedRequest> snapshotRequests = [];
+
+        using RecordingHandler obicoHandler = new(request =>
+        {
+            obicoRequests.Add(CapturedRequest.From(request));
+            if (request.Method == HttpMethod.Get)
+            {
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent(
+                        "{\"error\":\"Obico could not fetch the provided snapshot URL from its network.\"}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.MethodNotAllowed);
+        });
+
+        using RecordingHandler snapshotHandler = new(request =>
+        {
+            snapshotRequests.Add(CapturedRequest.From(request));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([1, 2, 3, 4, 5])
+            };
+        });
+
+        Mock<IHttpClientFactory> httpClientFactory = new(MockBehavior.Strict);
+        httpClientFactory
+            .Setup(factory => factory.CreateClient(It.IsAny<string>()))
+            .Returns((string name) => name switch
+            {
+                "ObicoML" => new HttpClient(obicoHandler, disposeHandler: false),
+                "" => new HttpClient(snapshotHandler, disposeHandler: false),
+                _ => throw new InvalidOperationException($"Unexpected client request: {name}")
+            });
+
+        ObicoFailureDetectionService service = CreateService(httpClientFactory);
+
+        FailureDetectionResult result = await service.AnalyzeImageFromUrlAsync(snapshotUrl, "http://obico.local", null, CancellationToken.None);
+
+        result.ErrorMessage.Should().Be(
+            "Obico could not reach the saved snapshot URL from its network, and this server does not accept uploaded fallback snapshots (legacy POST /p/ returned HTTP 405). " +
+            "Make the camera snapshot URL reachable from the Obico host, or use an Obico ML API build that supports uploaded snapshot fallback.");
+        result.IsFailureDetected.Should().BeFalse();
+        result.Confidence.Should().Be(0m);
+
+        obicoRequests.Should().HaveCount(2);
+        obicoRequests[0].Method.Should().Be(HttpMethod.Get);
+        obicoRequests[0].PathAndQuery.Should().StartWith("/p/?img=");
+        Uri.UnescapeDataString(obicoRequests[0].PathAndQuery.Split("img=", 2)[1]).Should().Be(snapshotUrl);
+        obicoRequests[1].Method.Should().Be(HttpMethod.Post);
+        obicoRequests[1].PathAndQuery.Should().Be("/p/");
+
+        snapshotRequests.Should().ContainSingle();
+        snapshotRequests[0].Method.Should().Be(HttpMethod.Get);
+        snapshotRequests[0].AbsoluteUri.Should().Be(snapshotUrl);
+    }
+
     private static ObicoFailureDetectionService CreateService(Mock<IHttpClientFactory> httpClientFactory)
     {
         Mock<ISettingsService> settingsService = new(MockBehavior.Strict);

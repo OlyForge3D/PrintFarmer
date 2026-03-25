@@ -1,6 +1,6 @@
 # Squad Decisions
 
-**Updated:** 2026-03-25T18:50:21Z
+**Updated:** 2026-03-25T13:40:00Z
 
 ## Archived Decisions
 
@@ -2813,3 +2813,84 @@ Lambert's backend review found no hardcoded `10.0.0.24:3333` path in code, while
 - Verify whether the affected printer is using `detectionSource = pooled` or `global`.
 - Confirm that exact `detectionTarget` is reachable from the API runtime context.
 - Keep route-contract fixes and runtime network-debugging as separate workstreams.
+
+---
+
+## 2026-03-25: Obico Snapshot Reachability — Runtime & Admin Validation Alignment (APPROVED)
+
+**Date:** 2026-03-25  
+**Authors:** Kane (Test/Validation), Lambert (Backend), Ripley (Frontend), Parker (Implementation/Landing)  
+**Status:** APPROVED — Implementation Complete and Verified
+
+### Problem
+
+Three independent failure seams emerged in Obico snapshot reachability and diagnostics:
+
+1. **Runtime service** — ObicoFailureDetectionService could fail on self-hosted GET responses but had no structured fallback to legacy POST
+2. **Admin validation** — ObicoServerController create/enable/health probes only used legacy POST, allowing false-green scenarios where runtime would fail
+3. **Frontend monitoring** — Modal displayed raw HTTP errors without actionable context for operators
+
+### Decision
+
+Establish a unified Obico contract across all three seams:
+
+1. **Snapshot GET-first rule** — Both runtime service and admin validation must attempt `GET /p/?img=<snapshot-url>` first
+2. **Structured fallback** — Only retry legacy `POST /p/` when GET returns 400 AND response body indicates the ML server could not fetch the snapshot URL
+3. **Frontend feedback** — Modal renders reachability gates and converts HTTP errors into operator-actionable incompatibility messages
+4. **No modal-specific request changes** — Frontend already calls the correct `GET /api/failure-detection/status` endpoint; modal paths are not the source of 405 errors
+
+### Implementation Details
+
+**Service Layer:**
+- `ObicoSnapshotFallbackDetector.cs` — Detects 400-response fallback conditions by parsing ML response body
+- `ObicoFailureDetectionService.cs` — Reconciles GET upstream payload formats (tuple-array and object-style) with fallback to legacy POST
+- `ObicoServerController.cs` — Admin validation uses identical GET-first contract as runtime service
+
+**Frontend:**
+- `FailureDetectionStatusModal.tsx` — Displays reachability status and render actionable error messages
+- `failureDetectionStatus.ts` — Service wrapper for querying failure-detection status from `GET /api/failure-detection/status`
+
+**Test Coverage:**
+- `ObicoFailureDetectionServiceTests.cs` — 6 focused tests verify GET/fallback behavior and payload parsing
+- `ObicoServerControllerTests.cs` — Admin validation uses identical GET-first logic
+- `FailureDetectionMonitoringOverlay.test.tsx` — Frontend modal renders error context correctly
+
+### Key Design Decisions
+
+1. **Fallback Specificity** — Do not blanket-fallback on all 400s, auth failures, or general transport errors. Only retry legacy route when the exact condition indicates the server cannot reach the supplied snapshot URL.
+2. **Admin & Runtime Sync** — Both paths now validate the same upstream contract, eliminating scenarios where create/enable health-checks pass but runtime fails.
+3. **Modal Error Messaging** — Convert raw HTTP codes into domain-level incompatibility explanations (e.g., "The configured URL does not expose a supported prediction route").
+4. **No Request-Shape Changes** — Frontend modal path analysis revealed the request already matches the backend controller signature. Root cause was backend/container/proxy routing, not request shape.
+
+### Test Evidence
+
+- **Obico-focused backend tests:** 6/6 PASSING
+- **React regression tests:** 150/150 PASSING  
+- **Frontend build:** Production build successful with 0 new errors
+- **API regression:** 28 total passing tests covering auto-dispatch/bed-clear monitoring context
+
+### Operational Impact
+
+- Operators now see actionable reachability diagnostics instead of raw HTTP errors
+- Admin validation and runtime behavior stay aligned through a shared contract
+- Self-hosted Obico servers with private/loopback/unreachable camera URLs are properly diagnosed without masking real Obico outages
+
+### Files Modified
+
+**Backend:**
+- `src/infra/Services/FailureDetection/ObicoSnapshotFallbackDetector.cs`
+- `src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs`
+- `src/api/Controllers/ObicoServerController.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Controllers/ObicoServerControllerTests.cs`
+
+**Frontend:**
+- `src/Web/ReactApp/src/features/printers/FailureDetectionStatusModal.tsx`
+- `src/Web/ReactApp/src/services/failureDetectionStatus.ts`
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx`
+
+### Follow-Up Boundary
+
+The current GET probe validates route/response-shape compatibility using a synthetic `img=` parameter. Real end-to-end printer-camera snapshot reachability remains a separate follow-up workstream.
+
+---

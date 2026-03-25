@@ -1,13 +1,18 @@
 ---
-updated_at: 2026-03-25T07:26:32Z
-focus_area: Camera fit and preview sizing improvements — PUSHED ✅
+updated_at: 2026-03-25T13:40:00Z
+focus_area: Obico snapshot reachability & diagnostics — COMPLETE & VERIFIED ✅
 active_issues: []
 ---
 
 # What We're Focused On
 
-**Current Cycle:** Camera fit improvements complete and pushed ✅
+**Current Cycle:** Obico snapshot reachability and failure-detection diagnostics complete ✅
 
-Ripley implemented camera fit improvements (object-contain for full visibility), Kane reviewed and added regression tests, Newt applied fixes increasing preview size by 308%, Kane approved for deployment. **Parker pushed changes to `development` (commit `1942cd5c`)**.
+Parker landed Obico snapshot reachability integration with fallback detection (commit `1ae23837`). The work unified three independent seams:
+1. Runtime snapshot reachability — ObicoFailureDetectionService GET/POST contract alignment
+2. Admin validation diagnostics — ObicoServerController now validates the same GET-first contract
+3. Frontend failure-detection monitoring — FailureDetectionStatusModal displays actionable reachability gates
 
-**Status:** Code pushed and ready for staging/production deployment. Next focus area TBD.
+All validation completed pre-commit (dotnet format/build/tests, npm lint, React tests, React build). 6 Obico-focused backend tests passing, 150 React tests passing.
+
+**Status:** Code pushed to `development` branch. All reachability/diagnostics work documented in decisions.md. Ready for deployment. Next focus area TBD.

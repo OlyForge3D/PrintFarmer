@@ -145,3 +145,39 @@ PendingReady fix fully documented. No pending squad state. Branch clean after pu
 
 **Outcome:** Squad documentation now reflects the landed GET-first Obico contract fix, keeps runtime reachability work separate from the route bug, and trims oversized history/decision files back toward maintainable active records.
 
+
+## 2026-03-25 Obico Reachability & Diagnostics Documentation Session
+
+**Task:** Process Parker's Obico snapshot reachability + diagnostics landing (commit `1ae23837`); consolidate decision inbox, create session log, update identity/now.md  
+**Timestamp:** 2026-03-25T13:40:00Z  
+
+**Status:** ✅ COMPLETE — All logs written, decisions merged, inbox cleared, identity updated.
+
+**Documents Created:**
+1. `.squad/log/2026-03-25T13-40-00Z-obico-reachability-diagnostics.md` — Session summary (3 seams unified, pre-commit validation summary)
+2. `.squad/decisions.md` — New decision #25 (Obico Snapshot Reachability consolidated from 5 inbox entries)
+3. `.squad/identity/now.md` — Updated to reflect Obico completion status
+
+**Decisions Merged (5 inbox files):**
+- kane-snapshot-reachability.md → Regression gate specs
+- lambert-snapshot-reachability.md → Fallback implementation design
+- kane-spaghetti-modal-405.md → Rejected direction documentation
+- lambert-spaghetti-modal-405.md → Backend fix specs
+- ripley-spaghetti-modal-405.md → Frontend path analysis (no changes)
+
+**Deduplication & Consolidation:**
+- All 5 inbox decisions consolidated into single unified decision entry documenting the GET-first contract across runtime, admin validation, and frontend monitoring
+- Removed redundant problem statements and aligned solution descriptions around the canonical contract
+- Archived all 5 inbox files after merge
+
+**Key Outcomes:**
+- 3 failure seams now documented as unified under GET-first contract
+- Runtime service + admin validation + frontend monitoring all synchronized
+- 6 Obico-focused backend tests locked in pre-commit validation
+- Ready for deployment to staging/production
+
+**Learnings:**
+- Consolidating parallel decision streams around a canonical contract reduces cognitive load and prevents divergence
+- Three-seam alignment (service/admin/frontend) requires explicit cross-boundary decision documentation
+- Inbox files representing the same architectural problem should reference each other during merge to preserve decision lineage
+

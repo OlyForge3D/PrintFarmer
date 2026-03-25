@@ -43,6 +43,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             obicoServerUrl,
             apiKey,
             treatLegacyUploadMismatchAsCompatibilityError: false,
+            snapshotReachabilityFallbackTriggered: false,
             ct: ct);
     }
 
@@ -55,6 +56,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         string obicoServerUrl,
         string? apiKey,
         bool treatLegacyUploadMismatchAsCompatibilityError,
+        bool snapshotReachabilityFallbackTriggered,
         CancellationToken ct)
     {
         if (imageData == null || imageData.Length == 0)
@@ -81,11 +83,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 obicoServerUrl);
 
             HttpResponseMessage response = await httpClient.PostAsync("p/", content, ct);
-            (bool handled, FailureDetectionResult result) parsedResponse = await ParseResponseAsync(
+            (bool handled, bool snapshotReachabilityFallbackTriggered, FailureDetectionResult result) parsedResponse = await ParseResponseAsync(
                 response,
                 obicoServerUrl,
                 allowLegacyFallback: false,
                 treatLegacyUploadMismatchAsCompatibilityError: treatLegacyUploadMismatchAsCompatibilityError,
+                snapshotReachabilityFallbackTriggered: snapshotReachabilityFallbackTriggered,
                 ct: ct);
             return parsedResponse.result;
         }
@@ -131,19 +134,25 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             return FailureDetectionResult.Error("Obico server URL is not configured");
         }
 
-        (bool handled, FailureDetectionResult result) upstreamResult = await TryAnalyzeSnapshotUrlAsync(snapshotUrl, obicoServerUrl, apiKey, ct);
+        (bool handled, bool snapshotReachabilityFallbackTriggered, FailureDetectionResult result) upstreamResult =
+            await TryAnalyzeSnapshotUrlAsync(snapshotUrl, obicoServerUrl, apiKey, ct);
         if (upstreamResult.handled)
         {
             return upstreamResult.result;
         }
 
-        return await FetchSnapshotAndAnalyzeLegacyAsync(snapshotUrl, obicoServerUrl, apiKey, ct);
+        return await FetchSnapshotAndAnalyzeLegacyAsync(
+            snapshotUrl,
+            obicoServerUrl,
+            apiKey,
+            upstreamResult.snapshotReachabilityFallbackTriggered,
+            ct);
     }
 
     /// <summary>
     /// Tries the upstream self-hosted contract (`GET /p/?img=...`) before falling back to the legacy upload flow.
     /// </summary>
-    private async Task<(bool handled, FailureDetectionResult result)> TryAnalyzeSnapshotUrlAsync(
+    private async Task<(bool handled, bool snapshotReachabilityFallbackTriggered, FailureDetectionResult result)> TryAnalyzeSnapshotUrlAsync(
         string snapshotUrl,
         string obicoServerUrl,
         string? apiKey,
@@ -165,27 +174,28 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 obicoServerUrl,
                 allowLegacyFallback: true,
                 treatLegacyUploadMismatchAsCompatibilityError: false,
+                snapshotReachabilityFallbackTriggered: false,
                 ct: ct);
         }
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "[ObicoFailureDetection] HTTP request failed for snapshot URL analysis");
-            return (true, FailureDetectionResult.Error($"HTTP error: {ex.Message}"));
+            return (true, false, FailureDetectionResult.Error($"HTTP error: {ex.Message}"));
         }
         catch (TaskCanceledException)
         {
             _logger.LogWarning("[ObicoFailureDetection] Snapshot URL analysis request timeout");
-            return (true, FailureDetectionResult.Error(CreatePredictionTimeoutMessage(isSnapshotUrlRequest: true)));
+            return (true, false, FailureDetectionResult.Error(CreatePredictionTimeoutMessage(isSnapshotUrlRequest: true)));
         }
         catch (JsonException ex)
         {
             _logger.LogError(ex, "[ObicoFailureDetection] Failed to parse snapshot URL analysis response");
-            return (true, FailureDetectionResult.Error("Invalid JSON response"));
+            return (true, false, FailureDetectionResult.Error("Invalid JSON response"));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[ObicoFailureDetection] Unexpected error during snapshot URL analysis");
-            return (true, FailureDetectionResult.Error($"Unexpected error: {ex.GetType().Name}"));
+            return (true, false, FailureDetectionResult.Error($"Unexpected error: {ex.GetType().Name}"));
         }
     }
 
@@ -196,6 +206,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         string snapshotUrl,
         string obicoServerUrl,
         string? apiKey,
+        bool snapshotReachabilityFallbackTriggered,
         CancellationToken ct)
     {
         try
@@ -227,6 +238,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 obicoServerUrl,
                 apiKey,
                 treatLegacyUploadMismatchAsCompatibilityError: true,
+                snapshotReachabilityFallbackTriggered: snapshotReachabilityFallbackTriggered,
                 ct: ct);
         }
         catch (HttpRequestException ex)
@@ -249,11 +261,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     /// <summary>
     /// Parses successful Obico responses and detects when the legacy multipart upload fallback should be attempted.
     /// </summary>
-    private async Task<(bool handled, FailureDetectionResult result)> ParseResponseAsync(
+    private async Task<(bool handled, bool snapshotReachabilityFallbackTriggered, FailureDetectionResult result)> ParseResponseAsync(
         HttpResponseMessage response,
         string obicoServerUrl,
         bool allowLegacyFallback,
         bool treatLegacyUploadMismatchAsCompatibilityError,
+        bool snapshotReachabilityFallbackTriggered,
         CancellationToken ct)
     {
         if (!response.IsSuccessStatusCode)
@@ -265,7 +278,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                     "[ObicoFailureDetection] Snapshot URL contract unavailable at {ApiUrl}/p/ (HTTP {StatusCode}); falling back to legacy upload",
                     obicoServerUrl,
                     (int)response.StatusCode);
-                return (false, FailureDetectionResult.Error("Legacy fallback requested"));
+                return (false, false, FailureDetectionResult.Error("Legacy fallback requested"));
             }
 
             if (allowLegacyFallback &&
@@ -275,7 +288,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                     "[ObicoFailureDetection] Obico server could not reach the supplied snapshot URL via {ApiUrl}/p/ (HTTP {StatusCode}); falling back to local fetch and legacy upload",
                     obicoServerUrl,
                     (int)response.StatusCode);
-                return (false, FailureDetectionResult.Error("Legacy fallback requested"));
+                return (false, true, FailureDetectionResult.Error("Legacy fallback requested"));
             }
 
             if (treatLegacyUploadMismatchAsCompatibilityError &&
@@ -286,14 +299,20 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                     obicoServerUrl,
                     response.StatusCode,
                     errorBody);
-                return (true, FailureDetectionResult.Error(CreateUnsupportedPredictionContractMessage(response.StatusCode)));
+                return (
+                    true,
+                    false,
+                    FailureDetectionResult.Error(
+                        snapshotReachabilityFallbackTriggered
+                            ? CreateSnapshotReachabilityWithoutLegacyUploadMessage(response.StatusCode)
+                            : CreateUnsupportedPredictionContractMessage(response.StatusCode)));
             }
 
             _logger.LogWarning(
                 "[ObicoFailureDetection] API returned {StatusCode}: {Error}",
                 response.StatusCode,
                 errorBody);
-            return (true, FailureDetectionResult.Error(CreatePredictionApiErrorMessage(
+            return (true, false, FailureDetectionResult.Error(CreatePredictionApiErrorMessage(
                 response.StatusCode,
                 isSnapshotUrlRequest: allowLegacyFallback)));
         }
@@ -306,14 +325,14 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 _logger.LogInformation(
                     "[ObicoFailureDetection] Snapshot URL contract response from {ApiUrl}/p/ was not recognized; falling back to legacy upload",
                     obicoServerUrl);
-                return (false, FailureDetectionResult.Error("Legacy fallback requested"));
+                return (false, false, FailureDetectionResult.Error("Legacy fallback requested"));
             }
 
             _logger.LogWarning("[ObicoFailureDetection] Invalid API response: {Response}", responseBody);
-            return (true, FailureDetectionResult.Error("Invalid API response format"));
+            return (true, false, FailureDetectionResult.Error("Invalid API response format"));
         }
 
-        return (true, CreateSuccessResult(confidence));
+        return (true, false, CreateSuccessResult(confidence));
     }
 
     /// <summary>
@@ -325,6 +344,17 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         return
             $"Configured Obico server is not exposing a supported prediction route (legacy POST /p/ returned HTTP {(int)legacyStatusCode}). " +
             "Check that the URL points to the Obico ML API root that supports upstream GET /p/?img=... or legacy POST /p/.";
+    }
+
+    /// <summary>
+    /// Builds a more precise message when Obico exposes the upstream GET route but cannot reach the
+    /// snapshot URL and also does not accept uploaded fallback snapshots.
+    /// </summary>
+    private static string CreateSnapshotReachabilityWithoutLegacyUploadMessage(HttpStatusCode legacyStatusCode)
+    {
+        return
+            $"Obico could not reach the saved snapshot URL from its network, and this server does not accept uploaded fallback snapshots (legacy POST /p/ returned HTTP {(int)legacyStatusCode}). " +
+            "Make the camera snapshot URL reachable from the Obico host, or use an Obico ML API build that supports uploaded snapshot fallback.";
     }
 
     /// <summary>
