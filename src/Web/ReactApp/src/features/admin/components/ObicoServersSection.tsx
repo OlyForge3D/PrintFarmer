@@ -210,9 +210,9 @@ export function ObicoServersSection() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-pf-text-primary">Obico ML Servers</h3>
+          <h3 className="text-lg font-semibold text-pf-text-primary">Registered Obico ML Servers</h3>
           <p className="text-sm text-pf-text-secondary">
-            Manage Obico servers for AI-powered print failure detection
+            Add pooled Obico ML servers here. Printers can use one of these servers or fall back to the global Obico Failure Detection settings above.
           </p>
         </div>
         <Button variant="primary" onClick={handleOpenAddModal} iconLeft={<PlusIcon />}>

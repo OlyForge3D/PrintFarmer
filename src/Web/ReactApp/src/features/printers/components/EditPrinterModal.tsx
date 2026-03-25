@@ -177,7 +177,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
-      'backendPort', 'frontendPort'
+      'backendPort', 'frontendPort', 'obicoEnabled'
     ];
     
     for (const field of fields) {
@@ -1069,7 +1069,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             <FormField 
               label="Obico AI Monitoring" 
               htmlFor="obico-enabled"
-              helper="Enable AI-powered print failure detection. Requires a camera. The app auto-assigns the best available Obico server."
+              helper="Enable AI-powered print failure detection. Requires a camera. The app uses the best available Obico ML server when one is configured, or falls back to the global Obico Failure Detection settings."
             >
               <Checkbox
                 id="obico-enabled"

@@ -14,6 +14,7 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
@@ -24,6 +25,7 @@ using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 
 namespace Farm.Web.Api.Controllers;
@@ -47,6 +49,7 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
     Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
+    IOptions<ObicoSettings> obicoSettings,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
@@ -62,6 +65,7 @@ public class PrintersController(
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
     private readonly Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService _obicoServerAssignment = obicoServerAssignment;
+    private readonly ObicoSettings _obicoSettings = obicoSettings.Value;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -1411,7 +1415,17 @@ public class PrintersController(
                 ObicoServer? assigned = await _obicoServerAssignment.AssignServerAsync(p.Id, ct);
                 if (assigned is null)
                 {
-                    return BadRequest(new { error = "No available Obico server. Add and enable at least one Obico server in Settings." });
+                    if (!_obicoSettings.Enabled || string.IsNullOrWhiteSpace(_obicoSettings.ObicoApiUrl))
+                    {
+                        return BadRequest(new
+                        {
+                            error = "No available Obico ML configuration. Open Settings > Obico Failure Detection to add a pooled Obico ML server or configure the global fallback."
+                        });
+                    }
+
+                    _logger.LogInformation(
+                        "[PRINTERS] No pooled Obico server available for printer {PrinterName}; using global Obico Failure Detection settings fallback",
+                        p.Name);
                 }
             }
             else if (!dto.ObicoEnabled.Value && p.ObicoEnabled)
@@ -1738,7 +1752,7 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, [FromBody] TempTargets targets, CancellationToken ct)
+    public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, [FromBody] Farm.Infrastructure.TempTargets targets, CancellationToken ct)
     {
         if (targets is null)
         {

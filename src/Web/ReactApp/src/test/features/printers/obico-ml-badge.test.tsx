@@ -102,6 +102,7 @@ function makePrinter(overrides: Partial<Printer> = {}): Printer {
     fileName: null,
     cameraStreamUrl: null,
     cameraSnapshotUrl: null,
+    obicoEnabled: false,
     obicoServerId: null,
     ...overrides,
   } as Printer;
@@ -167,13 +168,13 @@ describe('ShieldIcon', () => {
 // ── CompactPrinterCard ML badge tests ──
 
 describe('CompactPrinterCard ML badge', () => {
-  it('shows ML badge when printer has obicoServerId and is printing', async () => {
+  it('shows ML badge when printer has Obico monitoring enabled and is printing', async () => {
     const { CompactPrinterCard } = await import(
       '@/features/printers/components/CompactPrinterCard'
     );
 
     const printer = makePrinter({
-      obicoServerId: 'obico-server-1',
+      obicoEnabled: true,
       state: 'Printing',
       isOnline: true,
     });
@@ -189,13 +190,13 @@ describe('CompactPrinterCard ML badge', () => {
     expect(screen.getByLabelText('ML Monitoring Active')).toBeTruthy();
   });
 
-  it('does NOT show ML badge when printer has no obicoServerId', async () => {
+  it('does NOT show ML badge when printer does not have Obico monitoring enabled', async () => {
     const { CompactPrinterCard } = await import(
       '@/features/printers/components/CompactPrinterCard'
     );
 
     const printer = makePrinter({
-      obicoServerId: null,
+      obicoEnabled: false,
       state: 'Printing',
       isOnline: true,
     });
@@ -210,13 +211,13 @@ describe('CompactPrinterCard ML badge', () => {
     expect(screen.queryByText('ML')).toBeNull();
   });
 
-  it('does NOT show ML badge when printer is idle even with obicoServerId', async () => {
+  it('does NOT show ML badge when printer is idle even with Obico monitoring enabled', async () => {
     const { CompactPrinterCard } = await import(
       '@/features/printers/components/CompactPrinterCard'
     );
 
     const printer = makePrinter({
-      obicoServerId: 'obico-server-1',
+      obicoEnabled: true,
       state: 'Idle',
       isOnline: true,
     });
@@ -235,13 +236,13 @@ describe('CompactPrinterCard ML badge', () => {
 // ── DetailedPrinterCard ML badge tests ──
 
 describe('DetailedPrinterCard ML badge', () => {
-  it('shows ML badge when printer has obicoServerId and is printing', async () => {
+  it('shows ML badge when printer has Obico monitoring enabled and is printing', async () => {
     const { DetailedPrinterCard } = await import(
       '@/features/printers/components/DetailedPrinterCard'
     );
 
     const printer = makePrinter({
-      obicoServerId: 'obico-server-1',
+      obicoEnabled: true,
       state: 'Printing',
       isOnline: true,
     });
@@ -256,13 +257,13 @@ describe('DetailedPrinterCard ML badge', () => {
     expect(screen.getByLabelText('ML Monitoring Active')).toBeTruthy();
   });
 
-  it('does NOT show ML badge when printer has no obicoServerId', async () => {
+  it('does NOT show ML badge when printer does not have Obico monitoring enabled', async () => {
     const { DetailedPrinterCard } = await import(
       '@/features/printers/components/DetailedPrinterCard'
     );
 
     const printer = makePrinter({
-      obicoServerId: null,
+      obicoEnabled: false,
       state: 'Printing',
       isOnline: true,
     });

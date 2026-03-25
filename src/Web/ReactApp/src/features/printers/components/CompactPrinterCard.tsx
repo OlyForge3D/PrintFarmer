@@ -137,8 +137,9 @@ export function CompactPrinterCard({
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
-  // Show Obico ML monitoring badge when printer has an Obico server assigned and is printing
-  const showObicoMonitoringBadge = !!printer.obicoServerId && isPrinting;
+  // Show Obico ML monitoring badge when monitoring is enabled and the printer is printing,
+  // regardless of whether it is using a pooled server or the global fallback configuration.
+  const showObicoMonitoringBadge = !!printer.obicoEnabled && isPrinting;
 
   return (
     <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">

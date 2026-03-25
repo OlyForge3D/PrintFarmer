@@ -146,8 +146,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
-  // Show Obico ML monitoring badge when printer has an Obico server assigned and is printing
-  const showObicoMonitoringBadge = !!apiPrinter.obicoServerId && isPrinting;
+  // Show Obico ML monitoring badge when monitoring is enabled and the printer is printing,
+  // regardless of whether it is using a pooled server or the global fallback configuration.
+  const showObicoMonitoringBadge = !!apiPrinter.obicoEnabled && isPrinting;
 
   // Camera URL handling
   const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
