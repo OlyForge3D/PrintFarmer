@@ -273,3 +273,55 @@ Merged `docker-publish.yml` (release pipeline, multistage Dockerfile) and `conta
 
 **Impact:** Your Obico compose work enables Lambert's Feature #1 implementation
 **Status:** Wave 1 infrastructure complete; Feature #1 backend work begins Wave 2
+
+## Phase 1 Spaghetti Detection Delivery (2026-03-24)
+
+**Status:** ✅ Implemented, tested, and pushed to development  
+**Commit:** `53a2284f` — feat: spaghetti detection phase 1 delivery  
+**Bead:** PFarm1-0xa (closed)
+
+### Deliverables
+
+**Team Coordination:**
+- Consolidated phase 1 scope across Lambert (backend), Ripley (frontend), Kane (validation), Dallas (lead)
+- Merged decision docs and skill extractions from all agents
+- All 30+ files staged in single atomic commit with bead closure
+
+**Backend Work (Lambert):**
+- Auto-pause wired through `IBackendClientFactory` in `PrintFailureMonitorService`
+- `FailureDetectionDto` enriched with `SnapshotUrl` from camera snapshot
+- `FailureDetectionMonitorStatus` tracks real-time monitoring state (counts, last scan)
+- Status endpoint now returns actual data instead of placeholder
+- Extended controller tests for pause execution and status validation
+
+**Frontend Work (Ripley):**
+- `FailureDetectionEvent` type updated with `snapshotUrl` field
+- Toast notification improved with confidence % and view-snapshot action
+- Transient alert badges on both Compact and Detailed printer cards
+- `FailureDetectionStatusCard` added to Settings → Monitoring section
+- `useFailureDetectionAlert` hook manages alert state with 60s timeout
+- Focused tests for status card and alerts (both passing)
+
+**Validation (Kane):**
+- All 1709 API tests passing (including new auto-pause tests)
+- All 365 React tests passing (including new alert/status tests)
+- No new lint/formatting issues
+- SignalR end-to-end verified
+- Auto-pause tested with all backend types
+
+### Root Cause: `pfdev redeploy nginx` Error
+
+**Diagnosis:** User tried to run `pfdev redeploy nginx` and got `no such service: nginx`.
+
+**Root causes (3-part problem):**
+1. **`pfdev` is not installed** — No alias or symlink; user needs `scripts/pf-dev.sh` directly or create alias
+2. **`pf-dev.sh` has no `redeploy` command** — Only supports: bootstrap, start, stop, status, logs, test, clean
+3. **Service name is `nginx-proxy`, not `nginx`** — Docker Compose service defined as `nginx-proxy` with container name `printfarmer-nginx-proxy`
+
+**Context confusion:**
+- `pf-dev.sh` is a local development helper (for native .NET + React dev servers)
+- `scripts/deploy-docker.sh` is what has the `--redeploy` flag (for Docker Compose orchestration)
+- If redeploying, user should use: `./scripts/deploy-docker.sh --redeploy`
+- If restarting just nginx via compose: `docker-compose restart nginx-proxy`
+
+**Not a codebase bug** — User was trying to use a non-existent command on a different tool. The script and services work correctly.

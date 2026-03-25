@@ -2032,3 +2032,70 @@ POST   /api/obico-servers/{id}/health  → ObicoServerHealthResponse (latency)
 - **Ash (Frontend):** TypeScript types already existed, backend completed the feature
 - **Jeff (Product):** Feature enables enterprise deployments with multiple GPU machines
 
+
+---
+
+### 21. Docker Compose Service Naming — `nginx-proxy` vs `nginx` (Documented)
+
+**Author:** Parker  
+**Date:** 2026-03-24  
+**Status:** DOCUMENTED — User education, no code changes
+
+#### Issue
+
+User attempted `pfdev redeploy nginx` and received error: `no such service: nginx`.
+
+**Root Cause:** The Nginx service in `docker-compose.yml` is named `nginx-proxy`, not `nginx`.
+
+#### Context
+
+The PrintFarmer Docker Compose stack defines three deployment tiers:
+- **Lite:** Single monolith (no Nginx reverse proxy)
+- **Standard:** API + Frontend + Nginx reverse proxy
+- **Full:** Standard + PostgreSQL + discovery service + monitoring stack
+
+The Nginx service is only present in Standard and Full profiles:
+- **Service name** (in Compose): `nginx-proxy`
+- **Container name** (at runtime): `printfarmer-nginx-proxy`
+- **Image:** `${NGINX_IMAGE:-nginx:alpine}`
+- **Healthcheck endpoint:** `http://nginx-proxy:80/health`
+
+#### Correct Usage
+
+**To restart Nginx via Docker Compose:**
+```bash
+docker-compose restart nginx-proxy
+```
+
+**To redeploy the full stack (including Nginx):**
+```bash
+./scripts/deploy-docker.sh --redeploy
+```
+
+**For local development (no Nginx needed):**
+```bash
+./scripts/pf-dev.sh start  # Runs native API + React, no containers
+```
+
+#### Implications
+
+1. **Compose service names must match exactly** — Documentation and wiki pages must reference `nginx-proxy`, not `nginx`
+2. **Local dev (`pf-dev.sh`) ≠ Docker deployment** — Users must understand the distinction:
+   - `pf-dev.sh`: Native .NET/React dev servers, no Docker, no reverse proxy
+   - `deploy-docker.sh`: Full Docker Compose orchestration with reverse proxy
+3. **Alias clarity** — `pfdev` is a convenience alias for `./scripts/pf-dev.sh` with 7 supported commands; Docker Compose commands require full `docker-compose` CLI
+
+#### Why Not a Bug
+
+The compose file is correct. The user was attempting syntax from a different tool (`docker-compose restart`) using a command from the local dev tool (`pf-dev.sh`) on an incorrect service name (`nginx` vs `nginx-proxy`). This is a usage/documentation issue, not a code issue.
+
+#### Documentation Updates Needed
+
+- User guides must emphasize the difference between `pf-dev.sh` and `deploy-docker.sh`
+- Docker Compose service names in examples must use `nginx-proxy`
+- Setup instructions should clarify which tool is appropriate for which use case
+- Consider adding a troubleshooting section: "Service not found" → verify service name with `docker-compose ps`
+
+#### Decision Record
+
+This decision documents the correct naming convention for the Nginx reverse proxy service and clarifies the distinction between local development workflows and containerized deployments. No code changes required — this is user education and documentation maintenance.

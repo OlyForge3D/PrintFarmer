@@ -320,3 +320,58 @@
 ✅ All quality gates passed
 
 ---
+
+---
+
+## Spaghetti Detection Validation Plan (2026-03-18)
+
+**Status:** Plan complete, no implementation yet
+
+**Context:** Backend monitoring service exists (`PrintFailureMonitorService`), frontend shows ML badge and toast notifications. Need validation plan for first slice before implementation begins.
+
+**Key Files Analyzed:**
+- `src/api/Controllers/FailureDetectionController.cs` — Manual analyze endpoint, status endpoint, history stub
+- `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs` — Background monitoring loop, Obico integration, SignalR broadcasts
+- `src/tests/Farm.Web.Api.Tests/Controllers/FailureDetectionControllerTests.cs` — Existing controller tests (10 tests)
+- `src/Web/ReactApp/src/App.tsx` — Failure event toast handler
+- `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx` — Existing ML badge tests (9 tests)
+
+**Validation Plan Created:**
+- **File:** `.squad/decisions/inbox/kane-spaghetti-validation.md`
+- **Backend tests needed:** `PrintFailureMonitorServiceTests.cs` (NEW)
+  - Printer eligibility filtering (online + printing + camera)
+  - Obico server selection (assigned vs fallback)
+  - SignalR broadcast verification
+  - Disabled monitoring behavior
+  - Edge cases: offline printers, no cameras, Obico API errors
+- **Frontend tests needed:** `failure-detection-toast.test.tsx` (NEW)
+  - Toast display on `FailureDetected` event
+  - Confidence rounding, auto-pause message
+  - Multiple events handling
+- **Edge cases documented:** 6 backend, 3 frontend, 3 integration
+
+**Quality Gates:**
+- All backend integration tests pass
+- All frontend component tests pass
+- Existing test suites pass (0 regressions)
+- Developer smoke test confirms end-to-end flow
+- No new linting/compiler errors
+
+**Deferred (Out of Scope for First Slice):**
+- History persistence (endpoint returns 501)
+- Auto-pause implementation (requires backend client integration)
+- Manual analyze endpoint (low priority, requires auth setup)
+- Confidence threshold tuning
+- Multi-camera printer support
+- Rate limiting
+- Performance under load (50+ printers)
+
+**Testing Patterns:**
+- Use `CustomWebApplicationFactory` for backend integration tests
+- Mock `IObicoFailureDetectionService`, `IHubContext<PrinterHub>`, `IPrinterStatusCacheReader`
+- Use `IHostedService` test harness to trigger `ExecuteAsync` without 30s delay
+- Frontend: mock `printerSignalRService` to trigger events
+- Verify SignalR broadcasts with mock hub context
+
+**No Code Implemented:** This is validation planning only. Implementation phase follows after plan approval.
+

@@ -1747,3 +1747,46 @@ The auto-dispatch workflow is **farm-level operations**, not **per-printer contr
 - `src/Web/ReactApp/src/test/features/auto-dispatch/AutoDispatchDashboardPage.test.tsx` — Updated title assertion
 
 **Validation:** TypeScript clean, ESLint clean, all 1480 tests passing, production build successful.
+
+## Learnings
+
+### 2026-03-10: Spaghetti Detection UI Design
+
+**Architecture Discovery:**
+- Backend `FailureDetectionController` exists with `/api/failure-detection/status` and `/api/failure-detection/analyze/{printerId}` endpoints
+- SignalR infrastructure already wired: `printer-signalr.ts` has `onFailureDetected` callback registration
+- `FailureDetectionEvent` type defined in `api.ts`: `printerId`, `printerName`, `jobId`, `confidence`, `detectedAt`, `autoPaused`
+- Events are transient (no persistence yet) — backend TODO notes this as "event_persistence" feature
+
+**Existing UI Patterns:**
+- Obico monitoring badge: Small inline badge next to printer name with ShieldIcon (shows monitoring active)
+- Compact cards: Header with name + state badge + optional indicators
+- Detailed cards: Header + action bar + progress + control sections
+- Alert component: Existing `Alert.tsx` with `success|error|info|warning` types, title, body, dismissible
+- Badge component: Existing `Badge.tsx` with 6 variants, 2 sizes, dot mode
+
+**Design Decisions:**
+- Primary location: Inline on printer cards (both compact and detailed) for at-a-glance visibility
+- Compact card: Small badge near header, shows confidence only
+- Detailed card: Full-width Alert panel below progress bar, shows confidence + auto-pause + timestamp
+- Warning vs Error: <80% confidence = warning (yellow), ≥80% or auto-paused = error (red)
+- Toast notification: On detection for immediate feedback
+- Phase 2: Settings for thresholds, history page, persistence
+
+**Component Plan:**
+1. `FailureDetectionBadge.tsx` — compact inline badge
+2. `FailureDetectionAlert.tsx` — detailed alert panel
+3. Hook into existing `printer-signalr.ts` service via `onFailureDetected()`
+4. Local state in cards: `useState<FailureDetectionEvent | null>`
+
+**Key Files:**
+- `/src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx`
+- `/src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx`
+- `/src/Web/ReactApp/src/services/printer-signalr.ts`
+- `/src/Web/ReactApp/src/types/api.ts` (FailureDetectionEvent)
+- `/src/Web/ReactApp/src/common/components/ui/Badge.tsx`
+- `/src/Web/ReactApp/src/common/components/ui/Alert.tsx`
+
+**No Persistence Risk:**
+Events are transient. Refreshing page clears detection state. This is acceptable for Phase 1 real-time monitoring.
+

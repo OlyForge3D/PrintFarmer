@@ -845,3 +845,40 @@ Created: `.squad/orchestration-log/2026-03-16T23-12-05Z-dallas.md`
 - **Fix technique:** Two-step `git mv` — first move files to a temp path, then move back with correct casing. This is necessary because case-insensitive filesystems treat `data` and `Data` as the same directory, so a direct `git mv data/ Data/` is a no-op.
 - **Hidden blast radius:** The casing mismatch extended beyond just the git index — the `.csproj` Include paths and the C# runtime `Path.Combine()` call in `YamlSeedDataReader.cs` also used lowercase `"data"`. These would silently fail on Linux when files copy to `Data/` but code looks for `data/`.
 - **Lesson:** When fixing path casing, always grep the entire repo for string references to the old path — not just the git index.
+
+## Learnings
+
+### Spaghetti Detection Phase 1 Slice (2025-07-14)
+
+**Architecture inventory — what exists:**
+- Full Obico ML integration in `src/infra/Services/FailureDetection/` — `ObicoFailureDetectionService` submits images, `PrintFailureMonitorService` runs the background monitoring loop
+- `FailureDetectionDto` at `src/infra/Dtos/FailureDetectionDto.cs` — broadcast via SignalR `FailureDetected` event
+- SignalR wiring complete end-to-end: backend → `printer-signalr.ts` → `App.tsx` toast
+- Obico server CRUD at `/api/obico-servers`, UI in `ObicoServersSection.tsx`
+- `ObicoSettings` with dynamic settings UI (enable, threshold, interval, auto-pause flag)
+- Printer cards show "ML" badge when `obicoEnabled && isPrinting`
+
+**Known gaps:**
+- `GET /api/failure-detection/history` returns 501 — no persistence layer for detection events
+- Auto-pause is a no-op: `HandleFailureDetectedAsync` logs a warning but never calls the backend client pause. `IBackendClientFactory` exists and all backends implement pause methods.
+- Status endpoint (`GET /api/failure-detection/status`) returns a static message, not real monitoring state
+- `FailureDetectionDto` doesn't include the snapshot URL that triggered detection
+
+**Phase 1 decisions:**
+- Auto-pause is highest value — wire `IBackendClientFactory` into `PrintFailureMonitorService`
+- Enrich DTO with `snapshotUrl` for frontend display
+- Make status endpoint return real counts (monitored printers, last scan time)
+- Frontend: warning badge on printer cards when failure detected, improved toasts, monitoring status card in Settings
+- Deferred: event persistence, history page, per-printer settings, trend charts, notification channels
+
+**Key files for future reference:**
+- Backend monitor: `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs`
+- Detection service: `src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs`
+- Controller: `src/api/Controllers/FailureDetectionController.cs`
+- DTO: `src/infra/Dtos/FailureDetectionDto.cs`
+- Settings: `src/infra/Settings/ObicoSettings.cs`
+- Frontend types: `src/Web/ReactApp/src/types/api.ts` (FailureDetectionEvent at line ~3396)
+- SignalR handler: `src/Web/ReactApp/src/services/printer-signalr.ts`
+- Toast wiring: `src/Web/ReactApp/src/App.tsx` line ~292
+- Printer cards: `CompactPrinterCard.tsx`, `DetailedPrinterCard.tsx` (obicoEnabled badge)
+- Obico servers UI: `src/Web/ReactApp/src/features/admin/components/ObicoServersSection.tsx`

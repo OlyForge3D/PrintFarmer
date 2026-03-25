@@ -70,3 +70,24 @@ Agent Scribe initialized and ready for work. Maintains orchestration log, sessio
 - ✅ Updated affected agents (Ash, Ripley, Dallas) with cross-team context
 
 **Outcome:** Camera Phase A documented and team notified. Ready for Phase A.1 (migrations).
+
+## 2026-03-24 Landing — Parker Decision (Nginx Service Naming)
+
+**Task:** Merge Parker's Nginx service naming decision into consolidated decisions.md  
+**Timestamp:** 2026-03-24T14-30-00Z
+
+**Documents Processed:**
+1. Input: `.squad/decisions/inbox/parker-nginx-service-naming.md` — Service naming clarification
+2. Output: `.squad/decisions.md` #21 — Docker Compose service naming decision record
+3. Cleanup: Deleted inbox file after merge
+
+**Actions Completed:**
+- ✅ Merged Parker's Nginx service naming clarification into decisions.md as decision #21
+- ✅ Updated decision status to DOCUMENTED (user education, no code changes)
+- ✅ Deleted inbox file: `.squad/decisions/inbox/parker-nginx-service-naming.md`
+- ✅ Documented context, implications, and user education requirements
+
+**Outcome:** Parker's documentation decision consolidated. Team now has centralized decision record for service naming conventions and local dev vs containerized workflows.
+
+**Key Takeaway:** This decision clarifies that `nginx-proxy` (not `nginx`) is the correct Docker Compose service name, and documents the distinction between `pf-dev.sh` (local dev, no containers) and `deploy-docker.sh` (Docker Compose orchestration). No code changes required — documentation and user education focus only.
+

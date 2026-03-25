@@ -1532,3 +1532,48 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 - **Affected controllers**: `TasksController.cs` (line 44), `ObicoServerController.cs` (line 117).
 - **Tests added**: `CreateManualTaskAsync_WithValidDto_ReturnsCreatedWithLocationHeader` and `CreateManualTaskAsync_WithInvalidDto_ReturnsBadRequest` in `TasksControllerTests.cs`.
 - **Decision filed**: `.squad/decisions/inbox/lambert-createdataction-route-fix.md`
+
+## Learnings: Spaghetti Detection Backend Investigation (2026-01-12)
+
+### Failure Detection Architecture Analysis
+- **Current State:** PrintFailureMonitorService broadcasts real-time SignalR events with NO persistence
+- **Key Issue:** `/api/failure-detection/history` returns HTTP 501 — events are transient
+- **SignalR DTO:** `FailureDetectionDto` includes PrinterId, JobId, Confidence, DetectedAt, AutoPaused
+- **Background worker:** Scans active prints every 30s via `ObicoFailureDetectionService` HTTP client
+
+### Domain Model Findings
+- `PrintJob` entity already has `FailureReason` field (string, nullable) for manual tracking
+- `ObicoServer` entity manages per-server assignments and load balancing
+- `Camera` entity links printers to snapshot URLs for ML analysis
+- No existing `FailureDetectionEvent` or event log table
+
+### Phase 1 Design Proposal (Minimal Persistence)
+- New entity: `FailureDetectionEvent` with PrinterId (FK), JobId (FK), Confidence, DetectedAt
+- Adds user action tracking: UserAcknowledged, AcknowledgedAt, AcknowledgedByUserId
+- Adds outcome tracking: WasActualFailure (nullable, for ML accuracy ground truth)
+- Migrations required: Both PostgreSQL and SQL Server providers
+- Non-breaking: Existing SignalR broadcast preserved, history endpoint now returns actual data
+
+### Controller Changes
+- `GET /api/failure-detection/history` → Replace 501 with paginated query (pageSize, page, printerId filter)
+- `POST /api/failure-detection/{eventId}/acknowledge` → User can mark as false alarm or confirmed failure
+- DTOs: `FailureDetectionEventDto` (extends current broadcast DTO), `AcknowledgeEventDto`
+
+### Key Technical Decisions
+- **Persistence point:** `PrintFailureMonitorService.HandleFailureDetectedAsync` writes to DB before SignalR broadcast
+- **Indexes:** DetectedAt DESC (for history), PrinterId + DetectedAt (for per-printer views)
+- **Retention:** TBD (archive after 90 days? keep forever for ML training?)
+- **Auto-pause:** Deferred to Phase 2 (requires IBackendClientFactory integration)
+
+### Files Reviewed
+- `src/api/Controllers/FailureDetectionController.cs` — Status endpoint works, history is 501, analyze endpoint functional
+- `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs` — Background worker, 30s cycles, SignalR broadcast
+- `src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs` — HTTP client for Obico ML API
+- `src/infra/Dtos/FailureDetectionDto.cs` — Current SignalR DTO structure
+- `src/infra/Domain/PrintJob.cs` — Already has FailureReason field
+- `src/infra/Domain/ObicoServer.cs` — Multi-server support for load balancing
+
+### Team Handoff
+- **Ripley (Frontend):** Needs history table/list UI + acknowledge modal (DTOs designed)
+- **Open questions:** Auto-pause implementation timing, snapshot storage decision, retention policy, notification preferences
+- **Decision file:** `.squad/decisions/inbox/lambert-spaghetti-backend.md` created for team review
