@@ -192,15 +192,22 @@ Early entries (pre-2026-03-25) summarized for brevity. See decisions-archive.md 
 3. Visual regression check (both card layouts, mobile + desktop)
 4. Merge after Kane re-approval
 
-## 2026-03-25: PendingReady compact-card fallback fix
+## 2026-03-25: PendingReady compact-card fallback fix → LANDED
 
 **Role:** Frontend Dev  
-**Status:** ✅ Complete
+**Status:** ✅ Complete — commit e807133d landed on development
 
 Fixed `CompactPrinterCard` and `BedClearBanner` to derive bed-clear confirmation from `readyGateChecks` when bulk auto-dispatch state is stale/flattened. Updated consistency surfaces across printer views.
 
-**Test Coverage:** React regression 29/29 PASSING  
+**Test Coverage:** React regression 44/44 PASSING (focused)  
 **Decision Output:** `.squad/decisions.md` → "Pending Ready compact-card fallback"
+
+**Commit Evidence:**
+- Frontend renderer + cache fixes approved by Lambert + Kane
+- Backend contract normalization approved by Ripley + Lambert
+- All focused tests green (44 React / 22 API / 28 backend suite)
+- Build: 0 errors, 0 warnings. Lint: clean.
+- Branch clean and up to date with origin after push
 
 ### 2026-03-25: Frontend auto-dispatch rename should stop at centralized transport wrappers
 

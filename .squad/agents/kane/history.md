@@ -15,6 +15,32 @@ Early entries (pre-2026-03-18) summarized to reduce file size. See decisions-arc
 
 ---
 
+## 2026-03-25: PendingReady Regression Testing & Approval → LANDED
+
+**Role:** Test/Quality Specialist  
+**Status:** ✅ Complete — commit e807133d landed on development
+
+Designed and approved final backend regression for bulk-status first-load path. Verified 22 focused API tests + 44 focused React tests all PASSING. User-facing contract locked for queued printer blocked on bed-clear confirmation (PendingReady state with Dismissed sentinel for operator dismissal).
+
+**Test Evidence:**
+- API focused tests: 22/22 PASS
+- React focused tests: 44/44 PASS
+- Backend suite (prior): 28/28 PASS
+- Coverage: Bulk-status first-load path, PendingReady state normalization, Dismissed sentinel logic
+
+**Approval Deliverables:**
+- ✅ Verified & APPROVED user-facing contract
+- ✅ Locked exact compact-card contract for queued printer blocked on bed-clear confirmation
+- ✅ Validated focused test suite covers all regression paths
+- ✅ Build clean (0 errors, 0 warnings), lint clean
+
+**Commit Evidence:**
+- All tests green across frontend + backend
+- Branch clean and up to date with origin after push
+- User directive honored: End-to-end confirmation pending per Jeff Papiez
+
+---
+
 ## Tailwind v4 CSS-First Migration Verification — Complete (2026-03-18)
 
 **Coordination:** Multi-agent sprint (Ripley + Ash + Kane)  

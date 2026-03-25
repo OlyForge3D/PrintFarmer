@@ -15,7 +15,29 @@ Early entries (pre-2026-03-11) summarized for file size. See decisions-archive.m
 
 ---
 
-## Pi 4 Deployment Infrastructure (2026-03-11)
+## 2026-03-25: PendingReady Backend Contract Normalization → LANDED
+
+**Role:** Backend Dev (bug discovery + fix implementation)  
+**Status:** ✅ Complete — commit e807133d landed on development
+
+Fixed `AutoDispatchState.cs` and `AutoDispatchService.cs` to normalize queued work with failed bed-clear gate from `state=None` to `state=PendingReady`. Added `AutoDispatchState.Dismissed` sentinel for operator dismissal tracking.
+
+**Test Coverage:** API regression 22/22 PASSING (focused) + backend suite 28/28 (prior)  
+**Commit Evidence:**
+- Backend state contract + dismissal logic approved by Ripley + Kane
+- Frontend renderer + cache fixes approved by Ripley + Kane
+- All focused tests green (22 API / 44 React / 28 backend suite)
+- Build: 0 errors, 0 warnings. Lint: clean.
+- Branch clean and up to date with origin after push
+
+**Files Changed:**
+- `src/infra/Domain/AutoDispatchState.cs` — state normalization + Dismissed sentinel
+- `src/infra/Domain/Printer.cs` — domain model updates
+- `src/infra/Services/AutoDispatch/AutoDispatchService.cs` — service logic
+- `src/tests/Farm.Web.Api.Tests/Controllers/AutoDispatchPendingReadyTests.cs` — controller regression
+- `src/tests/Farm.Web.Api.Tests/Services/AutoDispatch/AutoDispatchReadyGateServiceTests.cs` — service regression
+
+---
 
 **Sprint Focus:** Monolith deployment mode + GHCR CI/CD pipeline + comprehensive hardware documentation
 

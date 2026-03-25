@@ -28,6 +28,37 @@
 - **CI/CD Integration:** Enabled monolith-runtime target in docker-publish.yml matrix
 - **Consequence:** ~500MB memory savings, zero database configuration needed
 
+### 2026-03-25: PendingReady Landing — Commit e807133d
+
+**Role:** Orchestrator/Commit Author  
+**Status:** ✅ Complete — commit landed on development and pushed to origin
+
+Coordinated final verification and landing of PendingReady / bed-clear regression fix across frontend + backend. Commit e807133d includes 10 files (5 frontend / 5 backend) with focused regression test coverage (44 React, 22 API, 28 backend suite).
+
+**Commit Evidence:**
+- All tests green (44 React focused / 22 API focused / 28 backend suite)
+- Build: 0 errors, 0 warnings
+- Lint: clean
+- Branch: clean and up to date with origin after push
+
+**Approval Chain:**
+- Ripley: Frontend renderer fallback + cache freshness fixes approved
+- Lambert: Backend state normalization + Dismissed sentinel approved
+- Kane: Final regression verification + contract approval
+- Jeff Papiez: End-to-end confirmation pending (user directive honored)
+
+**Files Landed:**
+1. `src/Web/ReactApp/src/common/utils/printerStateDisplay.ts` — Renderer + fallback
+2. `src/Web/ReactApp/src/common/utils/__tests__/printerStateDisplay.test.ts` — Renderer tests
+3. `src/Web/ReactApp/src/features/printers/hooks/useAutoDispatch.ts` — Cache freshness
+4. `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx` — Banner regression
+5. `src/Web/ReactApp/src/test/features/printers/compact-printer-pendingready-live.test.tsx` — Live integration
+6. `src/infra/Domain/AutoDispatchState.cs` — State contract + sentinel
+7. `src/infra/Domain/Printer.cs` — Domain model
+8. `src/infra/Services/AutoDispatch/AutoDispatchService.cs` — Service logic
+9. `src/tests/Farm.Web.Api.Tests/Controllers/AutoDispatchPendingReadyTests.cs` — Controller regression
+10. `src/tests/Farm.Web.Api.Tests/Services/AutoDispatch/AutoDispatchReadyGateServiceTests.cs` — Service regression
+
 ### Related Decisions Finalized
 - **Decision 1:** GHCR CI/CD Pipeline — automated releases, multi-arch support, semantic versioning
 - **Decision 2:** Monolith Deployment Mode Infrastructure — Docker stage + compose + CI/CD
