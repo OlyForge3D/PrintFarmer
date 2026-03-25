@@ -49,7 +49,7 @@ const COMMAND_CENTER_STYLES = `
 .ad-beacon { animation: ad-beacon 2s ease-in-out infinite; }
 `;
 
-type AutoDispatchStateFilter = 'all' | 'pendingReady' | 'printing' | 'ready' | 'disabled' | 'idle';
+type AutoDispatchStateFilter = 'all' | 'queued' | 'pendingReady' | 'printing' | 'ready' | 'disabled' | 'idle';
 type AutoDispatchSortMode = 'state' | 'name';
 
 function getAutoDispatchStatePriority(printer: AutoDispatchDetailedStatus): number {
@@ -165,6 +165,7 @@ export function AutoDispatchDashboardPage() {
       list = list.filter(p => {
         const isPrinting = !!p.currentJobName;
         const isPendingReady = p.state === 'PendingReady';
+        if (stateFilter === 'queued') return p.queueDepth > 0;
         if (stateFilter === 'disabled') return !p.enabled;
         if (stateFilter === 'printing') return p.enabled && isPrinting;
         if (stateFilter === 'pendingReady') return p.enabled && isPendingReady;
@@ -179,6 +180,8 @@ export function AutoDispatchDashboardPage() {
       if (sortMode === 'state') {
         const diff = getAutoDispatchStatePriority(a) - getAutoDispatchStatePriority(b);
         if (diff !== 0) return diff;
+        const queueDepthDiff = b.queueDepth - a.queueDepth;
+        if (queueDepthDiff !== 0) return queueDepthDiff;
         return (a.printerName ?? '').localeCompare(b.printerName ?? '');
       }
       return (a.printerName ?? '').localeCompare(b.printerName ?? '');
@@ -187,6 +190,10 @@ export function AutoDispatchDashboardPage() {
   }, [status?.printers, stateFilter, sortMode]);
 
   const farmStats = useMemo(() => computeFarmStats(status?.printers ?? []), [status?.printers]);
+  const queuedPrinterCount = useMemo(
+    () => (status?.printers ?? []).filter((printer) => printer.queueDepth > 0).length,
+    [status?.printers],
+  );
 
   const handleGlobalToggle = (enabled: boolean) => {
     setGlobalEnabledMutation.mutate(enabled);
@@ -274,6 +281,7 @@ export function AutoDispatchDashboardPage() {
             <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Filter printers by state">
               {([
                 ['all', 'All', undefined],
+                ['queued', 'Queued Jobs', queuedPrinterCount],
                 ['pendingReady', 'Attention', farmStats.pending],
                 ['printing', 'Printing', farmStats.printing],
                 ['ready', 'Ready', farmStats.ready],

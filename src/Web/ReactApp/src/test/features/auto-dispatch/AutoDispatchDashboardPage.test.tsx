@@ -422,4 +422,93 @@ describe('AutoDispatchDashboardPage', () => {
     expect(screen.getByText('Bed Clear Confirmed')).toBeInTheDocument();
     expect(screen.queryByText('Pre-Clear Bed')).not.toBeInTheDocument();
   });
+
+  it('sorts printers with the same state by queue depth before name', () => {
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: {
+        globalEnabled: true,
+        printers: [
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-alpha',
+            printerName: 'Alpha Printer',
+            queueDepth: 1,
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-zulu',
+            printerName: 'Zulu Printer',
+            queueDepth: 5,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    const printerHeadings = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
+    expect(printerHeadings.slice(0, 2)).toEqual(['Zulu Printer', 'Alpha Printer']);
+  });
+
+  it('filters to printers that have queued jobs regardless of current state', async () => {
+    const user = userEvent.setup();
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: {
+        globalEnabled: true,
+        printers: [
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-printing',
+            printerName: 'Printing Queue',
+            currentJobName: 'active-job.gcode',
+            state: 'None',
+            queueDepth: 2,
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-ready',
+            printerName: 'Ready Queue',
+            isReady: true,
+            state: 'Ready',
+            queueDepth: 1,
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-idle',
+            printerName: 'Idle Queue',
+            state: 'None',
+            queueDepth: 3,
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-empty',
+            printerName: 'No Queue',
+            state: 'None',
+            queueDepth: 0,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    await user.click(screen.getByRole('radio', { name: /queued jobs/i }));
+
+    expect(screen.getByText('Printing Queue')).toBeInTheDocument();
+    expect(screen.getByText('Ready Queue')).toBeInTheDocument();
+    expect(screen.getByText('Idle Queue')).toBeInTheDocument();
+    expect(screen.queryByText('No Queue')).not.toBeInTheDocument();
+  });
 });
