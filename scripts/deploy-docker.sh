@@ -5318,9 +5318,10 @@ tls_certificate_is_valid() {
     local cert_dir="$1"
     local cert_file="$cert_dir/tls.crt"
     local key_file="$cert_dir/tls.key"
+    local ca_file="$cert_dir/ca.crt"
     local fullchain_file="$cert_dir/tls-fullchain.crt"
 
-    if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
+    if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ] || [ ! -f "$ca_file" ]; then
         return 1
     fi
 
@@ -5333,6 +5334,10 @@ tls_certificate_is_valid() {
     fi
 
     if [ ! -f "$fullchain_file" ]; then
+        return 1
+    fi
+
+    if ! openssl verify -CAfile "$ca_file" "$cert_file" >/dev/null 2>&1; then
         return 1
     fi
 

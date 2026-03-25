@@ -128,7 +128,7 @@ tls_cert_dir_needs_refresh() {
     local cert_dir=$1
     local cert_text
 
-    if [[ ! -f "$cert_dir/tls.crt" || ! -f "$cert_dir/tls.key" || ! -f "$cert_dir/ca.cer" || ! -f "$cert_dir/tls-fullchain.crt" ]]; then
+    if [[ ! -f "$cert_dir/tls.crt" || ! -f "$cert_dir/tls.key" || ! -f "$cert_dir/ca.crt" || ! -f "$cert_dir/ca.cer" || ! -f "$cert_dir/tls-fullchain.crt" ]]; then
         return 0
     fi
 
@@ -146,6 +146,10 @@ tls_cert_dir_needs_refresh() {
     fi
 
     if [[ "$cert_text" != *"TLS Web Server Authentication"* ]]; then
+        return 0
+    fi
+
+    if ! openssl verify -CAfile "$cert_dir/ca.crt" "$cert_dir/tls.crt" >/dev/null 2>&1; then
         return 0
     fi
 
