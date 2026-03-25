@@ -262,4 +262,71 @@ describe('FailureDetectionMonitoringOverlay', () => {
       )
     ).toBeInTheDocument();
   });
+
+  it('shows private snapshot reachability details without hiding the latest snapshot link', () => {
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-1',
+      printerName: 'Voron 2.4',
+      state: 'error',
+      reason: 'The selected snapshot URL is private to the printer LAN, so the Obico service could not reach it directly.',
+      isPrinting: true,
+      detectionSource: 'pooled',
+      detectionTarget: 'North Bay pooled Obico',
+      snapshotUrl: 'http://127.0.0.1:8080/webcam/?action=snapshot',
+      lastOutcome: 'error',
+      lastAnalyzedAt: '2026-03-25T12:00:05Z',
+      lastConfidence: null,
+      lastAutoPaused: false,
+    };
+
+    render(<FailureDetectionMonitoringOverlay enabled={true} status={status} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /open spaghetti detection details for voron 2.4/i })
+    );
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getAllByText(/private to the printer lan/i).length).toBeGreaterThan(1);
+    expect(screen.getByText('North Bay pooled Obico')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Make the saved snapshot URL reachable from the Obico server network, or switch to a snapshot feed that PrintFarmer can fetch locally.'
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /open latest snapshot/i })).toHaveAttribute(
+      'href',
+      'http://127.0.0.1:8080/webcam/?action=snapshot'
+    );
+  });
+
+  it('shows timeout-specific operator guidance when PrintFarmer cannot fetch the snapshot in time', () => {
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-1',
+      printerName: 'Voron 2.4',
+      state: 'error',
+      reason: 'Snapshot fetch timeout. PrintFarmer could not download the camera snapshot in time.',
+      isPrinting: true,
+      detectionSource: 'pooled',
+      detectionTarget: 'North Bay pooled Obico',
+      snapshotUrl: 'http://printer.local/webcam/?action=snapshot',
+      lastOutcome: 'error',
+      lastAnalyzedAt: '2026-03-25T12:00:05Z',
+      lastConfidence: null,
+      lastAutoPaused: false,
+    };
+
+    render(<FailureDetectionMonitoringOverlay enabled={true} status={status} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /open spaghetti detection details for voron 2.4/i })
+    );
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getAllByText(/snapshot fetch timeout/i).length).toBeGreaterThan(1);
+    expect(
+      screen.getByText(
+        'Open the latest snapshot and confirm the camera responds from PrintFarmer before relying on failure detection or auto-pause.'
+      )
+    ).toBeInTheDocument();
+  });
 });

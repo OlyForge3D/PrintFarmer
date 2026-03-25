@@ -16,6 +16,29 @@ function getFailureDetectionAction(
 ): string {
   const normalizedReason = status.reason.toLowerCase();
 
+  if (
+    normalizedReason.includes('snapshot url request')
+    || normalizedReason.includes('reachable from the obico server')
+    || normalizedReason.includes('private to the printer lan')
+    || normalizedReason.includes('printer lan')
+  ) {
+    return 'Make the saved snapshot URL reachable from the Obico server network, or switch to a camera feed that PrintFarmer can fetch locally.';
+  }
+
+  if (
+    normalizedReason.includes('snapshot fetch timeout')
+    || normalizedReason.includes('could not download the camera snapshot')
+  ) {
+    return 'Open the latest snapshot and verify PrintFarmer can reach the camera feed quickly enough.';
+  }
+
+  if (
+    normalizedReason.includes('analysis timed out')
+    || normalizedReason.includes('timed out while analyzing')
+  ) {
+    return 'Check the Obico ML service load and retry after the service recovers.';
+  }
+
   if (normalizedReason.includes('snapshot') || normalizedReason.includes('camera')) {
     return context === 'misconfigured'
       ? 'Add or enable a snapshot camera for this printer.'

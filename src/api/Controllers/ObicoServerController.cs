@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.FailureDetection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -348,7 +349,8 @@ public class ObicoServerController : ControllerBase
 
             if (!response.IsSuccessStatusCode)
             {
-                if (ShouldFallbackToLegacyProbe(response.StatusCode))
+                if (ObicoSnapshotFallbackDetector.ShouldFallbackToLegacyUpload(response.StatusCode) ||
+                    ObicoSnapshotFallbackDetector.ShouldFallbackBecauseSnapshotWasUnreachable(response.StatusCode, responseBody))
                 {
                     return (false, null);
                 }
@@ -430,16 +432,6 @@ public class ObicoServerController : ControllerBase
 
         value = default;
         return false;
-    }
-
-    /// <summary>
-    /// Allows legacy probing when the server clearly does not support the upstream GET contract.
-    /// </summary>
-    private static bool ShouldFallbackToLegacyProbe(HttpStatusCode statusCode)
-    {
-        return statusCode is HttpStatusCode.MethodNotAllowed
-            or HttpStatusCode.NotFound
-            or HttpStatusCode.UnsupportedMediaType;
     }
 
     private static ObicoServerDto ToDto(ObicoServer server)

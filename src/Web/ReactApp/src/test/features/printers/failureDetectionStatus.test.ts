@@ -427,6 +427,46 @@ describe('failureDetectionStatus utilities', () => {
       });
     });
 
+    it('returns snapshot-network guidance for Obico reachability errors', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'error',
+        reason: 'Obico rejected the snapshot URL request (HTTP 400). Check whether the saved snapshot URL is reachable from the Obico server network and still returns an image.',
+        isPrinting: true,
+        detectionSource: 'global',
+        lastOutcome: 'error',
+        lastAnalyzedAt: '2026-01-15T10:30:00Z',
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      expect(getFailureDetectionAttentionContent(status)).toEqual({
+        issue: 'Obico rejected the snapshot URL request (HTTP 400). Check whether the saved snapshot URL is reachable from the Obico server network and still returns an image.',
+        action: 'Make the saved snapshot URL reachable from the Obico server network, or switch to a camera feed that PrintFarmer can fetch locally.',
+      });
+    });
+
+    it('returns timeout guidance for snapshot fetch failures', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'error',
+        reason: 'Snapshot fetch timeout. PrintFarmer could not download the camera snapshot in time.',
+        isPrinting: true,
+        detectionSource: 'global',
+        lastOutcome: 'error',
+        lastAnalyzedAt: '2026-01-15T10:30:00Z',
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      expect(getFailureDetectionAttentionContent(status)).toEqual({
+        issue: 'Snapshot fetch timeout. PrintFarmer could not download the camera snapshot in time.',
+        action: 'Open the latest snapshot and verify PrintFarmer can reach the camera feed quickly enough.',
+      });
+    });
+
     it('returns failed-scan guidance when monitoring stays active', () => {
       const status: FailureDetectionPrinterStatusDto = {
         printerId: 'printer-1',

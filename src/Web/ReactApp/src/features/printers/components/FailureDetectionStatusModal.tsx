@@ -57,6 +57,36 @@ function getFailureDetectionOutcomeLabel(status?: FailureDetectionPrinterStatusD
   }
 }
 
+function getFailureDetectionErrorNextStep(reason: string): string | null {
+  const normalizedReason = reason.toLowerCase();
+
+  if (
+    normalizedReason.includes('snapshot url request')
+    || normalizedReason.includes('reachable from the obico server')
+    || normalizedReason.includes('private to the printer lan')
+    || normalizedReason.includes('printer lan')
+  ) {
+    return 'Make the saved snapshot URL reachable from the Obico server network, or switch to a snapshot feed that PrintFarmer can fetch locally.';
+  }
+
+  if (
+    normalizedReason.includes('snapshot fetch timeout')
+    || normalizedReason.includes('could not download the camera snapshot')
+  ) {
+    return 'Open the latest snapshot and confirm the camera responds from PrintFarmer before relying on failure detection or auto-pause.';
+  }
+
+  if (
+    normalizedReason.includes('analysis timed out')
+    || normalizedReason.includes('timed out while analyzing')
+    || normalizedReason.includes('request timeout')
+  ) {
+    return 'Check the Obico ML service load and camera reachability, then retry once the service is responding normally.';
+  }
+
+  return null;
+}
+
 function getFailureDetectionNextStep(
   status: FailureDetectionPrinterStatusDto | undefined,
   enabled: boolean
@@ -77,7 +107,8 @@ function getFailureDetectionNextStep(
     case 'misconfigured':
       return 'Add or enable a usable camera snapshot feed so failure detection can inspect frames from this printer.';
     case 'error':
-      return 'Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.';
+      return getFailureDetectionErrorNextStep(status.reason)
+        ?? 'Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.';
     case 'disabled':
       return enabled
         ? 'Monitoring is standing by. Start a print or verify this printer is eligible for the runtime to begin scanning.'

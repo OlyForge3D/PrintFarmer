@@ -97,7 +97,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         catch (TaskCanceledException)
         {
             _logger.LogWarning("[ObicoFailureDetection] Request timeout");
-            return FailureDetectionResult.Error("Request timeout");
+            return FailureDetectionResult.Error(CreatePredictionTimeoutMessage(isSnapshotUrlRequest: false));
         }
         catch (JsonException ex)
         {
@@ -175,7 +175,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         catch (TaskCanceledException)
         {
             _logger.LogWarning("[ObicoFailureDetection] Snapshot URL analysis request timeout");
-            return (true, FailureDetectionResult.Error("Request timeout"));
+            return (true, FailureDetectionResult.Error(CreatePredictionTimeoutMessage(isSnapshotUrlRequest: true)));
         }
         catch (JsonException ex)
         {
@@ -232,12 +232,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "[ObicoFailureDetection] Failed to fetch snapshot from {SnapshotUrl}", snapshotUrl);
-            return FailureDetectionResult.Error($"Failed to fetch snapshot: {ex.Message}");
+            return FailureDetectionResult.Error($"PrintFarmer could not download the camera snapshot: {ex.Message}");
         }
         catch (TaskCanceledException)
         {
             _logger.LogWarning("[ObicoFailureDetection] Snapshot fetch timeout from {SnapshotUrl}", snapshotUrl);
-            return FailureDetectionResult.Error("Snapshot fetch timeout");
+            return FailureDetectionResult.Error("Snapshot fetch timeout. PrintFarmer could not download the camera snapshot in time.");
         }
         catch (Exception ex)
         {
@@ -259,7 +259,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         if (!response.IsSuccessStatusCode)
         {
             string errorBody = await response.Content.ReadAsStringAsync(ct);
-            if (allowLegacyFallback && ShouldFallbackToLegacyUpload(response.StatusCode))
+            if (allowLegacyFallback && ObicoSnapshotFallbackDetector.ShouldFallbackToLegacyUpload(response.StatusCode))
             {
                 _logger.LogInformation(
                     "[ObicoFailureDetection] Snapshot URL contract unavailable at {ApiUrl}/p/ (HTTP {StatusCode}); falling back to legacy upload",
@@ -268,7 +268,18 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 return (false, FailureDetectionResult.Error("Legacy fallback requested"));
             }
 
-            if (treatLegacyUploadMismatchAsCompatibilityError && ShouldFallbackToLegacyUpload(response.StatusCode))
+            if (allowLegacyFallback &&
+                ObicoSnapshotFallbackDetector.ShouldFallbackBecauseSnapshotWasUnreachable(response.StatusCode, errorBody))
+            {
+                _logger.LogInformation(
+                    "[ObicoFailureDetection] Obico server could not reach the supplied snapshot URL via {ApiUrl}/p/ (HTTP {StatusCode}); falling back to local fetch and legacy upload",
+                    obicoServerUrl,
+                    (int)response.StatusCode);
+                return (false, FailureDetectionResult.Error("Legacy fallback requested"));
+            }
+
+            if (treatLegacyUploadMismatchAsCompatibilityError &&
+                ObicoSnapshotFallbackDetector.ShouldFallbackToLegacyUpload(response.StatusCode))
             {
                 _logger.LogWarning(
                     "[ObicoFailureDetection] Legacy upload contract unavailable at {ApiUrl}/p/ (HTTP {StatusCode}): {Error}",
@@ -282,7 +293,9 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
                 "[ObicoFailureDetection] API returned {StatusCode}: {Error}",
                 response.StatusCode,
                 errorBody);
-            return (true, FailureDetectionResult.Error($"API error: HTTP {(int)response.StatusCode}"));
+            return (true, FailureDetectionResult.Error(CreatePredictionApiErrorMessage(
+                response.StatusCode,
+                isSnapshotUrlRequest: allowLegacyFallback)));
         }
 
         string responseBody = await response.Content.ReadAsStringAsync(ct);
@@ -312,6 +325,35 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         return
             $"Configured Obico server is not exposing a supported prediction route (legacy POST /p/ returned HTTP {(int)legacyStatusCode}). " +
             "Check that the URL points to the Obico ML API root that supports upstream GET /p/?img=... or legacy POST /p/.";
+    }
+
+    /// <summary>
+    /// Builds a more actionable timeout message for either snapshot-URL analysis or direct-upload analysis.
+    /// </summary>
+    private static string CreatePredictionTimeoutMessage(bool isSnapshotUrlRequest)
+    {
+        return isSnapshotUrlRequest
+            ? "Obico analysis timed out while fetching the snapshot URL. Check the Obico server load and whether the camera feed is reachable from that server."
+            : "Obico analysis timed out while processing the uploaded snapshot. Check the Obico ML service load and try again.";
+    }
+
+    /// <summary>
+    /// Builds a more actionable API error message for either snapshot-URL analysis or direct-upload analysis.
+    /// </summary>
+    private static string CreatePredictionApiErrorMessage(HttpStatusCode statusCode, bool isSnapshotUrlRequest)
+    {
+        return (statusCode, isSnapshotUrlRequest) switch
+        {
+            (HttpStatusCode.BadRequest, true) =>
+                "Obico rejected the snapshot URL request (HTTP 400). Check whether the saved snapshot URL is reachable from the Obico server network and still returns an image.",
+            (HttpStatusCode.BadRequest, false) =>
+                "Obico rejected the uploaded snapshot (HTTP 400). Verify that the camera returned a valid image before retrying failure detection.",
+            (HttpStatusCode.RequestTimeout, true) =>
+                "Obico timed out while analyzing the snapshot URL (HTTP 408). Check the Obico server load and camera reachability before relying on failure detection.",
+            (HttpStatusCode.RequestTimeout, false) =>
+                "Obico timed out while analyzing the uploaded snapshot (HTTP 408). Check the Obico ML service load and retry once the service recovers.",
+            _ => $"API error: HTTP {(int)statusCode}"
+        };
     }
 
     /// <summary>
@@ -480,16 +522,6 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
 
         value = default;
         return false;
-    }
-
-    /// <summary>
-    /// Treats method and media-type mismatches as signals to retry the legacy multipart upload flow.
-    /// </summary>
-    private static bool ShouldFallbackToLegacyUpload(HttpStatusCode statusCode)
-    {
-        return statusCode is HttpStatusCode.MethodNotAllowed
-            or HttpStatusCode.NotFound
-            or HttpStatusCode.UnsupportedMediaType;
     }
 
     /// <summary>

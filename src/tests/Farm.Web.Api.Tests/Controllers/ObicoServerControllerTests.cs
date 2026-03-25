@@ -92,6 +92,57 @@ public class ObicoServerControllerTests
     }
 
     [Fact]
+    public async Task CreateServerAsync_WhenUpstreamServerCannotReachProbeSnapshot_PersistsCompatibleServer()
+    {
+        List<CapturedRequest> requests = [];
+        bool isFirstRequest = true;
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(request =>
+        {
+            requests.Add(CapturedRequest.From(request));
+            if (isFirstRequest)
+            {
+                isFirstRequest = false;
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent(
+                        "{\"error\":\"The prediction service could not fetch the supplied snapshot URL.\"}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            if (request.Method == HttpMethod.Post)
+            {
+                return new HttpResponseMessage(HttpStatusCode.UnsupportedMediaType);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"detections\":[]}", Encoding.UTF8, "application/json")
+            };
+        });
+
+        CreateObicoServerDto dto = new()
+        {
+            Name = "Reachable Obico",
+            Url = "http://obico.local:3333",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 2,
+        };
+
+        ActionResult<ObicoServerDto> result = await controller.CreateServerAsync(dto, CancellationToken.None);
+
+        CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
+        ObicoServerDto createdServer = Assert.IsType<ObicoServerDto>(createdResult.Value);
+        createdServer.Name.Should().Be("Reachable Obico");
+        dbContext.ObicoServers.Should().ContainSingle(server => server.Name == "Reachable Obico");
+
+        requests.Should().NotBeEmpty();
+        requests[0].Method.Should().Be(HttpMethod.Get);
+        requests[0].PathAndQuery.Should().StartWith("/p/?img=");
+    }
+
+    [Fact]
     public async Task CreateServerAsync_WhenLegacyProbeAlsoReturnsMethodNotAllowed_RejectsServer()
     {
         List<CapturedRequest> requests = [];
