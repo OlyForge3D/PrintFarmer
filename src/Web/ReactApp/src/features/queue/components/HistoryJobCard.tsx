@@ -138,7 +138,7 @@ export default function HistoryJobCard({
 
       {/* Actions */}
       <div className="flex gap-2 pt-3 border-t border-pf-border">
-        {job.status === "completed" && (
+        {(job.status === "completed" || job.status === "cancelled") && (
           <Button
             onClick={onRerun}
             className="flex-1 px-3 py-2 rounded-sm text-sm font-medium"
