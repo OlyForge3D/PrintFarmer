@@ -75,8 +75,8 @@ public sealed class AutoDispatchBackgroundService(
             .Where(p =>
                 p.IsEnabled
                 && p.IsAvailable
-                && p.AutoPrintEnabled
-                && (p.AutoPrintState == AutoPrintState.Ready || p.BedPreConfirmed)
+                && p.AutoDispatchEnabled
+                && (p.AutoDispatchState == AutoDispatchState.Ready || p.BedPreConfirmed)
                 && !db.PrintJobs.Any(j =>
                     j.AssignedPrinterId == p.Id
                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
@@ -207,14 +207,14 @@ public sealed class AutoDispatchBackgroundService(
             return;
         }
 
-        // Respect the auto-print bed-clear gate: if auto-print is enabled,
+        // Respect the per-printer auto-dispatch ready gate: if automatic dispatch is enabled,
         // only dispatch when the operator has confirmed the bed is clear (Ready state)
         // OR when they've pre-confirmed the bed is clear (BedPreConfirmed = true).
-        if (printer.AutoPrintEnabled && printer.AutoPrintState != AutoPrintState.Ready && !printer.BedPreConfirmed)
+        if (printer.AutoDispatchEnabled && printer.AutoDispatchState != AutoDispatchState.Ready && !printer.BedPreConfirmed)
         {
             logger.LogDebug(
-                "[AutoDispatch] Printer {PrinterId} has auto-print enabled but state is {State} and bed not pre-confirmed — waiting for operator confirmation",
-                printerId, printer.AutoPrintState);
+                "[AutoDispatch] Printer {PrinterId} has automatic dispatch enabled but state is {State} and bed not pre-confirmed — waiting for operator confirmation",
+                printerId, printer.AutoDispatchState);
             return;
         }
 
@@ -322,12 +322,12 @@ public sealed class AutoDispatchBackgroundService(
                 jobToUpdate.DispatchMode = (int)DispatchMode.Auto;
             }
 
-            if (printer.AutoPrintEnabled)
+            if (printer.AutoDispatchEnabled)
             {
                 Printer? printerToUpdate = await db.Printers.FindAsync([printerId], ct);
                 if (printerToUpdate is not null)
                 {
-                    printerToUpdate.AutoPrintState = AutoPrintState.None;
+                    printerToUpdate.AutoDispatchState = AutoDispatchState.None;
                     printerToUpdate.BedPreConfirmed = false; // Reset pre-clear flag after dispatch
                 }
             }

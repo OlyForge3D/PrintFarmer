@@ -1,12 +1,12 @@
 ﻿namespace Farm.Infrastructure.Domain;
 
 /// <summary>
-/// Represents the current state of the auto-print ready-gate workflow for a printer.
+/// Represents the current state of the auto-dispatch ready-gate workflow for a printer.
 /// </summary>
-public enum AutoPrintState
+public enum AutoDispatchState
 {
     /// <summary>
-    /// Auto-print is not active or has no pending action.
+    /// Auto-dispatch is not active or has no pending action.
     /// </summary>
     None = 0,
 

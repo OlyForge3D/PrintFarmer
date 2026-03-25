@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.AutoPrint;
+using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
@@ -18,14 +18,16 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.AutoPrint;
+namespace Farm.Web.Api.Tests.Services.AutoDispatch;
 
-public sealed class AutoPrintServiceTests : IDisposable
+public sealed class AutoDispatchReadyGateServiceTests : IDisposable
 {
+    private const string AutoDispatchStateChangedEventName = "autodispatchstatechanged";
+    private const string AutoDispatchPendingWebhookEventName = "printer.autodispatch_pending";
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _db;
 
-    public AutoPrintServiceTests()
+    public AutoDispatchReadyGateServiceTests()
     {
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
@@ -54,13 +56,13 @@ public sealed class AutoPrintServiceTests : IDisposable
 
         var (hubContext, _) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
-        AutoPrintService service = new(
+        AutoDispatchService service = new(
             _db,
             hubContext.Object,
-            NullLogger<AutoPrintService>.Instance,
+            NullLogger<AutoDispatchService>.Instance,
             dispatchTrigger: dispatchTrigger.Object);
 
-        AutoPrintStatusDto status = await service.MarkPreClearAsync(printer.Id);
+        AutoDispatchStatusDto status = await service.MarkPreClearAsync(printer.Id);
 
         status.BedPreConfirmed.Should().BeTrue();
         dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(printer.Id), Times.Once);
@@ -75,33 +77,33 @@ public sealed class AutoPrintServiceTests : IDisposable
         var (hubContext, clientProxy) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
         Mock<IWebhookService> webhookService = new();
-        AutoPrintService service = new(
+        AutoDispatchService service = new(
             _db,
             hubContext.Object,
-            NullLogger<AutoPrintService>.Instance,
+            NullLogger<AutoDispatchService>.Instance,
             webhookService: webhookService.Object,
             dispatchTrigger: dispatchTrigger.Object);
 
         await service.TransitionToPendingReadyAsync(printer.Id);
 
         Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
-        persistedPrinter.AutoPrintState.Should().Be(AutoPrintState.PendingReady);
+        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.PendingReady);
         persistedPrinter.BedPreConfirmed.Should().BeFalse();
 
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
-                "autoprintstatechanged",
+                AutoDispatchStateChangedEventName,
                 It.Is<object?[]>(args => MatchesStatusEvent(
                     args,
                     printer.Id,
-                    nameof(AutoPrintState.PendingReady),
+                    nameof(AutoDispatchState.PendingReady),
                     1,
                     "Bed Clear Confirmed",
                     false,
                     "Waiting for operator")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
-        webhookService.Verify(service => service.Enqueue("printer.autoprint_pending", It.IsAny<object>()), Times.Once);
+        webhookService.Verify(service => service.Enqueue(AutoDispatchPendingWebhookEventName, It.IsAny<object>()), Times.Once);
         dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
     }
 
@@ -109,37 +111,78 @@ public sealed class AutoPrintServiceTests : IDisposable
     public async Task MarkReadyAsync_WhenPrinterIsPendingReadyWithQueuedJob_TransitionsToReadyAndNotifiesDispatchTrigger()
     {
         Printer printer = await CreatePrinterAsync();
-        printer.AutoPrintState = AutoPrintState.PendingReady;
+        printer.AutoDispatchState = AutoDispatchState.PendingReady;
         await _db.SaveChangesAsync();
 
         PrintJob queuedJob = await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
 
         var (hubContext, clientProxy) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
-        AutoPrintService service = new(
+        AutoDispatchService service = new(
             _db,
             hubContext.Object,
-            NullLogger<AutoPrintService>.Instance,
+            NullLogger<AutoDispatchService>.Instance,
             dispatchTrigger: dispatchTrigger.Object);
 
-        AutoPrintReadyResult result = await service.MarkReadyAsync(printer.Id);
+        AutoDispatchReadyResult result = await service.MarkReadyAsync(printer.Id);
 
-        result.Status.State.Should().Be(nameof(AutoPrintState.Ready));
+        result.Status.State.Should().Be(nameof(AutoDispatchState.Ready));
         result.NextJob.Should().NotBeNull();
         result.NextJob!.Id.Should().Be(queuedJob.Id);
         result.FilamentCheck.Should().NotBeNull();
         result.FilamentCheck!.Sufficient.Should().BeTrue();
 
         Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
-        persistedPrinter.AutoPrintState.Should().Be(AutoPrintState.Ready);
+        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.Ready);
 
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
-                "autoprintstatechanged",
+                AutoDispatchStateChangedEventName,
                 It.Is<object?[]>(args => MatchesStatusEvent(
                     args,
                     printer.Id,
-                    nameof(AutoPrintState.Ready),
+                    nameof(AutoDispatchState.Ready),
+                    1)),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(printer.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task MarkReadyAsync_WhenPrinterIsBedPreConfirmedWithQueuedJob_TransitionsToReadyAndClearsPreConfirm()
+    {
+        Printer printer = await CreatePrinterAsync();
+        printer.BedPreConfirmed = true;
+        await _db.SaveChangesAsync();
+
+        PrintJob queuedJob = await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
+
+        var (hubContext, clientProxy) = CreateHubContextMockWithProxy();
+        Mock<IAutoDispatchTrigger> dispatchTrigger = new();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            dispatchTrigger: dispatchTrigger.Object);
+
+        AutoDispatchReadyResult result = await service.MarkReadyAsync(printer.Id);
+
+        result.Status.State.Should().Be(nameof(AutoDispatchState.Ready));
+        result.Status.BedPreConfirmed.Should().BeFalse();
+        result.NextJob.Should().NotBeNull();
+        result.NextJob!.Id.Should().Be(queuedJob.Id);
+
+        Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
+        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.Ready);
+        persistedPrinter.BedPreConfirmed.Should().BeFalse();
+
+        clientProxy.Verify(
+            proxy => proxy.SendCoreAsync(
+                AutoDispatchStateChangedEventName,
+                It.Is<object?[]>(args => MatchesStatusEvent(
+                    args,
+                    printer.Id,
+                    nameof(AutoDispatchState.Ready),
                     1)),
                 It.IsAny<CancellationToken>()),
             Times.Once);
@@ -150,21 +193,21 @@ public sealed class AutoPrintServiceTests : IDisposable
     public async Task SkipNextJobAsync_WhenQueuedJobsRemain_StaysPendingReadyAndCancelsOnlyNextJob()
     {
         Printer printer = await CreatePrinterAsync();
-        printer.AutoPrintState = AutoPrintState.PendingReady;
+        printer.AutoDispatchState = AutoDispatchState.PendingReady;
         await _db.SaveChangesAsync();
 
         PrintJob firstJob = await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
         PrintJob secondJob = await CreateQueuedJobAsync(printer, "queued-job-2", queuePosition: 2);
 
         var (hubContext, clientProxy) = CreateHubContextMockWithProxy();
-        AutoPrintService service = new(
+        AutoDispatchService service = new(
             _db,
             hubContext.Object,
-            NullLogger<AutoPrintService>.Instance);
+            NullLogger<AutoDispatchService>.Instance);
 
-        AutoPrintStatusDto status = await service.SkipNextJobAsync(printer.Id);
+        AutoDispatchStatusDto status = await service.SkipNextJobAsync(printer.Id);
 
-        status.State.Should().Be(nameof(AutoPrintState.PendingReady));
+        status.State.Should().Be(nameof(AutoDispatchState.PendingReady));
         status.QueueDepth.Should().Be(1);
         status.ReadyGateChecks.Should().Contain(check =>
             check.Name == "Jobs in Queue"
@@ -177,15 +220,15 @@ public sealed class AutoPrintServiceTests : IDisposable
         persistedSecondJob.Status.Should().Be(PrintJobStatus.Queued);
 
         Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
-        persistedPrinter.AutoPrintState.Should().Be(AutoPrintState.PendingReady);
+        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.PendingReady);
 
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
-                "autoprintstatechanged",
+                AutoDispatchStateChangedEventName,
                 It.Is<object?[]>(args => MatchesStatusEvent(
                     args,
                     printer.Id,
-                    nameof(AutoPrintState.PendingReady),
+                    nameof(AutoDispatchState.PendingReady),
                     1)),
                 It.IsAny<CancellationToken>()),
             Times.Once);
@@ -195,17 +238,17 @@ public sealed class AutoPrintServiceTests : IDisposable
     public async Task GetStatusAsync_WhenPrinterIsPendingReady_PopulatesAttentionDetails()
     {
         Printer printer = await CreatePrinterAsync();
-        printer.AutoPrintState = AutoPrintState.PendingReady;
+        printer.AutoDispatchState = AutoDispatchState.PendingReady;
         await _db.SaveChangesAsync();
         await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
 
         var (hubContext, _) = CreateHubContextMockWithProxy();
-        AutoPrintService service = new(
+        AutoDispatchService service = new(
             _db,
             hubContext.Object,
-            NullLogger<AutoPrintService>.Instance);
+            NullLogger<AutoDispatchService>.Instance);
 
-        AutoPrintStatusDto status = await service.GetStatusAsync(printer.Id);
+        AutoDispatchStatusDto status = await service.GetStatusAsync(printer.Id);
 
         status.AttentionMessage.Should().Be("Print completed. 1 queued job is blocked until you clear the bed and confirm ready. Once confirmed, the next queued job will start automatically.");
     }
@@ -218,13 +261,13 @@ public sealed class AutoPrintServiceTests : IDisposable
 
         var (hubContext, _) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
-        AutoPrintService service = new(
+        AutoDispatchService service = new(
             _db,
             hubContext.Object,
-            NullLogger<AutoPrintService>.Instance,
+            NullLogger<AutoDispatchService>.Instance,
             dispatchTrigger: dispatchTrigger.Object);
 
-        AutoPrintStatusDto status = await service.MarkPreClearAsync(printer.Id);
+        AutoDispatchStatusDto status = await service.MarkPreClearAsync(printer.Id);
 
         status.BedPreConfirmed.Should().BeTrue();
         status.AttentionMessage.Should().Be("Bed is clear. The next queued job will start automatically.");
@@ -239,12 +282,12 @@ public sealed class AutoPrintServiceTests : IDisposable
         await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
 
         var (hubContext, _) = CreateHubContextMockWithProxy();
-        AutoPrintService service = new(
+        AutoDispatchService service = new(
             _db,
             hubContext.Object,
-            NullLogger<AutoPrintService>.Instance);
+            NullLogger<AutoDispatchService>.Instance);
 
-        AutoPrintStatusDto status = await service.GetStatusAsync(printer.Id);
+        AutoDispatchStatusDto status = await service.GetStatusAsync(printer.Id);
 
         status.AttentionMessage.Should().Be("Printer is in maintenance mode. 1 queued job will not start until maintenance is complete and the printer is available.");
     }
@@ -265,13 +308,13 @@ public sealed class AutoPrintServiceTests : IDisposable
         Printer printer = new()
         {
             Id = Guid.NewGuid(),
-            Name = "AutoPrint Service Test Printer",
-            ServerUrl = $"http://autoprint-service-test-{Guid.NewGuid():N}.local",
+            Name = "AutoDispatch Ready Gate Test Printer",
+            ServerUrl = $"http://autodispatch-ready-gate-test-{Guid.NewGuid():N}.local",
             BackendPort = 7125,
             Backend = (int)PrinterBackend.Moonraker,
             ManufacturerId = manufacturer.Id,
             ModelId = model.Id,
-            AutoPrintEnabled = true,
+            AutoDispatchEnabled = true,
             IsEnabled = true,
             IsAvailable = true,
         };
@@ -335,7 +378,7 @@ public sealed class AutoPrintServiceTests : IDisposable
             return false;
         }
 
-        AutoPrintStatusDto? status = args[0] as AutoPrintStatusDto;
+        AutoDispatchStatusDto? status = args[0] as AutoDispatchStatusDto;
         if (status is null)
         {
             return false;

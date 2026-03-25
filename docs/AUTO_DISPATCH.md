@@ -62,7 +62,7 @@ graph TB
     subgraph "API Controllers"
         DC[DispatchController]
         DSC[DispatchSettingsController]
-        APC[AutoPrintController]
+        ADC[AutoDispatchController]
     end
     
     subgraph "Background Services"
@@ -72,7 +72,7 @@ graph TB
     
     subgraph "Core Services"
         JQS[JobQueueService]
-        APS[AutoPrintService]
+        APS[AutoDispatchService]
         JDS[JobDispatchService]
         DS[DispatchScorer]
     end
@@ -89,12 +89,12 @@ graph TB
     
     UI --> DC
     UI --> DSC
-    PC --> APC
-    BCC --> APC
+    PC --> ADC
+    BCC --> ADC
     
     DC --> JDS
     DSC --> DSE
-    APC --> APS
+    ADC --> APS
     
     JQS --> ADT
     ADBS --> ADT
@@ -197,8 +197,10 @@ private int _inFlightCount; // Concurrent dispatch limiter
 - Resolves filament types for enclosure/abrasive checks
 - Uses split queries and `AsNoTracking()` for performance
 
-### AutoPrintService.cs
+### AutoPrintService.cs (Internal Implementation)
 **Purpose:** Manages the Ready Gate workflow for bed-clear confirmation.
+
+> **Note:** `AutoPrintService` is an internal implementation detail. User-facing terminology is "auto-dispatch."
 
 **State Machine:**
 ```
@@ -423,7 +425,7 @@ stateDiagram-v2
   2. Queued jobs remain queued but auto-dispatch is paused for this printer
 
 **UI Integration:**
-The `BedClearBanner` component appears on printer cards when `AutoPrintState = PendingReady`. It displays three action buttons with loading states and disabled states when another action is in progress.
+The `BedClearBanner` component appears on printer cards when the printer's auto-dispatch state is `PendingReady` (database schema: `AutoPrintState`). It displays three action buttons with loading states and disabled states when another action is in progress.
 
 ---
 
@@ -567,8 +569,8 @@ Auto-dispatch operates on **3 independent layers** that must all be enabled for 
 
 **⚠️ Critical:** The toggle alone sets `enabled=true` but leaves mode at `Manual`. **You must ALSO set the mode** via API or via a backend configuration change.
 
-### Layer 3: Per-Printer Opt-In (AutoPrintEnabled)
-**What it does:** Each printer decides if it participates in auto-dispatch.
+### Layer 3: Per-Printer Opt-In (Auto-Dispatch Enabled)
+**What it does:** Each printer decides if it participates in auto-dispatch. (Database schema field: `AutoPrintEnabled`)
 **How to enable:** Click the Zap (⚡) icon on individual printer cards, OR use bulk toggle to enable all at once.
 
 ---
@@ -638,8 +640,8 @@ Each printer has two auto-dispatch properties:
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `AutoPrintEnabled` | `bool` | `false` | Whether this printer participates in auto-dispatch. Must be enabled for that printer to receive dispatched jobs. |
-| `AutoPrintState` | `enum` | `None` | Current ready-gate state: `None` (idle), `PendingReady` (awaiting bed clear), or `Ready` (cleared, ready for next job). |
+| `AutoDispatchEnabled` | `bool` | `false` | Whether this printer participates in auto-dispatch. Must be enabled for that printer to receive dispatched jobs. |
+| `AutoDispatchState` | `enum` | `None` | Current ready-gate state: `None` (idle), `PendingReady` (awaiting bed clear), or `Ready` (cleared, ready for next job). |
 
 **How to Enable:**
 - **UI:** Toggle the Zap (⚡) icon on the printer card in the Printers Dashboard
@@ -937,7 +939,7 @@ Fired when auto-dispatch attempts fail (no compatible printers, assignment error
 - Logs error to console for debugging
 
 ### `autoprintstatechanged`
-Fired when a printer's `AutoPrintState` changes (e.g., `None` → `PendingReady` → `Ready`).
+Fired when a printer's `AutoDispatchState` changes (e.g., `None` → `PendingReady` → `Ready`).
 
 **Payload:**
 ```json
@@ -1002,7 +1004,7 @@ Fired when a printer's `AutoPrintState` changes (e.g., `None` → `PendingReady`
 
 ### Bed Clear Banner (Printer Cards)
 
-**Location:** Appears on printer card when `AutoPrintState = PendingReady`
+**Location:** Appears on printer card when `AutoDispatchState = PendingReady`
 
 **Component:** `BedClearBanner`
 
@@ -1021,7 +1023,7 @@ Fired when a printer's `AutoPrintState` changes (e.g., `None` → `PendingReady`
 1. **Confirm** (green, success variant)
    - Label: "Confirm"
    - Icon: CheckCircle
-   - Action: POST `/api/autoprint/{printerId}/ready`
+   - Action: POST `/api/auto-dispatch/{printerId}/ready`
    - On Success:
      - If filament check passes → dispatches next job
      - If material mismatch → shows warning toast, job NOT dispatched
@@ -1031,13 +1033,13 @@ Fired when a printer's `AutoPrintState` changes (e.g., `None` → `PendingReady`
 2. **Skip** (secondary variant)
    - Label: "Skip"
    - Icon: SkipForward
-   - Action: POST `/api/autoprint/{printerId}/skip`
+   - Action: POST `/api/auto-dispatch/{printerId}/skip`
    - On Success: Cancels next queued job, shows info toast
 
 3. **Cancel** (ghost variant)
    - Label: "Cancel"
    - Icon: Close
-   - Action: POST `/api/autoprint/{printerId}/cancel`
+   - Action: POST `/api/auto-dispatch/{printerId}/cancel`
    - On Success: Exits auto-dispatch workflow, shows info toast
 
 **Visual Styling:**

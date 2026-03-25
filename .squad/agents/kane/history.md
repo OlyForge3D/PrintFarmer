@@ -1,5 +1,12 @@
 ## Learnings
 
+### Auto-Dispatch Rename Contract Validation (2026-03-26)
+- **Canonical frontend contract:** `src/Web/ReactApp/src/services/api.ts` now uses `/auto-dispatch` for the auto-dispatch adapter surface, and the old `markPrinterReady` helper is gone. Regression tests should lock the canonical helper (`confirmAutoDispatchReady`) and explicitly assert the removed alias stays absent.
+- **Backend compatibility boundary:** `src/api/Controllers/AutoDispatchController.cs` still exposes both `[Route("api/auto-dispatch")]` and `[Route("api/auto-print")]`, while `src/tests/Farm.Web.Api.Tests/Services/AutoPrint/AutoDispatchReadyGateServiceTests.cs` still intentionally verifies the legacy SignalR event name `autoprintstatechanged`.
+- **Focused rename coverage paths:** `src/Web/ReactApp/src/test/services/api.test.ts`, `src/Web/ReactApp/src/services/__tests__/printer-signalr.test.ts`, `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx`, `src/Web/ReactApp/src/test/features/printers/compact-printer-pendingready-live.test.tsx`, `src/tests/Farm.Web.Api.Tests/Controllers/AutoDispatchPendingReadyTests.cs`, and `src/tests/Farm.Web.Api.Tests/Controllers/AutoDispatchPreClearTests.cs`.
+- **Validation result:** focused frontend rename slice passed 35/35 tests; focused backend rename slice passed 23/23 tests.
+- **Reusable pattern:** when a rename is partially complete, keep the product-facing hooks/UI on the canonical name, assert removed aliases stay gone on the client adapter, and keep legacy compatibility assertions only at the backend controller / SignalR seam.
+
 ### PendingReady Live-Update Validation (2026-03-25)
 - **Behavior change validated**: compact printer cards now react to the backend `autoprintstatechanged` SignalR event instead of waiting for the 10-second `/api/auto-print/status` poll.
 - **Root cause**: backend already broadcast `autoprintstatechanged`, but the React client had no subscription path from `printer-signalr.ts` into the auto-dispatch React Query cache, so Pending Ready / bed-clear UI could lag or appear missing in compact view.
@@ -723,3 +730,21 @@ Reproduced real live-state gap in compact cards; identified root cause as missin
 
 **Decision Output:** `.squad/decisions.md` → "PendingReady SignalR Sync to React Query Cache"
 
+
+## 2026-03-25: Auto-dispatch rename compatibility audit
+
+**Role:** Tester  
+**Status:** ⚠️ Frontend compatibility tests added and passing; backend rename suite is currently blocked by unrelated infrastructure/build failures.
+
+**Key Learnings:**
+- The rename boundary is now explicit in frontend adapters: `src/Web/ReactApp/src/services/api.ts` keeps `AUTO_DISPATCH_API_BASE = "/auto-print"`, while `src/Web/ReactApp/src/services/printer-signalr.ts` keeps `AUTO_DISPATCH_STATE_CHANGED_EVENT = "autoprintstatechanged"` behind auto-dispatch-facing methods.
+- Added route-compatibility regression coverage in `src/Web/ReactApp/src/test/services/api.test.ts` so renamed auto-dispatch helpers still prove they hit legacy `/auto-print` endpoints.
+- Added SignalR compatibility coverage in `src/Web/ReactApp/src/services/__tests__/printer-signalr.test.ts` so the legacy `autoprintstatechanged` event is verified to feed both `onAutoDispatchStateChanged` and the deprecated `onAutoPrintStateChanged` alias.
+- Current backend rename work already includes a dual-route controller in `src/api/Controllers/AutoDispatchController.cs` and legacy-route assertions in `src/tests/Farm.Web.Api.Tests/Controllers/AutoDispatchPendingReadyTests.cs`.
+- Validation is currently blocked in two separate backend layers: the full solution build fails in `src/tests/Farm.Slicer.Module.Tests/ContractTests/SlicerJobsProtoCompilationTests.cs`, and the focused API rename tests currently fail with `BadImageFormatException` in `CustomWebApplicationFactory.ResetDatabaseAsync()` plus the SQLite ready-gate test constructor.
+
+**Validation:**
+- React build: PASS
+- Focused React rename slice: 28/28 PASS (`api.test.ts`, `printer-signalr.test.ts`, `compact-printer-pendingready-live.test.tsx`, `BedClearBanner.test.tsx`)
+- Full .NET solution build: FAIL due unrelated slicer proto contract errors
+- Focused API rename tests: FAIL due `BadImageFormatException` before route assertions can execute

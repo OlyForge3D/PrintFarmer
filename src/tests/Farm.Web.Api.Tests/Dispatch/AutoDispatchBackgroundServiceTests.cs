@@ -280,12 +280,12 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     [Fact]
     [Trait("Category", "Dispatch")]
     [Trait("Phase", "2")]
-    public async Task OnStartup_ReadyAutoPrintPrinterWithQueuedJob_DispatchesWithoutExternalTrigger()
+    public async Task OnStartup_ReadyAutoDispatchPrinterWithQueuedJob_DispatchesWithoutExternalTrigger()
     {
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter(name: "Startup Ready Printer");
-        printer.AutoPrintEnabled = true;
-        printer.AutoPrintState = AutoPrintState.Ready;
+        printer.AutoDispatchEnabled = true;
+        printer.AutoDispatchState = AutoDispatchState.Ready;
         _db.SaveChanges();
 
         PrintJob job = SeedQueuedJob("startup-ready-job");

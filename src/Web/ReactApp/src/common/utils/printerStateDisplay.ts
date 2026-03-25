@@ -66,12 +66,35 @@ export function isPendingReadyState(state: string | undefined | null): boolean {
   return state.replace(/[\s_-]+/g, '').toLowerCase() === 'pendingready';
 }
 
+function normalizeStatusText(value: string | undefined | null): string {
+  return value?.replace(/[\s_-]+/g, '').toLowerCase() ?? '';
+}
+
+function normalizeStatusMessage(value: string | undefined | null): string {
+  return value?.trim().replace(/[\s_-]+/g, ' ').toLowerCase() ?? '';
+}
+
+function isWaitingForBedClearConfirmationText(value: string | undefined | null): boolean {
+  const normalized = normalizeStatusMessage(value);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized.includes('waiting for operator')
+    || normalized.includes('confirm bed is clear')
+    || normalized.includes('confirm the bed is clear')
+    || (normalized.includes('clear the bed') && normalized.includes('confirm ready'));
+}
+
 /**
  * Determine whether auto-dispatch is blocked on operator bed-clear confirmation.
  *
  * Prefer the explicit PendingReady state, but fall back to the failed
  * "Bed Clear Confirmed" gate from the detailed/global auto-dispatch payload so
  * UI surfaces still show the operator-facing state when the summary row is stale.
+ * Ignore the backend's "No confirmation needed yet" gate message so a canonical
+ * None state does not keep rendering a stale Pending Ready overlay.
  *
  * @param status - Auto-dispatch status row from the bulk or per-printer endpoint
  * @returns True when the operator must clear the bed before queued work can resume
@@ -86,10 +109,22 @@ export function requiresBedClearConfirmation(status: AutoDispatchStatus | undefi
   }
 
   const bedClearGate = status.readyGateChecks?.find((check) =>
-    check.name.replace(/[\s_-]+/g, '').toLowerCase() === 'bedclearconfirmed',
+    normalizeStatusText(check.name) === 'bedclearconfirmed',
   );
 
-  return bedClearGate?.passed === false;
+  if (bedClearGate?.passed !== false) {
+    return false;
+  }
+
+  const gateMessage = normalizeStatusMessage(bedClearGate.message);
+  if (!gateMessage || gateMessage === 'no confirmation needed yet') {
+    return false;
+  }
+
+  return isWaitingForBedClearConfirmationText(bedClearGate.message)
+    || isWaitingForBedClearConfirmationText(status.attentionMessage)
+    || isWaitingForBedClearConfirmationText(status.attentionReason)
+    || isWaitingForBedClearConfirmationText(status.operatorAction);
 }
 
 /**

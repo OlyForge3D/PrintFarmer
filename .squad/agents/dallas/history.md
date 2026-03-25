@@ -166,3 +166,56 @@ This section summarizes foundational knowledge and recurring patterns across Dal
 - `monitoring-lifecycle-badges`: Monitoring status badges reflect active lifecycle, not raw errors
 
 ---
+
+## Session: Auto-Dispatch Naming Cleanup (2026-03-25)
+
+**Role:** Lead decision reviewer  
+**Status:** Decision approved; implementation scope documented  
+**Urgency:** High
+
+### Work Completed
+
+**Analysis:** Reviewed naming inconsistency between frontend (uses "AutoDispatch") and backend (uses "AutoPrint"):
+- Frontend hooks: `useAutoDispatchStatus`, `useAutoDispatchGlobalStatus` ✅
+- Frontend types: `AutoDispatchStatus`, `AutoDispatchReadyResult` ✅
+- Backend routes: `POST /api/auto-print/...` ❌ Should be `/api/auto-dispatch/...`
+- Backend controller: `AutoPrintController` ❌ Should be `AutoDispatchController`
+- Backend service: `IAutoPrintService`, `AutoPrintService` ❌ Should be `IAutoDispatchService`, `AutoDispatchService`
+- SignalR handler: `onAutoPrintStateChanged` ❌ Should be `onAutoDispatchStateChanged`
+
+**Root Cause:** Product rename was incomplete. Frontend already migrated to "auto-dispatch" terminology, but backend implementation still uses "auto-print" naming.
+
+**Impact:** 3-layer contract violation—frontend code expects auto-dispatch semantics, backend implements auto-print routes. Will cause confusion; harder to maintain.
+
+### Decision
+
+**Full rename required** (Option B: clean rename, not deprecation period):
+- **Tier 1 (MUST rename):** Routes, controller, services, DTOs, SignalR handlers
+- **Tier 2 (Recommended):** Domain properties (`Printer.AutoDispatchEnabled`), logging tags, enums
+- **Tier 3 (DO NOT rename):** Database columns (stay as `AutoPrintState` for backward compatibility; use `[Column]` mapping in EF Core)
+
+**Rationale:**
+- Single coordinated change minimizes confusion window
+- No deprecated code to maintain long-term
+- Lower maintenance cost than compatibility layer
+- Database columns protected via EF Core mapping (`[Column("AutoPrintState")]` on `Printer.AutoDispatchState`)
+
+### Implementation Checklist
+
+**Backend Phase 1:** Rename controller → `AutoDispatchController`, route → `api/auto-dispatch`, service folder & files, DTOs  
+**Backend Phase 2:** Update domain properties, enums, logging tags, add `[Column]` mapping  
+**Frontend Phase 1:** Update all `/auto-print/*` routes → `/auto-dispatch/*`, rename SignalR handler  
+**All Tests:** API + React tests must pass  
+**Docs:** Update `AUTO_DISPATCH.md` terminology  
+
+### Files Written
+
+- `.squad/decisions/inbox/dallas-auto-dispatch-rename-scope.md` — Full implementation scope, trade-off analysis, risk assessment, checklist, definition of done.
+
+### Key Patterns Established
+
+**Database Column Mapping:** When C# properties are renamed post-deployment but database columns must stay immutable, use EF Core `[Column("OriginalName")]` attribute. Zero-cost mapping; no migration needed.
+
+**3-Layer Rename Coordination:** Backend route + service + DTO names must match frontend expectations. Break this contract only when backward compatibility is critical (public APIs). For internal-only APIs, prefer clean rename over deprecation period.
+
+---

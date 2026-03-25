@@ -242,7 +242,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             issues.Add("disabled");
         }
 
-        if (printer.AutoPrintState == AutoPrintState.PendingReady)
+        if (printer.AutoDispatchState == AutoDispatchState.PendingReady)
         {
             issues.Add("waiting for bed clear confirmation");
         }

@@ -544,3 +544,53 @@ Layer 1: CSS Custom Properties (@theme block in index.css)
 ✅ Production deployment
 
 ---
+
+## January 2026 — Auto-Dispatch Rename Completion
+
+### Work Completed
+
+Completed comprehensive documentation update for auto-dispatch rename:
+
+1. **AUTO_DISPATCH.md** (34 lines changed, 18 insertions, 16 deletions):
+   - Updated component diagram: `AutoPrintController` → `AutoDispatchController`
+   - Updated all API endpoint references: `/api/auto-dispatch/` (documented legacy `/api/auto-print` support)
+   - Clarified state names: `AutoDispatchState = PendingReady` (not `AutoPrintState`)
+   - Clarified enabled flag: "Auto-Dispatch Enabled" with database schema annotation
+   - Marked internal `AutoPrintService` as "Internal Implementation Detail"
+   - Updated bed-clear workflow docs for consistency
+
+2. **Verification completed**:
+   - README.md: ✅ Already uses "Auto-Dispatch with 9-Factor Scoring"
+   - API.md: ✅ Already using "auto-dispatch" terminology correctly
+   - COMPETITIVE_ANALYSIS.md: ✅ Correctly references competitor's "AutoPrint™" (trademark noted)
+   - All docs now consistent on user-facing terminology
+
+3. **Decision record created**: `.squad/decisions/inbox/ash-complete-auto-dispatch-rename.md`
+
+### Key Learnings
+
+**Documentation Naming Strategy:**
+- User-facing features use kebab-case: "auto-dispatch"
+- Internal implementation details clearly marked (e.g., "Internal Implementation Detail")
+- Database schema names documented with context
+- Legacy API routes supported for backwards compatibility — no need to update client code if working
+
+**API Route Design Pattern:**
+- Primary route: `/api/auto-dispatch/` (new, forward-looking)
+- Legacy route: `/api/auto-print/` (maintained for compatibility)
+- Controller accepts both, so no forced client migration
+- Client can use either route without issue
+
+### Architecture Notes
+
+- AutoPrintService/DTO naming stays internal — would require significant refactoring across layers
+- Renaming internal names provides minimal user benefit but high code change cost
+- User-facing docs are the customer interface; internal naming is implementation detail
+
+### Files Modified
+
+- `docs/AUTO_DISPATCH.md` — Core auto-dispatch documentation
+
+### Future Considerations
+
+If a major refactor occurs, consider renaming internal services from AutoPrint* to AutoDispatch* for full codebase consistency, but this is not urgent given current dual-route strategy and clear documentation.

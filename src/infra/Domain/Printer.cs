@@ -277,21 +277,21 @@ public class Printer
     /// </summary>
     public DateTime? LastHistorySeedUtc { get; set; }
 
-    // AutoPrint Ready-Gate properties
+    // AutoDispatch Ready-Gate properties
 
     /// <summary>
     /// When enabled, the printer transitions to PendingReady after a job completes,
     /// waiting for operator confirmation before dispatching the next queued job.
     /// </summary>
-    public bool AutoPrintEnabled { get; set; }
+    public bool AutoDispatchEnabled { get; set; }
 
     /// <summary>
-    /// Current auto-print workflow state.
+    /// Current auto-dispatch ready-gate workflow state.
     /// None = feature disabled or no pending action.
     /// PendingReady = job completed, waiting for operator "bed clear" confirmation.
     /// Ready = operator confirmed, next queued job will be dispatched.
     /// </summary>
-    public AutoPrintState AutoPrintState { get; set; } = AutoPrintState.None;
+    public AutoDispatchState AutoDispatchState { get; set; } = AutoDispatchState.None;
 
     /// <summary>
     /// Indicates the operator has pre-confirmed the bed is clear.

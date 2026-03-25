@@ -123,5 +123,56 @@ describe('printerStateDisplay utils', () => {
         isOnline: true,
       })).toBe('Pending Ready');
     });
+
+    it('does not show Pending Ready when the failed bed-clear gate says no confirmation is needed', () => {
+      const autoDispatchStatus: AutoDispatchStatus = {
+        printerId: 'printer-1',
+        enabled: true,
+        state: 'None',
+        queueDepth: 0,
+        readyGateChecks: [
+          {
+            name: 'Bed Clear Confirmed',
+            passed: false,
+            message: 'No confirmation needed yet',
+            checkedAt: '2026-03-25T00:00:00Z',
+          },
+        ],
+      };
+
+      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(false);
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: autoDispatchStatus.state,
+        autoDispatchStatus,
+        isOnline: true,
+      })).toBe('Complete');
+    });
+
+    it('keeps the Pending Ready fallback when a stale summary row still carries waiting-for-operator copy', () => {
+      const autoDispatchStatus: AutoDispatchStatus = {
+        printerId: 'printer-1',
+        enabled: true,
+        state: 'None',
+        queueDepth: 2,
+        readyGateChecks: [
+          {
+            name: 'Bed Clear Confirmed',
+            passed: false,
+            message: 'Waiting for operator to confirm bed is clear',
+            checkedAt: '2026-03-25T00:00:00Z',
+          },
+        ],
+        attentionMessage: 'Print completed. 2 queued jobs are blocked until you clear the bed and confirm ready.',
+      };
+
+      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(true);
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: autoDispatchStatus.state,
+        autoDispatchStatus,
+        isOnline: true,
+      })).toBe('Pending Ready');
+    });
   });
 });

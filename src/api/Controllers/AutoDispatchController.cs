@@ -1,32 +1,32 @@
-﻿using Farm.Infrastructure.Services.AutoPrint;
+﻿using Farm.Infrastructure.Services.AutoDispatch;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
 
 /// <summary>
-/// Manages the auto-print ready-gate workflow for printers.
-/// After a print completes on an auto-print-enabled printer, the operator must confirm
+/// Manages the auto-dispatch ready-gate workflow for printers.
+/// After a print completes on an auto-dispatch-enabled printer, the operator must confirm
 /// the bed is clear before the next queued job is dispatched.
 /// </summary>
 [ApiController]
-[Route("api/auto-print")]
+[Route("api/auto-dispatch")]
 [Authorize]
-public class AutoPrintController(
-    IAutoPrintService autoPrintService,
-    ILogger<AutoPrintController> logger) : ControllerBase
+public class AutoDispatchController(
+    IAutoDispatchService autoDispatchService,
+    ILogger<AutoDispatchController> logger) : ControllerBase
 {
     /// <summary>
-    /// Get the auto-print status for a printer.
+    /// Get the auto-dispatch status for a printer.
     /// </summary>
     [HttpGet("{printerId:guid}/status")]
-    [ProducesResponseType(typeof(AutoPrintStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AutoPrintStatusDto>> GetStatusAsync(Guid printerId, CancellationToken ct)
+    public async Task<ActionResult<AutoDispatchStatusDto>> GetStatusAsync(Guid printerId, CancellationToken ct)
     {
         try
         {
-            var status = await autoPrintService.GetStatusAsync(printerId, ct);
+            var status = await autoDispatchService.GetStatusAsync(printerId, ct);
             return Ok(status);
         }
         catch (InvalidOperationException ex)
@@ -42,19 +42,19 @@ public class AutoPrintController(
     /// is idempotent so a redundant client call is harmless.
     /// </summary>
     [HttpPost("{printerId:guid}/ready")]
-    [ProducesResponseType(typeof(AutoPrintReadyResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoDispatchReadyResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AutoPrintReadyResult>> MarkReadyAsync(Guid printerId, CancellationToken ct)
+    public async Task<ActionResult<AutoDispatchReadyResult>> MarkReadyAsync(Guid printerId, CancellationToken ct)
     {
         try
         {
-            var result = await autoPrintService.MarkReadyAsync(printerId, ct);
+            var result = await autoDispatchService.MarkReadyAsync(printerId, ct);
             return Ok(result);
         }
         catch (InvalidOperationException ex)
         {
-            logger.LogWarning("[AutoPrint] MarkReady failed for printer {PrinterId}: {Error}", printerId, ex.Message);
+            logger.LogWarning("[AutoDispatchReadyGate] MarkReady failed for printer {PrinterId}: {Error}", printerId, ex.Message);
             return BadRequest(new { error = ex.Message });
         }
     }
@@ -64,13 +64,13 @@ public class AutoPrintController(
     /// the printer stays in PendingReady; otherwise transitions to None.
     /// </summary>
     [HttpPost("{printerId:guid}/skip")]
-    [ProducesResponseType(typeof(AutoPrintStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AutoPrintStatusDto>> SkipNextAsync(Guid printerId, CancellationToken ct)
+    public async Task<ActionResult<AutoDispatchStatusDto>> SkipNextAsync(Guid printerId, CancellationToken ct)
     {
         try
         {
-            var status = await autoPrintService.SkipNextJobAsync(printerId, ct);
+            var status = await autoDispatchService.SkipNextJobAsync(printerId, ct);
             return Ok(status);
         }
         catch (InvalidOperationException ex)
@@ -80,17 +80,17 @@ public class AutoPrintController(
     }
 
     /// <summary>
-    /// Cancel the auto-print workflow. Returns the printer to None state
+    /// Cancel the auto-dispatch ready-gate workflow. Returns the printer to None state
     /// without affecting queued jobs.
     /// </summary>
     [HttpPost("{printerId:guid}/cancel")]
-    [ProducesResponseType(typeof(AutoPrintStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AutoPrintStatusDto>> CancelAutoAsync(Guid printerId, CancellationToken ct)
+    public async Task<ActionResult<AutoDispatchStatusDto>> CancelAutoAsync(Guid printerId, CancellationToken ct)
     {
         try
         {
-            var status = await autoPrintService.CancelAutoAsync(printerId, ct);
+            var status = await autoDispatchService.CancelAutoAsync(printerId, ct);
             return Ok(status);
         }
         catch (InvalidOperationException ex)
@@ -104,37 +104,37 @@ public class AutoPrintController(
     /// immediately without waiting for PendingReady confirmation.
     /// </summary>
     [HttpPost("{printerId:guid}/pre-clear")]
-    [ProducesResponseType(typeof(AutoPrintStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AutoPrintStatusDto>> MarkPreClearAsync(Guid printerId, CancellationToken ct)
+    public async Task<ActionResult<AutoDispatchStatusDto>> MarkPreClearAsync(Guid printerId, CancellationToken ct)
     {
         try
         {
-            var status = await autoPrintService.MarkPreClearAsync(printerId, ct);
+            var status = await autoDispatchService.MarkPreClearAsync(printerId, ct);
             return Ok(status);
         }
         catch (InvalidOperationException ex)
         {
-            logger.LogWarning("[AutoPrint] PreClear failed for printer {PrinterId}: {Error}", printerId, ex.Message);
+            logger.LogWarning("[AutoDispatchReadyGate] PreClear failed for printer {PrinterId}: {Error}", printerId, ex.Message);
             return BadRequest(new { error = ex.Message });
         }
     }
 
     /// <summary>
-    /// Enable or disable auto-print for a printer.
+    /// Enable or disable auto-dispatch for a printer.
     /// </summary>
     [HttpPut("{printerId:guid}/enabled")]
-    [ProducesResponseType(typeof(AutoPrintStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AutoPrintStatusDto>> SetEnabledAsync(
+    public async Task<ActionResult<AutoDispatchStatusDto>> SetEnabledAsync(
         Guid printerId,
-        [FromBody] SetAutoPrintEnabledRequest request,
+        [FromBody] SetAutoDispatchEnabledRequest request,
         CancellationToken ct)
     {
         try
         {
-            var status = await autoPrintService.SetEnabledAsync(printerId, request.Enabled, ct);
+            var status = await autoDispatchService.SetEnabledAsync(printerId, request.Enabled, ct);
             return Ok(status);
         }
         catch (InvalidOperationException ex)
@@ -144,32 +144,32 @@ public class AutoPrintController(
     }
 
     /// <summary>
-    /// Get auto-print status for all printers.
+    /// Get auto-dispatch status for all printers.
     /// </summary>
     [HttpGet("status")]
-    [ProducesResponseType(typeof(AutoPrintGlobalStatusDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<AutoPrintGlobalStatusDto>> GetAllStatusAsync(CancellationToken ct)
+    [ProducesResponseType(typeof(AutoDispatchGlobalStatusDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AutoDispatchGlobalStatusDto>> GetAllStatusAsync(CancellationToken ct)
     {
-        var status = await autoPrintService.GetAllStatusAsync(ct);
+        var status = await autoDispatchService.GetAllStatusAsync(ct);
         return Ok(status);
     }
 
     /// <summary>
-    /// Enable or disable auto-print for all printers at once.
+    /// Enable or disable auto-dispatch for all printers at once.
     /// </summary>
     [HttpPut("enabled")]
     [Authorize(Roles = "farm_admin")]
-    [ProducesResponseType(typeof(List<AutoPrintStatusDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<AutoPrintStatusDto>>> SetAllEnabledAsync(
-        [FromBody] SetAutoPrintEnabledRequest request,
+    [ProducesResponseType(typeof(List<AutoDispatchStatusDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<AutoDispatchStatusDto>>> SetAllEnabledAsync(
+        [FromBody] SetAutoDispatchEnabledRequest request,
         CancellationToken ct)
     {
-        var statuses = await autoPrintService.SetAllEnabledAsync(request.Enabled, ct);
+        var statuses = await autoDispatchService.SetAllEnabledAsync(request.Enabled, ct);
         return Ok(statuses);
     }
 }
 
-public class SetAutoPrintEnabledRequest
+public class SetAutoDispatchEnabledRequest
 {
     public bool Enabled { get; set; }
 }

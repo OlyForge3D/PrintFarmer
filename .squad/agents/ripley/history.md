@@ -372,3 +372,31 @@ Fixed `CompactPrinterCard` and `BedClearBanner` to derive bed-clear confirmation
 **Test Coverage:** React regression 29/29 PASSING  
 **Decision Output:** `.squad/decisions.md` → "Pending Ready compact-card fallback"
 
+### 2026-03-25: Frontend auto-dispatch rename should stop at centralized transport wrappers
+
+**Context:** Product terminology is now **auto-dispatch**, but the backend still exposes legacy `/api/auto-print/*` endpoints and the `autoprintstatechanged` SignalR event for compatibility.
+
+**Decision:** Renamed frontend-facing client/subscription/test surfaces to auto-dispatch language, but kept legacy transport names isolated inside `src/Web/ReactApp/src/services/api.ts` and `src/Web/ReactApp/src/services/printer-signalr.ts`. `useAutoDispatch.ts` now consumes those wrappers instead of hardcoded `/auto-print/*` strings.
+
+**Files:**
+- `src/Web/ReactApp/src/services/api.ts`
+- `src/Web/ReactApp/src/services/printer-signalr.ts`
+- `src/Web/ReactApp/src/features/printers/hooks/useAutoDispatch.ts`
+- `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx`
+- `src/Web/ReactApp/src/test/features/printers/compact-printer-pendingready-live.test.tsx`
+
+**Why it matters:** This keeps UI/product language consistent without breaking backend compatibility, and it gives the team one place to update if the backend contract is renamed later.
+
+### 2026-03-26: Auto-dispatch rename complete (frontend transport aligned)
+
+**Context:** Compatibility shims for legacy `/auto-print` routes and `autoprintstatechanged` SignalR event were previously retained inside adapter layers.
+
+**Decision:** Fully aligned frontend transport names with the backend's renamed contract. Updated API base path to `/auto-dispatch`, replaced SignalR event with `autodispatchstatechanged`, and removed deprecated client callbacks/methods that referenced auto-print.
+
+**Files:**
+- `src/Web/ReactApp/src/services/api.ts`
+- `src/Web/ReactApp/src/services/printer-signalr.ts`
+- `src/Web/ReactApp/src/services/__tests__/printer-signalr.test.ts`
+- `src/Web/ReactApp/src/test/services/api.test.ts`
+
+**Why it matters:** Ensures the frontend now exclusively speaks the canonical auto-dispatch contract end-to-end, removing confusion and eliminating legacy seams.

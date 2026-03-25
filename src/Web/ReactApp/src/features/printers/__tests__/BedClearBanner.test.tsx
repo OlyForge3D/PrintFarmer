@@ -8,7 +8,7 @@ import type { AutoDispatchStatus } from '@/types/api';
 vi.mock('@/services/api', () => ({
   apiClient: {
     getSettings: vi.fn().mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: false }),
-    post: vi.fn().mockResolvedValue({ data: {} }),
+    confirmAutoDispatchReady: vi.fn().mockResolvedValue({}),
     skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
     cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
   },
@@ -82,6 +82,22 @@ const readyResultNoJob = {
   filamentCheck: null,
 };
 
+const noneStateWithFailedGate: AutoDispatchStatus = {
+  printerId: 'printer-1',
+  enabled: true,
+  state: 'None',
+  queueDepth: 1,
+  readyGateChecks: [
+    {
+      name: 'Bed Clear Confirmed',
+      passed: false,
+      message: 'Waiting for operator to confirm bed is clear',
+      checkedAt: '2026-03-25T00:00:00Z',
+    },
+  ],
+  attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
+};
+
 const readyResultMaterialMismatch = {
   status: { printerId: 'printer-1', enabled: true, state: 'Ready', queueDepth: 1 },
   nextJob: { id: 'job-2', name: 'part.gcode' },
@@ -127,6 +143,37 @@ describe('BedClearBanner', () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it('renders nothing when the backend says no confirmation is needed', () => {
+    const status = {
+      ...baseStatus,
+      state: 'None' as const,
+      queueDepth: 0,
+      readyGateChecks: [
+        {
+          name: 'Bed Clear Confirmed',
+          passed: false,
+          message: 'No confirmation needed yet',
+          checkedAt: '2026-03-25T00:00:00Z',
+        },
+      ],
+    };
+    const { container } = render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={status} />,
+      { wrapper: createWrapper() },
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders from the failed bed-clear gate even when state is None', () => {
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={noneStateWithFailedGate} />,
+      { wrapper: createWrapper() },
+    );
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(/confirm bed is clear/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 job queued/)).toBeInTheDocument();
+  });
+
   it('renders nothing when state is Ready', () => {
     const status = { ...baseStatus, state: 'Ready' as const };
     const { container } = render(
@@ -146,14 +193,14 @@ describe('BedClearBanner', () => {
   });
 
   it('confirms bed clear and shows dispatch toast without manual dispatch call', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultWithJob });
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultWithJob);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/auto-print/printer-1/ready');
+      expect(apiClient.confirmAutoDispatchReady).toHaveBeenCalledWith('printer-1');
     });
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Dispatching "benchy.gcode" to MK4');
@@ -161,7 +208,7 @@ describe('BedClearBanner', () => {
   });
 
   it('optimistically updates printer cache to Starting state on dispatch', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultWithJob });
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultWithJob);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -194,12 +241,18 @@ describe('BedClearBanner', () => {
   });
 
   it('does not optimistically update cache when no next job', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultNoJob });
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultNoJob);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     const existingPrinter = { id: 'printer-1', name: 'MK4', state: 'Idle' };
     queryClient.setQueryData(['printers'], [existingPrinter]);
+    queryClient.setQueryData(['auto-dispatch', 'all-statuses'], [{ ...baseStatus, printerName: 'MK4' }]);
+    queryClient.setQueryData(['auto-dispatch', 'status', 'printer-1'], { ...baseStatus, printerName: 'MK4' });
+    queryClient.setQueryData(['auto-dispatch', 'global-status'], {
+      globalEnabled: true,
+      printers: [{ ...baseStatus, printerName: 'MK4' }],
+    });
 
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -217,10 +270,25 @@ describe('BedClearBanner', () => {
 
     const updatedList = queryClient.getQueryData<Array<{ id: string; state: string }>>(['printers']);
     expect(updatedList?.[0]?.state).toBe('Idle');
+
+    const updatedStatusList = queryClient.getQueryData<AutoDispatchStatus[]>(['auto-dispatch', 'all-statuses']);
+    expect(updatedStatusList?.[0]).toMatchObject({
+      printerId: 'printer-1',
+      state: 'None',
+      queueDepth: 0,
+      printerName: 'MK4',
+    });
+
+    const updatedSingleStatus = queryClient.getQueryData<AutoDispatchStatus>(['auto-dispatch', 'status', 'printer-1']);
+    expect(updatedSingleStatus).toMatchObject({
+      printerId: 'printer-1',
+      state: 'None',
+      queueDepth: 0,
+    });
   });
 
   it('shows success without dispatch when no jobs queued', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultNoJob });
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultNoJob);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -232,7 +300,7 @@ describe('BedClearBanner', () => {
   });
 
   it('warns on material mismatch without dispatching', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultMaterialMismatch });
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -247,7 +315,7 @@ describe('BedClearBanner', () => {
   });
 
   it('warns on insufficient filament without dispatching', async () => {
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: readyResultInsufficientFilament });
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultInsufficientFilament);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -292,7 +360,7 @@ describe('BedClearBanner', () => {
   });
 
   it('shows error toast on confirm failure', async () => {
-    vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('Network error'));
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockRejectedValueOnce(new Error('Network error'));
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },

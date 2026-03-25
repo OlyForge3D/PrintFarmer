@@ -103,6 +103,8 @@ import {
   ScheduleJobRequest,
   AutoDispatchGlobalStatus,
   AutoDispatchDetailedStatus,
+  AutoDispatchReadyResult,
+  AutoDispatchStatus,
   ObicoServer,
   CreateObicoServerRequest,
   UpdateObicoServerRequest,
@@ -110,6 +112,8 @@ import {
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
+
+const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
 
 export class ApiClient {
   // Utility to generate a correlation ID (UUID v4)
@@ -3637,33 +3641,39 @@ export class ApiClient {
 
   // ============ Auto-Dispatch API methods ============
   async getAutoDispatchStatus(): Promise<AutoDispatchGlobalStatus> {
-    const response = await this.client.get('/auto-print/status');
+    const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/status`);
     return response.data;
   }
 
   async getAutoDispatchPrinterStatus(printerId: string): Promise<AutoDispatchDetailedStatus> {
-    const response = await this.client.get(`/auto-print/${printerId}/status`);
+    const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/${printerId}/status`);
     return response.data;
   }
 
-  async markPrinterReady(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/ready`);
+  async confirmAutoDispatchReady(printerId: string): Promise<AutoDispatchReadyResult> {
+    const response = await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/ready`);
+    return response.data;
   }
 
   async skipAutoDispatchJob(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/skip`);
+    await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/skip`);
   }
 
   async cancelAutoDispatch(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/cancel`);
+    await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/cancel`);
   }
 
   async setAutoDispatchEnabled(printerId: string, enabled: boolean): Promise<void> {
-    await this.client.put(`/auto-print/${printerId}/enabled`, { enabled });
+    await this.client.put(`${AUTO_DISPATCH_API_BASE}/${printerId}/enabled`, { enabled });
   }
 
   async setAutoDispatchGlobalEnabled(enabled: boolean): Promise<void> {
-    await this.client.put('/auto-print/enabled', { enabled });
+    await this.client.put(`${AUTO_DISPATCH_API_BASE}/enabled`, { enabled });
+  }
+
+  async preClearAutoDispatchBed(printerId: string): Promise<AutoDispatchStatus> {
+    const response = await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/pre-clear`);
+    return response.data;
   }
 
   // ============ Job Scheduling API methods ============

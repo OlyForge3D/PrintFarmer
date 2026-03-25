@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.AutoPrint;
+using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -19,15 +19,17 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
-/// Integration tests for PendingReady auto-print state visibility.
+/// Integration tests for PendingReady auto-dispatch state visibility.
 /// These tests cover the exact state the printers page depends on:
 /// queued jobs exist, the bed has not been confirmed clear, and the status endpoints
 /// must surface PendingReady so the UI can render the confirmation prompt.
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection(IntegrationTestCollection.Name)]
-public class AutoPrintPendingReadyTests : IAsyncLifetime
+public class AutoDispatchPendingReadyTests : IAsyncLifetime
 {
+    private const string CurrentRouteBase = "/api/auto-dispatch";
+
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
 
@@ -38,7 +40,7 @@ public class AutoPrintPendingReadyTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public AutoPrintPendingReadyTests()
+    public AutoDispatchPendingReadyTests()
     {
         _factory = new CustomWebApplicationFactory();
     }
@@ -64,17 +66,21 @@ public class AutoPrintPendingReadyTests : IAsyncLifetime
         await CreateQueuedJobAsync(printer.Id, "queued-job-2", queuePosition: 2);
         await TransitionPrinterToPendingReadyAsync(printer.Id);
 
-        HttpResponseMessage response = await _client!.GetAsync($"/api/auto-print/{printer.Id}/status");
+        HttpResponseMessage response = await _client!.GetAsync($"{CurrentRouteBase}/{printer.Id}/status");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        AutoPrintStatusDto? status = await response.Content.ReadFromJsonAsync<AutoPrintStatusDto>(JsonOptions);
+        AutoDispatchStatusDto? status = await response.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
         status.Should().NotBeNull();
         status!.PrinterId.Should().Be(printer.Id);
         status.State.Should().Be("PendingReady");
         status.QueueDepth.Should().Be(2);
         status.BedPreConfirmed.Should().BeFalse();
         status.AttentionMessage.Should().Be("Print completed. 2 queued jobs are blocked until you clear the bed and confirm ready. Once confirmed, the next queued job will start automatically.");
+        status.ReadyGateChecks.Should().Contain(check =>
+            check.Name == "Auto-Dispatch Enabled"
+            && check.Passed
+            && check.Message == "Auto-dispatch is enabled");
         status.ReadyGateChecks.Should().Contain(check =>
             check.Name == "Jobs in Queue"
             && check.Passed
@@ -94,15 +100,15 @@ public class AutoPrintPendingReadyTests : IAsyncLifetime
 
         Printer idlePrinter = await CreateTestPrinterAsync(name: "idle-printer");
 
-        HttpResponseMessage response = await _client!.GetAsync("/api/auto-print/status");
+        HttpResponseMessage response = await _client!.GetAsync($"{CurrentRouteBase}/status");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        AutoPrintGlobalStatusDto? payload = await response.Content.ReadFromJsonAsync<AutoPrintGlobalStatusDto>(JsonOptions);
+        AutoDispatchGlobalStatusDto? payload = await response.Content.ReadFromJsonAsync<AutoDispatchGlobalStatusDto>(JsonOptions);
         payload.Should().NotBeNull();
         payload!.GlobalEnabled.Should().BeTrue();
         payload.Printers.Should().Contain(p => p.PrinterId == idlePrinter.Id);
-        AutoPrintStatusDto pendingStatus = payload.Printers.Single(p => p.PrinterId == pendingReadyPrinter.Id);
+        AutoDispatchStatusDto pendingStatus = payload.Printers.Single(p => p.PrinterId == pendingReadyPrinter.Id);
         pendingStatus.State.Should().Be("PendingReady");
         pendingStatus.QueueDepth.Should().Be(1);
         pendingStatus.AttentionMessage.Should().Be("Print completed. 1 queued job is blocked until you clear the bed and confirm ready. Once confirmed, the next queued job will start automatically.");
@@ -110,6 +116,32 @@ public class AutoPrintPendingReadyTests : IAsyncLifetime
             check.Name == "Bed Clear Confirmed"
             && !check.Passed
             && check.Message.Contains("Waiting for operator"));
+    }
+
+    [Fact]
+    public async Task GetStatus_WhenQueuedJobsExistButStateIsNone_ReadyEndpointRejectsCurrentNone()
+    {
+        Printer printer = await CreateTestPrinterAsync(name: "none-state-printer");
+        await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
+
+        HttpResponseMessage statusResponse = await _client!.GetAsync($"{CurrentRouteBase}/{printer.Id}/status");
+
+        statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        AutoDispatchStatusDto? status = await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
+        status.Should().NotBeNull();
+        status!.State.Should().Be("None");
+        status.QueueDepth.Should().Be(1);
+        status.ReadyGateChecks.Should().Contain(check =>
+            check.Name == "Bed Clear Confirmed"
+            && !check.Passed
+            && check.Message.Contains("No confirmation needed yet"));
+
+        HttpResponseMessage readyResponse = await _client.PostAsync($"{CurrentRouteBase}/{printer.Id}/ready", null);
+
+        readyResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        string body = await readyResponse.Content.ReadAsStringAsync();
+        body.Should().Contain("current: None");
     }
 
     private async Task<Printer> CreateTestPrinterAsync(string name)
@@ -129,7 +161,7 @@ public class AutoPrintPendingReadyTests : IAsyncLifetime
             Backend = (int)PrinterBackend.Moonraker,
             ManufacturerId = manufacturer.Id,
             ModelId = model.Id,
-            AutoPrintEnabled = true,
+            AutoDispatchEnabled = true,
             IsEnabled = true,
             IsAvailable = true,
         };
@@ -163,8 +195,8 @@ public class AutoPrintPendingReadyTests : IAsyncLifetime
     private async Task TransitionPrinterToPendingReadyAsync(Guid printerId)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
-        IAutoPrintService autoPrintService = scope.ServiceProvider.GetRequiredService<IAutoPrintService>();
-        await autoPrintService.TransitionToPendingReadyAsync(printerId);
+        IAutoDispatchService autoDispatchService = scope.ServiceProvider.GetRequiredService<IAutoDispatchService>();
+        await autoDispatchService.TransitionToPendingReadyAsync(printerId);
     }
 
     private static async Task<Manufacturer> GetOrCreateManufacturerAsync(AppDbContext context)

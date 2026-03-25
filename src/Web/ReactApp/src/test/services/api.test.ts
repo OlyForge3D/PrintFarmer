@@ -109,4 +109,134 @@ describe("ApiClient", () => {
       expect(result).toEqual(mockResponse.data);
     });
   });
+
+  describe("auto-dispatch endpoints", () => {
+    it("should fetch global auto-dispatch status from the auto-dispatch route", async () => {
+      const mockResponse = {
+        data: {
+          globalEnabled: true,
+          printers: [],
+        },
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(mockResponse);
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+        mockGet;
+
+      const result = await apiClient.getAutoDispatchStatus();
+
+      expect(mockGet).toHaveBeenCalledWith("/auto-dispatch/status");
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it("should fetch per-printer auto-dispatch status from the auto-dispatch route", async () => {
+      const mockResponse = {
+        data: {
+          printerId: "printer-1",
+          enabled: true,
+          state: "PendingReady",
+          queueDepth: 1,
+        },
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(mockResponse);
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+        mockGet;
+
+      const result = await apiClient.getAutoDispatchPrinterStatus("printer-1");
+
+      expect(mockGet).toHaveBeenCalledWith("/auto-dispatch/printer-1/status");
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it("should post ready confirmations through the canonical auto-dispatch helper", async () => {
+      const mockResponse = {
+        data: {
+          status: {
+            printerId: "printer-1",
+            enabled: true,
+            state: "Ready",
+            queueDepth: 1,
+          },
+          nextJob: null,
+          filamentCheck: null,
+        },
+      };
+
+      const mockPost = vi.fn().mockResolvedValue(mockResponse);
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      const result = await apiClient.confirmAutoDispatchReady("printer-1");
+
+      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/ready");
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it("should expose confirmAutoDispatchReady instead of the removed markPrinterReady alias", () => {
+      expect(typeof apiClient.confirmAutoDispatchReady).toBe("function");
+      expect((apiClient as unknown as { markPrinterReady?: unknown }).markPrinterReady).toBeUndefined();
+    });
+
+    it("should post skip requests to the auto-dispatch route", async () => {
+      const mockPost = vi.fn().mockResolvedValue({ data: undefined });
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      await apiClient.skipAutoDispatchJob("printer-1");
+
+      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/skip");
+    });
+
+    it("should post cancel requests to the auto-dispatch route", async () => {
+      const mockPost = vi.fn().mockResolvedValue({ data: undefined });
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      await apiClient.cancelAutoDispatch("printer-1");
+
+      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/cancel");
+    });
+
+    it("should post pre-clear requests to the auto-dispatch route", async () => {
+      const mockResponse = {
+        data: {
+          printerId: "printer-1",
+          enabled: true,
+          state: "None",
+          queueDepth: 0,
+          bedPreConfirmed: true,
+        },
+      };
+
+      const mockPost = vi.fn().mockResolvedValue(mockResponse);
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      const result = await apiClient.preClearAutoDispatchBed("printer-1");
+
+      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/pre-clear");
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it("should put per-printer enabled changes to the auto-dispatch route", async () => {
+      const mockPut = vi.fn().mockResolvedValue({ data: undefined });
+      (apiClient as unknown as { client: { put: typeof mockPut } }).client.put =
+        mockPut;
+
+      await apiClient.setAutoDispatchEnabled("printer-1", true);
+
+      expect(mockPut).toHaveBeenCalledWith("/auto-dispatch/printer-1/enabled", { enabled: true });
+    });
+
+    it("should put global enabled changes to the auto-dispatch route", async () => {
+      const mockPut = vi.fn().mockResolvedValue({ data: undefined });
+      (apiClient as unknown as { client: { put: typeof mockPut } }).client.put =
+        mockPut;
+
+      await apiClient.setAutoDispatchGlobalEnabled(false);
+
+      expect(mockPut).toHaveBeenCalledWith("/auto-dispatch/enabled", { enabled: false });
+    });
+  });
 });

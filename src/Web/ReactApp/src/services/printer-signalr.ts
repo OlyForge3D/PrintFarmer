@@ -26,7 +26,9 @@ type DiscoveryCompletedCallback = (completed: DiscoveryCompletedDto) => void;
 type PrinterImportProgressCallback = (progress: unknown) => void;
 type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => void;
 type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
-type AutoPrintStatusCallback = (status: AutoDispatchStatus) => void;
+type AutoDispatchStatusCallback = (status: AutoDispatchStatus) => void;
+
+const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
 export class PrinterSignalRService {
   // Keep a local cache of last statuses for debugging
@@ -267,13 +269,13 @@ export class PrinterSignalRService {
     );
 
     this.connection.on(
-      "autoprintstatechanged",
+      AUTO_DISPATCH_STATE_CHANGED_EVENT,
       (status: AutoDispatchStatus) => {
-        this.autoPrintStatusCallbacks.forEach((cb) => {
+        this.autoDispatchStatusCallbacks.forEach((cb) => {
           try {
             cb(status);
           } catch (e) {
-            console.error("Auto-print status cb error:", e);
+            console.error("Auto-dispatch status callback error:", e);
           }
         });
       }
@@ -320,7 +322,7 @@ export class PrinterSignalRService {
   private printerImportProgressCallbacks: PrinterImportProgressCallback[] = [];
   private dispatchUploadProgressCallbacks: DispatchUploadProgressCallback[] = [];
   private failureDetectionCallbacks: FailureDetectionCallback[] = [];
-  private autoPrintStatusCallbacks: AutoPrintStatusCallback[] = [];
+  private autoDispatchStatusCallbacks: AutoDispatchStatusCallback[] = [];
 
   constructor() {
     this.loadSettings().then(() => {
@@ -610,11 +612,11 @@ export class PrinterSignalRService {
     };
   }
 
-  onAutoPrintStateChanged(callback: AutoPrintStatusCallback): () => void {
-    this.autoPrintStatusCallbacks.push(callback);
+  onAutoDispatchStateChanged(callback: AutoDispatchStatusCallback): () => void {
+    this.autoDispatchStatusCallbacks.push(callback);
     return () => {
-      const idx = this.autoPrintStatusCallbacks.indexOf(callback);
-      if (idx > -1) this.autoPrintStatusCallbacks.splice(idx, 1);
+      const idx = this.autoDispatchStatusCallbacks.indexOf(callback);
+      if (idx > -1) this.autoDispatchStatusCallbacks.splice(idx, 1);
     };
   }
 
@@ -637,7 +639,7 @@ export class PrinterSignalRService {
     this.printerImportProgressCallbacks = [];
     this.dispatchUploadProgressCallbacks = [];
     this.failureDetectionCallbacks = [];
-    this.autoPrintStatusCallbacks = [];
+    this.autoDispatchStatusCallbacks = [];
     if (this.connection) {
       this.connection.stop();
       this.connection = null;

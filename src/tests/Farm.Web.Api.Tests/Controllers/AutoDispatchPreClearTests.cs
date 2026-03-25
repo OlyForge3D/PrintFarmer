@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.AutoPrint;
+using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -19,13 +19,14 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
 /// Integration tests for the bed pre-clear feature.
-/// POST /api/auto-print/{printerId}/pre-clear marks the bed as pre-confirmed
+/// POST /api/auto-dispatch/{printerId}/pre-clear marks the bed as pre-confirmed
 /// so the next job dispatches immediately without the PendingReady gate.
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection(IntegrationTestCollection.Name)]
-public class AutoPrintPreClearTests : IAsyncLifetime
+public class AutoDispatchPreClearTests : IAsyncLifetime
 {
+    private const string CurrentRouteBase = "/api/auto-dispatch";
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
 
@@ -36,7 +37,7 @@ public class AutoPrintPreClearTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public AutoPrintPreClearTests()
+    public AutoDispatchPreClearTests()
     {
         _factory = new CustomWebApplicationFactory();
     }
@@ -56,7 +57,7 @@ public class AutoPrintPreClearTests : IAsyncLifetime
 
     private async Task<Printer> CreateTestPrinterAsync(
         string? name = null,
-        bool autoPrintEnabled = true)
+        bool autoDispatchEnabled = true)
     {
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -86,7 +87,7 @@ public class AutoPrintPreClearTests : IAsyncLifetime
             Backend = (int)PrinterBackend.Moonraker,
             ManufacturerId = manufacturer.Id,
             ModelId = model.Id,
-            AutoPrintEnabled = autoPrintEnabled
+            AutoDispatchEnabled = autoDispatchEnabled
         };
 
         context.Printers.Add(printer);
@@ -97,16 +98,16 @@ public class AutoPrintPreClearTests : IAsyncLifetime
     // ── Test 1: Happy path — pre-clear returns 200 ──
 
     [Fact]
-    public async Task PreClear_ValidPrinterWithAutoPrintEnabled_Returns200()
+    public async Task PreClear_ValidPrinterWithAutoDispatchEnabled_Returns200()
     {
-        Printer printer = await CreateTestPrinterAsync(autoPrintEnabled: true);
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
         HttpResponseMessage response = await _client!.PostAsync(
-            $"/api/auto-print/{printer.Id}/pre-clear", null);
+            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var status = await response.Content.ReadFromJsonAsync<AutoPrintStatusDto>(JsonOptions);
+        var status = await response.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
         status.Should().NotBeNull();
         status!.PrinterId.Should().Be(printer.Id);
         status.BedPreConfirmed.Should().BeTrue();
@@ -120,22 +121,22 @@ public class AutoPrintPreClearTests : IAsyncLifetime
         var bogusId = Guid.NewGuid();
 
         HttpResponseMessage response = await _client!.PostAsync(
-            $"/api/auto-print/{bogusId}/pre-clear", null);
+            $"{CurrentRouteBase}/{bogusId}/pre-clear", null);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         string body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("not found");
     }
 
-    // ── Test 3: Auto-print disabled returns 400 ──
+    // ── Test 3: Auto-dispatch disabled returns 400 ──
 
     [Fact]
-    public async Task PreClear_AutoPrintDisabled_Returns400()
+    public async Task PreClear_AutoDispatchDisabled_Returns400()
     {
-        Printer printer = await CreateTestPrinterAsync(autoPrintEnabled: false);
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: false);
 
         HttpResponseMessage response = await _client!.PostAsync(
-            $"/api/auto-print/{printer.Id}/pre-clear", null);
+            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         string body = await response.Content.ReadAsStringAsync();
@@ -147,19 +148,19 @@ public class AutoPrintPreClearTests : IAsyncLifetime
     [Fact]
     public async Task GetStatus_AfterPreClear_ShowsBedPreConfirmedTrue()
     {
-        Printer printer = await CreateTestPrinterAsync(autoPrintEnabled: true);
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
         // Pre-clear
         HttpResponseMessage preClearResponse = await _client!.PostAsync(
-            $"/api/auto-print/{printer.Id}/pre-clear", null);
+            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
         preClearResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Check status
         HttpResponseMessage statusResponse = await _client!.GetAsync(
-            $"/api/auto-print/{printer.Id}/status");
+            $"{CurrentRouteBase}/{printer.Id}/status");
         statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var status = await statusResponse.Content.ReadFromJsonAsync<AutoPrintStatusDto>(JsonOptions);
+        var status = await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
         status.Should().NotBeNull();
         status!.BedPreConfirmed.Should().BeTrue();
     }
@@ -169,13 +170,13 @@ public class AutoPrintPreClearTests : IAsyncLifetime
     [Fact]
     public async Task GetStatus_DefaultPrinter_BedPreConfirmedIsFalse()
     {
-        Printer printer = await CreateTestPrinterAsync(autoPrintEnabled: true);
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
         HttpResponseMessage statusResponse = await _client!.GetAsync(
-            $"/api/auto-print/{printer.Id}/status");
+            $"{CurrentRouteBase}/{printer.Id}/status");
         statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var status = await statusResponse.Content.ReadFromJsonAsync<AutoPrintStatusDto>(JsonOptions);
+        var status = await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
         status.Should().NotBeNull();
         status!.BedPreConfirmed.Should().BeFalse();
     }
@@ -185,34 +186,34 @@ public class AutoPrintPreClearTests : IAsyncLifetime
     [Fact]
     public async Task PreClear_AlreadyPreCleared_SucceedsIdempotently()
     {
-        Printer printer = await CreateTestPrinterAsync(autoPrintEnabled: true);
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
         HttpResponseMessage first = await _client!.PostAsync(
-            $"/api/auto-print/{printer.Id}/pre-clear", null);
+            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
         first.StatusCode.Should().Be(HttpStatusCode.OK);
 
         HttpResponseMessage second = await _client!.PostAsync(
-            $"/api/auto-print/{printer.Id}/pre-clear", null);
+            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
         second.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var status = await second.Content.ReadFromJsonAsync<AutoPrintStatusDto>(JsonOptions);
+        var status = await second.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
         status!.BedPreConfirmed.Should().BeTrue();
     }
 
     [Fact]
     public async Task GetStatus_AfterPreClear_MarksBedClearConfirmedGateAsPassed()
     {
-        Printer printer = await CreateTestPrinterAsync(autoPrintEnabled: true);
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
         HttpResponseMessage preClearResponse = await _client!.PostAsync(
-            $"/api/auto-print/{printer.Id}/pre-clear", null);
+            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
         preClearResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         HttpResponseMessage statusResponse = await _client.GetAsync(
-            $"/api/auto-print/{printer.Id}/status");
+            $"{CurrentRouteBase}/{printer.Id}/status");
         statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        AutoPrintStatusDto? status = await statusResponse.Content.ReadFromJsonAsync<AutoPrintStatusDto>(JsonOptions);
+        AutoDispatchStatusDto? status = await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
         status.Should().NotBeNull();
 
         ReadyGateCheckDto? bedClearGate = status!.ReadyGateChecks
@@ -221,5 +222,56 @@ public class AutoPrintPreClearTests : IAsyncLifetime
         bedClearGate.Should().NotBeNull();
         bedClearGate!.Passed.Should().BeTrue();
         bedClearGate.Message.Should().Contain("pre-cleared");
+    }
+
+    [Fact]
+    public async Task Ready_AfterPreClear_CurrentRouteSucceedsAndClearsPreConfirmedFlag()
+    {
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
+        await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
+
+        HttpResponseMessage preClearResponse = await _client!.PostAsync(
+            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
+        preClearResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        HttpResponseMessage statusResponse = await _client.GetAsync(
+            $"{CurrentRouteBase}/{printer.Id}/status");
+        statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        AutoDispatchStatusDto? statusBeforeReady = await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
+        statusBeforeReady.Should().NotBeNull();
+        statusBeforeReady!.State.Should().Be("None");
+        statusBeforeReady.BedPreConfirmed.Should().BeTrue();
+
+        HttpResponseMessage readyResponse = await _client.PostAsync(
+            $"{CurrentRouteBase}/{printer.Id}/ready", null);
+        readyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        AutoDispatchReadyResult? readyResult = await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
+        readyResult.Should().NotBeNull();
+        readyResult!.Status.State.Should().Be("Ready");
+        readyResult.Status.BedPreConfirmed.Should().BeFalse();
+        readyResult.NextJob.Should().NotBeNull();
+    }
+
+    private async Task CreateQueuedJobAsync(Guid printerId, string name, int queuePosition)
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        context.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            AssignedPrinterId = printerId,
+            Status = Farm.Infrastructure.PrintJobStatus.Queued,
+            Priority = 0,
+            QueuePosition = queuePosition,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = DateTime.UtcNow,
+        });
+
+        await context.SaveChangesAsync();
     }
 }

@@ -5,8 +5,22 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutoDispatchStatus, Printer } from '@/types/api';
 
-const { autoPrintStateListeners } = vi.hoisted(() => ({
-  autoPrintStateListeners: [] as Array<(status: AutoDispatchStatus) => void>,
+const {
+  autoDispatchStateListeners,
+  connectSignalR,
+  subscribeToAutoDispatchStateChanged,
+} = vi.hoisted(() => ({
+  autoDispatchStateListeners: [] as Array<(status: AutoDispatchStatus) => void>,
+  connectSignalR: vi.fn().mockResolvedValue(undefined),
+  subscribeToAutoDispatchStateChanged: vi.fn((callback: (status: AutoDispatchStatus) => void) => {
+    autoDispatchStateListeners.push(callback);
+    return () => {
+      const index = autoDispatchStateListeners.indexOf(callback);
+      if (index >= 0) {
+        autoDispatchStateListeners.splice(index, 1);
+      }
+    };
+  }),
 }));
 
 vi.mock('@/common/hooks/useApi', () => ({
@@ -19,22 +33,15 @@ vi.mock('@/common/hooks/useApi', () => ({
 
 vi.mock('@/services/printer-signalr', () => ({
   printerSignalRService: {
-    connect: vi.fn().mockResolvedValue(undefined),
-    onAutoPrintStateChanged: vi.fn((callback: (status: AutoDispatchStatus) => void) => {
-      autoPrintStateListeners.push(callback);
-      return () => {
-        const index = autoPrintStateListeners.indexOf(callback);
-        if (index >= 0) {
-          autoPrintStateListeners.splice(index, 1);
-        }
-      };
-    }),
+    connect: connectSignalR,
+    onAutoDispatchStateChanged: subscribeToAutoDispatchStateChanged,
   },
 }));
 
 vi.mock('@/services/api', () => ({
   apiClient: {
     get: vi.fn(),
+    getAutoDispatchStatus: vi.fn().mockResolvedValue({ printers: [] }),
     getObjectTags: vi.fn().mockResolvedValue([]),
     setAutoDispatchEnabled: vi.fn().mockResolvedValue(undefined),
     post: vi.fn().mockResolvedValue({ data: {} }),
@@ -132,20 +139,20 @@ function makePrinter(overrides: Partial<Printer> = {}): Printer {
   } as Printer;
 }
 
-function emitAutoPrintStateChanged(status: AutoDispatchStatus) {
+function emitAutoDispatchStateChanged(status: AutoDispatchStatus) {
   act(() => {
-    autoPrintStateListeners.forEach((listener) => listener(status));
+    autoDispatchStateListeners.forEach((listener) => listener(status));
   });
 }
 
 describe('CompactPrinterCard PendingReady live updates', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    autoPrintStateListeners.splice(0, autoPrintStateListeners.length);
-    vi.mocked(apiClient.get).mockResolvedValue({ data: { printers: [] } });
+    autoDispatchStateListeners.splice(0, autoDispatchStateListeners.length);
+    vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValue({ printers: [] });
   });
 
-  it('shows Pending Ready status and bed-clear banner after an auto-print SignalR update', async () => {
+  it('uses the auto-dispatch hook path to fetch bulk status and subscribe to live updates', async () => {
     const printer = makePrinter();
 
     render(
@@ -158,7 +165,27 @@ describe('CompactPrinterCard PendingReady live updates', () => {
 
     expect(await screen.findByText('Idle')).toBeInTheDocument();
 
-    emitAutoPrintStateChanged({
+    await waitFor(() => {
+      expect(apiClient.getAutoDispatchStatus).toHaveBeenCalledTimes(1);
+      expect(connectSignalR).toHaveBeenCalledTimes(1);
+      expect(subscribeToAutoDispatchStateChanged).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('shows Pending Ready status and bed-clear banner after an auto-dispatch SignalR update', async () => {
+    const printer = makePrinter();
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    expect(await screen.findByText('Idle')).toBeInTheDocument();
+
+    emitAutoDispatchStateChanged({
       printerId: printer.id,
       printerName: printer.name,
       enabled: true,
@@ -182,6 +209,105 @@ describe('CompactPrinterCard PendingReady live updates', () => {
     });
     expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
     expect(screen.getByText('Print complete — confirm bed is clear')).toBeInTheDocument();
+    expect(screen.getByText('2 jobs queued')).toBeInTheDocument();
+  });
+
+  it('clears the Pending Ready overlay when the backend returns None with no confirmation needed', async () => {
+    const printer = makePrinter();
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    expect(await screen.findByText('Idle')).toBeInTheDocument();
+
+    emitAutoDispatchStateChanged({
+      printerId: printer.id,
+      printerName: printer.name,
+      enabled: true,
+      isReady: false,
+      queueDepth: 2,
+      state: 'PendingReady',
+      bedPreConfirmed: false,
+      readyGateChecks: [
+        {
+          name: 'Bed Clear Confirmed',
+          passed: false,
+          message: 'Waiting for operator to confirm bed is clear',
+          checkedAt: '2026-03-25T00:00:00Z',
+        },
+      ],
+      attentionMessage: 'Print completed. 2 queued jobs are blocked until you clear the bed and confirm ready.',
+    });
+
+    expect(await screen.findByText('Pending Ready')).toBeInTheDocument();
+    expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
+
+    emitAutoDispatchStateChanged({
+      printerId: printer.id,
+      printerName: printer.name,
+      enabled: true,
+      isReady: false,
+      queueDepth: 0,
+      state: 'None',
+      bedPreConfirmed: false,
+      readyGateChecks: [
+        {
+          name: 'Bed Clear Confirmed',
+          passed: false,
+          message: 'No confirmation needed yet',
+          checkedAt: '2026-03-25T00:00:05Z',
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Pending Ready')).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole('alert', { name: 'Bed clear confirmation required' })).not.toBeInTheDocument();
+    expect(screen.getByText('Idle')).toBeInTheDocument();
+  });
+
+  it('shows Pending Ready status and bed-clear banner when a stale summary row still says the operator is waiting for confirmation', async () => {
+    const printer = makePrinter();
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    expect(await screen.findByText('Idle')).toBeInTheDocument();
+
+    emitAutoDispatchStateChanged({
+      printerId: printer.id,
+      printerName: printer.name,
+      enabled: true,
+      isReady: false,
+      queueDepth: 2,
+      state: 'None',
+      bedPreConfirmed: false,
+      readyGateChecks: [
+        {
+          name: 'Bed Clear Confirmed',
+          passed: false,
+          message: 'Waiting for operator to confirm bed is clear',
+          checkedAt: '2026-03-25T00:00:00Z',
+        },
+      ],
+      attentionMessage: 'Print completed. 2 queued jobs are blocked until you clear the bed and confirm ready.',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Pending Ready')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('alert', { name: 'Bed clear confirmation required' })).toBeInTheDocument();
     expect(screen.getByText('2 jobs queued')).toBeInTheDocument();
   });
 });

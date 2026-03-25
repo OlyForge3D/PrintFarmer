@@ -1713,3 +1713,11 @@ Validated backend auto-print service still correctly emits `PendingReady` state 
 
 **Decision Output:** `.squad/decisions.md` → "Compact Card PendingReady Backend Verification"
 
+
+### Auto-Dispatch Rename Compatibility (2026-03-25)
+
+- `AutoDispatchController` is now the primary backend controller name and serves both `/api/auto-dispatch/*` and the legacy `/api/auto-print/*` route. Treat the old route as a compatibility alias until callers are fully migrated.
+- `AutoPrintService` is still the ready-gate implementation name internally, but product-facing copy in backend comments, controller docs, logs, and ready-gate messages should say **auto-dispatch**. Persisted names like `AutoPrintEnabled` / `AutoPrintState` were intentionally left alone in this pass.
+- SignalR and webhook transport identifiers remain legacy for compatibility: `autoprintstatechanged`, `printer.autoprint_ready`, and `printer.autoprint_pending`. Keep those behind constants/comments and regression tests instead of guessing at a breaking rename.
+- Focused validation that worked here: `dotnet build ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug` plus `dotnet test ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj -c Debug --no-build --filter "FullyQualifiedName~AutoDispatchPendingReadyTests|FullyQualifiedName~AutoDispatchPreClearTests|FullyQualifiedName~AutoDispatchReadyGateServiceTests" -p:CollectCoverage=false`.
+- Full solution build is currently blocked by unrelated slicer proto contract compile failures in `src/tests/Farm.Slicer.Module.Tests/ContractTests/SlicerJobsProtoCompilationTests.cs`; do not treat that as evidence that the auto-dispatch rename work regressed the API project.
