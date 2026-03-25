@@ -233,6 +233,10 @@
 
 ## Learnings
 
+### `pfdev` Service Aliases Must Resolve Through Compose Map (2026-03-25)
+
+If `scripts/pfdev` exposes user-friendly aliases like `nginx`, the Docker commands inside `build`, `deploy`, and `redeploy` must use the mapped Compose service from `SERVICES`, not the raw user argument. In this repo that means `nginx` stays the public alias while the internal Compose target is `nginx-proxy`.
+
 ### Unified Docker Workflow (2026-03-17)
 
 Merged `docker-publish.yml` (release pipeline, multistage Dockerfile) and `containers.yml` (native-build pipeline, daily schedule) into a single `docker-publish.yml`.
@@ -325,3 +329,29 @@ Merged `docker-publish.yml` (release pipeline, multistage Dockerfile) and `conta
 - If restarting just nginx via compose: `docker-compose restart nginx-proxy`
 
 **Not a codebase bug** — User was trying to use a non-existent command on a different tool. The script and services work correctly.
+
+## Diagnosis: `scripts/pfdev` Service Name Mismatch (2026-03-25)
+
+**Issue:** `pfdev redeploy nginx` fails with `no such service: nginx`
+
+**Root Cause (Simple):**
+- `scripts/pfdev` hardcodes `[nginx]="nginx"` in the SERVICES array (line 50)
+- The actual Docker Compose file defines the service as `nginx-proxy` (lines 188–202 in `docker-compose.yml`)
+- When `pfdev` calls `docker compose up -d nginx`, Docker correctly fails: service doesn't exist
+
+**Evidence Chain:**
+1. `scripts/pfdev` line 50: `[nginx]="nginx"` — expects service named `nginx`
+2. `scripts/pfdev` line 113: `docker compose up -d --remove-orphans "$service"` — passes `nginx` to Docker
+3. `docker-compose.yml` line 188: `nginx-proxy:` — actual service is named `nginx-proxy`
+4. Docker error: `no such service: nginx` ✅ matches observed failure
+
+**Why It Exists:**
+- `pfdev` was written as a development helper for rebuilding individual services
+- The SERVICES array is generic and was never synchronized with actual Compose file
+- Both `docker-compose.yml` and the template `scripts/docker/compose-templates/docker-compose.yml` define service as `nginx-proxy` — this is the correct, deployed reality
+
+**Discrepancy Detail:**
+- `pfdev` SERVICES array expects: `api`, `frontend`, `orcaslicer-worker`, `printer-discovery`, `nginx`
+- Actual `docker-compose.yml` provides: `database`, `api`, `frontend`, `nginx-proxy`, `printer-discovery`
+
+**Observation:** The `pfdev` script appears outdated relative to the current Compose file structure. It's a development-only tool (for Docker Compose rebuilds), not the primary deployment mechanism. Users should use `deploy-docker.sh` for orchestrated deployments or `docker compose restart nginx-proxy` for quick restarts.

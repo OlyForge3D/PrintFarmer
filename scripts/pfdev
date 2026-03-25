@@ -41,23 +41,39 @@ remove_symlink() {
     fi
 }
 
-# Service configuration
-declare -A SERVICES=(
-    [api]="api"
-    [frontend]="frontend"
-    [orcaslicer-worker]="orcaslicer-worker"
-    [printer-discovery]="printer-discovery"
-    [nginx]="nginx"
+# Service configuration (user-facing alias : docker compose service)
+SERVICES=(
+    "api:api"
+    "frontend:frontend"
+    "orcaslicer-worker:orcaslicer-worker"
+    "printer-discovery:printer-discovery"
+    "nginx:nginx-proxy"
 )
 
 # Dockerfile paths (kept for reference if needed)
-declare -A DOCKERFILES=(
-    [api]="Dockerfile.api"
-    [frontend]="Dockerfile.frontend"
-    [orcaslicer-worker]="Dockerfile"
-    [printer-discovery]="Dockerfile.printer-discovery"
-    [nginx]="Dockerfile.nginx-proxy"
+DOCKERFILES=(
+    "api:Dockerfile.api"
+    "frontend:Dockerfile.frontend"
+    "orcaslicer-worker:Dockerfile"
+    "printer-discovery:Dockerfile.printer-discovery"
+    "nginx:Dockerfile.nginx-proxy"
 )
+
+resolve_service() {
+    local requested_service=$1
+    local service_entry
+    local service_alias
+
+    for service_entry in "${SERVICES[@]}"; do
+        service_alias=${service_entry%%:*}
+        if [[ "$service_alias" == "$requested_service" ]]; then
+            echo "${service_entry#*:}"
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 print_usage() {
     cat << EOF
@@ -90,14 +106,17 @@ EOF
 
 build_image() {
     local service=$1
+    local compose_service
     local start_time=$(date +%s)
+
+    compose_service=$(resolve_service "$service")
     
     echo "📦 Building $service... [$(date '+%H:%M:%S')]"
     cd "$REPO_ROOT"
     # Force cache invalidation by removing the image first
-    docker rmi "printfarmer-$service:latest" 2>/dev/null || true
+    docker rmi "printfarmer-$compose_service:latest" 2>/dev/null || true
     # Don't use --pull since we use local upgraded base images
-    DOCKER_BUILDKIT=1 docker compose build --no-cache "$service"
+    DOCKER_BUILDKIT=1 docker compose build --no-cache "$compose_service"
     
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
@@ -106,11 +125,14 @@ build_image() {
 
 deploy_service() {
     local service=$1
+    local compose_service
     local start_time=$(date +%s)
+
+    compose_service=$(resolve_service "$service")
     
     echo "🚀 Deploying $service... [$(date '+%H:%M:%S')]"
     cd "$REPO_ROOT"
-    docker compose up -d --remove-orphans "$service"
+    docker compose up -d --remove-orphans "$compose_service"
     
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
@@ -154,7 +176,7 @@ case "$COMMAND" in
         fi
         shift  # Remove command from args
         for SERVICE in "$@"; do
-            if [[ ! -v SERVICES[$SERVICE] ]]; then
+            if ! resolve_service "$SERVICE" >/dev/null; then
                 echo "❌ Unknown service: $SERVICE"
                 echo ""
                 print_usage
@@ -171,7 +193,7 @@ case "$COMMAND" in
         fi
         shift  # Remove command from args
         for SERVICE in "$@"; do
-            if [[ ! -v SERVICES[$SERVICE] ]]; then
+            if ! resolve_service "$SERVICE" >/dev/null; then
                 echo "❌ Unknown service: $SERVICE"
                 echo ""
                 print_usage
@@ -188,7 +210,7 @@ case "$COMMAND" in
         fi
         shift  # Remove command from args
         for SERVICE in "$@"; do
-            if [[ ! -v SERVICES[$SERVICE] ]]; then
+            if ! resolve_service "$SERVICE" >/dev/null; then
                 echo "❌ Unknown service: $SERVICE"
                 echo ""
                 print_usage

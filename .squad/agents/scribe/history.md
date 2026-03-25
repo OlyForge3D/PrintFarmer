@@ -91,3 +91,15 @@ Agent Scribe initialized and ready for work. Maintains orchestration log, sessio
 
 **Key Takeaway:** This decision clarifies that `nginx-proxy` (not `nginx`) is the correct Docker Compose service name, and documents the distinction between `pf-dev.sh` (local dev, no containers) and `deploy-docker.sh` (Docker Compose orchestration). No code changes required — documentation and user education focus only.
 
+## 2026-03-25 Documentation — pf-dev Script Location Clarification
+
+**Task:** Correct earlier diagnosis of pf-dev script location  
+**Timestamp:** 2026-03-25
+
+**Correction Applied:**
+- Previous reference: `pf-dev.sh` (implied root directory)
+- Verified location: `scripts/pfdev` — the canonical local dev helper script
+- This is the unified interface for `bootstrap`, `start`, `stop`, `status`, `logs`, `test`, and `clean` commands
+
+**Outcome:** Team documentation and instructions now reflect correct script location for local development workflow.
+
