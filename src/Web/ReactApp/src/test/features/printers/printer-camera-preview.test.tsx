@@ -13,7 +13,7 @@ describe('PrinterCameraPreview', () => {
     vi.restoreAllMocks();
   });
 
-  it('embeds live streams with an iframe control when a stream URL is available', () => {
+  it('embeds live streams as an image first when a stream URL is available', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
 
     render(
@@ -25,7 +25,25 @@ describe('PrinterCameraPreview', () => {
       />
     );
 
-    const iframe = screen.getByTitle('Printer One live camera feed');
+    const stream = screen.getByAltText('Printer One live camera feed');
+    expect(stream.tagName).toBe('IMG');
+  });
+
+  it('falls back to an iframe when the live stream cannot be embedded as an image', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+
+    render(
+      <PrinterCameraPreview
+        printerId="printer-iframe"
+        printerName="Printer Fallback"
+        cameraStreamUrl="http://printer.local/webcam/?action=stream"
+        cameraSnapshotUrl="http://printer.local/webcam/?action=snapshot"
+      />
+    );
+
+    fireEvent.error(screen.getByAltText('Printer Fallback live camera feed'));
+
+    const iframe = screen.getByTitle('Printer Fallback live camera feed');
     expect(iframe.tagName).toBe('IFRAME');
   });
 
@@ -42,9 +60,9 @@ describe('PrinterCameraPreview', () => {
     );
 
     fireEvent.click(screen.getByLabelText('Rotate camera clockwise'));
-    const iframe = screen.getByTitle('Printer Rotate live camera feed');
-    expect(iframe.getAttribute('style')).toContain('rotate(90deg)');
-    expect(iframe.getAttribute('style')).toContain('scale(0.5625)');
+    const stream = screen.getByAltText('Printer Rotate live camera feed');
+    expect(stream.getAttribute('style')).toContain('rotate(90deg)');
+    expect(stream.getAttribute('style')).toContain('scale(0.5625)');
 
     unmount();
 
@@ -57,8 +75,8 @@ describe('PrinterCameraPreview', () => {
       />
     );
 
-    const rerenderedIframe = screen.getByTitle('Printer Rotate live camera feed');
-    expect(rerenderedIframe.getAttribute('style')).toContain('rotate(90deg)');
-    expect(rerenderedIframe.getAttribute('style')).toContain('scale(0.5625)');
+    const rerenderedStream = screen.getByAltText('Printer Rotate live camera feed');
+    expect(rerenderedStream.getAttribute('style')).toContain('rotate(90deg)');
+    expect(rerenderedStream.getAttribute('style')).toContain('scale(0.5625)');
   });
 });

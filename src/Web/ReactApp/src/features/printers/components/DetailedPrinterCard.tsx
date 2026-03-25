@@ -541,7 +541,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             cameraStreamUrl={cameraStreamUrl}
             cameraSnapshotUrl={cameraSnapshotUrl}
             isPrinting={isPrinting}
-            className="mt-3 w-52"
+            className="mt-3 w-full max-w-[40rem]"
             overlay={
               <FailureDetectionMonitoringOverlay
                 enabled={!!apiPrinter.obicoEnabled}

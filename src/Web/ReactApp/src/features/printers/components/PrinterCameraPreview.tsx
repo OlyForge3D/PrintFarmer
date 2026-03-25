@@ -116,7 +116,9 @@ export function PrinterCameraPreview({
     refreshIntervalMs
   );
   const rawSnapshotKey = `${printerId}:${cameraSnapshotUrl ?? ''}`;
+  const rawStreamKey = `${printerId}:${cameraStreamUrl ?? ''}`;
   const [failedRawSnapshotKey, setFailedRawSnapshotKey] = useState<string | null>(null);
+  const [failedRawStreamKey, setFailedRawStreamKey] = useState<string | null>(null);
   const fallbackSnapshotSrc =
     failedRawSnapshotKey === rawSnapshotKey ? null : (cameraSnapshotUrl ?? null);
   const previewSrc = snapshotSrc ?? fallbackSnapshotSrc;
@@ -138,6 +140,7 @@ export function PrinterCameraPreview({
   const externalUrl = cameraStreamUrl ?? cameraSnapshotUrl ?? null;
   const mediaStyle = getCameraMediaTransformStyle(rotation);
   const showLiveStream = cameraMode === 'stream' && hasStream;
+  const shouldUseImageStream = showLiveStream && failedRawStreamKey !== rawStreamKey;
 
   return (
     <div
@@ -148,19 +151,32 @@ export function PrinterCameraPreview({
     >
       <div className="relative aspect-video w-full overflow-hidden bg-pf-bg-0">
         {showLiveStream && cameraStreamUrl ? (
-          <iframe
-            src={cameraStreamUrl}
-            title={`${printerName} live camera feed`}
-            className="border-0 bg-black"
-            style={mediaStyle}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
+          shouldUseImageStream ? (
+            <img
+              src={cameraStreamUrl}
+              alt={`${printerName} live camera feed`}
+              className="h-full w-full object-contain bg-black"
+              style={mediaStyle}
+              loading="eager"
+              onError={() => {
+                setFailedRawStreamKey(rawStreamKey);
+              }}
+            />
+          ) : (
+            <iframe
+              src={cameraStreamUrl}
+              title={`${printerName} live camera feed`}
+              className="h-full w-full border-0 bg-black"
+              style={mediaStyle}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
+          )
         ) : previewSrc ? (
           <img
             src={previewSrc}
             alt={`${printerName} camera preview`}
-            className="object-cover"
+            className="h-full w-full object-contain bg-black"
             style={mediaStyle}
             loading="lazy"
             onError={() => {
