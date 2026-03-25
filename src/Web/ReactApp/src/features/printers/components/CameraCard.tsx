@@ -5,7 +5,7 @@ import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/com
 import { Button, Badge } from '@/common/components/ui';
 import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
 import {
-  getCameraMediaTransformStyle,
+  getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 
@@ -58,7 +58,7 @@ export function CameraCard({
     ? cameraStreamUrl 
     : cameraSnapshotUrl;
   const imageError = !!activeUrl && failedUrl === activeUrl;
-  const mediaStyle = getCameraMediaTransformStyle(rotation);
+  const mediaClassName = getCameraMediaTransformClassName(rotation);
 
   // Health status dot color
   const getHealthDotColor = (health: CameraHealthStatus) => {
@@ -78,8 +78,7 @@ export function CameraCard({
           <iframe
             src={activeUrl}
             title={`${p.name} live camera feed`}
-            className="border-0 bg-black"
-            style={mediaStyle}
+            className={`border-0 bg-black ${mediaClassName}`}
             loading="lazy"
             referrerPolicy="no-referrer"
           />
@@ -87,8 +86,7 @@ export function CameraCard({
           <img
             src={activeUrl ?? ''}
             alt={`${p.name} camera feed`}
-            className="object-cover"
-            style={mediaStyle}
+            className={`object-cover ${mediaClassName}`}
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />

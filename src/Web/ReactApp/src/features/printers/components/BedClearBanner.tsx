@@ -114,7 +114,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
           iconCenter={<CheckCircleIcon className="h-4 w-4" />}
           aria-label={`Confirm bed clear for ${printerName}`}
           title="Confirm bed is clear"
-          className="flex-1 h-9 !p-0"
+          className="flex-1 h-9 p-0!"
         />
         <Button
           variant="primary"
@@ -125,7 +125,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
           iconCenter={<SkipForwardIcon className="h-4 w-4" />}
           aria-label="Skip next queued job"
           title="Skip this job"
-          className="flex-1 h-9 !p-0"
+          className="flex-1 h-9 p-0!"
         />
         <Button
           variant="secondary"
@@ -136,7 +136,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
           iconCenter={<CloseIcon className="h-4 w-4" />}
           aria-label="Cancel auto-dispatch"
           title="Cancel auto-dispatch"
-          className="flex-1 h-9 !p-0"
+          className="flex-1 h-9 p-0!"
         />
       </div>
     </div>

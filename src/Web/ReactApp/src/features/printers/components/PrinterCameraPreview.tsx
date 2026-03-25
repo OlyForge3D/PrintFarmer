@@ -6,7 +6,7 @@ import { Button } from '@/common/components/ui';
 import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import {
-  getCameraMediaTransformStyle,
+  getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 
@@ -138,7 +138,7 @@ export function PrinterCameraPreview({
     hasSnapshot,
   });
   const externalUrl = cameraStreamUrl ?? cameraSnapshotUrl ?? null;
-  const mediaStyle = getCameraMediaTransformStyle(rotation);
+  const mediaClassName = getCameraMediaTransformClassName(rotation);
   const showLiveStream = cameraMode === 'stream' && hasStream;
   const shouldUseImageStream = showLiveStream && failedRawStreamKey !== rawStreamKey;
 
@@ -155,8 +155,7 @@ export function PrinterCameraPreview({
             <img
               src={cameraStreamUrl}
               alt={`${printerName} live camera feed`}
-              className="h-full w-full object-contain bg-black"
-              style={mediaStyle}
+              className={`h-full w-full object-contain bg-black ${mediaClassName}`}
               loading="eager"
               onError={() => {
                 setFailedRawStreamKey(rawStreamKey);
@@ -166,8 +165,7 @@ export function PrinterCameraPreview({
             <iframe
               src={cameraStreamUrl}
               title={`${printerName} live camera feed`}
-              className="h-full w-full border-0 bg-black"
-              style={mediaStyle}
+              className={`h-full w-full border-0 bg-black ${mediaClassName}`}
               loading="lazy"
               referrerPolicy="no-referrer"
             />
@@ -176,8 +174,7 @@ export function PrinterCameraPreview({
           <img
             src={previewSrc}
             alt={`${printerName} camera preview`}
-            className="h-full w-full object-contain bg-black"
-            style={mediaStyle}
+            className={`h-full w-full object-contain bg-black ${mediaClassName}`}
             loading="lazy"
             onError={() => {
               if (snapshotSrc) {

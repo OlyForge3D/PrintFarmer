@@ -37,7 +37,7 @@ import {
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
-import { getStatusHeaderStyle, getStatusIndicatorColor } from '@/features/printers/utils/statusColors';
+import { getStatusHeaderClassName, getStatusIndicatorColor } from '@/features/printers/utils/statusColors';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
@@ -295,7 +295,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
   const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
-  const headerStyle = getStatusHeaderStyle({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
+  const headerClassName = getStatusHeaderClassName({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
   const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
 
   const support = getPrinterSupport(backendCapabilities);
@@ -601,7 +601,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   return (
     <div className={`${sidebarShellClassName} z-30`}>
       {/* Header */}
-      <div style={headerStyle} className="flex justify-between items-start px-4 pt-4 pb-3 border-b border-white/10 shrink-0 gap-3">
+      <div className={`flex justify-between items-start px-4 pt-4 pb-3 border-b border-white/10 shrink-0 gap-3 ${headerClassName}`}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h2 className="text-2xl font-bebas uppercase tracking-wide leading-none text-pf-text-primary truncate">{printer.name}</h2>
@@ -914,8 +914,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   value={(EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) >= 0 ? (EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) : 0}
                   onChange={(e) => setExtrudeStep(EXTRUDE_DISTANCE_OPTIONS[Number(e.target.value)])}
                   disabled={!canExtrudeNow}
-                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed [writing-mode:vertical-lr] [direction:rtl]"
                   aria-label="Extrude distance"
                 />
                 <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeStep}mm</span>
@@ -955,8 +954,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   value={(EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) >= 0 ? (EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) : 0}
                   onChange={(e) => setExtrudeSpeed(EXTRUDE_SPEED_OPTIONS[Number(e.target.value)])}
                   disabled={!canExtrudeNow}
-                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed [writing-mode:vertical-lr] [direction:rtl]"
                   aria-label="Extrude speed"
                 />
                 <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeSpeed}mm/s</span>

@@ -83,6 +83,7 @@ type NavigationElement = NavigationItem | NavigationDivider | NavigationSectionH
 
 const isDivider = (item: NavigationElement): item is NavigationDivider => 'isDivider' in item && item.isDivider === true;
 const isSectionHeader = (item: NavigationElement): item is NavigationSectionHeader => 'isSectionHeader' in item && item.isSectionHeader === true;
+const isNavigationItem = (item: NavigationElement): item is NavigationItem => !isDivider(item) && !isSectionHeader(item);
 
 const navigation: NavigationElement[] = [
   // — Operations —
@@ -367,7 +368,7 @@ export function Layout() {
       // Auto-expand groups containing current route during initialization
       // Note: filteredNavigation not available yet, so use navigation directly
       for (const item of navigation) {
-        if (!isDivider(item) && item.children) {
+        if (isNavigationItem(item) && item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild && !(item.name in parsed)) {
             parsed[item.name] = true;
@@ -380,7 +381,7 @@ export function Layout() {
       // If parsing fails, at least auto-expand current route
       const autoExpanded: Record<string, boolean> = {};
       for (const item of navigation) {
-        if (!isDivider(item) && item.children) {
+        if (isNavigationItem(item) && item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild) {
             autoExpanded[item.name] = true;
@@ -407,7 +408,7 @@ export function Layout() {
       
       // Find item to get child count (from filtered list so it's permission-safe)
       const itemDef = filteredNavigation.find(i => i.name === name);
-      const childCount = itemDef && !isDivider(itemDef) ? itemDef.children?.length ?? 0 : 0;
+      const childCount = itemDef && isNavigationItem(itemDef) ? itemDef.children?.length ?? 0 : 0;
       const message = nextValue
         ? `${name} section expanded. ${childCount} item${childCount === 1 ? '' : 's'}.`
         : `${name} section collapsed.`;
@@ -446,7 +447,7 @@ export function Layout() {
     
     // Auto-expand groups containing current route
     for (const item of filteredNavigation) {
-      if (!isDivider(item) && item.children) {
+      if (isNavigationItem(item) && item.children) {
         const hasActiveChild = item.children.some(c => path.startsWith(c.href));
         // Only auto-expand if user hasn't explicitly set it
         if (hasActiveChild && expanded[item.name] === undefined) {

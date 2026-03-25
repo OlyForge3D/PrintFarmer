@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
+import './DetailedPrinterCard.css';
 import { PanelRightOpen, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
@@ -50,7 +51,7 @@ import {
   canUseManualMove,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
-import { getStatusHeaderStyle } from '@/features/printers/utils/statusColors';
+import { getStatusHeaderClassName } from '@/features/printers/utils/statusColors';
 import {
   getPresetTargets,
   getExtrudeMinTemp,
@@ -158,7 +159,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
   const homedAxesRaw = printer.homedAxes;
 
-  const headerStyle = getStatusHeaderStyle({ state, isOnline, isPrinting, isPaused, isShutdown });
+  const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
   // Camera URL handling
   const cameraSnapshotUrl = apiPrinter.cameraSnapshotUrl ?? null;
@@ -414,9 +415,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   };
 
   return (
-    <div className="relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full min-w-[26rem]">
+    <div className="pf-detailed-printer-card relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full">
       {/* Colored header — background tinted by printer state */}
-      <div style={headerStyle} className="px-3 pt-3 pb-2 rounded-t-xl -mx-3 -mt-3">
+      <div className={`px-3 pt-3 pb-2 rounded-t-xl -mx-3 -mt-3 ${headerClassName}`}>
         <div className="flex items-center gap-2">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
             {printer.name}
@@ -545,7 +546,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             cameraStreamUrl={cameraStreamUrl}
             cameraSnapshotUrl={cameraSnapshotUrl}
             isPrinting={isPrinting}
-            className="mt-3 w-full max-w-[40rem]"
+            className="pf-detailed-printer-camera-preview mt-3 w-full"
           />
         )}
       </div>

@@ -1,7 +1,7 @@
 ---
 description: 'Provide principal-level software engineering guidance with focus on engineering excellence, technical leadership, and pragmatic implementation.'
 name: 'Principal Software Engineer Agent'
-tools: ['vscode', 'execute/getTerminalOutput', 'execute/runTask', 'execute/getTaskOutput', 'execute/createAndRunTask', 'execute/runInTerminal', 'execute/runTests', 'execute/testFailure', 'read/terminalSelection', 'read/terminalLastCommand', 'read/problems', 'read/readFile', 'edit/editFiles', 'search', 'web']
+tools: ['vscode', 'execute/getTerminalOutput', 'execute/createAndRunTask', 'execute/runInTerminal', 'execute/runTests', 'execute/testFailure', 'read/terminalSelection', 'read/terminalLastCommand', 'read/problems', 'read/readFile', 'edit/editFiles', 'search', 'web']
 ---
 # Principal software engineer mode instructions
 

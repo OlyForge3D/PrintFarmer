@@ -191,6 +191,8 @@ export interface PrinterJobInfo {
   fileName?: string;
   /** Thumbnail URL for the current job */
   thumbnailUrl?: string;
+  /** Active spool identifier persisted in the PrintFarmer database */
+  currentSpoolId?: number;
   /** Active spool/filament information */
   spoolInfo?: PrinterSpoolInfo;
 }

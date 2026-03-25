@@ -1,7 +1,7 @@
 ---
 description: 'Challenge assumptions and encourage critical thinking to ensure the best possible solution and outcomes.'
 name: 'Critical Thinking Agent'
-tools: ['codebase', 'extensions', 'fetch', 'findTestFiles', 'githubRepo', 'problems', 'search', 'searchResults', 'usages']
+tools: ['codebase', 'extensions', 'fetch', 'problems', 'search', 'usages']
 ---
 # Critical thinking mode instructions
 

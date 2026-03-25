@@ -1,0 +1,11 @@
+.pf-maintenance-schedule-badge {
+  min-width: 18px;
+}
+
+.pf-maintenance-priority-list-scroll {
+  max-height: 560px;
+}
+
+.pf-maintenance-timeline-scroll {
+  max-height: 600px;
+}

@@ -29,7 +29,7 @@ import {
   canOpenHistory,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
-import { getStatusHeaderStyle } from '@/features/printers/utils/statusColors';
+import { getStatusHeaderClassName } from '@/features/printers/utils/statusColors';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
@@ -145,7 +145,7 @@ export function CompactPrinterCard({
   const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
-  const headerStyle = getStatusHeaderStyle({ state, isOnline, isPrinting, isPaused, isShutdown });
+  const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
   return (
     <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
@@ -162,7 +162,7 @@ export function CompactPrinterCard({
         </div>
       )}
       {/* Colored header — background tinted by printer state */}
-      <div style={headerStyle} className="px-3 pt-3 pb-2 rounded-t-xl">
+      <div className={`px-3 pt-3 pb-2 rounded-t-xl ${headerClassName}`}>
           {/* Top row: Name + Status Pill + failure-detection status */}
         <div className="flex items-center gap-2">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
@@ -336,10 +336,13 @@ export function CompactPrinterCard({
                 </span>
               )}
               <span
-                className="shrink-0 w-8 h-4 rounded-full border border-white/20"
-                style={{ backgroundColor: printer.spoolInfo.colorHex ?? '#888' }}
+                className="shrink-0 w-8 h-4 rounded-full border border-white/20 overflow-hidden"
                 title={printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Filament color'}
-              />
+              >
+                <svg className="h-full w-full" viewBox="0 0 32 16" aria-hidden="true" focusable="false">
+                  <rect width="32" height="16" fill={printer.spoolInfo.colorHex ?? '#888'} />
+                </svg>
+              </span>
             </>
           ) : (
             <span className="italic text-pf-text-tertiary">No spool loaded</span>

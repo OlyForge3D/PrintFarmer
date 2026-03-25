@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react';
 import { useCallback, useMemo, useState } from 'react';
 
 export type CameraViewMode = 'snapshot' | 'stream';
@@ -66,20 +65,20 @@ function getInitialRotation(preferenceKey: string): number {
   return normalized - (normalized % 90);
 }
 
-export function getCameraMediaTransformStyle(rotation: number): CSSProperties {
+export function getCameraMediaTransformClassName(rotation: number): string {
   const normalized = ((rotation % 360) + 360) % 360;
-  const requiresScale = normalized === 90 || normalized === 270;
-  const scale = requiresScale ? 9 / 16 : 1;
+  const baseClassName = 'absolute left-1/2 top-1/2 h-full w-full -translate-x-1/2 -translate-y-1/2 origin-center';
 
-  return {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    width: '100%',
-    height: '100%',
-    transform: `translate(-50%, -50%) rotate(${normalized}deg) scale(${scale})`,
-    transformOrigin: 'center center',
-  };
+  switch (normalized) {
+    case 90:
+      return `${baseClassName} rotate-90 scale-[0.5625]`;
+    case 180:
+      return `${baseClassName} rotate-180`;
+    case 270:
+      return `${baseClassName} -rotate-90 scale-[0.5625]`;
+    default:
+      return baseClassName;
+  }
 }
 
 export function useCameraViewPreferences({

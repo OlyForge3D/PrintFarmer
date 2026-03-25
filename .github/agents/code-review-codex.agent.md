@@ -1,7 +1,7 @@
 ---
 description: Code review following VS Code contribution standards — correctness, lifecycle, naming, layering, accessibility, and security
 name: Code Review (Codex)
-tools: ['search', 'read/problems', 'read/terminalLastCommand', 'web/githubRepo']
+tools: ['search', 'read/problems', 'read/terminalLastCommand']
 model: GPT-5.3-Codex (copilot)
 ---
 

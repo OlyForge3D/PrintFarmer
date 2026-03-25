@@ -10,7 +10,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
 import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
 import {
-  getCameraMediaTransformStyle,
+  getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 import { getCameraAttentionContent } from '@/features/cameras/utils/cameraAttention';
@@ -185,7 +185,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
     ? camera.streamUrl
     : camera.snapshotUrl;
   const imageError = !!activeUrl && failedUrl === activeUrl;
-  const mediaStyle = getCameraMediaTransformStyle(rotation);
+  const mediaClassName = getCameraMediaTransformClassName(rotation);
   const cameraAttention = getCameraAttentionContent({
     healthStatus: camera.healthStatus,
     healthMessage: camera.healthMessage,
@@ -204,8 +204,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
           <iframe
             src={activeUrl}
             title={`${camera.name} live camera feed`}
-            className="border-0 bg-black"
-            style={mediaStyle}
+            className={`border-0 bg-black ${mediaClassName}`}
             loading="lazy"
             referrerPolicy="no-referrer"
           />
@@ -213,8 +212,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
           <img
             src={activeUrl}
             alt={`${camera.name} camera feed`}
-            className="object-cover"
-            style={mediaStyle}
+            className={`object-cover ${mediaClassName}`}
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />

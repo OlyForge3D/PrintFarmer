@@ -61,8 +61,8 @@ describe('PrinterCameraPreview', () => {
 
     fireEvent.click(screen.getByLabelText('Rotate camera clockwise'));
     const stream = screen.getByAltText('Printer Rotate live camera feed');
-    expect(stream.getAttribute('style')).toContain('rotate(90deg)');
-    expect(stream.getAttribute('style')).toContain('scale(0.5625)');
+    expect(stream.className).toContain('rotate-90');
+    expect(stream.className).toContain('scale-[0.5625]');
 
     unmount();
 
@@ -76,7 +76,7 @@ describe('PrinterCameraPreview', () => {
     );
 
     const rerenderedStream = screen.getByAltText('Printer Rotate live camera feed');
-    expect(rerenderedStream.getAttribute('style')).toContain('rotate(90deg)');
-    expect(rerenderedStream.getAttribute('style')).toContain('scale(0.5625)');
+    expect(rerenderedStream.className).toContain('rotate-90');
+    expect(rerenderedStream.className).toContain('scale-[0.5625]');
   });
 });
