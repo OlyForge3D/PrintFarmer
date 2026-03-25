@@ -103,3 +103,28 @@ Agent Scribe initialized and ready for work. Maintains orchestration log, sessio
 
 **Outcome:** Team documentation and instructions now reflect correct script location for local development workflow.
 
+## 2026-03-25 Decision Merge — Icon-Only Failure Shield Cleanup
+
+**Task:** Process Ripley + Kane orchestration logs; merge icon-only failure shield refinement into consolidated decisions.md  
+**Timestamp:** 2026-03-25T16:00:00Z  
+
+**Status:** ✅ COMPLETE — No pending inbox; merged decision ready for Parker's clean commit.
+
+**Documents Processed:**
+1. Ripley orchestration log: `2026-03-25T14-46-45Z-ripley.md` — Icon-only badge implementation + overlay removal
+2. Kane orchestration log: `2026-03-25T14-46-45Z-kane.md` — Code review + risk assessment
+3. Session log: `2026-03-25T14-46-45Z-icon-only-shield.md` — Team collaboration summary
+
+**Inbox Status Check:**
+- `.squad/decisions/inbox/` — Empty (no pending decision files)
+- No pending ripley-icon-only-failure-shield.md or kane-icon-only-shield-review.md to merge
+
+**Merge Action:**
+- ✅ Created consolidated decision entry in `decisions.md`
+- ✅ Documented: implementation summary, pattern compliance, Kane's approval with Tier 1 regression test gate
+- ✅ Captured key learnings: icon-only UX compensation, integration vs. unit test coverage, dual-surface redundancy
+- ✅ Documented accessibility requirements and next steps for Parker's landing
+
+**Outcome:** 
+Icon-only failure detection shield cleanup fully documented. No pending squad state. Parker has clean decision record in consolidated decisions.md for landing commit. Tier 1 regression test gate (tooltip assertions, card header integration, state styling) remains blocking condition for merge approval per Kane's review.
+
