@@ -48,11 +48,27 @@ dedupe_paths() {
 }
 
 TARGET_CERT_DIRS=()
+should_mirror_legacy_runtime_dir() {
+    [[ -d "$(dirname "$RUNTIME_CERT_DIR")" ]]
+}
+
 if [[ $# -gt 0 && -n "${1:-}" ]]; then
     TARGET_CERT_DIRS+=("$1")
+    case "$1" in
+        "$REPO_CERT_DIR"|./deploy/nginx/certs|deploy/nginx/certs)
+            if should_mirror_legacy_runtime_dir; then
+                TARGET_CERT_DIRS+=("$RUNTIME_CERT_DIR")
+            fi
+            ;;
+        "$RUNTIME_CERT_DIR"|./nginx/certs|nginx/certs)
+            TARGET_CERT_DIRS+=("$REPO_CERT_DIR")
+            ;;
+    esac
 else
     TARGET_CERT_DIRS+=("$REPO_CERT_DIR")
-    TARGET_CERT_DIRS+=("$RUNTIME_CERT_DIR")
+    if should_mirror_legacy_runtime_dir; then
+        TARGET_CERT_DIRS+=("$RUNTIME_CERT_DIR")
+    fi
 fi
 
 DEDUPED_TARGET_CERT_DIRS=()
@@ -226,5 +242,7 @@ echo ""
 echo "Use tls-fullchain.crt + tls.key for nginx."
 echo "Install ca.cer on iPhone/iPad and enable trust in:"
 echo "  Settings > General > About > Certificate Trust Settings"
+echo "Do not install tls.crt on iPhone/iPad."
+echo "If Settings shows a trusted certificate named 'PrintFarmer', remove it and trust 'PrintFarmer Local CA' instead."
 echo "Users can open http://<host>/install-ca to download the CA."
 echo "Access PrintFarmer at https://<host>:${HTTPS_PORT:-8443}"

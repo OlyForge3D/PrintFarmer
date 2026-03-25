@@ -5345,15 +5345,20 @@ ensure_tls_certificates() {
     fi
 
     local cert_dir="./deploy/nginx/certs"
-    if tls_certificate_is_valid "$cert_dir"; then
+    local legacy_cert_dir="./nginx/certs"
+    local legacy_nginx_dir="./nginx"
+    if tls_certificate_is_valid "$cert_dir" \
+        && { [ ! -d "$legacy_nginx_dir" ] || tls_certificate_is_valid "$legacy_cert_dir"; }; then
         print_info "TLS certificates already exist at $cert_dir and passed validation"
         return 0
     fi
 
-    if [ -f "$cert_dir/tls.crt" ] || [ -f "$cert_dir/tls.key" ]; then
-        print_warning "Existing TLS certificates at $cert_dir are invalid or incomplete; regenerating"
-        rm -f "$cert_dir/tls.crt" "$cert_dir/tls.key" "$cert_dir/tls-fullchain.crt" "$cert_dir/ca.crt" "$cert_dir/ca.cer" "$cert_dir/ca.key" "$cert_dir/ca.srl"
-    fi
+    for stale_cert_dir in "$cert_dir" "$legacy_cert_dir"; do
+        if [ -f "$stale_cert_dir/tls.crt" ] || [ -f "$stale_cert_dir/tls.key" ] || [ -f "$stale_cert_dir/tls-fullchain.crt" ]; then
+            print_warning "Existing TLS certificates at $stale_cert_dir are invalid or incomplete; regenerating"
+            rm -f "$stale_cert_dir/tls.crt" "$stale_cert_dir/tls.key" "$stale_cert_dir/tls-fullchain.crt" "$stale_cert_dir/ca.crt" "$stale_cert_dir/ca.cer" "$stale_cert_dir/ca.key" "$stale_cert_dir/ca.srl"
+        fi
+    done
 
     print_info "Generating TLS certificates for HTTPS (port $HTTPS_PORT)..."
     if [ -x "./scripts/generate-certs.sh" ]; then
@@ -5452,6 +5457,7 @@ EOF
         chmod 644 "$cert_dir/ca.crt" "$cert_dir/ca.cer" "$cert_dir/tls.crt" "$cert_dir/tls-fullchain.crt"
         print_success "TLS certificates generated at $cert_dir"
         print_info "Install $cert_dir/ca.cer on iPhone/iPad and enable trust in Certificate Trust Settings."
+        print_info "Do not install tls.crt on iPhone/iPad; if Settings shows a trusted certificate named 'PrintFarmer', remove it and trust 'PrintFarmer Local CA' instead."
         print_info "Users can open http://<host>/install-ca to download the CA."
     fi
 }
