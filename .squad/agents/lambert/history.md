@@ -1533,6 +1533,13 @@ DB_PROVIDER=sqlserver dotnet ef migrations add <Name> --project ./migrations/Far
 - **Tests added**: `CreateManualTaskAsync_WithValidDto_ReturnsCreatedWithLocationHeader` and `CreateManualTaskAsync_WithInvalidDto_ReturnsBadRequest` in `TasksControllerTests.cs`.
 - **Decision filed**: `.squad/decisions/inbox/lambert-createdataction-route-fix.md`
 
+### API Container Startup Triage (2026-03-25)
+
+- **Validated startup path:** With Postgres running, the API reached `[Startup] ✓ Database initialization complete - application ready to serve requests` using compose-equivalent backend settings. That means the current backend startup sequence is not reproducing a fatal app-startup crash by itself.
+- **Infra-first signal:** In this workspace `docker compose up api` did not reach application startup because the local `printfarmer-api` image was missing and Compose tried to pull it instead of creating a runnable container. Treat that as an infra/runtime issue before changing backend code.
+- **Important startup noise:** The app still emits pre-schema queries against `AppSettingsEntities` and `SystemLogs` before startup initialization creates the schema. They were noisy but non-fatal in this run, so they are worth tracking separately instead of treating them as the current container root cause.
+- **Port caveat:** `Program.cs` hardcodes `UseUrls("http://0.0.0.0:5245")`, so local `ASPNETCORE_URLS` overrides do not take effect during validation. That complicated reproduction, but it does not explain a Docker container bound to 5245 internally.
+
 ## Learnings: Spaghetti Detection Backend Investigation (2026-01-12)
 
 ### Failure Detection Architecture Analysis

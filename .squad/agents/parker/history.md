@@ -412,3 +412,21 @@ Successfully committed and pushed spaghetti detection discoverability improvemen
 - Development branch fully validated
 - Ready for merge to main after final review
 
+
+## Learnings
+
+### pfdev Should Not Generate docker-compose.yml (2026-03-14)
+- **Problem:** `pfdev` was calling `ensure_generated_stack()` which regenerated `docker-compose.yml` on every build/deploy operation
+- **Root cause:** Leftover logic from early development when pfdev had more responsibilities
+- **Solution:** Replaced `ensure_generated_stack()` with `check_required_files()` that fails loudly with a clear error message pointing users to `./scripts/deploy-docker.sh`
+- **Source of truth:** Only `deploy-docker.sh` should generate `docker-compose.yml`, `Dockerfile.multistage`, and `docker-entrypoint-config.sh`
+- **Error message pattern:** When required generated files are missing, fail immediately with:
+  - Clear list of missing files
+  - Instruction to run deploy-docker.sh
+  - Exit code 1
+- **Benefits:**
+  - Prevents pfdev from overwriting user's deploy-docker.sh configuration
+  - Makes the deployment workflow more predictable
+  - Reduces confusion about which script does what
+- **Preserved functionality:** TLS certificate refresh logic for nginx/frontend (kept in `ensure_tls_certificates()`)
+- **nginx alias fix preserved:** Service mapping `nginx:nginx-proxy` maintained in SERVICES array
