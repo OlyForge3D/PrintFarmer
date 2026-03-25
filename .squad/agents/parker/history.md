@@ -430,3 +430,19 @@ Successfully committed and pushed spaghetti detection discoverability improvemen
   - Reduces confusion about which script does what
 - **Preserved functionality:** TLS certificate refresh logic for nginx/frontend (kept in `ensure_tls_certificates()`)
 - **nginx alias fix preserved:** Service mapping `nginx:nginx-proxy` maintained in SERVICES array
+
+### Shield Badge Refinement Landing (2026-03-25)
+- **Scope:** Icon-only failure-detection badge refactor + overlay removal
+- **Changes:**
+  - `FailureDetectionMonitoringBadge.tsx` — removed pill border, inline label; now renders icon-only with tooltip
+  - `CompactPrinterCard.tsx` / `DetailedPrinterCard.tsx` — removed `FailureDetectionMonitoringOverlay` (single source of truth)
+  - Test coverage added: 6 focused tests, 3 integration tests
+  - New skill file: `.squad/skills/icon-only-badges/SKILL.md` (pattern for header-only badges)
+- **Squad State:** Updated `.squad/decisions.md` with two approval records (badge refinement + overlay migration), agent histories (Kane, Ripley) with assessment notes
+- **Push Workflow:**
+  - Staged all changes (component, tests, squad files, skill)
+  - Commit: `7269ca5b` with detailed message covering color mapping, tooltip strategy, test coverage
+  - Remote had new work; rebased cleanly with no conflicts
+  - Final state: `development` branch up-to-date with `origin/development`
+- **Key Insight:** Squad file updates (decisions.md, agent histories, skills) should travel with the feature commits they document. These provide context for future readers and trace back to implementation choices.
+- **Pattern Verified:** Icon-only designs need strong tooltip + aria-label to avoid accessibility loss. Tooltip is NOT optional; it becomes the information source, not a convenience feature.
