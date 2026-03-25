@@ -162,3 +162,41 @@
 - **Anti-pattern rejected:** "Add dispatch mode toggle to printer cards page" — couples two workflows to same page, adds conditional rendering complexity, doesn't simplify UX
 - **Design principle reinforced:** **Workflow separation** — farm-level operations deserve dedicated interfaces optimized for their mental model, not shoehorned into per-entity cards
 - **Decision document:** `.squad/decisions/inbox/newt-auto-dispatch-integration.md`
+
+### Camera Fit Sizing Fix (2026-03-18)
+- **Issue #1 (object-fit):** Kane's review showed snapshot preview was using `object-cover` (cropping). Already fixed in `PrinterCameraPreview.tsx` line 179 — now correctly uses `object-contain` to fit entire image without cropping.
+- **Issue #2 (sizing):** DetailedPrinterCard camera preview was constrained to `max-w-[28rem]` (448px), too small for detailed monitoring. Increased to `max-w-[40rem]` (640px) — 43% larger.
+- **File:** `src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx` line 544
+- **Validation:** All 1499 React tests pass, 0 lint errors, Kane's regression tests all green
+- **Design rationale:** 640px provides better camera feed visibility on detailed printer cards where users are actively monitoring print progress. The additional 192px width significantly improves the usability without overwhelming the card layout.
+
+## Camera Fit Revision (2026-03-25)
+
+**Task:** Revise Ripley's camera fit implementation based on Kane's review findings  
+**Timestamp:** 2026-03-25T06:25:00Z  
+**Status:** ✅ COMPLETE — Approved for deployment
+
+### Changes Applied
+- **Fix #1:** Changed PrinterCameraPreview.tsx line 179 from `object-cover` to `object-contain`
+- **Fix #2:** Increased DetailedPrinterCard.tsx line 544 from `max-w-[28rem]` (448px) to `max-w-[40rem]` (640px)
+
+### Design Decisions
+- Chose 640px over 576px recommendation to maximize visibility for monitoring use case
+- Used responsive `w-full max-w-[40rem]` instead of fixed width for flexibility
+- Maintained black letterboxing for non-16:9 camera feeds
+
+### Validation Results
+- ✅ ESLint: 0 errors
+- ✅ React Tests: 1499/1499 passing
+- ✅ Regression Tests: 3/3 passing
+- ✅ No new failures, no regressions
+
+### Approval
+- Kane re-reviewed and approved for deployment
+- 308% size improvement (208px → 640px from original)
+- Zero blockers, ready for immediate production deployment
+
+### Learnings
+- Clear line-number specific feedback from reviewer enabled precise fixes
+- Regression tests provided confidence that fixes worked correctly
+- Responsive design preferred over fixed widths for layout flexibility

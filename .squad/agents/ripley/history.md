@@ -1790,3 +1790,45 @@ The auto-dispatch workflow is **farm-level operations**, not **per-printer contr
 **No Persistence Risk:**
 Events are transient. Refreshing page clears detection state. This is acceptable for Phase 1 real-time monitoring.
 
+
+## Learnings
+
+### Camera Feed Rendering (2025-01-29)
+
+**Issue:** Live camera streams were being cropped instead of fitting the available space. The problem was twofold:
+1. Stream iframes had no explicit sizing, leading to unpredictable crop behavior
+2. Snapshot images used `object-cover` which intentionally crops to fill space
+
+**Solution:** 
+- Changed all media elements (stream `<img>`, stream `<iframe>`, and snapshot `<img>`) to use `h-full w-full object-contain bg-black`
+- Increased camera preview width in `DetailedPrinterCard` from `w-52` to `w-full max-w-[28rem]` for more viewing space
+
+**Key Files:**
+- `src/Web/ReactApp/src/features/printers/components/PrinterCameraPreview.tsx` - Main camera preview component
+- `src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx` - Detailed view container
+- `src/Web/ReactApp/src/test/features/printers/printer-camera-preview.test.tsx` - Test coverage
+
+**Pattern:** For camera feeds, always prefer `object-contain` over `object-cover` to avoid cropping important print information. Use `bg-black` to handle letterboxing gracefully when aspect ratios don't match 16:9.
+
+**In-Progress Work Detection:** This task involved continuing from existing uncommitted changes rather than starting fresh. Always check `git diff` first to understand the current state and avoid overwriting in-progress work.
+
+## Camera Fit Implementation (2026-03-25)
+
+**Task:** Implement camera fit improvements to address cropping in printer previews  
+**Timestamp:** 2026-03-25T06:15:00Z  
+**Status:** ✅ IMPLEMENTED (later revised by Newt)
+
+### Changes Made
+- Updated PrinterCameraPreview.tsx snapshot from `object-cover` to `object-contain`
+- Increased DetailedPrinterCard camera preview from 208px to 448px
+- Applied consistent sizing across stream and snapshot modes
+
+### Outcome
+- Partial implementation with issues identified by Kane (reviewer)
+- Led to revision cycle with Newt for final fixes
+- Contributing to feature that received final approval
+
+### Learnings
+- Initial implementation provided foundation for final solution
+- Clear reviewer feedback from Kane enabled quick revision
+- Testing strategy (regression tests) valuable for catching subtle CSS issues
