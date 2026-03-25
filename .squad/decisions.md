@@ -4229,3 +4229,83 @@ className="mt-3 w-full max-w-[40rem]"  // 640px responsive
 **Status:** APPROVED ✅  
 **Ready for Deployment:** Yes  
 **Manual QA Recommended:** Yes (optional, not blocking)
+
+---
+
+## pfdev No Longer Generates docker-compose.yml (IMPLEMENTED)
+
+**Date:** 2026-03-14  
+**Author:** Parker  
+**Status:** IMPLEMENTED  
+**Tags:** [deployment, scripts, docker-compose]
+
+### Decision
+
+The `pfdev` script must NOT generate or refresh `docker-compose.yml`. Only `./scripts/deploy-docker.sh` should generate this file.
+
+### Context
+
+User reported: "the only thing that should be generating docker-compose.yml is deploy-docker.sh"
+
+Previously, `pfdev` had `ensure_generated_stack()` function that would automatically regenerate docker-compose.yml on every `pfdev build` and `pfdev deploy` operation, causing unpredictable overwrites of user's deployment configuration.
+
+### Implementation
+
+**Removed:**
+- `generated_stack_needs_refresh()` function (93 lines of compose staleness detection)
+- `ensure_generated_stack()` function
+- `COMPOSE_GENERATOR` variable and all compose generation logic
+
+**Added:**
+- `check_required_files()` function that validates required files exist
+- Fails loudly if docker-compose.yml, Dockerfile.multistage, or docker-entrypoint-config.sh are missing
+- Clear error message pointing users to `./scripts/deploy-docker.sh`
+
+**Preserved:**
+- TLS certificate refresh logic (`ensure_tls_certificates()`) — still needed for nginx/frontend
+- All build/deploy functionality
+
+### Benefits
+
+1. **Single source of truth:** Only deploy-docker.sh generates compose files
+2. **Predictable behavior:** pfdev never modifies deployment configuration
+3. **Clearer workflows:** User knows exactly what each script does
+4. **Fail-fast:** Missing files cause immediate, helpful errors
+5. **No silent overwrites:** User's deploy configuration is never lost
+
+**Status:** IMPLEMENTED ✅
+
+---
+
+## API Container Startup Triage (DECISION LOGGED)
+
+**Date:** 2026-03-25  
+**Author:** Lambert (Backend Dev)  
+**Status:** DECISION LOGGED
+
+### Decision
+
+Do not change backend startup code for the current API-container report yet. The backend startup path was validated separately against Postgres and completed its database initialization sequence successfully.
+
+### Context
+
+In this workspace, `docker compose up api` never produced a real application container to inspect because the `printfarmer-api` image was missing locally and Compose tried to pull it. That points to an infra/runtime problem first, not a confirmed application-startup regression.
+
+### Notes
+
+- Compose-resolved API settings already include `ConnectionStrings__Default` and `Jwt__Key`
+- Startup logs early `AppSettingsEntities` / `SystemLogs` missing-table errors before schema creation (non-fatal during validation, noisy but worth a separate cleanup pass)
+- `Program.cs` currently forces `http://0.0.0.0:5245`, which makes local port-override validation harder (not the likely cause of container failures)
+
+**Status:** LOGGED ✅
+
+---
+
+## User Directive: docker-compose.yml Generation (CAPTURED)
+
+**Date:** 2026-03-25T06:13:03Z  
+**Author:** Jeff Papiez (via Copilot)  
+**Directive:** The only thing that should be generating docker-compose.yml is deploy-docker.sh.  
+**Rationale:** User request — ensuring single source of truth for deployment configuration
+
+**Status:** CAPTURED ✅
