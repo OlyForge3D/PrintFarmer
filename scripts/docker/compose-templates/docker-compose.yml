@@ -121,6 +121,8 @@ services:
       - VITE_SIGNALR_PRINTERS_URL=/hubs/printers
       - VITE_SIGNALR_HARVEST_URL=/hubs/harvest
       - NGINX_PROXY_API=http://api:5245
+    volumes:
+      - ./deploy/nginx/certs:/etc/nginx/certs:ro
     networks:
       - printfarmer-network
     depends_on:
