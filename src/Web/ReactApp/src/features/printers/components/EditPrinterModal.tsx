@@ -1069,11 +1069,16 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             <FormField 
               label="Obico AI Monitoring" 
               htmlFor="obico-enabled"
-              helper="Enable AI-powered print failure detection. Requires a camera. The app uses the best available Obico ML server when one is configured, or falls back to the global Obico Failure Detection settings."
+              helper={
+                !formData.cameraStreamUrl && !formData.cameraSnapshotUrl
+                  ? "Configure a camera URL above to enable failure detection."
+                  : "Enable AI-powered print failure detection. Requires a camera. The app uses the best available Obico ML server when one is configured, or falls back to the global Obico Failure Detection settings."
+              }
             >
               <Checkbox
                 id="obico-enabled"
                 checked={formData.obicoEnabled || false}
+                disabled={!formData.cameraStreamUrl && !formData.cameraSnapshotUrl}
                 onChange={e => {
                   const enabling = e.target.checked;
                   if (enabling && !formData.cameraStreamUrl && !formData.cameraSnapshotUrl) {

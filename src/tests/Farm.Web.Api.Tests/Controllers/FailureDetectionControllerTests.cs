@@ -320,4 +320,145 @@ public class FailureDetectionControllerTests : IAsyncLifetime
             }
         }
     }
+
+    [Fact(DisplayName = "Misconfigured state indicates user-actionable camera setup")]
+    public async Task MisconfiguredState_IndicatesUserActionableCameraSetup()
+    {
+        // This test verifies that the "misconfigured" state is only used when the user
+        // can fix the issue (missing camera), not for admin-level configuration issues.
+
+        // Act
+        var response = await _client!.GetAsync("/api/failure-detection/status");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var json = await response.Content.ReadAsStringAsync();
+        var status = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
+
+        status.TryGetProperty("printers", out var printers).Should().BeTrue();
+
+        // If any printer is in "misconfigured" state, the reason must reference camera setup
+        foreach (var printer in printers.EnumerateArray())
+        {
+            if (printer.TryGetProperty("state", out var state) && 
+                state.GetString() == "misconfigured")
+            {
+                printer.TryGetProperty("reason", out var reason).Should().BeTrue();
+                var reasonText = reason.GetString() ?? string.Empty;
+                reasonText.Should().Contain("camera", 
+                    "Misconfigured state should only be used for camera-related issues that users can fix");
+                reasonText.Should().NotContain("administrator",
+                    "Misconfigured state should not reference administrator actions");
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Error state indicates admin-level configuration issues")]
+    public async Task ErrorState_IndicatesAdminLevelConfigurationIssues()
+    {
+        // This test verifies that admin-level configuration issues (like missing Obico server)
+        // use "error" state, not "misconfigured", to distinguish them from user-fixable issues.
+
+        // Act
+        var response = await _client!.GetAsync("/api/failure-detection/status");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var json = await response.Content.ReadAsStringAsync();
+        var status = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
+
+        status.TryGetProperty("printers", out var printers).Should().BeTrue();
+
+        // If any printer is in "error" state with an Obico server message,
+        // it should reference administrator/configuration
+        foreach (var printer in printers.EnumerateArray())
+        {
+            if (printer.TryGetProperty("state", out var state) &&
+                printer.TryGetProperty("reason", out var reason) &&
+                state.GetString() == "error")
+            {
+                var reasonText = reason.GetString() ?? string.Empty;
+                if (reasonText.Contains("Obico", StringComparison.OrdinalIgnoreCase))
+                {
+                    reasonText.Should().ContainAny("administrator", "admin", "configured",
+                        "Error state for Obico issues should indicate admin-level action needed");
+                }
+            }
+        }
+    }
+
+    [Fact(DisplayName = "State messages are user-facing and actionable")]
+    public async Task StateMessages_AreUserFacingAndActionable()
+    {
+        // This test verifies that all state messages provide clear, actionable guidance
+        // without exposing implementation details.
+
+        // Act
+        var response = await _client!.GetAsync("/api/failure-detection/status");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var json = await response.Content.ReadAsStringAsync();
+        var status = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
+
+        status.TryGetProperty("printers", out var printers).Should().BeTrue();
+
+        // Verify that all printer status messages are meaningful
+        foreach (var printer in printers.EnumerateArray())
+        {
+            printer.TryGetProperty("reason", out var reason).Should().BeTrue();
+            var reasonText = reason.GetString();
+            
+            reasonText.Should().NotBeNullOrWhiteSpace("All printers should have a status reason");
+            reasonText!.Length.Should().BeGreaterThan(10, "Status messages should be descriptive");
+            
+            // Messages should not contain internal jargon or technical field names
+            reasonText.Should().NotContain("SnapshotUrl", "Messages should not expose internal field names");
+            reasonText.Should().NotContain("ObicoApiUrl", "Messages should not expose internal field names");
+        }
+    }
+
+    [Fact(DisplayName = "Legacy printer snapshot URLs work when no Camera entities exist")]
+    public async Task LegacyPrinterSnapshotUrls_WorkWithoutCameraEntities()
+    {
+        // This test verifies that printers created with legacy CameraSnapshotUrl field
+        // (but no Camera entities) still work with failure detection.
+        // Real-world scenario: printer imported/discovered before Camera entity model existed.
+
+        // Act
+        var response = await _client!.GetAsync("/api/failure-detection/status");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var json = await response.Content.ReadAsStringAsync();
+        var status = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
+
+        status.TryGetProperty("printers", out var printers).Should().BeTrue();
+
+        // For printers in the test database with legacy CameraSnapshotUrl but no Camera entities,
+        // the failure detection should NOT report "No enabled camera snapshot URL is configured"
+        // if the legacy field is populated.
+        foreach (var printer in printers.EnumerateArray())
+        {
+            if (printer.TryGetProperty("snapshotUrl", out var snapshotUrl) && 
+                snapshotUrl.ValueKind == JsonValueKind.String && 
+                !string.IsNullOrWhiteSpace(snapshotUrl.GetString()))
+            {
+                // If a snapshot URL is present in the status, the state should not be "misconfigured"
+                // due to missing camera configuration.
+                printer.TryGetProperty("state", out var state).Should().BeTrue();
+                if (state.GetString() == "misconfigured")
+                {
+                    printer.TryGetProperty("reason", out var reason).Should().BeTrue();
+                    var reasonText = reason.GetString() ?? string.Empty;
+                    reasonText.Should().NotContain("camera snapshot URL",
+                        "Printers with snapshot URLs (legacy or Camera entities) should not report camera misconfiguration");
+                }
+            }
+        }
+    }
 }

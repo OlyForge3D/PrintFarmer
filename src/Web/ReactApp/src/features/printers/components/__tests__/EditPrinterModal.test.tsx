@@ -121,4 +121,113 @@ describe('EditPrinterModal', () => {
       });
     });
   });
+
+  it('disables Obico checkbox when no camera URLs are configured', async () => {
+    mockUsePrinterDetails.mockReturnValue({
+      data: {
+        name: 'qp4-1',
+        serverUrl: 'http://qp4-1.local',
+        originalServerUrl: 'http://qp4-1.local',
+        notes: '',
+        manufacturerId: 'manufacturer-1',
+        modelId: 'model-1',
+        backend: 'Moonraker',
+        apiKey: '',
+        username: '',
+        password: '',
+        cameraStreamUrl: '', // No camera URL
+        cameraSnapshotUrl: '', // No camera URL
+        capabilities: {},
+        backendPort: 7125,
+        frontendPort: 80,
+        obicoEnabled: false,
+        toolheads: [],
+      },
+    });
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
+    expect(checkbox).toBeDisabled();
+    expect(screen.getByText(/configure a camera url above to enable failure detection/i)).toBeInTheDocument();
+  });
+
+  it('enables Obico checkbox when at least one camera URL is configured', async () => {
+    mockUsePrinterDetails.mockReturnValue({
+      data: {
+        name: 'qp4-1',
+        serverUrl: 'http://qp4-1.local',
+        originalServerUrl: 'http://qp4-1.local',
+        notes: '',
+        manufacturerId: 'manufacturer-1',
+        modelId: 'model-1',
+        backend: 'Moonraker',
+        apiKey: '',
+        username: '',
+        password: '',
+        cameraStreamUrl: 'http://qp4-1.local/webcam/?action=stream', // Camera URL present
+        cameraSnapshotUrl: '',
+        capabilities: {},
+        backendPort: 7125,
+        frontendPort: 80,
+        obicoEnabled: false,
+        toolheads: [],
+      },
+    });
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
+    expect(checkbox).not.toBeDisabled();
+  });
+
+  it('enables Obico checkbox when snapshot URL is configured', async () => {
+    mockUsePrinterDetails.mockReturnValue({
+      data: {
+        name: 'qp4-1',
+        serverUrl: 'http://qp4-1.local',
+        originalServerUrl: 'http://qp4-1.local',
+        notes: '',
+        manufacturerId: 'manufacturer-1',
+        modelId: 'model-1',
+        backend: 'Moonraker',
+        apiKey: '',
+        username: '',
+        password: '',
+        cameraStreamUrl: '',
+        cameraSnapshotUrl: 'http://qp4-1.local/webcam/?action=snapshot', // Snapshot URL present
+        capabilities: {},
+        backendPort: 7125,
+        frontendPort: 80,
+        obicoEnabled: false,
+        toolheads: [],
+      },
+    });
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
+    expect(checkbox).not.toBeDisabled();
+  });
 });

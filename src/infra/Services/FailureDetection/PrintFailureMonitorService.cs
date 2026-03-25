@@ -141,7 +141,16 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 {
                     previousPrinterStatuses.TryGetValue(printer.Id, out FailureDetectionPrinterStatusDto? previousStatus);
 
+                    // Prefer Camera entities, but fall back to legacy printer fields if no cameras exist
                     Camera? camera = printer.Cameras.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c.SnapshotUrl));
+                    string? snapshotUrl = camera?.SnapshotUrl;
+
+                    // Fallback to legacy printer field if no Camera entities have snapshot URLs
+                    if (string.IsNullOrWhiteSpace(snapshotUrl))
+                    {
+                        snapshotUrl = printer.CameraSnapshotUrl;
+                    }
+
                     bool isPrinting = IsPrinterPrinting(printer.Id);
                     var (detectionSource, detectionTarget, obicoServerUrl, obicoApiKey) = ResolveDetectionTarget(printer, obicoServers, currentSettings);
 
@@ -152,7 +161,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         DetectionSource = detectionSource,
                         DetectionTarget = detectionTarget,
                         IsPrinting = isPrinting,
-                        SnapshotUrl = camera?.SnapshotUrl,
+                        SnapshotUrl = snapshotUrl,
                         LastAnalyzedAt = previousStatus?.LastAnalyzedAt,
                         LastOutcome = previousStatus?.LastOutcome ?? AnalysisOutcomeNone,
                         LastConfidence = previousStatus?.LastConfidence,
@@ -176,12 +185,12 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         continue;
                     }
 
-                    if (string.IsNullOrWhiteSpace(camera?.SnapshotUrl))
+                    if (string.IsNullOrWhiteSpace(snapshotUrl))
                     {
                         printerStatuses.Add(baseStatus with
                         {
                             State = PrinterStateMisconfigured,
-                            Reason = "No enabled camera snapshot URL is configured.",
+                            Reason = "Camera snapshot URL required. Add or enable a camera in printer settings.",
                         });
                         continue;
                     }
@@ -200,8 +209,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     {
                         printerStatuses.Add(baseStatus with
                         {
-                            State = PrinterStateMisconfigured,
-                            Reason = "No available Obico server is configured.",
+                            State = PrinterStateError,
+                            Reason = "No Obico server configured. Contact your administrator to configure Obico integration.",
                         });
                         continue;
                     }
@@ -216,7 +225,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     };
 
                     FailureDetectionResult result = await failureDetectionService.AnalyzeImageFromUrlAsync(
-                        camera.SnapshotUrl,
+                        snapshotUrl,
                         obicoServerUrl,
                         obicoApiKey,
                         cancellationToken);
@@ -245,7 +254,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         failuresDetected++;
                         bool autoPaused = await HandleFailureDetectedAsync(
                             printer,
-                            camera.SnapshotUrl,
+                            snapshotUrl,
                             result,
                             currentSettings,
                             dbContext,
