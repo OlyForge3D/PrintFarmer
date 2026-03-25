@@ -69,7 +69,7 @@ function getInitialRotation(preferenceKey: string): number {
 export function getCameraMediaTransformStyle(rotation: number): CSSProperties {
   const normalized = ((rotation % 360) + 360) % 360;
   const requiresScale = normalized === 90 || normalized === 270;
-  const scale = requiresScale ? 16 / 9 : 1;
+  const scale = requiresScale ? 9 / 16 : 1;
 
   return {
     position: 'absolute',

@@ -44,6 +44,7 @@ describe('PrinterCameraPreview', () => {
     fireEvent.click(screen.getByLabelText('Rotate camera clockwise'));
     const iframe = screen.getByTitle('Printer Rotate live camera feed');
     expect(iframe.getAttribute('style')).toContain('rotate(90deg)');
+    expect(iframe.getAttribute('style')).toContain('scale(0.5625)');
 
     unmount();
 
@@ -58,5 +59,6 @@ describe('PrinterCameraPreview', () => {
 
     const rerenderedIframe = screen.getByTitle('Printer Rotate live camera feed');
     expect(rerenderedIframe.getAttribute('style')).toContain('rotate(90deg)');
+    expect(rerenderedIframe.getAttribute('style')).toContain('scale(0.5625)');
   });
 });
