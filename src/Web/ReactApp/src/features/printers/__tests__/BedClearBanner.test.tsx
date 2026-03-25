@@ -7,6 +7,7 @@ import type { AutoDispatchStatus } from '@/types/api';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
+    getSettings: vi.fn().mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: false }),
     post: vi.fn().mockResolvedValue({ data: {} }),
     skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
     cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),

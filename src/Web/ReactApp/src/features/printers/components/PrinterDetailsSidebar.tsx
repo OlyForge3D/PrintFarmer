@@ -289,6 +289,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const statusLabel = getPrinterDisplayState({
     printerState: rawState,
     autoDispatchState: autoDispatchStatus?.state,
+    autoDispatchStatus,
     isOnline,
   });
   const isPrinting = rawState.toLowerCase().includes('printing');

@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
-import type { AutoDispatchStatus, AutoDispatchReadyResult } from '@/types/api';
+import { printerSignalRService } from '@/services/printer-signalr';
+import type { AutoDispatchGlobalStatus, AutoDispatchStatus, AutoDispatchReadyResult } from '@/types/api';
 
 const KEYS = {
   all: ['auto-dispatch'] as const,
@@ -11,8 +12,73 @@ const KEYS = {
   globalStatus: ['auto-dispatch', 'global-status'] as const,
 };
 
+const autoDispatchQueryClients = new Set<QueryClient>();
+let autoDispatchSignalRUnsubscribe: (() => void) | undefined;
+
+function upsertStatus<T extends AutoDispatchStatus>(statuses: T[], nextStatus: AutoDispatchStatus): T[] {
+  const nextStatuses = [...statuses];
+  const existingIndex = nextStatuses.findIndex((status) => status.printerId === nextStatus.printerId);
+
+  if (existingIndex >= 0) {
+    nextStatuses[existingIndex] = { ...nextStatuses[existingIndex], ...nextStatus } as T;
+    return nextStatuses;
+  }
+
+  nextStatuses.push(nextStatus as T);
+  return nextStatuses;
+}
+
+function syncAutoDispatchCaches(queryClient: QueryClient, nextStatus: AutoDispatchStatus) {
+  queryClient.setQueryData<AutoDispatchStatus[]>(KEYS.allStatuses, (existing = []) =>
+    upsertStatus(existing, nextStatus),
+  );
+  queryClient.setQueryData(KEYS.status(nextStatus.printerId), nextStatus);
+  queryClient.setQueryData<AutoDispatchGlobalStatus | undefined>(KEYS.globalStatus, (existing) => {
+    if (!existing) {
+      return existing;
+    }
+
+    return {
+      ...existing,
+      printers: upsertStatus(existing.printers, nextStatus),
+    };
+  });
+}
+
+function ensureAutoDispatchSignalRSubscription() {
+  if (autoDispatchSignalRUnsubscribe) {
+    return;
+  }
+
+  void printerSignalRService.connect();
+  autoDispatchSignalRUnsubscribe = printerSignalRService.onAutoPrintStateChanged((status) => {
+    autoDispatchQueryClients.forEach((queryClient) => {
+      syncAutoDispatchCaches(queryClient, status);
+    });
+  });
+}
+
+function useAutoDispatchSignalRSync() {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    autoDispatchQueryClients.add(queryClient);
+    ensureAutoDispatchSignalRSubscription();
+
+    return () => {
+      autoDispatchQueryClients.delete(queryClient);
+
+      if (autoDispatchQueryClients.size === 0 && autoDispatchSignalRUnsubscribe) {
+        autoDispatchSignalRUnsubscribe();
+        autoDispatchSignalRUnsubscribe = undefined;
+      }
+    };
+  }, [queryClient]);
+}
+
 /** Dashboard hook — returns full global status including readyGateChecks */
 export function useAutoDispatchGlobalStatus() {
+  useAutoDispatchSignalRSync();
   return useQuery({
     queryKey: KEYS.globalStatus,
     queryFn: () => apiClient.getAutoDispatchStatus(),
@@ -26,6 +92,7 @@ export function useAutoDispatchGlobalStatus() {
  * Uses `select` so all cards share one query instead of N+1 individual calls.
  */
 export function useAutoDispatchStatus(printerId: string) {
+  useAutoDispatchSignalRSync();
   return useQuery({
     queryKey: KEYS.allStatuses,
     queryFn: async (): Promise<AutoDispatchStatus[]> => {
@@ -58,6 +125,7 @@ export function useSetAutoDispatchEnabled() {
 
 export function useAllAutoDispatchStatuses() {
   const qc = useQueryClient();
+  useAutoDispatchSignalRSync();
   const query = useQuery<AutoDispatchStatus[]>({
     queryKey: KEYS.allStatuses,
     queryFn: async () => {

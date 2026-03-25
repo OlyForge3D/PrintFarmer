@@ -3062,6 +3062,10 @@ export interface AutoDispatchStatus {
   currentJobName?: string;
   lastActivity?: string;
   bedPreConfirmed?: boolean;
+  readyGateChecks?: ReadyGateCheck[];
+  attentionMessage?: string;
+  attentionReason?: string;
+  operatorAction?: string;
 }
 
 export interface AutoDispatchNextJob {

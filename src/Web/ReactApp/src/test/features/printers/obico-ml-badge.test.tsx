@@ -377,6 +377,47 @@ describe('CompactPrinterCard monitoring badge', () => {
     expect(banner.parentElement?.parentElement).toHaveClass('absolute', 'inset-0', 'z-10');
   });
 
+  it('shows the bed-clear overlay when the bulk status row exposes a failed bed-clear gate even if state is stale', async () => {
+    const { CompactPrinterCard } = await import(
+      '@/features/printers/components/CompactPrinterCard'
+    );
+
+    const printer = makePrinter({
+      state: 'Idle',
+      isOnline: true,
+    });
+    autoDispatchStatusMock = {
+      printerId: printer.id,
+      printerName: printer.name,
+      enabled: true,
+      isReady: false,
+      queueDepth: 2,
+      readyGateChecks: [
+        {
+          name: 'Bed Clear Confirmed',
+          passed: false,
+          message: 'Waiting for operator to confirm bed is clear',
+          checkedAt: '2026-03-25T00:00:00Z',
+        },
+      ],
+      attentionMessage: 'Print completed. 2 queued jobs are blocked until you clear the bed and confirm ready.',
+      state: 'None',
+      bedPreConfirmed: false,
+    };
+
+    render(
+      <CompactPrinterCard
+        printer={printer}
+        onExpand={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Pending Ready')).toBeInTheDocument();
+    const banner = screen.getByTestId('bed-clear-banner');
+    expect(banner).toBeInTheDocument();
+    expect(banner.parentElement?.parentElement).toHaveClass('absolute', 'inset-0', 'z-10');
+  });
+
   it('does not show attention on the camera preview while a dispatched print is starting', async () => {
     const { CompactPrinterCard } = await import(
       '@/features/printers/components/CompactPrinterCard'

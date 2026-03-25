@@ -29,7 +29,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
-import { getPrinterDisplayState, isPendingReadyState } from '@/common/utils/printerStateDisplay';
+import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { FailureDetectionAlert } from '@/features/printers/components/FailureDetectionAlert';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
@@ -134,9 +134,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const statusLabel = getPrinterDisplayState({
     printerState: state,
     autoDispatchState: autoDispatchStatus?.state,
+    autoDispatchStatus,
     isOnline,
   });
-  const isPendingReady = isPendingReadyState(autoDispatchStatus?.state);
+  const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus);
   const support = getPrinterSupport(backendCapabilities);
 
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });

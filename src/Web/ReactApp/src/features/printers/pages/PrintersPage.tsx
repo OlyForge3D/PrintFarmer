@@ -24,7 +24,7 @@ import { Select } from '@/common/components/ui/Select';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
-import { isPendingReadyState } from '@/common/utils/printerStateDisplay';
+import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
@@ -89,7 +89,11 @@ export function PrintersPage() {
   const deletePrinterMutation = useDeletePrinter();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const pendingPrinterIds = useMemo(
-    () => new Set(((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter(s => isPendingReadyState(s.state)).map(s => s.printerId)),
+    () => new Set(
+      ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[])
+        .filter((status) => requiresBedClearConfirmation(status))
+        .map((status) => status.printerId)
+    ),
     [allAutoDispatchStatuses]
   );
   const [searchParams] = useSearchParams();

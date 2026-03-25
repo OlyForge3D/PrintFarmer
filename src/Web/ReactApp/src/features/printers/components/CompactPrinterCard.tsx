@@ -32,7 +32,7 @@ import {
 import { getStatusHeaderStyle } from '@/features/printers/utils/statusColors';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
-import { getPrinterDisplayState, isPendingReadyState } from '@/common/utils/printerStateDisplay';
+import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { TagDto } from '@/services/tagService';
 
 interface CompactPrinterCardProps {
@@ -117,10 +117,11 @@ export function CompactPrinterCard({
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
-  const isPendingReady = isPendingReadyState(autoDispatchStatus?.state);
+  const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus);
   const statusLabel = getPrinterDisplayState({
     printerState: state,
     autoDispatchState: autoDispatchStatus?.state,
+    autoDispatchStatus,
     isOnline,
   });
 

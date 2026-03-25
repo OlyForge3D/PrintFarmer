@@ -1,3 +1,5 @@
+import type { AutoDispatchStatus } from '@/types/api';
+
 /**
  * Format printer state for display.
  * Backend normalizes states to PascalCase (Idle, Printing, Paused, Offline, Shutdown, etc.)
@@ -65,6 +67,32 @@ export function isPendingReadyState(state: string | undefined | null): boolean {
 }
 
 /**
+ * Determine whether auto-dispatch is blocked on operator bed-clear confirmation.
+ *
+ * Prefer the explicit PendingReady state, but fall back to the failed
+ * "Bed Clear Confirmed" gate from the detailed/global auto-dispatch payload so
+ * UI surfaces still show the operator-facing state when the summary row is stale.
+ *
+ * @param status - Auto-dispatch status row from the bulk or per-printer endpoint
+ * @returns True when the operator must clear the bed before queued work can resume
+ */
+export function requiresBedClearConfirmation(status: AutoDispatchStatus | undefined | null): boolean {
+  if (!status) {
+    return false;
+  }
+
+  if (isPendingReadyState(status.state)) {
+    return true;
+  }
+
+  const bedClearGate = status.readyGateChecks?.find((check) =>
+    check.name.replace(/[\s_-]+/g, '').toLowerCase() === 'bedclearconfirmed',
+  );
+
+  return bedClearGate?.passed === false;
+}
+
+/**
  * Get the user-facing printer status label, including auto-dispatch overlays like PendingReady.
  *
  * @param options - Printer connectivity, printer state, and optional auto-dispatch state
@@ -73,15 +101,21 @@ export function isPendingReadyState(state: string | undefined | null): boolean {
 export function getPrinterDisplayState(options: {
   printerState: string | undefined | null;
   autoDispatchState?: string | undefined | null;
+  autoDispatchStatus?: AutoDispatchStatus | undefined | null;
   isOnline: boolean;
 }): string {
-  const { printerState, autoDispatchState, isOnline } = options;
+  const { printerState, autoDispatchState, autoDispatchStatus, isOnline } = options;
 
   if (!isOnline) {
     return 'Offline';
   }
 
-  if (isPendingReadyState(autoDispatchState)) {
+  if (requiresBedClearConfirmation(autoDispatchStatus ?? (autoDispatchState ? {
+    printerId: '',
+    enabled: true,
+    queueDepth: 0,
+    state: autoDispatchState as AutoDispatchStatus['state'],
+  } : undefined))) {
     return 'Pending Ready';
   }
 

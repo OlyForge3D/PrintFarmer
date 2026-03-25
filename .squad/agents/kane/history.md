@@ -1,5 +1,22 @@
 ## Learnings
 
+### PendingReady Live-Update Validation (2026-03-25)
+- **Behavior change validated**: compact printer cards now react to the backend `autoprintstatechanged` SignalR event instead of waiting for the 10-second `/api/auto-print/status` poll.
+- **Root cause**: backend already broadcast `autoprintstatechanged`, but the React client had no subscription path from `printer-signalr.ts` into the auto-dispatch React Query cache, so Pending Ready / bed-clear UI could lag or appear missing in compact view.
+- **Fix path**:
+  - `src/Web/ReactApp/src/services/printer-signalr.ts` now exposes `onAutoPrintStateChanged`
+  - `src/Web/ReactApp/src/features/printers/hooks/useAutoDispatch.ts` now syncs SignalR auto-print updates into `KEYS.allStatuses`, per-printer status cache, and existing global status cache
+  - `src/Web/ReactApp/src/test/features/printers/compact-printer-pendingready-live.test.tsx` proves `CompactPrinterCard` flips from `Idle` to `Pending Ready` and mounts the real `BedClearBanner` after the live event
+- **Regression coverage retained**:
+  - `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx` still covers compact-card overlay rendering
+  - `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx` still covers banner behavior and optimistic dispatch transitions
+  - `src/tests/Farm.Web.Api.Tests/{Controllers/AutoPrintPendingReadyTests.cs,Services/AutoPrint/AutoPrintServiceTests.cs}` still prove backend PendingReady state and waiting gate behavior
+- **Validation**:
+  - React targeted build ✅
+  - React lint ✅
+  - React focused regression tests ✅ 29/29
+  - Targeted .NET PendingReady tests ✅ 9/9, but repo-level .NET build still has unrelated `Farm.Slicer.Module.Tests/ContractTests/SlicerJobsProtoCompilationTests.cs` compile failures
+
 ### Icon-Only Shield Badge Refinement Review (2026-03-25)
 - **Change**: Remove pill border and status label text from FailureDetectionMonitoringBadge; tooltip becomes source of truth
 - **Current State**: Badge renders with icon + label in rounded pill; tooltip provides secondary info
@@ -692,4 +709,3 @@ Ripley implemented two linked refinements:
 - Component: `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
 - Tests: `src/Web/ReactApp/src/test/features/printers/{FailureDetectionMonitoringBadge,obico-ml-badge}.test.tsx`
 - Overlay removal: `{Detailed,Compact}PrinterCard.tsx` (removed `overlay` prop, imports)
-

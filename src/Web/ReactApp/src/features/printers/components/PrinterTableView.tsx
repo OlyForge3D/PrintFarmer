@@ -3,13 +3,13 @@ import { useState, useCallback, useMemo } from 'react';
 import styles from './PrinterTableView.module.css';
 import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
-import { Printer } from '@/types/api';
+import type { AutoDispatchStatus, Printer } from '@/types/api';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { CloseIcon, DeleteIcon, EditIcon } from '@/common/components/icons/MdiIcons';
 import { CheckIcon, CheckCircleIcon, CircleIcon, AlertIcon, ToolsIcon } from '@/common/components/icons/MdiIcons';
-import { getPrinterDisplayState, isPendingReadyState } from '@/common/utils/printerStateDisplay';
+import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button } from '@/common/components/ui';
 
@@ -86,9 +86,13 @@ export function PrinterTableView({
     setBulkAction('none');
   }, [bulkAction, selectedPrinters, printers, onDelete, onBulkSetMaintenance]);
 
-  const getStatusColor = (isOnline: boolean, state?: string, autoDispatchState?: string) => {
+  const getStatusColor = (
+    isOnline: boolean,
+    state?: string,
+    autoDispatchStatus?: AutoDispatchStatus,
+  ) => {
     if (!isOnline) return 'text-pf-text-tertiary';
-    if (isPendingReadyState(autoDispatchState)) return 'text-pf-warning';
+    if (requiresBedClearConfirmation(autoDispatchStatus)) return 'text-pf-warning';
     
     switch (state?.toLowerCase()) {
       case 'printing':
@@ -232,12 +236,13 @@ export function PrinterTableView({
             {printers.map((printer, index) => {
               const displayPrinter = displayPrinters[index];
               const autoDispatchStatus = autoDispatchStatusByPrinterId.get(printer.id);
-              const isPendingReady = isPendingReadyState(autoDispatchStatus?.state);
-              const statusLabel = getPrinterDisplayState({
-                printerState: displayPrinter.state,
-                autoDispatchState: autoDispatchStatus?.state,
-                isOnline: displayPrinter.isOnline ?? false,
-              });
+               const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus);
+               const statusLabel = getPrinterDisplayState({
+                 printerState: displayPrinter.state,
+                 autoDispatchState: autoDispatchStatus?.state,
+                 autoDispatchStatus,
+                 isOnline: displayPrinter.isOnline ?? false,
+               });
 
               return (
                 <SelectableRow key={printer.id} isSelected={selectedPrinters.has(printer.id)}>
@@ -282,7 +287,7 @@ export function PrinterTableView({
 
                   {/* Status */}
                   <td className="px-4 py-4">
-                    <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus?.state)}`}>
+                    <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus)}`}>
                       {statusLabel}
                     </div>
                     {isPendingReady ? (

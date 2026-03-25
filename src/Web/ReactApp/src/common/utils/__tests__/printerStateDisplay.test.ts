@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formatPrinterState, getPrinterDisplayState, isPendingReadyState } from '../printerStateDisplay';
+import type { AutoDispatchStatus } from '@/types/api';
+import {
+  formatPrinterState,
+  getPrinterDisplayState,
+  isPendingReadyState,
+  requiresBedClearConfirmation,
+} from '../printerStateDisplay';
 
 describe('printerStateDisplay utils', () => {
   describe('formatPrinterState', () => {
@@ -91,6 +97,31 @@ describe('printerStateDisplay utils', () => {
         autoDispatchState: 'Ready',
         isOnline: true,
       })).toBe('Printing');
+    });
+
+    it('uses the failed bed-clear gate from the detailed status payload as a Pending Ready fallback', () => {
+      const autoDispatchStatus: AutoDispatchStatus = {
+        printerId: 'printer-1',
+        enabled: true,
+        state: 'None',
+        queueDepth: 2,
+        readyGateChecks: [
+          {
+            name: 'Bed Clear Confirmed',
+            passed: false,
+            message: 'Waiting for operator to confirm bed is clear',
+            checkedAt: '2026-03-25T00:00:00Z',
+          },
+        ],
+      };
+
+      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(true);
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: autoDispatchStatus.state,
+        autoDispatchStatus,
+        isOnline: true,
+      })).toBe('Pending Ready');
     });
   });
 });

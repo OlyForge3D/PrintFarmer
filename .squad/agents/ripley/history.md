@@ -7,6 +7,18 @@
 
 ## Learnings
 
+### 2026-03-25: Pending Ready must fall back to the failed bed-clear gate, not just `state`
+
+**Context:** Compact printer cards were already wired to mount `BedClearBanner`, but they trusted `autoDispatchStatus.state` as the only signal for `PendingReady`.
+
+**Decision:** Added `requiresBedClearConfirmation()` in `src/Web/ReactApp/src/common/utils/printerStateDisplay.ts` to treat a failed `readyGateChecks["Bed Clear Confirmed"]` gate as equivalent operator-facing Pending Ready state. Wired that helper into `CompactPrinterCard`, `BedClearBanner`, `DetailedPrinterCard`, `PrinterTableView`, `PrinterDetailsSidebar`, `PrintersPage`, and `Layout`.
+
+**Regression Coverage:**
+- `src/Web/ReactApp/src/common/utils/__tests__/printerStateDisplay.test.ts`
+- `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx`
+
+**Why it matters:** The backend already emits detailed operator intent through `readyGateChecks` and `attentionMessage`. If the bulk summary row’s `state` is stale or flattened, the UI must still surface "Pending Ready" and the bed-clear banner instead of silently falling back to Idle.
+
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
 ### 2026-03-25 — Failure Detection Badge Placement Review
@@ -349,4 +361,3 @@ This section summarizes foundational knowledge and design patterns across Ripley
 2. Manual a11y audit with screen reader (verify title announcement)
 3. Visual regression check (both card layouts, mobile + desktop)
 4. Merge after Kane re-approval
-
