@@ -9,6 +9,25 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### 2026-03-25 — Failure Detection Badge Placement Review
+
+**Status:** ✅ UI review complete (no code changes)  
+**Finding:** `FailureDetectionMonitoringBadge` (header) + `FailureDetectionMonitoringOverlay` (camera overlay) display **identical state**.
+
+**Analysis:**
+- **Header badge**: Always visible, compact, row in card header next to printer name
+- **Camera overlay**: Only visible when `showCamera` is true; larger, glow effect, overlays video
+- Both render same shield icon + state label from same normalization helpers
+- Both trigger same modal (`FailureDetectionStatusModal`)
+
+**Recommendation:**
+✅ **Remove camera overlay; keep header badge** — One consistent glanceable surface, overlay distracts from actual camera image operators need to see. Header badge is always available for state awareness.
+
+**Pattern Compliance:**
+- Implementation follows `compact-status-detail-modal` and `monitoring-lifecycle-badges` skills correctly
+- Duplication exists at UI surface level, not logic level (good pattern reuse)
+- Modal architecture is sound; only badge placement needs consolidation
+
 ### Wave 2 — Cost Tracking Dashboard (2026-03-16)
 
 **Status:** ✅ Complete  
@@ -1987,3 +2006,51 @@ Events are transient. Refreshing page clears detection state. This is acceptable
 - [Lambert] Auto-Print Attention Details
 - [Kane] PendingReady 3-layer contract
 
+
+---
+
+## Session: Failure Detection Badge Placement Review (2026-03-25)
+
+**Role:** Frontend Dev decision reviewer  
+**Status:** Recommendation formulated; ready for team approval
+
+### Work Completed
+- Analyzed UI redundancy matrix: header badge vs. camera overlay (7 shared elements)
+- Compared visual impact: compact/integrated vs. large/glow-effect
+- Reviewed operator behavior: card scanning vs. camera inspection focus
+- Evaluated pattern compliance (compact-status-detail-modal, monitoring-lifecycle-badges)
+- Consolidated findings with Dallas (Lead)
+
+### Recommendation
+**Consolidate to header only; remove camera overlay.**
+
+**Key Insights:**
+1. Operator always sees header badge before camera opens (no information loss)
+2. Camera overlay distracts from video content with competing visual effects
+3. One glanceable surface maintains clean visual hierarchy
+4. Modal is still accessible via header badge (no functional loss)
+5. Operator mental model: opens camera to see print, not to check monitoring state
+
+### Decision Document
+- Status: Ready for review
+- File: `.squad/decisions/decisions.md` → merged from inbox
+- Implementation: Zero API impact; UI-only change
+
+### Implementation Checklist
+- [ ] Remove overlay prop from CompactPrinterCard → PrinterCameraPreview call
+- [ ] Validate camera focus behavior without overlay
+- [ ] Test modal trigger via header badge (smoke test)
+- [ ] Pattern compliance validation (compact-status-detail-modal, monitoring-lifecycle-badges)
+
+### Pattern Validation
+✅ `compact-status-detail-modal` maintained  
+✅ `monitoring-lifecycle-badges` maintained  
+✅ Visual focus improved by removing competing UI  
+
+### Related Components
+- `src/Web/ReactApp/src/features/printers/components/CompactPrinterCard.tsx` (line 231)
+- `src/Web/ReactApp/src/features/printers/components/PrinterCameraPreview.tsx` (overlay prop)
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx` (KEEP)
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx` (REMOVE)
+
+---

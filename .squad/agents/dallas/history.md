@@ -51,6 +51,29 @@
 
 ## Learnings
 
+### Failure Detection Badge Placement — 2026-03-25
+
+**Task:** Review current UX for failure detection shield/state in printer cards. Should it appear in both card header AND camera image overlay, or only one place?
+
+**Current State:**
+- **Header badge** (`FailureDetectionMonitoringBadge` in CompactPrinterCard line 176–180): Compact badge in card header next to printer name and status pill.
+- **Camera overlay** (`FailureDetectionMonitoringOverlay` in CompactPrinterCard line 231–236): Identical shield/state info overlaid on live camera feed when expanded.
+
+**Analysis:**
+- **Operator workflow:** Card header badge is essential for scanning collapsed cards. Operators need to know failure detection status at a glance. Camera overlay is redundant—if they already see the header, the overlay doesn't add new information.
+- **Visual noise:** Two identical elements in one card increase cognitive load. Overlay competes for attention during video inspection when operator's focus should be on the print.
+- **Discoverability:** Header badge is clickable and opens `FailureDetectionStatusModal` with full detail (why, next step, timestamps, snapshots). This is sufficient. No operator needs the overlay to discover the modal.
+- **Pattern alignment:** `compact-status-detail-modal` skill teaches: keep compact surface glanceable (status + icon), make it clickable to launch modal for detail. `monitoring-lifecycle-badges` skill: one consistent signal across all surfaces. One badge in header follows both patterns.
+
+**Decision:** Remove camera overlay. Keep shield badge **header-only**.
+
+**Why:** Eliminates redundancy, reduces visual noise, keeps operator focus on video, maintains single source of truth via header badge → modal flow. The skill `compact-status-detail-modal` shows this is the intended pattern.
+
+**Implementation:** Delete `FailureDetectionMonitoringOverlay` import and `overlay` prop from `PrinterCameraPreview` call in `CompactPrinterCard.tsx` lines 18, 230–236.
+
+**Files Written:**
+- `.squad/decisions/inbox/dallas-failure-badge-placement.md` — Full analysis with operator workflow, redundancy assessment, visual noise, discoverability, trade-offs, and implementation guidance.
+
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
 ### Auto-Print Scaling Analysis — 2026-03-06
@@ -968,3 +991,44 @@ Reviewed team implementation of Spaghetti Watch redesign, validated failure-dete
 - Quality standards enforced: regression coverage > quick fixes
 - Tradeoffs documented for future monitoring tuning
 
+
+---
+
+## Session: Failure Detection Badge Placement Review (2026-03-25)
+
+**Role:** Lead decision reviewer  
+**Status:** Recommendation formulated; ready for team approval
+
+### Work Completed
+- Analyzed operator workflow: card view (collapsed) vs. camera feed (expanded)
+- Assessed UI redundancy: header badge vs. camera overlay (identical information)
+- Evaluated visual noise and cognitive load impact
+- Reviewed discoverability via modal pattern
+- Consolidated findings with Ripley (Frontend Dev)
+
+### Recommendation
+**Keep header badge only; remove camera overlay.**
+
+**Reasoning:**
+1. Single source of truth eliminates confusion and sync issues
+2. Camera overlay is redundant; operator sees header state before camera opens
+3. Reduces visual distraction during video inspection
+4. Header badge → modal flow provides full detail access
+5. Follows PrintFarmer conventions (secondary status lives in header, not overlays)
+
+### Decision Document
+- Status: Recommendation ready for team decision
+- File: `.squad/decisions/decisions.md` → merged from inbox
+- Implementation path clear; backend-agnostic (UI only)
+
+### Implementation Checklist
+- [ ] Remove `FailureDetectionMonitoringOverlay` import from CompactPrinterCard.tsx (line 18)
+- [ ] Remove overlay prop from PrinterCameraPreview call (lines 230–236)
+- [ ] Optionally deprecate overlay component if unused elsewhere
+- [ ] Validate pattern compliance (compact-status-detail-modal, monitoring-lifecycle-badges)
+
+### Related Skills
+- `compact-status-detail-modal`: Status affordances should be glanceable + launch modal for detail
+- `monitoring-lifecycle-badges`: Monitoring status badges reflect active lifecycle, not raw errors
+
+---
