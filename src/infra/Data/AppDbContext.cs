@@ -162,6 +162,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Obico ML Servers
     public DbSet<ObicoServer> ObicoServers => Set<ObicoServer>();
 
+    // Failure-detection incident history
+    public DbSet<FailureDetectionIncident> FailureDetectionIncidents => Set<FailureDetectionIncident>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

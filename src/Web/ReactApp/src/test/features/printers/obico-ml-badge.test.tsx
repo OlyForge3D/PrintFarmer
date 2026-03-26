@@ -18,6 +18,8 @@ let autoDispatchStatusMock: AutoDispatchStatus | null = null;
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinters: () => ({ data: [], isLoading: false }),
   useJobQueue: () => ({ data: [], isLoading: false }),
+  useFailureDetectionHistory: () => ({ data: [], isLoading: false, isError: false }),
+  usePrintSessionTimeline: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
 vi.mock('@/common/hooks/useSpoolmanConfigured', () => ({
@@ -487,6 +489,12 @@ describe('CompactPrinterCard monitoring badge', () => {
     });
 
     expect(screen.getByText('Failure: 87%')).toBeTruthy();
+    expect(screen.getByText('Operator review required')).toBeTruthy();
+    expect(screen.queryByText('1 incident')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /open latest snapshot/i })).toHaveAttribute(
+      'href',
+      'http://example.com/snapshot.jpg'
+    );
   });
 });
 
@@ -539,7 +547,7 @@ describe('DetailedPrinterCard monitoring badge', () => {
     expect(screen.queryByText('Guarding')).toBeNull();
   });
 
-  it('shows a detailed failure alert when a matching failure event arrives', async () => {
+  it('shows a detailed failure operations panel when a matching failure event arrives', async () => {
     const { DetailedPrinterCard } = await import(
       '@/features/printers/components/DetailedPrinterCard'
     );
@@ -567,7 +575,16 @@ describe('DetailedPrinterCard monitoring badge', () => {
       });
     });
 
-    expect(screen.getByText('Print auto-paused after failure detection')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'View snapshot' })).toBeTruthy();
+    expect(screen.getByText('Print auto-paused')).toBeTruthy();
+    expect(screen.queryByText('1 incident')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Inspect the print, clear any loose material, and verify machine state before resuming.'
+      )
+    ).toBeTruthy();
+    expect(screen.getByRole('link', { name: /open latest snapshot/i })).toHaveAttribute(
+      'href',
+      'http://example.com/snapshot.jpg'
+    );
   });
 });

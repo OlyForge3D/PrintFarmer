@@ -27,6 +27,7 @@ import {
   HistoryListResponse,
   HistoryTotals,
   HotendModelDefinition,
+  JobStateHistoryDto,
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
@@ -93,8 +94,9 @@ import {
   ConnectionDiagnosticsResponse,
   PagedResponse,
   SystemCapabilities,
-  DispatchHistoryPageDto,
-  NotificationDto,
+    DispatchHistoryPageDto,
+    FailureDetectionEvent,
+    NotificationDto,
   NotificationPreferencesDto,
   UpdateNotificationPreferencesRequest,
   UnreadCountResponse,
@@ -109,6 +111,7 @@ import {
   CreateObicoServerRequest,
   UpdateObicoServerRequest,
   ObicoServerHealthResponse,
+  TimelineEventDto,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -3346,7 +3349,7 @@ export class ApiClient {
     printerId?: string,
     filterStatus?: string,
     limit: number = 100
-  ): Promise<unknown[]> {
+  ): Promise<TimelineEventDto[]> {
     const params = new URLSearchParams();
     if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
     if (dateTo) params.append("dateTo", dateTo.toISOString());
@@ -3361,8 +3364,8 @@ export class ApiClient {
   /**
    * Get state history for a specific job (analytics)
    */
-  async getAnalyticsJobStateHistory(jobId: string): Promise<unknown> {
-    const response = await this.client.get(
+  async getAnalyticsJobStateHistory(jobId: string): Promise<JobStateHistoryDto> {
+    const response = await this.client.get<JobStateHistoryDto>(
       `/job-queue-analytics/jobs/${jobId}/state-history`
     );
     return response.data;
@@ -3540,6 +3543,21 @@ export class ApiClient {
 
   async getFailureDetectionStatus(): Promise<import('@/types/api').FailureDetectionMonitorStatusDto> {
     const response = await this.client.get('/failure-detection/status');
+    return response.data;
+  }
+
+  async getFailureDetectionHistory(
+    options?: {
+      printerId?: string;
+      take?: number;
+    }
+  ): Promise<FailureDetectionEvent[]> {
+    const response = await this.client.get('/failure-detection/history', {
+      params: {
+        printerId: options?.printerId,
+        take: options?.take,
+      },
+    });
     return response.data;
   }
 

@@ -17,17 +17,20 @@ namespace Farm.Web.Api.Controllers;
 public class FailureDetectionController : ControllerBase
 {
     private readonly IObicoFailureDetectionService _failureDetectionService;
+    private readonly IFailureDetectionIncidentHistoryService _incidentHistoryService;
     private readonly IFailureDetectionMonitorStatus _monitorStatus;
     private readonly IStartupStatus _startupStatus;
     private readonly ILogger<FailureDetectionController> _logger;
 
     public FailureDetectionController(
         IObicoFailureDetectionService failureDetectionService,
+        IFailureDetectionIncidentHistoryService incidentHistoryService,
         IFailureDetectionMonitorStatus monitorStatus,
         IStartupStatus startupStatus,
         ILogger<FailureDetectionController> logger)
     {
         _failureDetectionService = failureDetectionService ?? throw new ArgumentNullException(nameof(failureDetectionService));
+        _incidentHistoryService = incidentHistoryService ?? throw new ArgumentNullException(nameof(incidentHistoryService));
         _monitorStatus = monitorStatus ?? throw new ArgumentNullException(nameof(monitorStatus));
         _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -122,23 +125,36 @@ public class FailureDetectionController : ControllerBase
     }
 
     /// <summary>
-    /// Gets recent failure detection events.
-    /// Note: This feature requires persistence layer implementation.
+    /// Gets recent persisted failure-detection incidents.
     /// </summary>
+    /// <param name="printerId">Optional printer filter.</param>
+    /// <param name="take">Maximum incidents to return.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>List of recent failure detection events</returns>
     /// <response code="200">Returns the event history</response>
-    /// <response code="501">Not yet implemented - events are currently transient (SignalR only)</response>
+    /// <response code="503">If the system is still initializing</response>
     [HttpGet("history")]
     [ProducesResponseType(typeof(IEnumerable<FailureDetectionDto>), 200)]
-    [ProducesResponseType(501)]
-    public ActionResult<IEnumerable<FailureDetectionDto>> GetHistory()
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<IEnumerable<FailureDetectionDto>>> GetHistoryAsync(
+        [FromQuery] Guid? printerId = null,
+        [FromQuery] int take = FailureDetectionIncidentHistoryService.DefaultTake,
+        CancellationToken ct = default)
     {
-        // History would require a database table to persist detection events
-        // Currently, events are only broadcast via SignalR in real-time
-        return StatusCode(501, new
+        try
         {
-            message = "Event history not yet implemented. Failure detection events are currently broadcast via SignalR in real-time only.",
-            feature = "event_persistence"
-        });
+            if (!_startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
+
+            List<FailureDetectionDto> incidents = await _incidentHistoryService.GetRecentAsync(printerId, take, ct);
+            return Ok(incidents);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FailureDetectionController] Exception in GetHistory");
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 }

@@ -84,4 +84,46 @@ public class PrintFailureMonitorServiceTests
         result.ShouldMonitor.Should().BeTrue();
         result.IdleReason.Should().BeEmpty();
     }
+
+    [Fact]
+    public void ResolveJobContext_WhenLiveStatusIncludesNormalizedNames_PrefersLiveStatus()
+    {
+        var printerStatus = new PrinterStatusDto(
+            Guid.NewGuid(),
+            true,
+            "Printing",
+            JobName: "folder/active-print.gcode",
+            FileName: "active-print.gcode");
+
+        var result = PrintFailureMonitorService.ResolveJobContext(printerStatus, activeJobName: "Queued job");
+
+        result.JobName.Should().Be("folder/active-print.gcode");
+        result.FileName.Should().Be("active-print.gcode");
+    }
+
+    [Fact]
+    public void ResolveJobContext_WhenLiveStatusMissingFileName_DerivesFileNameFromJobName()
+    {
+        var printerStatus = new PrinterStatusDto(
+            Guid.NewGuid(),
+            true,
+            "Printing",
+            JobName: ".cache/spaghetti-test.gcode");
+
+        var result = PrintFailureMonitorService.ResolveJobContext(printerStatus, activeJobName: null);
+
+        result.JobName.Should().Be(".cache/spaghetti-test.gcode");
+        result.FileName.Should().Be("spaghetti-test.gcode");
+    }
+
+    [Fact]
+    public void ResolveJobContext_WhenNoLiveStatus_FallsBackToTrackedJobName()
+    {
+        var result = PrintFailureMonitorService.ResolveJobContext(
+            printerStatus: null,
+            activeJobName: "Queued display name.gcode");
+
+        result.JobName.Should().Be("Queued display name.gcode");
+        result.FileName.Should().Be("Queued display name.gcode");
+    }
 }

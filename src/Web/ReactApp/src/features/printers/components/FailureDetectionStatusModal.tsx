@@ -1,7 +1,9 @@
+import { useMemo, useState } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
-import { Badge } from '@/common/components/ui';
+import { Badge, Button } from '@/common/components/ui';
 import { ExternalLinkIcon, ShieldIcon } from '@/common/components/icons/MdiIcons';
-import type { FailureDetectionPrinterStatusDto } from '@/types/api';
+import { useFailureDetectionHistory } from '@/common/hooks/useApi';
+import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
 import {
   getFailureDetectionDetail,
   getFailureDetectionDisplayState,
@@ -9,13 +11,20 @@ import {
   getFailureDetectionStateLabel,
   getFailureDetectionStateVariant,
 } from '@/features/printers/utils/failureDetectionStatus';
+import {
+  getFailureDetectionIncidentContext,
+  mergeFailureDetectionIncidents,
+} from '@/features/printers/utils/failure-detection-incidents';
+import { PrintSessionTimeline } from '@/features/printers/components/PrintSessionTimeline';
 
 interface FailureDetectionStatusModalProps {
   isOpen: boolean;
   onClose: () => void;
   enabled: boolean;
   status?: FailureDetectionPrinterStatusDto;
+  printerId?: string;
   printerName?: string;
+  recentEvents?: FailureDetectionEvent[];
 }
 
 function formatFailureDetectionDateTime(value?: string): string | null {
@@ -136,9 +145,20 @@ export function FailureDetectionStatusModal({
   onClose,
   enabled,
   status,
+  printerId,
   printerName,
+  recentEvents = [],
 }: FailureDetectionStatusModalProps) {
+  const [selectedTimelineJobId, setSelectedTimelineJobId] = useState<string | null>(null);
+  const resolvedPrinterId = status?.printerId ?? printerId;
   const resolvedPrinterName = status?.printerName ?? printerName ?? 'This printer';
+  const {
+    data: persistedIncidents = [],
+    isLoading: isHistoryLoading,
+    isError: hasHistoryError,
+  } = useFailureDetectionHistory(resolvedPrinterId, 5, {
+    enabled: isOpen && !!resolvedPrinterId,
+  });
   const displayState = getFailureDetectionDisplayState(status) ?? status?.state;
   const statusLabel = getFailureDetectionStateLabel(displayState, enabled);
   const statusVariant = getFailureDetectionStateVariant(displayState, enabled);
@@ -153,6 +173,65 @@ export function FailureDetectionStatusModal({
   const lastFailure = formatFailureDetectionDateTime(status?.lastFailureDetectedAt);
   const lastOutcome = getFailureDetectionOutcomeLabel(status);
   const nextStep = getFailureDetectionNextStep(status, enabled);
+  const recentIncidents = useMemo(
+    () => mergeFailureDetectionIncidents(recentEvents, persistedIncidents).slice(0, 5),
+    [persistedIncidents, recentEvents]
+  );
+  const timelineSessions = useMemo(() => {
+    const sessionsByJobId = new Map<string, {
+      jobId: string;
+      label: string;
+      latestDetectedAt: string;
+      incidents: FailureDetectionEvent[];
+    }>();
+
+    for (const incident of recentIncidents) {
+      if (!incident.jobId) {
+        continue;
+      }
+
+      const nextLabel = incident.jobName?.trim() || incident.fileName?.trim() || 'Tracked print session';
+      const existingSession = sessionsByJobId.get(incident.jobId);
+
+      if (existingSession) {
+        existingSession.incidents.push(incident);
+
+        if (new Date(incident.detectedAt).getTime() > new Date(existingSession.latestDetectedAt).getTime()) {
+          existingSession.latestDetectedAt = incident.detectedAt;
+          existingSession.label = nextLabel;
+        }
+
+        continue;
+      }
+
+      sessionsByJobId.set(incident.jobId, {
+        jobId: incident.jobId,
+        label: nextLabel,
+        latestDetectedAt: incident.detectedAt,
+        incidents: [incident],
+      });
+    }
+
+    return Array.from(sessionsByJobId.values())
+      .sort((leftSession, rightSession) => (
+        new Date(rightSession.latestDetectedAt).getTime() - new Date(leftSession.latestDetectedAt).getTime()
+      ))
+      .map((timelineSession) => ({
+        ...timelineSession,
+        incidents: [...timelineSession.incidents].sort((leftIncident, rightIncident) => (
+          new Date(leftIncident.detectedAt).getTime() - new Date(rightIncident.detectedAt).getTime()
+        )),
+      }));
+  }, [recentIncidents]);
+  const resolvedSelectedTimelineJobId = selectedTimelineJobId
+    && timelineSessions.some((timelineSession) => timelineSession.jobId === selectedTimelineJobId)
+    ? selectedTimelineJobId
+    : (timelineSessions[0]?.jobId ?? null);
+  const selectedTimelineSession = timelineSessions.find(
+    (timelineSession) => timelineSession.jobId === resolvedSelectedTimelineJobId
+  ) ?? timelineSessions[0];
+  const shouldShowRecentIncidentSection = !!resolvedPrinterId || recentIncidents.length > 0;
+  const hasUntiedTimelineIncidents = recentIncidents.some((incident) => !incident.jobId);
 
   return (
     <Modal
@@ -217,6 +296,148 @@ export function FailureDetectionStatusModal({
           <div className="rounded-lg border border-pf-warning/25 bg-pf-warning/10 px-4 py-3 text-sm leading-6 text-pf-text-primary">
             {nextStep}
           </div>
+        </section>
+
+        {shouldShowRecentIncidentSection && (
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+              Recent incidents
+            </h3>
+            {isHistoryLoading && recentIncidents.length === 0 && (
+              <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
+                Loading recent incident history…
+              </div>
+            )}
+
+            {!isHistoryLoading && hasHistoryError && recentIncidents.length === 0 && (
+              <div className="rounded-lg border border-pf-warning/25 bg-pf-warning/10 px-4 py-3 text-sm text-pf-text-primary">
+                Recent incident history is unavailable right now. Live monitoring details are still shown above.
+              </div>
+            )}
+
+            {!isHistoryLoading && !hasHistoryError && recentIncidents.length === 0 && (
+              <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
+                No persisted incidents have been recorded for this printer yet.
+              </div>
+            )}
+
+            {recentIncidents.length > 0 && (
+              <div className="space-y-2">
+                {recentIncidents.map((event, index) => {
+                  const detectedAt = formatFailureDetectionDateTime(event.detectedAt) ?? event.detectedAt;
+                  const confidencePercent = Math.round(event.confidence * 100);
+                  const incidentContext = getFailureDetectionIncidentContext(event);
+
+                  return (
+                    <div
+                      key={event.id ?? `${event.detectedAt}-${event.confidence}-${index}`}
+                      className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={event.autoPaused ? 'error' : 'warning'} size="sm">
+                          {confidencePercent}% confidence
+                        </Badge>
+                        <span className="text-sm text-pf-text-primary">{detectedAt}</span>
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+                          {event.autoPaused ? 'Auto-paused' : 'Review required'}
+                        </span>
+                      </div>
+
+                      {incidentContext.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2 text-sm text-pf-text-primary">
+                          {incidentContext.map((context) => (
+                            <span
+                              key={`${event.id ?? event.detectedAt}-${context.label}`}
+                              className="inline-flex items-center gap-1 rounded-full bg-pf-bg-1 px-2.5 py-1"
+                            >
+                              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-pf-text-secondary">
+                                {context.label}
+                              </span>
+                              <span>{context.value}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {event.snapshotUrl && (
+                        <a
+                          href={event.snapshotUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-pf-accent hover:underline underline-offset-2"
+                        >
+                          Open incident snapshot
+                          <ExternalLinkIcon className="h-4 w-4" />
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
+        <section className="space-y-3">
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+              Print session timeline
+            </h3>
+            <p className="text-sm leading-6 text-pf-text-secondary">
+              Use the selected session to see what happened around a failure: when the job queued,
+              when printing started, when failure detection fired, and whether auto-pause followed.
+            </p>
+          </div>
+
+          {timelineSessions.length > 1 && (
+            <div
+              className="flex flex-wrap gap-2"
+              role="group"
+              aria-label="Choose a print session timeline"
+            >
+              {timelineSessions.map((timelineSession) => {
+                const isSelected = timelineSession.jobId === selectedTimelineSession?.jobId;
+
+                return (
+                  <Button
+                    key={timelineSession.jobId}
+                    type="button"
+                    size="sm"
+                    variant={isSelected ? 'secondary' : 'subtle'}
+                    aria-pressed={isSelected}
+                    className="justify-start text-left"
+                    onClick={() => setSelectedTimelineJobId(timelineSession.jobId)}
+                  >
+                    <span className="flex flex-col items-start">
+                      <span className="font-medium text-pf-text-primary">{timelineSession.label}</span>
+                      <span className="text-[11px] uppercase tracking-[0.14em] text-pf-text-secondary">
+                        {formatFailureDetectionDateTime(timelineSession.latestDetectedAt) ?? timelineSession.latestDetectedAt}
+                      </span>
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+
+          {selectedTimelineSession ? (
+            <PrintSessionTimeline
+              jobId={selectedTimelineSession.jobId}
+              jobLabel={selectedTimelineSession.label}
+              incidents={selectedTimelineSession.incidents}
+            />
+          ) : (
+            <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
+              Session timeline will appear once an incident can be tied to a tracked PrintFarmer job.
+            </div>
+          )}
+
+          {hasUntiedTimelineIncidents && (
+            <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-xs leading-5 text-pf-text-secondary">
+              Some incidents are still shown above without session timelines because they do not carry a
+              tracked PrintFarmer job ID.
+            </div>
+          )}
         </section>
 
         {status?.snapshotUrl && (

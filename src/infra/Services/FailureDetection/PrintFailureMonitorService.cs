@@ -100,7 +100,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
         _logger.LogInformation("[PrintFailureMonitor] Service stopped");
     }
 
-    private sealed record ActivePrintWindow(PrintJobStatus Status, DateTime StartedAtUtc);
+    private sealed record ActivePrintWindow(PrintJobStatus Status, DateTime StartedAtUtc, string? JobName);
 
     internal static (bool ShouldMonitor, string IdleReason) EvaluateMonitoringWindow(
         PrinterStatusDto? status,
@@ -130,6 +130,24 @@ public sealed class PrintFailureMonitorService : BackgroundService
         return (true, string.Empty);
     }
 
+    /// <summary>
+    /// Resolves the operator-facing job/file context for failure-detection status and alerts.
+    /// </summary>
+    internal static (string? JobName, string? FileName) ResolveJobContext(
+        PrinterStatusDto? printerStatus,
+        string? activeJobName)
+    {
+        string? jobName = string.IsNullOrWhiteSpace(printerStatus?.JobName)
+            ? activeJobName
+            : printerStatus.JobName;
+
+        string? fileName = string.IsNullOrWhiteSpace(printerStatus?.FileName)
+            ? PrinterStatusDto.ExtractFileName(jobName)
+            : printerStatus.FileName;
+
+        return (jobName, fileName);
+    }
+
     private async Task RunMonitoringCycleAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -146,6 +164,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
             using IServiceScope scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var failureDetectionService = scope.ServiceProvider.GetRequiredService<IObicoFailureDetectionService>();
+            var incidentHistoryService = scope.ServiceProvider.GetRequiredService<IFailureDetectionIncidentHistoryService>();
             var printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
             var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
 
@@ -180,7 +199,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                             .OrderByDescending(j => j.ActualStartTime ?? j.UpdatedAt)
                             .First();
                         DateTime startedAtUtc = currentJob.ActualStartTime ?? currentJob.UpdatedAt;
-                        return new ActivePrintWindow(currentJob.Status, startedAtUtc);
+                        return new ActivePrintWindow(currentJob.Status, startedAtUtc, currentJob.Name);
                     });
 
             var printerStatuses = new List<FailureDetectionPrinterStatusDto>(configuredPrinters.Count);
@@ -207,12 +226,14 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     }
 
                     activeJobsByPrinter.TryGetValue(printer.Id, out ActivePrintWindow? activeJob);
+                    PrinterStatusDto? cachedPrinterStatus = _statusCache.GetStatus(printer.Id);
                     var monitoringWindow = EvaluateMonitoringWindow(
-                        _statusCache.GetStatus(printer.Id),
+                        cachedPrinterStatus,
                         activeJob?.Status,
                         activeJob?.StartedAtUtc,
                         DateTime.UtcNow);
                     bool isPrinting = monitoringWindow.ShouldMonitor;
+                    var jobContext = ResolveJobContext(cachedPrinterStatus, activeJob?.JobName);
                     var (detectionSource, detectionTarget, obicoServerUrl, obicoApiKey) = ResolveDetectionTarget(printer, obicoServers, currentSettings);
 
                     var baseStatus = new FailureDetectionPrinterStatusDto
@@ -222,6 +243,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         DetectionSource = detectionSource,
                         DetectionTarget = detectionTarget,
                         IsPrinting = isPrinting,
+                        JobName = jobContext.JobName,
+                        FileName = jobContext.FileName,
                         SnapshotUrl = snapshotUrl,
                         LastAnalyzedAt = previousStatus?.LastAnalyzedAt,
                         LastOutcome = previousStatus?.LastOutcome ?? AnalysisOutcomeNone,
@@ -319,6 +342,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                             result,
                             currentSettings,
                             dbContext,
+                            incidentHistoryService,
                             printersService,
                             cancellationToken);
                         printerStatuses.Add(monitoringStatus with
@@ -454,6 +478,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
         FailureDetectionResult result,
         ObicoSettings currentSettings,
         AppDbContext dbContext,
+        IFailureDetectionIncidentHistoryService incidentHistoryService,
         IPrintersService printersService,
         CancellationToken cancellationToken)
     {
@@ -470,6 +495,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 (j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting))
             .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
             .FirstOrDefaultAsync(cancellationToken);
+        var jobContext = ResolveJobContext(_statusCache.GetStatus(printer.Id), currentJob?.Name);
 
         // Publish failure event to SignalR clients
         var failureEvent = new FailureDetectionDto
@@ -477,6 +503,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
             PrinterId = printer.Id,
             PrinterName = printer.Name,
             JobId = currentJob?.Id,
+            JobName = jobContext.JobName,
+            FileName = jobContext.FileName,
             Confidence = result.Confidence,
             DetectedAt = result.AnalyzedAt,
             SnapshotUrl = snapshotUrl,
@@ -512,6 +540,29 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     currentJob.Id,
                     printer.Id);
             }
+        }
+
+        try
+        {
+            FailureDetectionIncident recordedIncident = await incidentHistoryService.RecordFailureAsync(
+                printer.Id,
+                currentJob?.Id,
+                jobContext.JobName,
+                jobContext.FileName,
+                result.Confidence,
+                result.AnalyzedAt,
+                snapshotUrl,
+                failureEvent.AutoPaused,
+                cancellationToken);
+            failureEvent.Id = recordedIncident.Id;
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogError(
+                ex,
+                "[PrintFailureMonitor] Failed to persist incident history for printer {PrinterId}, job {JobId}",
+                printer.Id,
+                currentJob?.Id);
         }
 
         // Broadcast failure event to all connected clients

@@ -137,12 +137,27 @@ export function CameraCard({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-2 rounded-full bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
-            <span>{cameraMode === 'stream' ? 'Live stream' : 'Snapshot preview'}</span>
+        <div className="flex items-center justify-end gap-2 overflow-x-auto">
+          <div
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pf-bg-2 text-pf-text-secondary"
+            role="status"
+            title={cameraMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}
+          >
+            <span className="sr-only">{cameraMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}</span>
+            <span className="relative inline-flex items-center justify-center">
+              {cameraMode === 'stream' ? (
+                <VideoIcon className="w-4 h-4" />
+              ) : (
+                <ImageIcon className="w-4 h-4" />
+              )}
+              <span
+                className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${cameraMode === 'stream' ? 'bg-pf-success' : 'bg-pf-accent'}`}
+                aria-hidden="true"
+              />
+            </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Button
               type="button"
               variant="ghost"
@@ -182,7 +197,7 @@ export function CameraCard({
                 href={cameraMode === 'stream' && hasStream ? cameraStreamUrl ?? activeUrl : activeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex h-8 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
                 title={`Open ${p.name} camera in a new tab`}
                 aria-label={`Open ${p.name} camera in a new tab`}
               >

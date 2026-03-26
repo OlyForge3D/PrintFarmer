@@ -2,7 +2,7 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { ShieldIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
-import type { FailureDetectionPrinterStatusDto } from '@/types/api';
+import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
 import {
   getFailureDetectionDisplayState,
   getFailureDetectionStateLabel,
@@ -13,14 +13,18 @@ interface FailureDetectionMonitoringBadgeProps {
   enabled: boolean;
   status?: FailureDetectionPrinterStatusDto;
   className?: string;
+  printerId?: string;
   printerName?: string;
+  recentEvents?: FailureDetectionEvent[];
 }
 
 export function FailureDetectionMonitoringBadge({
   enabled,
   status,
   className,
+  printerId,
   printerName,
+  recentEvents = [],
 }: FailureDetectionMonitoringBadgeProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
@@ -30,6 +34,7 @@ export function FailureDetectionMonitoringBadge({
 
   const displayState = getFailureDetectionDisplayState(status);
   const label = getFailureDetectionStateLabel(displayState, enabled);
+  const resolvedPrinterId = status?.printerId ?? printerId;
   const resolvedPrinterName = status?.printerName ?? printerName;
 
   // Color mapping based on state
@@ -67,7 +72,9 @@ export function FailureDetectionMonitoringBadge({
         onClose={() => setIsDetailsOpen(false)}
         enabled={enabled}
         status={status}
+        printerId={resolvedPrinterId}
         printerName={resolvedPrinterName}
+        recentEvents={recentEvents}
       />
     </>
   );

@@ -116,6 +116,16 @@ public sealed record FailureDetectionPrinterStatusDto
     public bool IsPrinting { get; init; }
 
     /// <summary>
+    /// Gets the active job display name when known.
+    /// </summary>
+    public string? JobName { get; init; }
+
+    /// <summary>
+    /// Gets the active file name when known.
+    /// </summary>
+    public string? FileName { get; init; }
+
+    /// <summary>
     /// Gets whether the printer is using a pooled or global Obico target.
     /// </summary>
     public string DetectionSource { get; init; } = "none";

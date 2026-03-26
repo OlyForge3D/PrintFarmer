@@ -210,19 +210,30 @@ export function PrinterCameraPreview({
       </div>
 
       {hasCameraSource && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-pf-border bg-pf-bg-1/90 px-3 py-2">
-          <div className="inline-flex items-center gap-2 rounded-full bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
-            <span
-              className={clsx(
-                'h-1.5 w-1.5 rounded-full',
-                showLiveStream ? 'bg-pf-success' : 'bg-pf-accent'
+        <div className="flex items-center justify-end gap-2 overflow-x-auto border-t border-pf-border bg-pf-bg-1/90 px-3 py-2">
+          <div
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pf-bg-2 text-pf-text-secondary"
+            role="status"
+            title={showLiveStream ? 'Live stream active' : 'Snapshot preview active'}
+          >
+            <span className="sr-only">{showLiveStream ? 'Live stream active' : 'Snapshot preview active'}</span>
+            <span className="relative inline-flex items-center justify-center">
+              {showLiveStream ? (
+                <VideoIcon className="h-3.5 w-3.5" />
+              ) : (
+                <ImageIcon className="h-3.5 w-3.5" />
               )}
-              aria-hidden="true"
-            />
-            <span>{showLiveStream ? 'Live stream' : 'Snapshot preview'}</span>
+              <span
+                className={clsx(
+                  'absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full',
+                  showLiveStream ? 'bg-pf-success' : 'bg-pf-accent'
+                )}
+                aria-hidden="true"
+              />
+            </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {hasMedia && (
               <Button
                 type="button"
@@ -266,12 +277,11 @@ export function PrinterCameraPreview({
                 href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 rounded-full border border-pf-border bg-pf-bg-2 px-2.5 py-1 text-[11px] font-semibold text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
                 title="Open camera feed in a new tab"
                 aria-label={`Open ${printerName} camera feed in a new tab`}
               >
                 <ExternalLinkIcon className="h-3.5 w-3.5" />
-                <span>Open</span>
               </a>
             )}
           </div>

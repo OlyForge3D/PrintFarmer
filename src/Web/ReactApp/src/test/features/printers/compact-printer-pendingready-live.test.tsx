@@ -29,6 +29,8 @@ vi.mock('@/common/hooks/useApi', () => ({
     printer: (id: string) => ['printers', id] as const,
   },
   useJobQueue: () => ({ data: [], isLoading: false }),
+  useFailureDetectionHistory: () => ({ data: [], isLoading: false, isError: false }),
+  usePrintSessionTimeline: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
 vi.mock('@/services/printer-signalr', () => ({

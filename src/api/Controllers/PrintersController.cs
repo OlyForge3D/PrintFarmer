@@ -50,6 +50,7 @@ public class PrintersController(
     IHttpClientFactory httpClientFactory,
     Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
     IOptions<ObicoSettings> obicoSettings,
+    Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
@@ -66,6 +67,7 @@ public class PrintersController(
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
     private readonly Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService _obicoServerAssignment = obicoServerAssignment;
     private readonly ObicoSettings _obicoSettings = obicoSettings.Value;
+    private readonly Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService _printerSessionTimelineService = printerSessionTimelineService;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -2415,6 +2417,38 @@ public class PrintersController(
         catch (Exception ex)
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to delete file: {ex.Message}"));
+        }
+    }
+
+    /// <summary>
+    /// Retrieves the recent print-session timeline for a single printer.
+    /// </summary>
+    /// <param name="id">The printer identifier.</param>
+    /// <param name="take">Maximum number of sessions to return.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Recent sessions composed from persisted jobs and failure incidents.</returns>
+    [HttpGet("{id:guid}/session-timeline")]
+    [ProducesResponseType(typeof(PrinterSessionTimelineDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterSessionTimelineDto>> GetSessionTimelineAsync(
+        Guid id,
+        [FromQuery] int take = Farm.Infrastructure.Services.Printers.PrinterSessionTimelineService.DefaultTake,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            PrinterSessionTimelineDto timeline = await _printerSessionTimelineService.GetRecentAsync(id, take, ct);
+            return Ok(timeline);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get session timeline for printer {Id}: {Message}", id, ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve printer session timeline" });
         }
     }
 

@@ -15,6 +15,7 @@ import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesMo
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
+import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
@@ -72,7 +73,7 @@ export function CompactPrinterCard({
 
   // Fetch printer tags
   const queryClient = useQueryClient();
-  const { event: recentFailure } = useFailureDetectionAlert(printer.id);
+  const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
   const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
     printer.id,
     !!printer.obicoEnabled
@@ -176,7 +177,9 @@ export function CompactPrinterCard({
           <FailureDetectionMonitoringBadge
             enabled={!!printer.obicoEnabled}
             status={failureDetectionStatus}
+            printerId={printer.id}
             printerName={printer.name}
+            recentEvents={recentEvents}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
         </div>
@@ -217,6 +220,15 @@ export function CompactPrinterCard({
               queueLabel={queueLabel}
             />
           </div>
+
+          <FailureDetectionMonitoringSummary
+            enabled={!!printer.obicoEnabled}
+            status={failureDetectionStatus}
+            recentEvents={recentEvents}
+            printerName={printer.name}
+            variant="compact"
+            className="mb-3"
+          />
 
           {/* Camera view — centered, between progress bar and footer */}
           {showCamera && (

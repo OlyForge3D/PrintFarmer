@@ -10,6 +10,7 @@ import {
   CreatePrinterDto,
   CreateToolheadModelDto,
   ExtruderModelDefinition,
+  FailureDetectionEvent,
   FilamentPresets,
   FilamentTypeDto,
   GcodeFile,
@@ -64,6 +65,7 @@ import {
   NotificationDto,
   ObicoServer,
   CreateObicoServerRequest,
+  JobStateHistoryDto,
   UpdateObicoServerRequest,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
@@ -129,6 +131,12 @@ export const queryKeys = {
   timezones: ['timezones'] as const,
   obicoServers: ['obico-servers'] as const,
   obicoServer: (id: string) => ['obico-servers', id] as const,
+  failureDetectionHistory: (printerId?: string, take?: number) => (
+    ['failure-detection', 'history', printerId ?? null, take ?? null] as const
+  ),
+  printSessionTimeline: (jobId?: string) => (
+    ['job-queue-analytics', 'jobs', jobId ?? null, 'state-history'] as const
+  ),
 } as const;
 
 // ============ Printer Hooks ============
@@ -263,6 +271,40 @@ export function usePrinterDetails(id: string, options?: QueryOptions<PrinterDeta
       // Don't retry on 404 (printer not found, likely deleted)
       if (error?.statusCode === 404) return false;
       // Retry other errors up to 2 times
+      return failureCount < 2;
+    },
+    ...options,
+  });
+}
+
+export function useFailureDetectionHistory(
+  printerId?: string,
+  take = 5,
+  options?: QueryOptions<FailureDetectionEvent[]>
+) {
+  return useQuery({
+    queryKey: queryKeys.failureDetectionHistory(printerId, take),
+    queryFn: () => apiClient.getFailureDetectionHistory({ printerId, take }),
+    enabled: !!printerId,
+    staleTime: 30_000,
+    ...options,
+  });
+}
+
+export function usePrintSessionTimeline(
+  jobId?: string,
+  options?: QueryOptions<JobStateHistoryDto>
+) {
+  return useQuery({
+    queryKey: queryKeys.printSessionTimeline(jobId),
+    queryFn: () => apiClient.getAnalyticsJobStateHistory(jobId!),
+    enabled: !!jobId,
+    staleTime: 30_000,
+    retry: (failureCount, error) => {
+      if (error?.statusCode === 404) {
+        return false;
+      }
+
       return failureCount < 2;
     },
     ...options,

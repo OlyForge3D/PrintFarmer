@@ -2960,6 +2960,8 @@ export interface FailureDetectionPrinterStatusDto {
   state: string;
   reason: string;
   isPrinting: boolean;
+  jobName?: string;
+  fileName?: string;
   detectionSource: string;
   detectionTarget?: string;
   snapshotUrl?: string;
@@ -3436,12 +3438,18 @@ export interface ObicoServerHealthResponse {
  * Broadcast when Obico ML detects a potential print failure.
  */
 export interface FailureDetectionEvent {
+  /** Persisted incident identifier when available */
+  id?: string;
   /** Printer ID where failure was detected */
   printerId: string;
   /** Printer name for display */
   printerName: string;
   /** Job ID if available */
   jobId?: string;
+  /** Active job display name when available */
+  jobName?: string;
+  /** Active print file name when available */
+  fileName?: string;
   /** Confidence score from 0.0 to 1.0 */
   confidence: number;
   /** Detection timestamp (ISO 8601) */

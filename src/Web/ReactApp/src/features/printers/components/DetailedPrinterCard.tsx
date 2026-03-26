@@ -31,9 +31,9 @@ import {
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
-import { FailureDetectionAlert } from '@/features/printers/components/FailureDetectionAlert';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
+import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -95,7 +95,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [step, setStep] = useState(1);
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
-  const { event: recentFailure, clearEvent: clearRecentFailure } = useFailureDetectionAlert(initialPrinter.id);
+  const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(initialPrinter.id);
   const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
     initialPrinter.id,
     !!apiPrinter.obicoEnabled
@@ -430,7 +430,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           <FailureDetectionMonitoringBadge
             enabled={!!apiPrinter.obicoEnabled}
             status={failureDetectionStatus}
+            printerId={printer.id}
             printerName={printer.name}
+            recentEvents={recentEvents}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
         </div>
@@ -574,11 +576,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         />
       </div>
 
-      {recentFailure && (
-        <div className="mb-4">
-          <FailureDetectionAlert event={recentFailure} onDismiss={clearRecentFailure} />
-        </div>
-      )}
+      <FailureDetectionMonitoringSummary
+        enabled={!!apiPrinter.obicoEnabled}
+        status={failureDetectionStatus}
+        recentEvents={recentEvents}
+        printerName={printer.name}
+        variant="detailed"
+        className="mb-4"
+      />
 
       {/* Temps Section */}
       <TemperatureControlSection

@@ -6,8 +6,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Controllers;
@@ -165,36 +169,78 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    [Fact(DisplayName = "GetHistory returns 501 not implemented")]
-    public async Task GetHistory_Returns501NotImplemented()
+    [Fact(DisplayName = "GetHistory returns recent persisted incidents")]
+    public async Task GetHistory_ReturnsRecentPersistedIncidents()
     {
+        Guid printerId = await SeedFailureDetectionIncidentAsync(
+            printerName: "History Printer",
+            jobName: "jobs/latest-print.gcode",
+            fileName: "latest-print.gcode",
+            detectedAt: new DateTime(2026, 3, 27, 12, 00, 00, DateTimeKind.Utc),
+            confidence: 0.93m,
+            autoPaused: true);
+        _ = await SeedFailureDetectionIncidentAsync(
+            printerName: "History Printer",
+            jobName: "jobs/older-print.gcode",
+            fileName: "older-print.gcode",
+            detectedAt: new DateTime(2026, 3, 27, 11, 00, 00, DateTimeKind.Utc),
+            confidence: 0.81m,
+            autoPaused: false,
+            printerId: printerId);
+        using HttpClient historyClient = await _factory.CreateAuthenticatedClientAsync();
+
         // Act
-        var response = await _client!.GetAsync("/api/failure-detection/history");
+        var response = await historyClient.GetAsync("/api/failure-detection/history?take=10");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotImplemented);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var json = await response.Content.ReadAsStringAsync();
-        var result = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
+        List<FailureDetectionDto>? incidents = JsonSerializer.Deserialize<List<FailureDetectionDto>>(
+            await response.Content.ReadAsStringAsync(),
+            _jsonOptions);
 
-        result.TryGetProperty("message", out var message).Should().BeTrue();
-        message.GetString().Should().Contain("not yet implemented");
+        incidents.Should().NotBeNull();
+        incidents.Should().HaveCount(2);
+        incidents![0].PrinterId.Should().Be(printerId);
+        incidents[0].JobName.Should().Be("jobs/latest-print.gcode");
+        incidents[0].FileName.Should().Be("latest-print.gcode");
+        incidents[0].AutoPaused.Should().BeTrue();
+        incidents[1].JobName.Should().Be("jobs/older-print.gcode");
     }
 
-    [Fact(DisplayName = "GetHistory returns valid JSON with feature indicator")]
-    public async Task GetHistory_ReturnsValidJsonWithFeatureIndicator()
+    [Fact(DisplayName = "GetHistory filters to a single printer when requested")]
+    public async Task GetHistory_FiltersByPrinter()
     {
+        Guid printerId = await SeedFailureDetectionIncidentAsync(
+            printerName: "Filtered Printer",
+            jobName: "jobs/matching.gcode",
+            fileName: "matching.gcode",
+            detectedAt: new DateTime(2026, 3, 27, 9, 00, 00, DateTimeKind.Utc),
+            confidence: 0.87m,
+            autoPaused: false);
+        _ = await SeedFailureDetectionIncidentAsync(
+            printerName: "Other Printer",
+            jobName: "jobs/other.gcode",
+            fileName: "other.gcode",
+            detectedAt: new DateTime(2026, 3, 27, 10, 00, 00, DateTimeKind.Utc),
+            confidence: 0.91m,
+            autoPaused: true);
+        using HttpClient historyClient = await _factory.CreateAuthenticatedClientAsync();
+
         // Act
-        var response = await _client!.GetAsync("/api/failure-detection/history");
+        var response = await historyClient.GetAsync($"/api/failure-detection/history?printerId={printerId}&take=10");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotImplemented);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var json = await response.Content.ReadAsStringAsync();
-        var result = JsonSerializer.Deserialize<JsonElement>(json, _jsonOptions);
+        List<FailureDetectionDto>? incidents = JsonSerializer.Deserialize<List<FailureDetectionDto>>(
+            await response.Content.ReadAsStringAsync(),
+            _jsonOptions);
 
-        result.TryGetProperty("feature", out var feature).Should().BeTrue();
-        feature.GetString().Should().Be("event_persistence");
+        incidents.Should().NotBeNull();
+        incidents.Should().ContainSingle();
+        incidents![0].PrinterId.Should().Be(printerId);
+        incidents[0].JobName.Should().Be("jobs/matching.gcode");
     }
 
     [Fact(DisplayName = "Endpoints are protected by authorization")]
@@ -460,5 +506,62 @@ public class FailureDetectionControllerTests : IAsyncLifetime
                 }
             }
         }
+    }
+
+    private async Task<Guid> SeedFailureDetectionIncidentAsync(
+        string printerName,
+        string jobName,
+        string fileName,
+        DateTime detectedAt,
+        decimal confidence,
+        bool autoPaused,
+        Guid? printerId = null)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid actualPrinterId = printerId ?? Guid.NewGuid();
+
+        if (!printerId.HasValue)
+        {
+            dbContext.Manufacturers.Add(new Manufacturer
+            {
+                Id = manufacturerId,
+                Name = $"{printerName} Manufacturer",
+            });
+            dbContext.PrinterModels.Add(new PrinterModel
+            {
+                Id = modelId,
+                ManufacturerId = manufacturerId,
+                Name = $"{printerName} Model",
+            });
+            dbContext.Printers.Add(new Printer
+            {
+                Id = actualPrinterId,
+                Name = printerName,
+                ServerUrl = $"http://{actualPrinterId:N}.local",
+                BackendPort = 7125,
+                ManufacturerId = manufacturerId,
+                ModelId = modelId,
+            });
+        }
+
+        dbContext.FailureDetectionIncidents.Add(new FailureDetectionIncident
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = actualPrinterId,
+            JobId = Guid.NewGuid(),
+            JobName = jobName,
+            FileName = fileName,
+            Confidence = confidence,
+            DetectedAt = detectedAt,
+            SnapshotUrl = "http://camera.local/snapshot.jpg",
+            AutoPaused = autoPaused,
+        });
+
+        await dbContext.SaveChangesAsync();
+        return actualPrinterId;
     }
 }
