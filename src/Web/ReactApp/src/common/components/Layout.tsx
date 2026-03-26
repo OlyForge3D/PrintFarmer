@@ -733,6 +733,7 @@ export function Layout() {
                       ) : (
                         <NavLink
                           to={navItem.href}
+                          end
                           onClick={() => { setSidebarOpen(false); }}
                           className={({ isActive }: { isActive: boolean }) =>
                             `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
@@ -843,6 +844,7 @@ export function Layout() {
                     ) : (
                       <NavLink
                         to={navItem.href}
+                        end
                         onClick={() => { /* top-level nav */ }}
                         className={({ isActive }: { isActive: boolean }) =>
                           `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
