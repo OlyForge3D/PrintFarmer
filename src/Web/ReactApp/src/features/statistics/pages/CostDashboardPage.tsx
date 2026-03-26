@@ -32,23 +32,25 @@ export const CostDashboardPage: React.FC = () => {
   const printerTableColumns = [
     {
       key: 'printerName',
-      label: 'Printer',
+      header: 'Printer',
       sortable: true,
+      render: (row: { printerName: string }) => row.printerName,
     },
     {
       key: 'jobCount',
-      label: 'Jobs',
+      header: 'Jobs',
       sortable: true,
+      render: (row: { jobCount: number }) => String(row.jobCount),
     },
     {
       key: 'totalCost',
-      label: 'Total Cost',
+      header: 'Total Cost',
       sortable: true,
       render: (row: { totalCost: number }) => formatCurrency(row.totalCost),
     },
     {
       key: 'avgCost',
-      label: 'Avg Cost/Job',
+      header: 'Avg Cost/Job',
       sortable: true,
       render: (row: { totalCost: number; jobCount: number }) => {
         const avg = row.jobCount > 0 ? row.totalCost / row.jobCount : 0;
@@ -60,23 +62,25 @@ export const CostDashboardPage: React.FC = () => {
   const materialTableColumns = [
     {
       key: 'materialType',
-      label: 'Material',
+      header: 'Material',
       sortable: true,
+      render: (row: { materialType: string }) => row.materialType,
     },
     {
       key: 'jobCount',
-      label: 'Jobs',
+      header: 'Jobs',
       sortable: true,
+      render: (row: { jobCount: number }) => String(row.jobCount),
     },
     {
       key: 'totalWeight',
-      label: 'Weight (kg)',
+      header: 'Weight (kg)',
       sortable: true,
       render: (row: { totalWeight: number }) => (row.totalWeight / 1000).toFixed(2),
     },
     {
       key: 'totalCost',
-      label: 'Total Cost',
+      header: 'Total Cost',
       sortable: true,
       render: (row: { totalCost: number }) => formatCurrency(row.totalCost),
     },
