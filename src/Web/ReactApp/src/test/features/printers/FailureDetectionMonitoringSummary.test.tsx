@@ -134,4 +134,49 @@ describe('FailureDetectionMonitoringSummary', () => {
     expect(screen.getByText('Standing by')).toBeInTheDocument();
     expect(screen.getByText('Idle')).toBeInTheDocument();
   });
+
+  // Card-level visibility: both CompactPrinterCard and DetailedPrinterCard
+  // only mount this component when the printer is actively printing or paused.
+  // The header badge remains the sole failure-detection indicator at rest.
+  describe('card-level visibility contract', () => {
+    it('renders nothing when not enabled, no status, and no events (card omits mount)', () => {
+      const { container } = render(
+        <FailureDetectionMonitoringSummary
+          enabled={false}
+          printerName="Voron 2.4"
+          variant="compact"
+        />
+      );
+
+      expect(container.innerHTML).toBe('');
+    });
+
+    it('renders detailed variant during active printing with healthy coverage', () => {
+      const status: FailureDetectionPrinterStatusDto = {
+        printerId: 'printer-1',
+        printerName: 'Voron 2.4',
+        state: 'monitoring',
+        reason: 'Monitoring via pooled server.',
+        isPrinting: true,
+        detectionSource: 'pooled',
+        detectionTarget: 'North bay camera',
+        lastOutcome: 'healthy',
+        lastAnalyzedAt: '2026-01-15T10:30:00Z',
+        lastConfidence: null,
+        lastAutoPaused: false,
+      };
+
+      render(
+        <FailureDetectionMonitoringSummary
+          enabled={true}
+          status={status}
+          printerName="Voron 2.4"
+          variant="detailed"
+        />
+      );
+
+      const coveredElements = screen.getAllByText('Covered');
+      expect(coveredElements.length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

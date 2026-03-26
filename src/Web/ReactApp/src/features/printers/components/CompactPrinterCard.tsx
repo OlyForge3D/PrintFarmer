@@ -221,14 +221,16 @@ export function CompactPrinterCard({
             />
           </div>
 
-          <FailureDetectionMonitoringSummary
-            enabled={!!printer.obicoEnabled}
-            status={failureDetectionStatus}
-            recentEvents={recentEvents}
-            printerName={printer.name}
-            variant="compact"
-            className="mb-3"
-          />
+          {(isPrinting || isPaused) && (
+            <FailureDetectionMonitoringSummary
+              enabled={!!printer.obicoEnabled}
+              status={failureDetectionStatus}
+              recentEvents={recentEvents}
+              printerName={printer.name}
+              variant="compact"
+              className="mb-3"
+            />
+          )}
 
           {/* Camera view — centered, between progress bar and footer */}
           {showCamera && (

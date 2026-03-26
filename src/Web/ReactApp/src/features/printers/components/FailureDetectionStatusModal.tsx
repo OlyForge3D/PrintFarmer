@@ -238,11 +238,13 @@ export function FailureDetectionStatusModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Spaghetti detection details"
-      size="md"
+      width="max-w-4xl"
+      maxHeight="max-h-[85vh]"
       titleIcon={<ShieldIcon className="h-5 w-5 text-pf-warning" ariaLabel="Spaghetti detection" />}
       closeAriaLabel={`Close spaghetti detection details for ${resolvedPrinterName}`}
     >
       <div className="space-y-5">
+        {/* Status header — always full width */}
         <div className="rounded-xl border border-pf-border bg-pf-bg-0 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -260,6 +262,7 @@ export function FailureDetectionStatusModal({
           <p className="mt-3 text-sm leading-6 text-pf-text-primary">{detail}</p>
         </div>
 
+        {/* Detail tiles — always full width */}
         <div className="grid gap-3 sm:grid-cols-2">
           <DetailTile
             label="Coverage source"
@@ -280,179 +283,188 @@ export function FailureDetectionStatusModal({
           )}
         </div>
 
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
-            Why this is showing
-          </h3>
-          <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm leading-6 text-pf-text-primary">
-            {reason}
+        {/* 2-column layout on large screens: context/action left, history right */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          {/* Left column — context and operator guidance */}
+          <div className="space-y-5">
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+                Why this is showing
+              </h3>
+              <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm leading-6 text-pf-text-primary">
+                {reason}
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+                Operator next step
+              </h3>
+              <div className="rounded-lg border border-pf-warning/25 bg-pf-warning/10 px-4 py-3 text-sm leading-6 text-pf-text-primary">
+                {nextStep}
+              </div>
+            </section>
+
+            {status?.snapshotUrl && (
+              <div className="rounded-lg border border-pf-accent/20 bg-pf-accent-bg/40 px-4 py-3">
+                <a
+                  href={status.snapshotUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-sm font-medium text-pf-accent hover:underline underline-offset-2"
+                >
+                  Open latest snapshot
+                  <ExternalLinkIcon className="h-4 w-4" />
+                </a>
+              </div>
+            )}
           </div>
-        </section>
 
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
-            Operator next step
-          </h3>
-          <div className="rounded-lg border border-pf-warning/25 bg-pf-warning/10 px-4 py-3 text-sm leading-6 text-pf-text-primary">
-            {nextStep}
-          </div>
-        </section>
+          {/* Right column — incident history and timeline */}
+          <div className="space-y-5">
+            {shouldShowRecentIncidentSection && (
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+                  Recent incidents
+                </h3>
+                {isHistoryLoading && recentIncidents.length === 0 && (
+                  <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
+                    Loading recent incident history…
+                  </div>
+                )}
 
-        {shouldShowRecentIncidentSection && (
-          <section className="space-y-2">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
-              Recent incidents
-            </h3>
-            {isHistoryLoading && recentIncidents.length === 0 && (
-              <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
-                Loading recent incident history…
-              </div>
-            )}
+                {!isHistoryLoading && hasHistoryError && recentIncidents.length === 0 && (
+                  <div className="rounded-lg border border-pf-warning/25 bg-pf-warning/10 px-4 py-3 text-sm text-pf-text-primary">
+                    Recent incident history is unavailable right now. Live monitoring details are still shown above.
+                  </div>
+                )}
 
-            {!isHistoryLoading && hasHistoryError && recentIncidents.length === 0 && (
-              <div className="rounded-lg border border-pf-warning/25 bg-pf-warning/10 px-4 py-3 text-sm text-pf-text-primary">
-                Recent incident history is unavailable right now. Live monitoring details are still shown above.
-              </div>
-            )}
+                {!isHistoryLoading && !hasHistoryError && recentIncidents.length === 0 && (
+                  <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
+                    No persisted incidents have been recorded for this printer yet.
+                  </div>
+                )}
 
-            {!isHistoryLoading && !hasHistoryError && recentIncidents.length === 0 && (
-              <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
-                No persisted incidents have been recorded for this printer yet.
-              </div>
-            )}
+                {recentIncidents.length > 0 && (
+                  <div className="space-y-2">
+                    {recentIncidents.map((event, index) => {
+                      const detectedAt = formatFailureDetectionDateTime(event.detectedAt) ?? event.detectedAt;
+                      const confidencePercent = Math.round(event.confidence * 100);
+                      const incidentContext = getFailureDetectionIncidentContext(event);
 
-            {recentIncidents.length > 0 && (
-              <div className="space-y-2">
-                {recentIncidents.map((event, index) => {
-                  const detectedAt = formatFailureDetectionDateTime(event.detectedAt) ?? event.detectedAt;
-                  const confidencePercent = Math.round(event.confidence * 100);
-                  const incidentContext = getFailureDetectionIncidentContext(event);
-
-                  return (
-                    <div
-                      key={event.id ?? `${event.detectedAt}-${event.confidence}-${index}`}
-                      className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={event.autoPaused ? 'error' : 'warning'} size="sm">
-                          {confidencePercent}% confidence
-                        </Badge>
-                        <span className="text-sm text-pf-text-primary">{detectedAt}</span>
-                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
-                          {event.autoPaused ? 'Auto-paused' : 'Review required'}
-                        </span>
-                      </div>
-
-                      {incidentContext.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2 text-sm text-pf-text-primary">
-                          {incidentContext.map((context) => (
-                            <span
-                              key={`${event.id ?? event.detectedAt}-${context.label}`}
-                              className="inline-flex items-center gap-1 rounded-full bg-pf-bg-1 px-2.5 py-1"
-                            >
-                              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-pf-text-secondary">
-                                {context.label}
-                              </span>
-                              <span>{context.value}</span>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {event.snapshotUrl && (
-                        <a
-                          href={event.snapshotUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-pf-accent hover:underline underline-offset-2"
+                      return (
+                        <div
+                          key={event.id ?? `${event.detectedAt}-${event.confidence}-${index}`}
+                          className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3"
                         >
-                          Open incident snapshot
-                          <ExternalLinkIcon className="h-4 w-4" />
-                        </a>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={event.autoPaused ? 'error' : 'warning'} size="sm">
+                              {confidencePercent}% confidence
+                            </Badge>
+                            <span className="text-sm text-pf-text-primary">{detectedAt}</span>
+                            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+                              {event.autoPaused ? 'Auto-paused' : 'Review required'}
+                            </span>
+                          </div>
+
+                          {incidentContext.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2 text-sm text-pf-text-primary">
+                              {incidentContext.map((context) => (
+                                <span
+                                  key={`${event.id ?? event.detectedAt}-${context.label}`}
+                                  className="inline-flex items-center gap-1 rounded-full bg-pf-bg-1 px-2.5 py-1"
+                                >
+                                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-pf-text-secondary">
+                                    {context.label}
+                                  </span>
+                                  <span>{context.value}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {event.snapshotUrl && (
+                            <a
+                              href={event.snapshotUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-pf-accent hover:underline underline-offset-2"
+                            >
+                              Open incident snapshot
+                              <ExternalLinkIcon className="h-4 w-4" />
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
             )}
-          </section>
-        )}
 
-        <section className="space-y-3">
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
-              Print session timeline
-            </h3>
-            <p className="text-sm leading-6 text-pf-text-secondary">
-              Use the selected session to see what happened around a failure: when the job queued,
-              when printing started, when failure detection fired, and whether auto-pause followed.
-            </p>
+            <section className="space-y-3">
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+                  Print session timeline
+                </h3>
+                <p className="text-sm leading-6 text-pf-text-secondary">
+                  Use the selected session to see what happened around a failure: when the job queued,
+                  when printing started, when failure detection fired, and whether auto-pause followed.
+                </p>
+              </div>
+
+              {timelineSessions.length > 1 && (
+                <div
+                  className="flex flex-wrap gap-2"
+                  role="group"
+                  aria-label="Choose a print session timeline"
+                >
+                  {timelineSessions.map((timelineSession) => {
+                    const isSelected = timelineSession.jobId === selectedTimelineSession?.jobId;
+
+                    return (
+                      <Button
+                        key={timelineSession.jobId}
+                        type="button"
+                        size="sm"
+                        variant={isSelected ? 'secondary' : 'subtle'}
+                        aria-pressed={isSelected}
+                        className="justify-start text-left"
+                        onClick={() => setSelectedTimelineJobId(timelineSession.jobId)}
+                      >
+                        <span className="flex flex-col items-start">
+                          <span className="font-medium text-pf-text-primary">{timelineSession.label}</span>
+                          <span className="text-[11px] uppercase tracking-[0.14em] text-pf-text-secondary">
+                            {formatFailureDetectionDateTime(timelineSession.latestDetectedAt) ?? timelineSession.latestDetectedAt}
+                          </span>
+                        </span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {selectedTimelineSession ? (
+                <PrintSessionTimeline
+                  jobId={selectedTimelineSession.jobId}
+                  jobLabel={selectedTimelineSession.label}
+                  incidents={selectedTimelineSession.incidents}
+                />
+              ) : (
+                <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
+                  Session timeline will appear once an incident can be tied to a tracked PrintFarmer job.
+                </div>
+              )}
+
+              {hasUntiedTimelineIncidents && (
+                <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-xs leading-5 text-pf-text-secondary">
+                  Some incidents are still shown above without session timelines because they do not carry a
+                  tracked PrintFarmer job ID.
+                </div>
+              )}
+            </section>
           </div>
-
-          {timelineSessions.length > 1 && (
-            <div
-              className="flex flex-wrap gap-2"
-              role="group"
-              aria-label="Choose a print session timeline"
-            >
-              {timelineSessions.map((timelineSession) => {
-                const isSelected = timelineSession.jobId === selectedTimelineSession?.jobId;
-
-                return (
-                  <Button
-                    key={timelineSession.jobId}
-                    type="button"
-                    size="sm"
-                    variant={isSelected ? 'secondary' : 'subtle'}
-                    aria-pressed={isSelected}
-                    className="justify-start text-left"
-                    onClick={() => setSelectedTimelineJobId(timelineSession.jobId)}
-                  >
-                    <span className="flex flex-col items-start">
-                      <span className="font-medium text-pf-text-primary">{timelineSession.label}</span>
-                      <span className="text-[11px] uppercase tracking-[0.14em] text-pf-text-secondary">
-                        {formatFailureDetectionDateTime(timelineSession.latestDetectedAt) ?? timelineSession.latestDetectedAt}
-                      </span>
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
-          )}
-
-          {selectedTimelineSession ? (
-            <PrintSessionTimeline
-              jobId={selectedTimelineSession.jobId}
-              jobLabel={selectedTimelineSession.label}
-              incidents={selectedTimelineSession.incidents}
-            />
-          ) : (
-            <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm text-pf-text-secondary">
-              Session timeline will appear once an incident can be tied to a tracked PrintFarmer job.
-            </div>
-          )}
-
-          {hasUntiedTimelineIncidents && (
-            <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-xs leading-5 text-pf-text-secondary">
-              Some incidents are still shown above without session timelines because they do not carry a
-              tracked PrintFarmer job ID.
-            </div>
-          )}
-        </section>
-
-        {status?.snapshotUrl && (
-          <div className="rounded-lg border border-pf-accent/20 bg-pf-accent-bg/40 px-4 py-3">
-            <a
-              href={status.snapshotUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm font-medium text-pf-accent hover:underline underline-offset-2"
-            >
-              Open latest snapshot
-              <ExternalLinkIcon className="h-4 w-4" />
-            </a>
-          </div>
-        )}
+        </div>
       </div>
     </Modal>
   );

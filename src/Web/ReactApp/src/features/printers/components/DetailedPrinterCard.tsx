@@ -576,14 +576,16 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         />
       </div>
 
-      <FailureDetectionMonitoringSummary
-        enabled={!!apiPrinter.obicoEnabled}
-        status={failureDetectionStatus}
-        recentEvents={recentEvents}
-        printerName={printer.name}
-        variant="detailed"
-        className="mb-4"
-      />
+      {(isPrinting || isPaused) && (
+        <FailureDetectionMonitoringSummary
+          enabled={!!apiPrinter.obicoEnabled}
+          status={failureDetectionStatus}
+          recentEvents={recentEvents}
+          printerName={printer.name}
+          variant="detailed"
+          className="mb-4"
+        />
+      )}
 
       {/* Temps Section */}
       <TemperatureControlSection
