@@ -166,3 +166,33 @@ Backend failure-detection scope clarified: Current in-memory snapshot (PrintFail
 - Removed barrier to operator understanding which print is being monitored
 
 **Known gap:** Historical job context for past-session incidents requires backend history endpoint (descoped from current work)
+
+## 2026-03-26: Failure Detection Incident History Backend Foundation → LANDED
+
+**Role:** Backend Dev  
+**Status:** ✅ Complete — Orchestration log: 20260326-024957-lambert.md
+
+Implemented end-to-end backend persistence layer for failure-detection incident history:
+- Domain aggregate: `src/infra/Domain/FailureDetectionIncident.cs`
+- EF Core config: `src/infra/Data/Configurations/FailureDetectionIncidentConfiguration.cs`
+- Query service: `src/infra/Services/FailureDetection/FailureDetectionIncidentHistoryService.cs`
+- Monitor persistence: Enhanced `PrintFailureMonitorService` to record incidents on detection
+- API endpoint: `FailureDetectionController.GET /api/failure-detection/history`
+- Migrations: PostgreSQL + SQL Server, both idempotent and passing
+
+**Key files:**
+- `src/infra/Domain/FailureDetectionIncident.cs`
+- `src/infra/Services/FailureDetection/FailureDetectionIncidentHistoryService.cs`
+- `src/api/Controllers/FailureDetectionController.cs`
+- `src/migrations/Farm.Migrations.PostgreSQL/` (FailureDetectionIncident table)
+- `src/migrations/Farm.Migrations.SqlServer/` (equivalent SQL Server)
+
+**Validation:**
+- ✅ Clean rebuild (dotnet build)
+- ✅ Full API test suite passing
+- ✅ Focused backend triad passing (Kane's QA gate validation)
+
+**Next:** Ripley integrates frontend UX. Backend ready for production queries.
+
+---
+

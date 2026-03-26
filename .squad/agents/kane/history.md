@@ -49,3 +49,35 @@ Treat Obico self-hosted compatibility as a two-layer backend regression seam:
 - 2026-03-25: When a modal is only a renderer for backend status, QA should reject fixes aimed at the modal route/verb first and instead prove the upstream contract plus the exact modal-path symptom before asking implementation to change code.
 - 2026-03-25: Snapshot reachability is now a separate Obico regression seam from plain contract mismatch. `src/infra/Services/FailureDetection/ObicoSnapshotFallbackDetector.cs` treats specific `400` bodies (`failed to fetch`, `could not download`, `no route to host`, `timeout`, etc.) as recoverable reachability failures, so QA should require paired runtime + admin-validation tests instead of blanket `400` rejection.
 - 2026-03-25: The highest-signal reachability coverage is the trio I validated here: `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs` for GET-first recovery, `src/tests/Farm.Web.Api.Tests/Controllers/ObicoServerControllerTests.cs` for create/validation alignment, and `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx` for the operator-facing private-snapshot message and snapshot link.
+
+- 2026-03-26: Persisted failure-detection history is now covered by a focused backend triad: `FailureDetectionIncidentHistoryServiceTests` for record/query rules, `FailureDetectionControllerTests` for authenticated `/api/failure-detection/history` retrieval and printer filtering, and `PrintFailureMonitorPersistenceTests` for the monitor-service persistence+broadcast seam using a direct private-method invocation with real SQLite.
+
+## 2026-03-26: Failure Detection Incident History Test Coverage & QA Gate → APPROVED
+
+**Role:** QA Engineer  
+**Status:** ✅ Complete — Orchestration log: 20260326-024957-kane.md
+
+Designed and validated focused test coverage for failure-detection incident history backend:
+- Service layer tests: `FailureDetectionIncidentHistoryServiceTests.cs` (persistence + normalization)
+- Controller tests: Updated `FailureDetectionControllerTests.cs` (/api/failure-detection/history endpoint)
+- Monitor persistence tests: `PrintFailureMonitorPersistenceTests.cs` (monitor + SignalR seam)
+
+**Decision gate approved:** QA triad model keeps validation fast while covering three user-visible risks:
+1. Incidents not being stored
+2. History queries returning wrong slice
+3. Live detections failing to land in history
+
+**Key files:**
+- `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/FailureDetectionIncidentHistoryServiceTests.cs`
+- `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/PrintFailureMonitorPersistenceTests.cs`
+- Updated `FailureDetectionControllerTests.cs`
+
+**Validation:**
+- ✅ Focused backend triad: 100% passing
+- ✅ Full API suite rebuild: no regressions
+- ✅ Edge cases: empty history, pagination, date boundaries
+
+**Decision:** Documented in decisions.md (merged from inbox/kane-failure-history-qa-gate.md)
+
+---
+

@@ -3328,3 +3328,44 @@ Frontend alerts now arrive with job identification, allowing operators to immedi
 Backend incident history endpoint needed for long-term drill-down and trend analysis.
 
 ---
+
+## 8. Failure Detection Incident History — QA Gate (APPROVED)
+
+**Date:** 2026-03-26  
+**Author:** Kane (QA)  
+**Status:** APPROVED — Validated  
+**Urgency:** High (foundation for backend persistence)
+
+### Decision
+
+Persisted failure-detection incident history should be guarded by a focused backend test triad instead of broad suite reruns:
+
+1. `FailureDetectionIncidentHistoryServiceTests` — Persistence and take normalization
+2. `FailureDetectionControllerTests` — `/api/failure-detection/history` retrieval and printer filtering
+3. `PrintFailureMonitorPersistenceTests` — `PrintFailureMonitorService` persistence + SignalR seam
+
+### Why
+
+This keeps validation fast while still covering the three user-visible risks:
+- Incidents not being stored (persistence failure)
+- History queries returning the wrong slice (filtering/pagination failure)
+- Live detections failing to land in history (monitor-to-DB seam failure)
+
+### Evidence
+
+- ✅ Focused backend triad: 100% passing
+- ✅ Full API test suite rebuild: no regressions
+- ✅ Edge cases covered (empty history, pagination, date boundaries)
+
+### Operational Impact
+
+Enables fast validation of failure-history changes without re-running the entire test suite. Supports frontend integration work (Ripley) without blocking on test performance.
+
+### Implementation
+
+- Commit: N/A (validation gate, not code change)
+- Branch: N/A
+- Impact: CI/CD test strategy only; no artifact changes
+
+---
+
