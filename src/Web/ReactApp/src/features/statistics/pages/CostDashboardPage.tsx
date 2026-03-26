@@ -20,13 +20,13 @@ export const CostDashboardPage: React.FC = () => {
   };
 
   const materialCostPercentage = useMemo(() => {
-    if (!summary || !summary.totalCost) return '0';
-    return (((summary.totalMaterialCost ?? 0) / summary.totalCost) * 100).toFixed(1);
+    if (!summary || !summary.totalCostUsd) return '0';
+    return (((summary.totalMaterialCostUsd ?? 0) / summary.totalCostUsd) * 100).toFixed(1);
   }, [summary]);
 
   const energyCostPercentage = useMemo(() => {
-    if (!summary || !summary.totalCost) return '0';
-    return (((summary.totalEnergyCost ?? 0) / summary.totalCost) * 100).toFixed(1);
+    if (!summary || !summary.totalCostUsd) return '0';
+    return (((summary.totalEnergyCostUsd ?? 0) / summary.totalCostUsd) * 100).toFixed(1);
   }, [summary]);
 
   const printerTableColumns = [
@@ -43,17 +43,17 @@ export const CostDashboardPage: React.FC = () => {
       render: (row: { jobCount: number }) => String(row.jobCount),
     },
     {
-      key: 'totalCost',
+      key: 'totalCostUsd',
       header: 'Total Cost',
       sortable: true,
-      render: (row: { totalCost: number }) => formatCurrency(row.totalCost),
+      render: (row: { totalCostUsd: number }) => formatCurrency(row.totalCostUsd),
     },
     {
       key: 'avgCost',
       header: 'Avg Cost/Job',
       sortable: true,
-      render: (row: { totalCost: number; jobCount: number }) => {
-        const avg = row.jobCount > 0 ? row.totalCost / row.jobCount : 0;
+      render: (row: { totalCostUsd: number; jobCount: number }) => {
+        const avg = row.jobCount > 0 ? row.totalCostUsd / row.jobCount : 0;
         return formatCurrency(avg);
       },
     },
@@ -73,16 +73,16 @@ export const CostDashboardPage: React.FC = () => {
       render: (row: { jobCount: number }) => String(row.jobCount),
     },
     {
-      key: 'totalWeight',
+      key: 'totalFilamentUsageGrams',
       header: 'Weight (kg)',
       sortable: true,
-      render: (row: { totalWeight: number }) => (row.totalWeight / 1000).toFixed(2),
+      render: (row: { totalFilamentUsageGrams: number }) => (row.totalFilamentUsageGrams / 1000).toFixed(2),
     },
     {
-      key: 'totalCost',
+      key: 'totalCostUsd',
       header: 'Total Cost',
       sortable: true,
-      render: (row: { totalCost: number }) => formatCurrency(row.totalCost),
+      render: (row: { totalCostUsd: number }) => formatCurrency(row.totalCostUsd),
     },
   ];
 
@@ -107,12 +107,12 @@ export const CostDashboardPage: React.FC = () => {
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <KpiCard
             label="Total Cost"
-            value={formatCurrency(summary?.totalCost ?? 0)}
+            value={formatCurrency(summary?.totalCostUsd ?? 0)}
             loading={summaryLoading}
           />
           <KpiCard
             label="Avg Cost/Job"
-            value={formatCurrency(summary?.averageCostPerJob ?? 0)}
+            value={formatCurrency(summary?.averageCostPerJobUsd ?? 0)}
             loading={summaryLoading}
           />
           <KpiCard

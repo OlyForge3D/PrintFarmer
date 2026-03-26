@@ -3288,32 +3288,44 @@ export interface MarkMultipleAsReadRequest {
 // ============ Cost Tracking Types ============
 
 export interface CostSummary {
-  totalMaterialCost: number;
-  totalEnergyCost: number;
-  totalMachineTimeCost: number;
-  totalLaborCost: number;
-  totalCost: number;
-  jobCount: number;
-  averageCostPerJob: number;
+  totalCostUsd: number;
+  averageCostPerJobUsd: number;
+  jobsWithCostData: number;
+  totalMaterialCostUsd: number;
+  totalEnergyCostUsd: number;
+  totalMachineTimeCostUsd: number;
+  totalLaborCostUsd: number;
+  mostExpensiveMaterial?: string;
+  mostExpensiveMaterialCost: number;
 }
 
 export interface CostByPrinter {
   printerId: string;
   printerName: string;
-  totalCost: number;
+  totalCostUsd: number;
+  averageCostPerJobUsd: number;
   jobCount: number;
+  materialCostUsd: number;
+  energyCostUsd: number;
+  machineTimeCostUsd: number;
+  laborCostUsd: number;
 }
 
 export interface CostByMaterial {
   materialType: string;
-  totalCost: number;
-  totalWeight: number;
+  totalCostUsd: number;
+  averageCostPerJobUsd: number;
   jobCount: number;
+  totalFilamentUsageGrams: number;
 }
 
 export interface CostOverTime {
   date: string;
-  totalCost: number;
+  totalCostUsd: number;
+  materialCostUsd: number;
+  energyCostUsd: number;
+  machineTimeCostUsd: number;
+  laborCostUsd: number;
   jobCount: number;
 }
 
