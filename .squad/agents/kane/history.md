@@ -41,3 +41,11 @@ Treat Obico self-hosted compatibility as a two-layer backend regression seam:
 ### Key files
 - `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs`
 - `src/tests/Farm.Web.Api.Tests/Controllers/ObicoServerControllerTests.cs`
+
+## Learnings
+
+- 2026-03-25: The spaghetti-detection modal path is not failing on `/api/failure-detection/status`; the React hook uses `GET /failure-detection/status`, and the user-visible 405 reproduces when `ObicoFailureDetectionService` tries `GET /p/?img=...` and then the legacy fallback `POST /p/` also comes back 405.
+- 2026-03-25: The most focused backend regression for this seam lives in `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs`, and the most focused frontend reproduction lives in `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx` using the real `usePrinterFailureDetectionStatus` hook with a mocked `apiClient.getFailureDetectionStatus()` payload.
+- 2026-03-25: When a modal is only a renderer for backend status, QA should reject fixes aimed at the modal route/verb first and instead prove the upstream contract plus the exact modal-path symptom before asking implementation to change code.
+- 2026-03-25: Snapshot reachability is now a separate Obico regression seam from plain contract mismatch. `src/infra/Services/FailureDetection/ObicoSnapshotFallbackDetector.cs` treats specific `400` bodies (`failed to fetch`, `could not download`, `no route to host`, `timeout`, etc.) as recoverable reachability failures, so QA should require paired runtime + admin-validation tests instead of blanket `400` rejection.
+- 2026-03-25: The highest-signal reachability coverage is the trio I validated here: `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs` for GET-first recovery, `src/tests/Farm.Web.Api.Tests/Controllers/ObicoServerControllerTests.cs` for create/validation alignment, and `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx` for the operator-facing private-snapshot message and snapshot link.

@@ -29,3 +29,28 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 - `src/Web/ReactApp/src/features/printers/hooks/useAutoDispatch.ts`
 - `src/Web/ReactApp/src/features/printers/__tests__/BedClearBanner.test.tsx`
 - `src/Web/ReactApp/src/test/features/printers/compact-printer-pendingready-live.test.tsx`
+
+## 2026-03-27: Failure Detection Timeline Decision — NO TIMELINE VIEW
+
+**Role:** Frontend affected  
+**Status:** Recommendation from Dallas (Lead) — Ready for implementation
+
+From Dallas decision: Failure detection is a real-time monitoring state machine, not a persisted historical audit log. Recommendation is to **NOT implement a timeline view**. Current modal + header badge pattern is fit-for-purpose.
+
+**Next steps for Ripley:**
+- Finalize badge + modal pattern. No timeline pagination or scroll within modal.
+- Call complete when modal shows all current state fields: coverage source, snapshot URL, last scan, last outcome, last failure, auto-pause action, next step.
+- See decision entry in `.squad/decisions.md` (entry 4) for full rationale.
+
+## Learnings
+
+- 2026-03-26: The spaghetti-detection modal is presentational only. The live data path is `CompactPrinterCard` / `DetailedPrinterCard` → `usePrinterFailureDetectionStatus` → `apiClient.getFailureDetectionStatus()` → `GET /api/failure-detection/status`, then the hook filters `printers[]` by `printerId` before passing `status` into `FailureDetectionMonitoringBadge` / `FailureDetectionStatusModal`.
+- 2026-03-26: `FailureDetectionStatusModal.tsx` does not issue its own request or send a payload; if the modal shows a transport error, inspect the upstream card hook and `/api/failure-detection/status` contract first.
+- 2026-03-27: Failure detection is live monitoring, not historical audit. Modal is the right interaction depth; no timeline needed.
+
+## 2026-03-27: Failure Detection UX — Scope Clarification (Cross-Agent)
+
+**Input:** Dallas decision memo on failure-detection timeline UX scope  
+**Status:** Pending team decision
+
+Failure detection UX scope clarified: Badge + modal pattern is recommended. No timeline/historical event list. Current modal shows state, coverage, last scan, last outcome—sufficient for operators. Awaiting team approval to finalize badge/modal implementation.

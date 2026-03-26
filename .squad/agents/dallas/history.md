@@ -155,3 +155,73 @@ Early entries (pre-2026-03-25) summarized for maintainability. See decisions-arc
 
 **Files:** Recorded in orchestration logs and merged into decisions.md.
 
+
+## Session: Failure Detection Timeline Scope Clarification (2026-03-27)
+
+**Role:** Lead decision authority  
+**Status:** ✅ RECOMMENDATION DOCUMENTED — ready for team approval  
+**Urgency:** Medium (unblocks Ripley + Lambert)
+
+### Work Completed
+
+**Analysis:**
+- Reviewed failure-detection UX and underlying data models
+- Examined in-memory monitoring state (no persistence layer)
+- Cross-referenced job history pattern (has timeline; has persistence)
+- Assessed operator workflow for failure detection
+
+**Key Findings:**
+- Failure detection is a **real-time state machine**, not a historical audit log
+- Backend tracks only the last result per printer (in-memory FailureDetectionPrinterStatusDto)
+- Current modal design already surfaces all actionable state: current state, last scan, last failure, last auto-pause, coverage source, next step
+- Building a timeline would require database persistence, API endpoint, and frontend pagination—no use case exists
+- Job history HAS a timeline because state transitions are persistent; failure detection doesn't follow this model
+
+### Decision
+
+**Do NOT implement a timeline view.** Current badge + modal pattern is fit-for-purpose.
+
+**Rationale:**
+1. No data model supports persistence (would require schema change)
+2. Operator workflow (glance badge → click for detail) doesn't require historical scrolling
+3. Modal already shows all anchoring points (last scan, last failure, last auto-pause)
+4. Aligns with PrintFarmer monitoring paradigm (live state, not audit logs)
+
+### Scope Clarity for Teams
+
+**Ripley (Frontend):**
+- Modal + header badge pattern is the final design
+- No timeline pagination or scrollable event list
+- Implementation complete when modal shows all current state fields
+
+**Lambert (Backend):**
+- In-memory snapshot is sufficient
+- No persistence layer needed (unless future audit/compliance requirement emerges separately)
+
+### Decision Document
+
+- File: `.squad/decisions/inbox/dallas-failure-detection-timeline-decision.md` — Full recommendation with implementation clarity and open questions
+
+### Related Context
+
+- Failure detection modal: `src/Web/ReactApp/src/features/printers/components/FailureDetectionStatusModal.tsx`
+- Status DTO (in-memory only): `src/infra/Services/FailureDetection/FailureDetectionMonitorStatus.cs`
+- Monitoring service: `src/infra/Services/FailureDetection/PrintFailureMonitorService.cs`
+- Job history timeline pattern (for contrast): `src/infra/Dtos/PrintQueue/PrintQueueDtos.cs` (TimelineEventDto)
+
+
+## Learnings
+
+- **Failure detection is NOT a timeline domain.** It's a real-time state machine with in-memory state. Operators care about "is this printer being watched NOW?" not "show me all scans from 2 hours ago." The absence of a persistence layer (in-memory FailureDetectionPrinterStatusDto) is intentional; it's designed for live monitoring, not audit logging.
+- **Modal + badge is the operator workflow for failure detection:** Glance at badge for state → click for detail (coverage source, snapshot URL, last scan time, last failure time, auto-pause action, next step). No need to scroll past historical events.
+- **Job history timeline pattern is NOT applicable here.** Job state transitions are persistent (TimelineEventDto in the queue schema). Failure detection scans are ephemeral. The difference is fundamental: historical audit log vs. live monitoring state.
+- **Data-driven scope containment:** Before proposing new UX patterns (timeline, graphs, tables), verify the backend has a persistence layer. If not, the pattern doesn't fit.
+
+
+## 2026-03-27: Failure Detection Timeline — Recommendation Against (Product)
+
+**Time:** Async  
+**Task:** Clarify UX scope: should failure detection have a timeline/event log view?  
+**Outcome:** ✅ Recommendation ready for team decision
+
+Analyzed the failure-detection UX design. Recommended AGAINST timeline view. Failure detection is a **live monitoring state machine**, not a historical audit log. No persistence layer exists. Modal + badge pattern is fit-for-purpose. Scope protection for Ripley (Frontend) and Lambert (Backend). Decision ready for team approval.

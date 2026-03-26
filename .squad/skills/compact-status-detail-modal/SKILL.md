@@ -15,6 +15,7 @@ Use this when a dashboard card, preview overlay, or other dense UI surface needs
 - Put the actionable content in the modal: why the state is showing, what the operator should do next, and any supporting facts like timestamps or snapshot links.
 - Pass contextual fallbacks such as `printerName` explicitly so neutral/loading states still have accessible trigger labels.
 - Reuse one modal component across badge and overlay variants so copy and metadata stay consistent.
+- Keep data fetching outside the modal when possible. Let the parent card or shared hook resolve live status first, then pass the resolved record into the modal so transport bugs are traceable at one seam.
 
 ## Examples
 - `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
@@ -25,3 +26,4 @@ Use this when a dashboard card, preview overlay, or other dense UI surface needs
 - Expanding a compact badge/overlay with multi-line remediation copy that competes with the rest of the layout.
 - Giving badge and overlay variants different detail copy for the same backend status.
 - Omitting accessible trigger text when the detail affordance appears before printer-specific status has loaded.
+- Starting a second modal-only fetch for the same status data and then debugging two different transport paths for one UI affordance.

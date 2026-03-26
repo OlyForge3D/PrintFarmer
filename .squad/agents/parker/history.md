@@ -153,3 +153,36 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 Improves operational reliability by allowing ML API timeout behavior to be tuned per-environment, reducing deployment friction and improving observability.
 
+## Learnings
+
+- 2026-03-26: In `/Users/jpapiez/s/obico-server`, `ml_api/Dockerfile` extends `thespaghettidetective/ml_api_base:1.4`. The published base image reliably includes `wget`, but not `curl`, so model-weight download steps in the runtime image should use `wget` unless the Dockerfile explicitly installs `curl`.
+- 2026-03-26: The safest validation path for this Obico rebuild issue is `docker compose build ml_api` from the obico-server repo root, then `docker run --rm <image> sh -lc 'command -v wget && ls -l /model_cache/ml_api/...` to confirm both the fetch tool and downloaded model artifacts exist.
+- 2026-03-26: Jeff's preference on the Obico fork task was explicit: patch locally, validate locally, report the exact next server commands, and do not push or commit unless strictly necessary.
+
+## 2026-01-16: Obico ml_api Dockerfile model download fix
+
+**Status:** ✅ Complete
+
+- Fixed ml_api Dockerfile to use `wget` instead of `curl` for downloading model weights.
+- Rationale: The published ml_api_base images include `wget` by default but do not consistently include `curl`. This ensures reliable downloads across all base image variants.
+- Changes: 
+  - `ml_api/Dockerfile`: Switched both model download RUN commands from `curl -o` to `wget -O`; improved shell quoting syntax
+  - `docs/building_docker_images.md`: Added inline explanation of why `wget` is the standard tool
+- Commit: `6efe08e1` on `release` branch with Copilot co-author trailer
+- Pushed to origin/release without issues
+- Lesson: Base image tool availability (curl vs wget) must be explicitly documented when changing download strategies
+
+## Learnings
+
+- **Base image tool consistency:** When switching between curl/wget or other utilities in container RUNs, verify availability across all variants of the base image — don't assume symmetry
+- **Dockerfile + docs coupling:** Model download logic that depends on specific base image tool availability warrants inline docs to prevent future surprises and regressions
+
+## 2026-03-25: Obico ml_api wget Fix (DevOps)
+
+**Time:** 19:23 UTC  
+**Task:** Fix ml_api Dockerfile curl → wget switch for build reliability  
+**Outcome:** ✅ Success
+
+Switched ml_api model downloads from curl to wget to resolve `/bin/sh: 1: curl: not found` failures. The ml_api_base image ships wget but not curl reliably. Commit 6efe08e pushed to release branch.
+
+**Files:** obico-server ml_api/ (sibling repo)

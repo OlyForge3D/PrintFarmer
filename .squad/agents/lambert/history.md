@@ -117,3 +117,10 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 **Files:** Documented in decisions.md; orchestration logs (`2026-03-26T01-45-41Z-lambert.md`).
 
+
+## 2026-03-27: Failure Detection Backend — Timeline Scope Clarification (Cross-Agent)
+
+**Input:** Dallas decision: failure detection does not need historical scan persistence  
+**Status:** Pending team decision
+
+Backend failure-detection scope clarified: Current in-memory snapshot (PrintFailureMonitorService) is sufficient. No timeline/event-store needed for MVP. If future compliance/audit requirement surfaces, that's a separate data-model decision. Awaiting team approval.

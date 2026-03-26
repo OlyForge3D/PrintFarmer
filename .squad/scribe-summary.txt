@@ -1,0 +1,38 @@
+================================================================================
+SCRIBE SUMMARY: Obico Follow-Up Commit Handoff
+================================================================================
+
+TIMESTAMP: 2026-03-25T19:28:18Z
+TEAM ROOT: /Users/jpapiez/s/PFarm1
+
+WORK COMPLETED:
+  ✓ Orchestration log entry created
+  ✓ Session log entry created
+  ✓ Decision inbox reviewed (no merging required)
+  ✓ Parker agent history updated
+
+COMMIT CHECKPOINT:
+  Commit Hash: a3e27f47c19251c34cfdf70488f5724521734fb1
+  Message: chore: Obico compatibility and admin validation follow-up fixes
+  Files: 5 changed, 302 insertions, 12 deletions
+  Status: Local commit ready for testing (no remote push)
+
+FILES COMMITTED:
+  • src/api/Controllers/ObicoServerController.cs (validation)
+  • src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs (state transitions)
+  • src/tests/Farm.Web.Api.Tests/Controllers/ObicoServerControllerTests.cs (controller tests)
+  • src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs (service tests)
+  • src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx (UI tests)
+
+UNCOMMITTED:
+  • .squad/ metadata updates only (histories, skills, decision inbox)
+
+DECISION INBOX:
+  • lambert-plugin-gap-review.md — architectural decision recorded
+  • brett-moonraker-obico-review.md — assessment recorded
+  No conflicts. Both remain as reference.
+
+NEXT STEP:
+  User to execute local app testing. Subsequent push or revision per test results.
+
+================================================================================

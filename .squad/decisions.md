@@ -1,4 +1,127 @@
-# Squad Decisions
+## 3. Obico ml_api wget Switch — Build Reliability Fix (APPROVED)
+
+**Date:** 2026-03-25  
+**Author:** Parker (DevOps)  
+**Status:** APPROVED — Implemented  
+**Urgency:** High (blocking ml_api rebuilds)
+
+### Problem
+
+The `ml_api` runtime Dockerfile was failing during model downloads with `/bin/sh: 1: curl: not found`. The runtime image extends `thespaghettidetective/ml_api_base:1.4`, which does not reliably ship `curl`.
+
+### Decision
+
+Switch model downloads in `ml_api/Dockerfile` from `curl` to `wget`.
+
+### Why
+
+- `ml_api_base` Dockerfiles (both `Dockerfile.base_amd64` and `Dockerfile.base_arm64`) explicitly install `wget`
+- `wget` is guaranteed available in the published runtime base image
+- Using `wget` removes hidden tooling assumptions and fixes rebuild failures
+- This is safer than adding a new package to the runtime Dockerfile—it aligns with the base-image contract already in use
+
+### Evidence
+
+- Local validation: `docker build ./ml_api` ✅
+- Local validation: `docker compose build ml_api` ✅
+- Image inspection: model files correctly downloaded into `/model_cache/ml_api/...` ✅
+
+### Implementation
+
+**Commit:** 6efe08e176059d57f01bf00ce9dffc16bf7cb00e  
+**Branch:** release (obico-server)  
+**Message:** fix: Switch ml_api model downloads from curl to wget
+
+**Operational Impact:** ml_api rebuilds work again without changing the published base image or runtime behavior.
+
+---
+
+## 4. Failure Detection Timeline — Recommendation Against (Ready for Decision)
+
+**Date:** 2026-03-27  
+**Author:** Dallas (Lead)  
+**Status:** RECOMMENDATION — Ready for team decision  
+**Urgency:** Medium (clarifies UX scope for Ripley + Lambert)
+
+### Context
+
+Ripley (Frontend) is implementing failure-detection UX. User asked: "Can we not have a timeline view somehow?"
+
+Failure detection is **not** a historical audit log like printer job history. It's a **real-time monitoring lifecycle**: state transitions (disabled → idle → monitoring → error), outcome events (healthy scan → failure detected → auto-paused), and status explanations.
+
+### Problem Statement
+
+Timeline views imply historical scrollable event logs. Failure detection doesn't fit that model because:
+
+1. **Single-printer scope:** Failure detection is per-printer, per-job. The modal already shows "last scan", "last failure", "last auto-pause"—three anchoring points in time.
+2. **In-memory state machine:** PrintFailureMonitorService updates in-memory `FailureDetectionPrinterStatusDto` every scan cycle (30s default). No persistence layer. We don't store historical scan records.
+3. **Real-time not historical:** Operators care about "is this printer being watched NOW" and "what was the LAST outcome?" Not "show me all scans from the past 2 hours."
+4. **Modal design is sufficient:** The `FailureDetectionStatusModal` already presents:
+   - Current state + reason
+   - Coverage source (global, pooled, or none)
+   - Watching (snapshot URL)
+   - Last scan timestamp
+   - Latest outcome (failure vs. healthy)
+   - Last failure timestamp
+   - Auto-pause action (triggered or not)
+   - Operator next step
+
+### Recommendation
+
+**Do NOT implement a timeline view.** Current modal + header badge pattern is fit-for-purpose.
+
+#### Reasoning
+
+1. **No data exists to visualize.** The backend doesn't persist scan history; it tracks only the last result per printer. Building a timeline would require:
+   - Database schema change (scan history table)
+   - Service layer persistence
+   - API endpoint for historical queries
+   - Frontend pagination/filtering UI
+   - All for a use case that doesn't exist.
+
+2. **Workflow fit.** Operators interact with failure detection through:
+   - **Glance mode:** Header badge shows state at a glance (green = monitoring, amber = error, none = disabled)
+   - **Detail mode:** Click badge → modal shows why + what happened last + next step
+   - No need to scroll past events; the modal is self-contained.
+
+3. **Precedent in codebase.** Job history (print queue) HAS a timeline view because job state transitions are persistent and queryable. Failure detection is fundamentally different: it's a live monitoring pipeline, not a persistent audit log.
+
+4. **Scope containment.** This protects Ripley and Lambert from scope creep while implementing the MVP failure-detection UX.
+
+### Decision
+
+**Keep the current design:**
+- Header badge (glanceable status)
+- Click badge → modal with current state, last scan, last failure, next step
+- No timeline / historical event list
+
+**Rationale:**
+- Aligns with PrintFarmer's monitoring paradigm (live state, not audit logs)
+- Data model doesn't support persistence
+- Operator workflow doesn't require historical scrolling
+- Modal is the right interaction depth for detail seekers
+
+### Implementation Clarity for Ripley/Lambert
+
+**Ripley (Frontend):**
+- Finalize badge + modal pattern. No timeline pagination or scroll within modal.
+- Call complete when modal shows all current state fields (coverage source, snapshot URL, last scan, last outcome, last failure, auto-pause action, next step).
+
+**Lambert (Backend):**
+- Current in-memory snapshot suffices; no persistence needed.
+- If future requirement for audit logging surfaces (security/compliance), that's a separate decision and data-model change.
+
+### Files Affected
+
+- No new files needed.
+- Modal design confirmed in: `src/Web/ReactApp/src/features/printers/components/FailureDetectionStatusModal.tsx`
+- Status DTO confirmed in: `src/infra/Services/FailureDetection/FailureDetectionMonitorStatus.cs`
+
+### Open Questions for Team
+
+- Is there a future compliance/audit requirement for failure-detection scan history? (If yes, escalate to separate decision track.)
+
+---
 
 **Updated:** 2026-03-26T01:45:41Z
 
@@ -3082,96 +3205,3 @@ The current GET probe validates route/response-shape compatibility using a synth
 
 ---
 
-## 2025-03-25: Print Session Timeline UX — Minimum Coherent Slice (APPROVED)
-
-**Date:** 2025-03-25  
-**Author:** Dallas (Lead)  
-**Status:** Approved  
-**Urgency:** High
-
-### Context
-
-Jeff requested: "extend our UX to add live print session timeline/events, plus whatever else is needed."
-
-**Current state:**
-- PrintFarmer is the **single source of truth** for print job state via `PrintJob` domain model
-- Job state transitions are **tracked** in the database via `JobStateHistory`
-- Obico integration is **ML/failure-detection only** — not a session manager
-- No existing session timeline UX in PrintFarmer
-
-### Scope: First Slice (MVP)
-
-**What's IN:**
-
-1. **Job Details Modal Timeline Tab**
-   - New tabbed section in existing `JobDetailsModal` (Ripley's responsibility)
-   - Display job's state transition history as vertical timeline
-   - Each transition shows: state name, timestamp (UTC), duration in state, optional notes
-   - Populated from `JobStateHistory` records via new endpoint: `GET /api/jobs/{jobId}/timeline`
-
-2. **Backend Timeline Endpoint**
-   - Route: `GET /api/jobs/{jobId}/timeline` → `JobStateHistoryDto[]`
-   - Maps `JobStateHistory` domain records to `StateTransitionDto`
-   - Uses existing `IPrintJobManagementRepository`
-
-3. **Real-Time Event Publishing** (foundation only)
-   - Backend publishes `JobStateChangedEvent` to PrinterHub on state transitions
-   - DTO: `JobStateChangedEventDto` (name, jobId, oldState, newState, timestamp)
-   - Infrastructure setup only — no UI consumption yet
-
-4. **Job Details Modal Tab Structure**
-   - Add "Timeline" tab alongside existing "Details", "Notes", "Tags"
-   - Tab visible only when job has state history
-
-### Why This Slice
-
-- Minimum viable integration of session timeline without overcomplicating UI
-- Leverages existing `JobStateHistory` data already being tracked
-- Establishes patterns for real-time job-event publishing (future live updates)
-- Clear ownership: Ripley (modal), Dallas (endpoint), Parker (timeline data)
-
-### Follow-Up Boundaries
-
-- Live updates (SignalR-driven) are a separate slice
-- Detailed failure-detection context is a separate concern
-- Printer session context (sidebar) is owned by Ripley separately
-
----
-
-## 2025-03-25: Ripley — Live Session UX Host Recommendation (APPROVED)
-
-**Date:** 2025-03-25  
-**Author:** Ripley (Frontend Lead)  
-**Status:** Approved  
-
-### Decision
-
-Host the first live print session UX inside `src/Web/ReactApp/src/features/printers/components/PrinterDetailsSidebar.tsx` as a new session-focused section, with `DetailedPrinterCard.tsx` surfacing only summary badges/entry points.
-
-### Why
-
-- Sidebar already owns richest per-printer detail surface and has room for deeper operator context
-- Already merges live printer state through `usePrinterDisplay()` and exposes quick links to history/files
-- Best place to combine realtime state, queue context, and failure-detection context
-- `DetailedPrinterCard` stays scannable; sidebar carries full timeline experience
-
-### Recommended First Slice
-
-- Session metadata header (job name, started/elapsed, ETA, queue position)
-- Live stats block (progress, temps, active state, lightweight ETA)
-- Failure-detection context block reusing existing monitoring status patterns
-- Scrollable event timeline fed from analytics/history APIs plus SignalR-derived live state changes
-
-### Reuse First
-
-- `usePrinterDisplay`, `useJobQueue`, `usePrinterHistory`, `usePrinterHistoryJob`
-- `useFailureDetectionAlert`, `usePrinterFailureDetectionStatus`
-- `PrintProgressBar`, `FailureDetectionMonitoringBadge`, `FailureDetectionStatusModal`, `CollapsibleSection`
-
-### Watch-outs
-
-- Current analytics timeline/state-history methods return loose `unknown` payloads; tighten typing before building
-- Current SignalR surface emits printer status and failure-detection events, but not dedicated session-event broadcasts
-- First slice needs hybrid of live status deltas + analytics/history backfill
-
----
