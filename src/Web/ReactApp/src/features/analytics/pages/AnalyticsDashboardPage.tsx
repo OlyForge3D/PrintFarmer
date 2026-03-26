@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/common/components/ui/Card';
-import { Button } from '@/common/components/ui';
 import { Tabs } from '@/common/components/ui/Tabs';
+import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -20,14 +20,6 @@ import { PredictiveAlertsPanel } from '../components/PredictiveAlertsPanel';
 import { CorrelationChartsSection } from '../components/CorrelationChartsSection';
 import { useMaintenanceForecast } from '../hooks/usePredictiveAnalytics';
 
-const PERIOD_OPTIONS = [
-  { label: '7 days', value: 7 },
-  { label: '30 days', value: 30 },
-  { label: '90 days', value: 90 },
-  { label: '1 year', value: 365 },
-  { label: 'All time', value: undefined },
-] as const;
-
 export const AnalyticsDashboardPage: React.FC = () => {
   const [days, setDays] = useState<number | undefined>(30);
 
@@ -45,23 +37,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
       icon={TrendingUpIcon}
       actions={
         <div className="flex items-center gap-3">
-          <div className="flex gap-1" role="group" aria-label="Time period filter">
-            {PERIOD_OPTIONS.map((opt) => (
-              <Button
-                variant="unstyled"
-                key={opt.label}
-                onClick={() => setDays(opt.value)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  days === opt.value
-                    ? 'bg-pf-primary text-white'
-                    : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
-                }`}
-                aria-pressed={days === opt.value}
-              >
-                {opt.label}
-              </Button>
-            ))}
-          </div>
+          <TimePeriodFilter value={days} onChange={setDays} />
           <ExportMenu days={days} />
         </div>
       }

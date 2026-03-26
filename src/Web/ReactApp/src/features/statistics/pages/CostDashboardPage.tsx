@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card } from '@/common/components/ui/Card';
 import { DataTable } from '@/common/components/ui/DataTable';
 import { Spinner } from '@/common/components/ui/Spinner';
+import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -11,9 +12,10 @@ import {
 } from '@/common/hooks/useApi';
 
 export const CostDashboardPage: React.FC = () => {
-  const { data: summary, isLoading: summaryLoading, error: summaryError } = useCostSummary();
-  const { data: printerCosts, isLoading: printerLoading, error: printerError } = useCostsByPrinter();
-  const { data: materialCosts, isLoading: materialLoading, error: materialError } = useCostsByMaterial();
+  const [days, setDays] = useState<number | undefined>(30);
+  const { data: summary, isLoading: summaryLoading, error: summaryError } = useCostSummary(days);
+  const { data: printerCosts, isLoading: printerLoading, error: printerError } = useCostsByPrinter(days);
+  const { data: materialCosts, isLoading: materialLoading, error: materialError } = useCostsByMaterial(days);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -101,6 +103,7 @@ export const CostDashboardPage: React.FC = () => {
       title="Cost Analytics"
       subtitle="Track print job costs and analyze spending patterns"
       icon={TrendingUpIcon}
+      actions={<TimePeriodFilter value={days} onChange={setDays} />}
     >
       <div className="space-y-6">
         {/* Summary Cards */}

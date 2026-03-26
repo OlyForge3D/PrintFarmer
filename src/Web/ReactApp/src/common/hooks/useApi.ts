@@ -121,10 +121,10 @@ export const queryKeys = {
   notifications: ['notifications'] as const,
   unreadCount: ['notifications', 'unread-count'] as const,
   notificationPreferences: ['notifications', 'preferences'] as const,
-  costSummary: ['costs', 'summary'] as const,
+  costSummary: (days?: number) => ['costs', 'summary', days] as const,
   costs: ['costs'] as const,
-  costsByPrinter: ['costs', 'by-printer'] as const,
-  costsByMaterial: ['costs', 'by-material'] as const,
+  costsByPrinter: (days?: number) => ['costs', 'by-printer', days] as const,
+  costsByMaterial: (days?: number) => ['costs', 'by-material', days] as const,
   costOverTime: ['costs', 'over-time'] as const,
   scheduledJobs: ['scheduled-jobs'] as const,
   scheduledJob: (jobId: string) => ['scheduled-jobs', jobId] as const,
@@ -1655,28 +1655,28 @@ export function useDeleteNotification() {
 
 // ============ Cost Tracking Hooks ============
 
-export function useCostSummary(options?: QueryOptions<import("@/types/api").CostSummary>) {
+export function useCostSummary(days?: number, options?: QueryOptions<import("@/types/api").CostSummary>) {
   return useQuery({
-    queryKey: queryKeys.costSummary,
-    queryFn: () => apiClient.getCostSummary(),
+    queryKey: queryKeys.costSummary(days),
+    queryFn: () => apiClient.getCostSummary(days),
     staleTime: 300_000, // 5 minutes - cost data is relatively stable
     ...options,
   });
 }
 
-export function useCostsByPrinter(options?: QueryOptions<import("@/types/api").CostByPrinter[]>) {
+export function useCostsByPrinter(days?: number, options?: QueryOptions<import("@/types/api").CostByPrinter[]>) {
   return useQuery({
-    queryKey: queryKeys.costsByPrinter,
-    queryFn: () => apiClient.getCostsByPrinter(),
+    queryKey: queryKeys.costsByPrinter(days),
+    queryFn: () => apiClient.getCostsByPrinter(days),
     staleTime: 300_000, // 5 minutes
     ...options,
   });
 }
 
-export function useCostsByMaterial(options?: QueryOptions<import("@/types/api").CostByMaterial[]>) {
+export function useCostsByMaterial(days?: number, options?: QueryOptions<import("@/types/api").CostByMaterial[]>) {
   return useQuery({
-    queryKey: queryKeys.costsByMaterial,
-    queryFn: () => apiClient.getCostsByMaterial(),
+    queryKey: queryKeys.costsByMaterial(days),
+    queryFn: () => apiClient.getCostsByMaterial(days),
     staleTime: 300_000, // 5 minutes
     ...options,
   });

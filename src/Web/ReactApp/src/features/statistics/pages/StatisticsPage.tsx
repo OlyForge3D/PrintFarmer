@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/common/components/ui/Card';
-import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
 import { ChartIcon } from '@/common/components/icons/MdiIcons';
 import {
  useStatisticsSummary,
@@ -14,13 +14,6 @@ import { JobsOverTimeChart } from '../components/JobsOverTimeChart';
 import { CostOverTimeChart } from '../components/CostOverTimeChart';
 import { FilamentByMaterialChart } from '../components/FilamentByMaterialChart';
 import { PrinterUtilizationChart } from '../components/PrinterUtilizationChart';
-
-const PERIOD_OPTIONS = [
- { label: '7 days', value: 7 },
- { label: '30 days', value: 30 },
- { label: '90 days', value: 90 },
- { label: 'All time', value: undefined },
-] as const;
 
 export const StatisticsPage: React.FC = () => {
  const [days, setDays] = useState<number | undefined>(30);
@@ -35,25 +28,7 @@ export const StatisticsPage: React.FC = () => {
  title="Print Statistics"
  subtitle="Track print jobs, costs, and printer utilization"
  icon={ChartIcon}
- actions={
- <div className="flex gap-2" role="group" aria-label="Time period filter">
- {PERIOD_OPTIONS.map((opt) => (
- <Button
- variant="unstyled"
- key={opt.label}
- onClick={() => setDays(opt.value)}
- className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
- days === opt.value
- ? 'bg-pf-primary text-white'
- : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
- }`}
- aria-pressed={days === opt.value}
- >
- {opt.label}
- </Button>
- ))}
- </div>
- }
+ actions={<TimePeriodFilter value={days} onChange={setDays} />}
  >
  <div className="space-y-6">
  {/* KPI Cards */}

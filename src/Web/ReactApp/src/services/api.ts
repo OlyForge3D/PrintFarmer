@@ -3594,8 +3594,10 @@ export class ApiClient {
   }
 
   // ============ Cost Tracking API methods ============
-  async getCostSummary(): Promise<import("@/types/api").CostSummary> {
-    const response = await this.client.get('/statistics/costs/summary');
+  async getCostSummary(days?: number): Promise<import("@/types/api").CostSummary> {
+    const response = await this.client.get('/statistics/costs/summary', {
+      params: days !== undefined ? { days } : undefined,
+    });
     return response.data;
   }
 
@@ -3604,13 +3606,17 @@ export class ApiClient {
     return response.data;
   }
 
-  async getCostsByPrinter(): Promise<import("@/types/api").CostByPrinter[]> {
-    const response = await this.client.get('/statistics/costs/by-printer');
+  async getCostsByPrinter(days?: number): Promise<import("@/types/api").CostByPrinter[]> {
+    const response = await this.client.get('/statistics/costs/by-printer', {
+      params: days !== undefined ? { days } : undefined,
+    });
     return response.data;
   }
 
-  async getCostsByMaterial(): Promise<import("@/types/api").CostByMaterial[]> {
-    const response = await this.client.get('/statistics/costs/by-material');
+  async getCostsByMaterial(days?: number): Promise<import("@/types/api").CostByMaterial[]> {
+    const response = await this.client.get('/statistics/costs/by-material', {
+      params: days !== undefined ? { days } : undefined,
+    });
     return response.data;
   }
 

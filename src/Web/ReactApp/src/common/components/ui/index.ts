@@ -44,6 +44,8 @@ export { Tabs, type TabsProps, type TabListProps, type TabProps, type TabPanelsP
 export { TemperatureInput, type TemperatureInputProps } from './TemperatureInput';
 export { TemperatureControlRow, type TemperatureControlRowProps } from './TemperatureControlRow';
 export { Textarea, type TextareaProps } from './Textarea';
+export { TimePeriodFilter, type TimePeriodFilterProps, type TimePeriodOption } from './TimePeriodFilter';
+export { TIME_PERIOD_OPTIONS } from './timePeriodOptions';
 export { Toggle, type ToggleProps } from './Toggle';
 export { Tooltip, type TooltipProps, type TooltipPosition } from './Tooltip';
 export { ViewToggle, type ViewToggleProps } from './ViewToggle';
