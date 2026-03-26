@@ -67,6 +67,7 @@ import {
   CreateObicoServerRequest,
   JobStateHistoryDto,
   UpdateObicoServerRequest,
+  TimezoneInfo,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1711,7 +1712,7 @@ export function useScheduledJob(jobId: string, options?: QueryOptions<import("@/
   });
 }
 
-export function useTimezones(options?: QueryOptions<string[]>) {
+export function useTimezones(options?: QueryOptions<TimezoneInfo[]>) {
   return useQuery({
     queryKey: queryKeys.timezones,
     queryFn: () => apiClient.getTimezones(),

@@ -112,6 +112,7 @@ import {
   UpdateObicoServerRequest,
   ObicoServerHealthResponse,
   TimelineEventDto,
+  TimezoneInfo,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -3734,7 +3735,7 @@ export class ApiClient {
     return response.data || [];
   }
 
-  async getTimezones(): Promise<string[]> {
+  async getTimezones(): Promise<TimezoneInfo[]> {
     const response = await this.client.get('/job-scheduling/timezones');
     return response.data || [];
   }

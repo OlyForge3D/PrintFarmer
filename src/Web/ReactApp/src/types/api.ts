@@ -3459,3 +3459,9 @@ export interface FailureDetectionEvent {
   /** Whether the print was automatically paused */
   autoPaused: boolean;
 }
+
+export interface TimezoneInfo {
+  id: string;
+  displayName: string;
+  offset: string;
+}

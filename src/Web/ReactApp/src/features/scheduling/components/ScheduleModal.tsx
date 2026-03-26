@@ -136,8 +136,8 @@ export function ScheduleModal({ isOpen, onClose, initialDate, jobId }: ScheduleM
             onChange={(e) => setTimezone(e.target.value)}
           >
             {timezones.map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
+              <option key={tz.id} value={tz.id}>
+                {tz.displayName} ({tz.offset})
               </option>
             ))}
           </Select>
