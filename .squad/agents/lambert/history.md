@@ -110,3 +110,24 @@ Published: `.squad/orchestration-log/20260326-031539-lambert.md`
 - Ordering: Stable chronological sort, deterministic at equal timestamps
 
 **Handed off to:** Ripley (Frontend) for modal integration
+
+## Session: Custom Date Range Support for Statistics Endpoints — Complete (2026-07-14)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — All 2,171 tests pass, 0 warnings
+
+### Work Completed
+
+- **IStatisticsService**: Added `DateTime? startDate, DateTime? endDate` optional params to all 9 methods
+- **StatisticsService**: Added `ResolveEffectiveDateRange` helper implementing priority: startDate/endDate > days > default > all-time. Expanded max days from 365 to 730. Added end-date filtering to all query methods.
+- **StatisticsController**: Added `startDate`/`endDate` query params to all 9 endpoints. Added `ValidateDateRange` (400 on invalid range or >730 days).
+- **ReportExportService**: Updated callers with named `ct:` parameter for compatibility with new optional params.
+- **Tests**: 17 new integration tests covering: validation (400 for startDate > endDate, 400 for >730 days), custom date range filtering, days/startDate precedence, all-time fallback, default behavior preservation.
+
+### Key Decisions
+
+- Custom dates take strict precedence over `days` parameter — no ambiguity
+- Cost queries filter on `ActualEndTime`, non-cost queries on `QueuedAt` — preserving existing behavior
+- Max range is 730 days (2 years) — validated at controller level
+- All endpoints consistent: every statistics endpoint now supports the same 3 optional time params
+
