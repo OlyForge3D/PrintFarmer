@@ -552,7 +552,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       isOpen={isOpen}
       onClose={handleClose}
       title="Edit Printer"
-      width="max-w-2xl"
+      size="xl"
       footer={modalFooter}
     >
       {error && (
@@ -562,20 +562,32 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       )}
 
       <form id="edit-printer-form" onSubmit={handleSubmit} className="space-y-5">
-            <FormField
-              label="Name"
-              required
-              error={validationErrors.name?.[0]}
-            >
-              <Input
-                type="text"
-                value={formData.name}
-                onChange={e => handleInputChange('name', e.target.value)}
-                placeholder="Printer name"
-                title="Printer name"
-              />
-            </FormField>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Basic Info Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <FormField
+                label="Name"
+                required
+                error={validationErrors.name?.[0]}
+              >
+                <Input
+                  type="text"
+                  value={formData.name}
+                  onChange={e => handleInputChange('name', e.target.value)}
+                  placeholder="Printer name"
+                  title="Printer name"
+                />
+              </FormField>
+              <FormField label="Backend">
+                <BackendSelector
+                  value={formData.backend}
+                  onChange={(backend) => handleInputChange('backend', backend)}
+                  ariaLabel="Printer backend"
+                />
+              </FormField>
+            </div>
+
+            {/* Connection Details Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <FormField
                 label="Server URL"
                 required
@@ -589,16 +601,11 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   title="Printer server URL"
                 />
               </FormField>
-              <FormField label="Backend">
-                <BackendSelector
-                  value={formData.backend}
-                  onChange={(backend) => handleInputChange('backend', backend)}
-                  ariaLabel="Printer backend"
-                />
-              </FormField>
-            {/* Moonraker/PrusaLink port/API key fields */}
+            </div>
+
+            {/* Moonraker/FlashForge port fields */}
             {(formData.backend === PrinterBackend.Moonraker || formData.backend === PrinterBackend.FlashForge) && (
-              <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <FormField label="Backend Port (API)">
                   <Input
                     type="number"
@@ -621,67 +628,57 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             )}
+
             {/* PrusaLink uses password authentication (username is fixed to "maker") */}
             {formData.backend === PrinterBackend.PrusaLink && (
-              <div className="col-span-2">
-                <FormField label="Password" error={validationErrors.password?.[0]}>
-                  <div className="relative">
-                    <Input
-                      type={showPassword ? 'text' : 'password'}
-                      value={formData.password || ''}
-                      onChange={e => handleInputChange('password', e.target.value)}
-                      placeholder="From printer Settings → Network → Credentials"
-                      title="PrusaLink password from printer settings"
-                      className="pr-10"
-                    />
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
-                    />
-                  </div>
-                </FormField>
-              </div>
+              <FormField label="Password" error={validationErrors.password?.[0]}>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    value={formData.password || ''}
+                    onChange={e => handleInputChange('password', e.target.value)}
+                    placeholder="From printer Settings → Network → Credentials"
+                    title="PrusaLink password from printer settings"
+                    className="pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                  />
+                </div>
+              </FormField>
             )}
+
             {/* OctoPrint uses API Key authentication */}
             {formData.backend === PrinterBackend.OctoPrint && (
-              <div className="col-span-2">
-                <FormField label="API Key (OctoPrint)" error={validationErrors.apiKey?.[0]}>
-                  <div className="relative">
-                    <Input
-                      type={showApiKey ? 'text' : 'password'}
-                      value={formData.apiKey || ''}
-                      onChange={e => handleInputChange('apiKey', e.target.value)}
-                      placeholder="Enter OctoPrint API Key"
-                      title="OctoPrint API Key"
-                      className="pr-10"
-                    />
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
-                      aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
-                      iconCenter={showApiKey ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
-                    />
-                  </div>
-                </FormField>
-              </div>
+              <FormField label="API Key (OctoPrint)" error={validationErrors.apiKey?.[0]}>
+                <div className="relative">
+                  <Input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={formData.apiKey || ''}
+                    onChange={e => handleInputChange('apiKey', e.target.value)}
+                    placeholder="Enter OctoPrint API Key"
+                    title="OctoPrint API Key"
+                    className="pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
+                    aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+                    iconCenter={showApiKey ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                  />
+                </div>
+              </FormField>
             )}
-            </div>
-            <FormField label="Notes">
-              <Textarea
-                value={formData.notes || ''}
-                onChange={e => handleInputChange('notes', e.target.value)}
-                rows={3}
-                placeholder="Optional notes"
-                title="Printer notes"
-              />
-            </FormField>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Catalog Selection Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <FormField label="Manufacturer">
                 <Select
                   value={formData.manufacturerId || ''}
@@ -703,6 +700,17 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </Select>
               </FormField>
             </div>
+
+            {/* Notes - Full Width */}
+            <FormField label="Notes">
+              <Textarea
+                value={formData.notes || ''}
+                onChange={e => handleInputChange('notes', e.target.value)}
+                rows={3}
+                placeholder="Optional notes"
+                title="Printer notes"
+              />
+            </FormField>
 
             {/* Printer Type & Build Volume Section */}
             <div className="border-t pt-5 mt-5">
@@ -1071,7 +1079,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             {/* Cost Settings */}
             <div className="border-t pt-5 mt-5">
               <h4 className="text-lg font-medium text-pf-text-primary mb-4">Cost Settings</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <FormField
                   label="Wattage (W)"
                   htmlFor="printer-wattage"
