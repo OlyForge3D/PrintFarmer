@@ -3601,3 +3601,45 @@ Timeline value is contextual to incident drill-down, not free-standing. Modal-fi
 Operators can drill down from failure-detection modal into session context without leaving the modal or navigating to a separate page. Timeline adds value only when job linkage is real.
 
 ---
+
+## 13. Printer Session Timeline v1 — Backend Shape (APPROVED)
+
+**Date:** 2026-03-27  
+**Author:** Lambert (Backend)  
+**Status:** APPROVED — Implementation Complete  
+**Urgency:** Medium
+
+### Decision
+
+Backend surface is printer-scoped for v1:
+
+```
+GET /api/printers/{printerId}/session-timeline?take=N
+```
+
+Returns printer-level recent print sessions with chronological event lists per session.
+
+### Why
+
+- Operator workflow starts from printer card/modal, not generic analytics page.
+- Existing persisted data already supports this: PrintJob timestamps + JobStateHistory + FailureDetectionIncident.
+- Nested sessions keep frontend from stitching multiple older endpoints.
+
+### Implementation
+
+- Session anchored on PrintJob
+- Event types: queued, dispatched, session started, state transition, failure detected, session ended
+- When persisted incident lacks JobId, attach by printer + session window (ActualStartTime ?? DispatchedAt ?? QueuedAt through end)
+- No new schema or migration required
+
+### Guardrails
+
+- Still a read model, not generic audit/event platform
+- Cross-printer/global analytics remain separate
+- Thermal alerts, manual notes, camera clips need own persistence first if added later
+
+### Status
+
+✅ Implemented. Endpoint returns merged timeline for printer's recent print sessions.
+
+---
