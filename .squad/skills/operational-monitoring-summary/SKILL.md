@@ -15,6 +15,7 @@ Use this when a compact dashboard badge is good for glanceability, but operators
 - Feed the summary from the existing polling status plus any in-memory realtime events. In PrintFarmer, `useFailureDetectionAlert()` now supplies both the transient live event and a short session incident ledger.
 - Use industrial, high-signal styling: dense metadata tiles, uppercase section labels, explicit action copy, and strong state color without looking ornamental.
 - When backend history does not exist yet, make the limitation explicit in naming and keep the session ledger local to the current frontend lifetime.
+- If operators need more than an incident list, add a **session timeline inside the existing drill-down modal** instead of sending them to a separate history page. Build the v1 timeline by merging job-state history (`getAnalyticsJobStateHistory`) with the session's incident ledger and label missing job linkage honestly.
 
 ## Examples
 - `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringSummary.tsx`
@@ -22,6 +23,7 @@ Use this when a compact dashboard badge is good for glanceability, but operators
 - `src/Web/ReactApp/src/features/printers/components/DetailedPrinterCard.tsx`
 - `src/Web/ReactApp/src/features/printers/hooks/useFailureDetectionAlert.ts`
 - `src/Web/ReactApp/src/features/printers/components/FailureDetectionStatusModal.tsx`
+- `src/Web/ReactApp/src/features/printers/components/PrintSessionTimeline.tsx`
 
 ## Anti-Patterns
 - Replacing the badge entirely with a bulky inline paragraph.
