@@ -1,5 +1,72 @@
 # Squad Decisions
 
+**Updated:** 2026-03-26T01:45:41Z
+
+## 0. Obico Self-Hosted UI Gap Validation (Architecture Confirmed)
+
+**Author:** Brett (Researcher) + Lambert (Backend) + Parker (DevOps)  
+**Date:** 2026-03-26  
+**Status:** VALIDATED — No action required; design is intentional
+
+### Problem Statement
+
+Obico self-hosted web UI appears empty when used with PrintFarmer (no printers, no jobs visible), while OctoPrint native clients show full device/job state in Obico UI. Assumption: PrintFarmer might be missing a required integration slice.
+
+### Investigation & Findings
+
+**Brett (Research):**
+- Analyzed OctoPrint Moonraker-Obico plugin; confirmed it sends **full printer/job/session state** to Obico server
+- Plugin responsibilities: snapshots, periodic uploads, WebRTC relay, remote tunneling, printer state reporting, auth/linking
+- PrintFarmer implements only snapshot delivery (1 of 6 responsibilities)
+
+**Lambert (Backend):**
+- Confirmed PrintFarmer's Obico integration uses **only ML/failure-detection slice**
+- Does NOT send printer/job state, device list, or session info to Obico server
+- This is an **intentional architectural choice** to avoid second source of truth
+- Snapshot delivery contract is correct and validated between runtime + admin validation
+
+**Parker (DevOps):**
+- Confirmed no compose/Dockerfile changes needed
+- Current setup correctly isolates PrintFarmer (farm controller truth source) from Obico (external ML service)
+- Docker DNS names properly used; no configuration gaps
+
+### Decision
+
+**Empty Obico UI is EXPECTED BEHAVIOR with current architecture.** Do NOT implement full printer/job sync.
+
+### Rationale
+
+- **Farm-controller vs single-printer-agent** — PrintFarmer manages multi-printer farm state; Obico's model is single-printer cloud agent
+- **Separation of concerns** — PrintFarmer is authoritative source for printer/job state; Obico serves as external ML/monitoring layer only
+- **Second source of truth risk** — Mirroring printer state into Obico would create consistency burden with no user benefit
+- **Architectural purity** — Moonraker-Obico provides WebRTC, tunneling, account linking; PrintFarmer should NOT replicate these (users have Obico client for remote access)
+
+### Scope Clarification
+
+**Current implementation (CORRECT):**
+- ✅ Snapshot delivery to Obico ML API for failure detection
+- ✅ Aligned GET-first / fallback contract between runtime and validation
+
+**Out of Scope:**
+- ❌ Mirror printer list to Obico UI (would be separate "full-sync" integration layer)
+- ❌ WebRTC streaming (Obico's responsibility; use Obico client)
+- ❌ Remote tunneling (Obico's responsibility; use Obico client)
+- ❌ Interactive auth/linking (self-hosted with manual token config is sufficient)
+
+### User Context
+
+- Jeff has forked obico-server in OlyForge3d org; if future full-sync is desired, server-side extensions become feasible
+- Current design is production-ready for failure-detection use case
+- Full-sync work would require explicit future decision and separate development cycle
+
+### Files
+
+- **Decision source:** Brett (2026-03-26), Lambert (2026-03-26), Parker (2026-03-26)
+- **Orchestration logs:** `2026-03-26T01-45-41Z-{brett,lambert,parker}.md`
+- **Team context:** Updated agent histories (brett, lambert, parker)
+
+---
+
 **Updated:** 2026-03-26T01:30:47Z
 
 ## 1. Obico ML Snapshot Timeout — Upstream Limitation (Final)

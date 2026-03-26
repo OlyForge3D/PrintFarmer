@@ -74,3 +74,27 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 **Files:** Documented in decisions.md; informs product roadmap and feature prioritization.
 
+## 2026-03-26: Obico Self-Hosted UI Gap Analysis — Final Validation
+
+**Role:** Research validation specialist  
+**Status:** ✅ Complete — Findings merged and validated
+
+**Team Collaboration:**
+- Validated OctoPrint Obico plugin behavior (sends full printer/job/session state)
+- Worked with Lambert to establish that PrintFarmer intentionally uses only ML/failure-detection slice
+- Confirmed with Parker that empty Obico UI is expected, not a defect
+
+**Key Conclusions:**
+1. Obico self-hosted UI appearing empty with PrintFarmer is **expected behavior**
+2. OctoPrint plugin provides full state sync; PrintFarmer **intentionally differs**
+3. Current architecture avoids second source of truth (PrintFarmer is authoritative)
+4. Mirroring printer/job state to Obico would be separate integration work, out-of-scope
+5. User context: Jeff has obico-server fork if future server-side extensions needed
+
+**Architecture Validation:**
+- PrintFarmer → Obico (ML/failure-detection only) ✅ Correct
+- PrintFarmer → Obico (full sync) ❌ Not implemented, intentional
+- Current design is **sound and complete** for stated use case
+
+**Files:** Documented in decisions.md; orchestration logs (`2026-03-26T01-45-41Z-brett.md`).
+

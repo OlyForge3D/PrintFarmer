@@ -73,3 +73,36 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 **Files:** Documented in orchestration logs and decisions.md.
 
+## 2026-03-26: Obico Plugin Gap Analysis — Deployment Validation & Handoff
+
+**Role:** Infrastructure lead + handoff coordinator  
+**Status:** ✅ Complete — Team validation finalized
+
+**Team Collaboration:**
+- Confirmed with Brett and Lambert that current Obico integration is architecturally sound
+- Validated that empty self-hosted UI is expected (not a deployment issue)
+- Established that no compose/Dockerfile changes needed for this design
+
+**Key Deployment Findings:**
+1. Current Obico compose setup is **correct for ML-only use case**
+2. No container changes required; architecture is intentional
+3. Docker DNS service names properly used for internal Obico ML container connectivity
+4. Self-hosted Obico UI appearing empty with PrintFarmer is **expected, not a bug**
+
+**Architecture Confirmation:**
+- PrintFarmer sends only snapshots to Obico ML API (correct)
+- Does NOT mirror printer/job state (intentional design choice)
+- Full sync would be separate integration layer (out-of-scope for current phase)
+
+**User Context:**
+- Jeff has obico-server fork in OlyForge3d org if future server extensions needed
+- Current deployment is production-ready for failure-detection use case
+- Future full-sync work would require explicit decision and separate development phase
+
+**Implications for Deployment:**
+- No rollout changes needed
+- Document expected behavior (empty Obico UI) in admin guides
+- If future sync work approved, will require new compose template
+
+**Files:** Documented in decisions.md; orchestration logs (`2026-03-26T01-45-41Z-parker.md`).
+

@@ -89,3 +89,31 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 **Files:** Documented in decisions.md; informs future backend planning.
 
+## 2026-03-26: Obico Plugin Gap Analysis — Backend Architecture Validation
+
+**Role:** Backend architect + team lead  
+**Status:** ✅ Complete — Analysis documented and validated
+
+**Team Collaboration:**
+- Confirmed with Brett that OctoPrint plugin sends full printer/job/session state
+- Established with Parker that current Obico snapshot implementation is correct
+- Validated that PrintFarmer intentionally uses only ML/failure-detection slice
+
+**Key Backend Findings:**
+1. PrintFarmer's ML snapshot delivery is **correct and sufficient** for local failure detection
+2. Farm-controller architecture (multi-tenant) differs from single-printer-agent model (Moonraker-Obico)
+3. Current GET-first/fallback snapshot contract is **properly aligned** between runtime and validation
+4. Do NOT replicate Moonraker-Obico's full feature set (WebRTC, tunneling, account linking)
+
+**Architecture Principle:**
+- PrintFarmer: Multi-printer farm controller (own truth source)
+- Obico: Cloud ML/monitoring service (external consumer only)
+- Maintain separation of concerns; PrintFarmer is authoritative for printer/job state
+
+**Follow-up Guidance (Lower Priority):**
+- Support stream-only webcams by deriving snapshots (future enhancement)
+- Strengthen Moonraker auth support via PrinterCredential (future optimization)
+- Do NOT add remote relay, account linking, or Janus streaming (out-of-scope)
+
+**Files:** Documented in decisions.md; orchestration logs (`2026-03-26T01-45-41Z-lambert.md`).
+
