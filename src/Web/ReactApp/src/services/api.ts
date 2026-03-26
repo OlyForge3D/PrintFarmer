@@ -188,6 +188,18 @@ export class ApiClient {
     await this.client.post("/settings", settings);
   }
 
+  // ============ Cost Tracking Settings ============
+
+  /** Get cost tracking settings. */
+  async getCostTrackingSettings(): Promise<import("@/types/api").CostTrackingSettings> {
+    return this.getSettings<import("@/types/api").CostTrackingSettings>("CostTracking");
+  }
+
+  /** Update cost tracking settings. */
+  async updateCostTrackingSettings(settings: import("@/types/api").CostTrackingSettings): Promise<void> {
+    return this.saveSettings("CostTracking", settings);
+  }
+
   // ========== Background Services API ==========
 
   /**

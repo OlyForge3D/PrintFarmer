@@ -3287,6 +3287,16 @@ export interface MarkMultipleAsReadRequest {
 
 // ============ Cost Tracking Types ============
 
+/** Settings that control how print job costs are calculated. */
+export interface CostTrackingSettings {
+  enableAutomaticCostCalculation: boolean;
+  electricityRatePerKwh: number;
+  averagePrinterWattage: number;
+  defaultMachineHourlyRate: number;
+  laborMarkupPercent: number;
+  profitMarginTargetPercent: number;
+}
+
 export interface CostSummary {
   totalCostUsd: number;
   averageCostPerJobUsd: number;

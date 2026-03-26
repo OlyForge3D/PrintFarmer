@@ -80,10 +80,10 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div className="flex items-center gap-3 py-1" key={prop.name}>
               {/* Label column - fixed width for alignment */}
               <label 
-                className="flex items-center shrink-0 w-48 text-sm font-medium text-pf-text-primary" 
+                className="flex items-center shrink-0 w-64 text-sm font-medium text-pf-text-primary" 
                 htmlFor={prop.name}
               >
-                <span className="truncate">{displayName}</span>
+                <span className="break-words">{displayName}</span>
                 {isRequired && <span className="text-pf-accent ml-1">*</span>}
                 {hasDescription && <InfoTooltip description={prop.display!.description!} />}
               </label>
