@@ -1,6 +1,124 @@
 # Squad Decisions
 
-**Updated:** 2026-03-25T13:40:00Z
+**Updated:** 2026-03-26T01:30:47Z
+
+## 1. Obico ML Snapshot Timeout — Upstream Limitation (Final)
+
+**Author:** Parker (DevOps) + Dallas (Lead)  
+**Date:** 2026-03-26  
+**Status:** ACCEPTED — No immediate action required
+
+### Problem
+
+Self-hosted Obico's `ml_api` container hardcodes 0.1s connect timeout on snapshot fetches via `GET /p/?img=...`. Users on slow/distant networks experience intermittent failures.
+
+### Investigation
+
+Parker (DevOps) evaluated whether this timeout is configurable:
+- Upstream `ml_api/server.py` hardcodes two timeout tuples: `(0.1, 5)` for normal URLs, `(10, 30)` only for Google Cloud Storage
+- Compose templates and internal docs expose only `DEBUG`, `FLASK_APP`, and optional `ML_API_TOKEN`
+- **No runtime env/config knob exists** in the container's public interface
+
+### Decision
+
+**Treat as upstream limitation.** Choose the simplest path with lowest maintenance burden and document workaround clearly.
+
+### Operational Guidance
+
+**3-tier remediation order for users hitting ConnectTimeoutError on GET /p/?img=...**
+
+1. **Fix network path/latency** — Ensure camera is reachable from `ml_api` container within 0.1s budget (preferred; no code changes)
+2. **Custom ml_api image** — If network fix is impossible, run a custom/forked `ml_api` image with timeout constants increased
+3. **Upstream request** — Longer-term: request or contribute an upstream env/config knob for snapshot timeout
+
+### Rationale
+
+- Custom image maintenance burden (rebasing, security patches) is high relative to benefit
+- Local proxy (alternative option) adds operational complexity and diagnostic burden
+- Intermittent failures are acceptable pending upstream fix or user-initiated remediation
+- Documented escalation path empowers operators without forcing a choice now
+
+### Files Affected
+
+**Documentation:** Update deployment troubleshooting guide to include 3-tier remediation order.
+
+---
+
+## 2. Moonraker-Obico Plugin Gap Analysis (Researcher Review)
+
+**Author:** Brett (Researcher)  
+**Date:** 2026-03-25  
+**Status:** RECOMMENDATION — No immediate action required
+
+### Problem Statement
+
+PrintFarmer recently switched to upstream-first Obico snapshot delivery (`GET /p/?img=...` with legacy fallback). Identify whether the implementation is complete, what gaps exist, and whether they matter.
+
+### Summary
+
+**Current Status:** PrintFarmer's snapshot delivery to ML API is ✅ **CORRECT and SUFFICIENT** for local failure detection.
+
+**Architecture Difference:**
+- **Moonraker-Obico:** Single-printer agent (cloud-first); includes WebRTC, tunneling, auth
+- **PrintFarmer:** Multi-tenant farm controller (farm-first); focuses on local failure detection only
+
+### Gaps That Matter
+
+| Gap | Effort | When to Add |
+|-----|--------|------------|
+| Snapshot upload for remote viewing | 5-7 days | Only if users request "view cameras on Obico dashboard" |
+| Printer state visibility (server-side) | 2-3 days | Later, if server-side optimization needed |
+| Failure detection webhook | 3-5 days | Later, for event-driven architecture |
+| Multi-camera tagging | 1-2 days | Later, if nozzle camera adoption grows |
+
+### Gaps That DON'T Matter (Never Add)
+
+- ❌ **WebRTC/Janus streaming** — Obico's responsibility; maintain separation of concerns
+- ❌ **Tunneling proxy** — Security risk; out of scope for farm controller
+- ❌ **Interactive auth discovery** — Self-hosted; users manually configure tokens
+
+### Recommendation
+
+**Current implementation is ACCEPTABLE.** Only add Gap 1 (snapshot upload) if users request remote viewing capability. Do NOT add streaming, tunneling, or interactive auth.
+
+---
+
+## 3. Moonraker / Obico Plugin Parity Gap Review
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-03-25  
+**Status:** GUIDANCE — Informs future work prioritization
+
+### Finding
+
+The upstream `moonraker-obico` plugin should **NOT** be treated as the target architecture for PrintFarmer. Key differences:
+
+- **Moonraker-Obico:** Co-located agent; can rely on localhost webcam, Moonraker API-key auth, Janus/WebRTC relay
+- **PrintFarmer:** Farm controller; must handle remote printer discovery, snapshot delivery via HTTP, selective auth
+
+### Decision Implications for PrintFarmer
+
+**Required (For current ML-monitoring integration):**
+1. ✅ Snapshot delivery to Obico ML API (Direct camera URL when reachable; fallback to proxy/upload)
+2. ⚠️ Short-lived/tokenized snapshot endpoint (if external Obico servers need `GET /p/?img=...`)
+3. ✅ Align runtime fallback with validation (treat 400 as legacy signal consistently)
+4. ✅ Printer-aware reachability validation (prove Obico server can reach real camera path)
+5. ⚠️ Strengthen Moonraker auth support (use PrinterCredential in camera discovery)
+
+**Lower Priority (Follow-up workstream):**
+- Support stream-only webcams by deriving snapshots from `stream_url`
+
+**Out of Scope (Different product area):**
+- Remote relay, Obico account linking, passthru APIs, Janus streaming (Obico's responsibility)
+
+### Concrete Implementation Path
+
+1. Add first-class snapshot delivery strategy (direct URL → proxy → tokenized endpoint)
+2. Extend `ObicoServerController` fallback logic to `ObicoFailureDetectionService` for consistency
+3. Implement printer-aware reachability check before analyzing snapshot
+4. Use `PrinterCredential` in Moonraker camera URL resolution
+
+---
 
 ## Archived Decisions
 
@@ -9,7 +127,7 @@ See `decisions-archive.md` for historical context and earlier decisions.
 
 ---
 
-## 2. Job Scheduling Calendar — UI Design (Approved)
+## 5. Job Scheduling Calendar — UI Design (Approved)
 
 **Author:** Ripley (Frontend Dev)  
 **Date:** 2026-03-16  
@@ -62,7 +180,7 @@ Users need a calendar interface to schedule print jobs with recurrence patterns,
 
 ---
 
-## 3. Auto-Print Ready-Gate Dashboard — UI Design (Approved)
+## 6. Auto-Print Ready-Gate Dashboard — UI Design (Approved)
 
 **Author:** Dallas (Lead/Frontend)  
 **Date:** 2026-03-16  

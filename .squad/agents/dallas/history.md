@@ -128,3 +128,30 @@ Early entries (pre-2026-03-25) summarized for maintainability. See decisions-arc
 - Obico self-hosted compatibility must be kept aligned in both the runtime client and the admin health probe: prefer `GET /p/?img=...`, then fall back to the legacy multipart `POST /p/` contract. If only the monitor is updated, settings validation still gives false confidence.
 - Key review files for this contract are `src/infra/Services/FailureDetection/ObicoFailureDetectionService.cs`, `src/api/Controllers/ObicoServerController.cs`, `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs`, and `src/tests/Farm.Web.Api.Tests/Controllers/ObicoServerControllerTests.cs`.
 - The current health validation uses a synthetic `img=` probe URL, so it proves route compatibility but not a real printer-camera fetch path. Treat runtime reachability issues separately from this contract fix.
+
+## 2026-03-26: Obico ML Timeout Mismatch — Final Tradeoff Call
+
+**Role:** Team Lead decision authority  
+**Status:** ✅ Complete — Decision documented
+
+**Context:** Parker (DevOps) evaluated whether Obico's self-hosted `ml_api` 0.1s snapshot fetch timeout is configurable. No upstream config knob exists. Three remediation paths available:
+1. Deploy local proxy on pfarm2 to improve latency
+2. Build custom ml_api image with higher timeouts
+3. Live with intermittent Obico failures (status quo)
+
+**Tradeoff Analysis:**
+- **Custom ml_api image:** High maintenance burden (rebasing, security patches) for marginal benefit
+- **Local proxy:** Adds operational complexity and diagnostic burden
+- **Status quo:** Intermittent failures acceptable pending upstream fix or user-initiated remediation
+
+**Decision:** Treat as upstream limitation. Choose the **simplest path with lowest maintenance burden** and document the workaround clearly.
+
+**Operational Guidance (3-tier remediation order):**
+1. Fix network latency to <100ms (preferred, no code changes)
+2. Custom ml_api image (if network fix is impossible)
+3. Request upstream config knob (longer-term)
+
+**Rationale:** No immediate action needed. Users have clear escalation path. Documented guidance empowers operators without forcing a choice now.
+
+**Files:** Recorded in orchestration logs and merged into decisions.md.
+
