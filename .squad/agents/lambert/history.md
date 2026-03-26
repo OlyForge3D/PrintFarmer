@@ -17,6 +17,7 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 ## Learnings
 
+- 2026-03-27: The smallest operator-relevant printer session timeline is a printer-scoped read model, not new persistence: anchor sessions on `PrintJob`, compose nested events from `QueuedAt`/`DispatchedAt`/`ActualStartTime`/`ActualEndTime` plus `JobStateHistory` and `FailureDetectionIncident`, and attach orphan incidents by printer + session window when `JobId` is missing.
 - 2026-03-26: `/api/failure-detection/status` already exposes the operator-facing monitoring reason/source/target/outcome contract. For richer PrintFarmer-owned UX, the safest backend addition is optional `jobName`/`fileName` on `FailureDetectionPrinterStatusDto` and SignalR `FailureDetectionDto`, sourced from `IPrinterStatusCacheReader` with queued-job fallback in `PrintFailureMonitorService`.
 - 2026-03-26: Persisted failure-detection history is a narrow incident slice, not a generic audit system: `FailureDetectionIncident` stores only detected failures, `PrintFailureMonitorService` records them through scoped `IFailureDetectionIncidentHistoryService`, and `GET /api/failure-detection/history?printerId=&take=` returns newest-first `FailureDetectionDto` rows with optional persisted `id`.
 - 2026-03-25: Upstream `moonraker-obico` is a co-located agent, not just an ML client. It links to Obico with a server auth token, talks directly to Moonraker with API-key/WebSocket access, captures JPEGs locally, and can tunnel HTTP/WebSocket traffic plus Janus-based webcam streaming.
@@ -84,3 +85,28 @@ PrintFarmer's Obico snapshot delivery implementation is **correct and sufficient
 **Guardrails:** Do not persist every scan; no acknowledge/workflow state yet; timeline page deferred; retention policy is future work.
 
 **Decisions merged:** #9
+
+## Session: Print Session Timeline v1 Backend — Complete (2026-03-27)
+
+**Role:** Backend implementation lead  
+**Status:** COMPLETE — All artifacts delivered, tests pass
+
+### Work Completed
+
+- **Service:** `PrinterSessionTimelineService.cs` — merge `JobStateHistory` + `FailureDetectionIncident` by JobId, sort chronologically
+- **DTO:** `PrinterSessionTimelineDto.cs` — unified event schema (state_change | failure_incident)
+- **Endpoint:** `GET /api/printers/{printerId}/session-timeline` exposed in `PrintersController.cs`
+- **Tests:** 6/6 focused service + 2/2 controller tests PASS
+- **Format:** dotnet format clean
+
+### Orchestration Log
+
+Published: `.squad/orchestration-log/20260326-031539-lambert.md`
+
+### Key Decisions Implemented
+
+- Merge strategy: Query both tables separately, combine by timestamp
+- Error handling: Orphan incidents (no JobStateHistory match) still included in timeline
+- Ordering: Stable chronological sort, deterministic at equal timestamps
+
+**Handed off to:** Ripley (Frontend) for modal integration

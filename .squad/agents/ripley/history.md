@@ -51,6 +51,7 @@ From Dallas decision: Failure detection is a real-time monitoring state machine,
 - 2026-03-27: Failure detection is live monitoring, not historical audit. Modal is the right interaction depth; no timeline needed.
 - 2026-03-27: Persisted failure-detection history now belongs in the modal-first drill-down, not the card body. Frontend path is `apiClient.getFailureDetectionHistory()` → `useFailureDetectionHistory()` → `FailureDetectionStatusModal.tsx`, where persisted incidents are merged with live SignalR incidents via `features/printers/utils/failure-detection-incidents.ts` so operators see fresh alerts plus honest recent history.
 - 2026-03-27: `FailureDetectionMonitoringSummary.tsx` should stay live-and-action focused. Keep card surfaces centered on current coverage, last result, and operator action; move multi-incident history detail into the modal so cards do not imply durable timeline storage.
+- 2026-03-27: The best v1 print-session timeline lives inside `FailureDetectionStatusModal.tsx`, not on a separate page. Frontend can already assemble it from persisted/live `FailureDetectionEvent.jobId` context plus `apiClient.getAnalyticsJobStateHistory()` rendered through `PrintSessionTimeline.tsx`, while incidents without `jobId` should stay in the incident list with an explicit limitation message.
 
 ## 2026-03-27: Failure Detection UX — Scope Clarification (Cross-Agent)
 
@@ -102,3 +103,33 @@ Failure detection UX scope clarified: Badge + modal pattern is recommended. No t
 **Architectural note:** Modal-first design keeps the feature scoped. Backend persists incidents; frontend merges with live events in the drill-down modal. Cards stay lean and live-focused.
 
 **Decisions merged:** #9 (backend persistence), #10 (frontend integration)
+
+## Session: Print Session Timeline v1 Frontend — Complete (2026-03-27)
+
+**Role:** Frontend implementation lead  
+**Status:** COMPLETE — All artifacts delivered, tests pass
+
+### Work Completed
+
+- **Integration:** Timeline tab embedded in `FailureDetectionStatusModal.tsx`
+- **Workflow:** Use latest incident's `jobId` to reconstruct session context
+- **UX:** Chronological rendering of mixed event types (state_change + failure_incident)
+- **Fallback:** Plain message "Timeline unavailable for this record" when incident lacks jobId
+- **Tests:** 3/3 focused component tests PASS
+- **Build:** Production React build passes, ESLint clean, 0 errors
+
+### Orchestration Log
+
+Published: `.squad/orchestration-log/20260326-031539-ripley.md`
+
+### Key Design Decision
+
+**Timeline stays inside modal; no standalone page.** Modal-first design keeps printer card live/current and timeline contextual to incident drill-down.
+
+### Test Coverage
+
+- Chronological rendering of mixed event types ✅
+- Auto-pause and snapshot affordances displayed ✅
+- Empty state handling ✅
+
+**Handed off to:** Kane for validation gate

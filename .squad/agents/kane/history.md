@@ -51,6 +51,8 @@ Treat Obico self-hosted compatibility as a two-layer backend regression seam:
 - 2026-03-25: The highest-signal reachability coverage is the trio I validated here: `src/tests/Farm.Web.Api.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs` for GET-first recovery, `src/tests/Farm.Web.Api.Tests/Controllers/ObicoServerControllerTests.cs` for create/validation alignment, and `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx` for the operator-facing private-snapshot message and snapshot link.
 
 - 2026-03-26: Persisted failure-detection history is now covered by a focused backend triad: `FailureDetectionIncidentHistoryServiceTests` for record/query rules, `FailureDetectionControllerTests` for authenticated `/api/failure-detection/history` retrieval and printer filtering, and `PrintFailureMonitorPersistenceTests` for the monitor-service persistence+broadcast seam using a direct private-method invocation with real SQLite.
+- 2026-03-27: The current print-session timeline slice is split across two contracts: backend exposes composed sessions at `/api/printers/{printerId}/session-timeline`, while frontend `PrintSessionTimeline` still composes local incident rows on top of `getAnalyticsJobStateHistory(jobId)`. QA should treat that API/UI mismatch as a regression seam until one contract wins.
+- 2026-03-27: The smallest coherent regression gate for session-timeline v1 is four pieces: `PrinterSessionTimelineServiceTests` for event composition and session ordering, `PrinterSessionTimelineControllerTests` for endpoint reachability/404 behavior, `PrintSessionTimeline.test.tsx` for chronological mixed-row rendering, and the existing incident-history tests because failure events still enter the timeline through `FailureDetectionIncident`.
 
 ## 2026-03-26: Failure Detection Incident History Test Coverage & QA Gate → APPROVED
 
@@ -81,3 +83,42 @@ Designed and validated focused test coverage for failure-detection incident hist
 
 ---
 
+## Session: Print Session Timeline v1 QA Validation — Complete (2026-03-27)
+
+**Role:** QA lead, validation gate designer  
+**Status:** COMPLETE — All 41 tests PASS, no regressions
+
+### Work Completed
+
+- **Service tests:** 6/6 PASS (merge logic, orphan incidents, ordering, take limiting)
+- **Controller tests:** 2/2 PASS (success + 404 scenarios)
+- **Component tests:** 3/3 PASS (chronological rendering, affordances, empty state)
+- **Regression suites:** 21/21 backend + 9/9 frontend PASS (failure-history intact)
+- **Total:** 41/41 PASS
+
+### Orchestration Log
+
+Published: `.squad/orchestration-log/20260326-031539-kane.md`
+
+### Validation Strategy
+
+Focused four-part gate instead of broad test reruns:
+1. Backend service composition (merge logic)
+2. Backend controller (endpoint contract)
+3. Frontend component (UX rendering)
+4. Regression coverage (failure-history suites)
+
+### Critical Seams Verified
+
+- API/UI contract (printer-scoped endpoint consumed by job-scoped hook) ✅
+- Session boundary leakage (incidents isolated by job) ✅
+- Duplicate rows (merge logic prevents doubles) ✅
+- Timestamp ordering (stable sort at equal times) ✅
+
+### Final Status
+
+- Build: ✅ Clean
+- Format: ✅ dotnet format + ESLint clean
+- Risk: ✅ Minimal; all seams covered
+
+**Session outcome:** Print Session Timeline v1 validated and ready for merge.

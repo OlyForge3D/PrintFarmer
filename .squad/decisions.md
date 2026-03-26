@@ -3457,3 +3457,147 @@ Persisted incident history is available from `GET /api/failure-detection/history
 Operators can now navigate to a printer's detail modal and see both live failure-detection state and recent persisted incidents. Cards remain uncluttered with live-only focus.
 
 ---
+
+## 10. Print Session Timeline v1 — Scope Definition (APPROVED)
+
+**Date:** 2026-03-27  
+**Author:** Dallas (Lead)  
+**Status:** APPROVED — Implementation Complete  
+**Urgency:** Medium
+
+### Decision
+
+Minimal print-session timeline v1 using only existing persisted data streams (`JobStateHistory` + `FailureDetectionIncident`) with no new schema.
+
+### Why
+
+- Both data sources already exist and are persisted.
+- A "print session" IS a PrintJob; JobId is the primary key.
+- Simple UNION of state transitions and failure incidents satisfies v1 UX needs.
+- Avoids premature generalization into an audit subsystem.
+
+### Scope
+
+**Single endpoint:** `GET /api/printers/{printerId}/session-timeline`
+
+**Event types:**
+- State transitions from `JobStateHistory` (FromState, ToState, duration)
+- Failure incidents from `FailureDetectionIncident` (confidence, auto-pause, snapshot)
+
+**UX placement:** Embedded in `FailureDetectionStatusModal.tsx`; no standalone page.
+
+### What Stays Out of V1
+
+- Thermal anomaly events (no persistence)
+- Manual operator notes (no schema)
+- Printer-level cross-job timeline (already exists separately)
+- Pagination/infinite scroll (rare for <20 events per job)
+
+### Implementation Status
+
+- **Backend:** ✅ Complete. `PrinterSessionTimelineService` merges both streams.
+- **Frontend:** ✅ Complete. Timeline tab in failure-detection modal reconstructs session context.
+- **Tests:** ✅ 41/41 PASS (service, controller, component, regression suites).
+- **Build:** ✅ Clean, no new errors.
+
+### Trade-offs Acknowledged
+
+- **No new schema:** Limits v1 to events already persisted. Future timeline features (thermal alerts, manual notes) need their own entities.
+- **Job-scoped only:** Printer-level timeline is a different UX pattern.
+- **No pagination:** Assumes <50 events per job; add later if needed.
+
+---
+
+## 11. Session Timeline v1 — QA Validation Gate (APPROVED)
+
+**Date:** 2026-03-27  
+**Author:** Kane (QA)  
+**Status:** APPROVED — Validation Complete  
+**Urgency:** High
+
+### Decision
+
+Guard print-session timeline v1 with a focused four-part validation gate instead of broad test reruns.
+
+### Validation Strategy
+
+1. **Backend Service Tests** (`PrinterSessionTimelineServiceTests`) — 6 tests
+   - Merge logic, orphan incident attachment, ordering, take limiting
+   - Status: ✅ 6/6 PASS
+
+2. **Backend Controller Tests** (`PrinterSessionTimelineControllerTests`) — 2 tests
+   - Success + 404 scenarios
+   - Status: ✅ 2/2 PASS
+
+3. **Frontend Component Tests** (`PrintSessionTimeline.test.tsx`) — 3 tests
+   - Chronological rendering, auto-pause/snapshot affordances, empty state
+   - Status: ✅ 3/3 PASS
+
+4. **Regression Coverage** — Failure-incident suites
+   - Backend: `FailureDetectionIncidentHistoryServiceTests` ✅ 21/21 PASS
+   - Frontend: Failure-history tests ✅ 9/9 PASS
+
+### Critical Seams Monitored
+
+- API/UI contract drift (printer-scoped endpoint vs job-scoped hook consumption)
+- Session boundary leakage (incidents bleeding across adjacent jobs)
+- Duplicate incident rows (live/persisted payload divergence)
+- Timestamp ordering (stable sorting at equal timestamps)
+
+### Validation Status
+
+- **Total tests:** 41/41 PASS
+- **Build:** ✅ Clean
+- **Format:** ✅ dotnet format + ESLint clean
+- **Production build:** ✅ React passes
+
+### Why This Gate
+
+Smallest honest validation strategy that proves timeline composition works without unnecessary broad reruns. Highest-risk seam (contract drift) covered by focused tests.
+
+---
+
+## 12. Print Session Timeline v1 — Frontend Placement (APPROVED)
+
+**Date:** 2026-03-27  
+**Author:** Ripley (Frontend)  
+**Status:** APPROVED — Implementation Complete  
+**Urgency:** Medium
+
+### Decision
+
+Keep print-session timeline embedded in `FailureDetectionStatusModal.tsx`. Do not create a standalone decorative history page.
+
+### Why
+
+Timeline value is contextual to incident drill-down, not free-standing. Modal-first design:
+1. Printer card remains live/current (no noise)
+2. Modal carries drill-down context
+3. Timeline reconstructs session context only when `jobId` linkage is real
+
+### Operator Workflow
+
+1. User views printer card with live status
+2. Clicks to open failure-detection modal
+3. Recent incident rows displayed
+4. When incident has `jobId`, timeline tab shows session context (queue/start/failure/pause)
+5. If incident has no `jobId`, plainly state "Timeline unavailable for this record"
+
+### Technical Implementation
+
+- Use latest incident's `jobId` to drive session reconstruction
+- Call existing `GET /api/job-queue-analytics/jobs/{jobId}/state-history` hook
+- Merge failure incidents for same job
+- Render chronologically with distinct visual treatment
+
+### Build & Test Status
+
+- **Component tests:** ✅ 3/3 PASS
+- **ESLint:** ✅ 0 errors
+- **Production build:** ✅ React passes
+
+### Operational Impact
+
+Operators can drill down from failure-detection modal into session context without leaving the modal or navigating to a separate page. Timeline adds value only when job linkage is real.
+
+---

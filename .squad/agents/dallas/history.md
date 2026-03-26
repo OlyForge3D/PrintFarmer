@@ -225,3 +225,88 @@ Early entries (pre-2026-03-25) summarized for maintainability. See decisions-arc
 **Outcome:** ✅ Recommendation ready for team decision
 
 Analyzed the failure-detection UX design. Recommended AGAINST timeline view. Failure detection is a **live monitoring state machine**, not a historical audit log. No persistence layer exists. Modal + badge pattern is fit-for-purpose. Scope protection for Ripley (Frontend) and Lambert (Backend). Decision ready for team approval.
+
+
+## Session: Print Session Timeline v1 — Scope Definition (2026-03-27)
+
+**Role:** Lead decision authority  
+**Status:** ✅ DECISION DOCUMENTED — ready for implementation  
+**Urgency:** Medium (unblocks Lambert + Ripley)
+
+### Work Completed
+
+**Analysis:**
+- Reviewed existing persisted data: `JobStateHistory` (state transitions) and `FailureDetectionIncident` (just completed)
+- Both already have `JobId` foreign key — clean join point
+- Existing job-level endpoint: `GET /api/analytics/jobs/{jobId}/state-history`
+- Existing timeline endpoint: `GET /api/analytics/timeline` (cross-job, filterable)
+
+**Key Finding:**
+A "print session" IS a PrintJob. The JobId anchors both state transitions and failure incidents. No new schema needed.
+
+### Decision
+
+**V1 print-session timeline = UNION of two already-persisted event streams:**
+1. `JobStateHistory` → state_change events
+2. `FailureDetectionIncident` → failure_incident events
+
+**Single new endpoint:**
+`GET /api/jobs/{jobId}/session-timeline` → `List<SessionTimelineEventDto>`
+
+**UX integration:** Add timeline to existing job detail view (contextual, not standalone page).
+
+**Out of scope for V1:**
+- Thermal anomaly events (no persistence layer)
+- Manual operator notes (would require new entity)
+- Paginated timeline (overkill for <50 events per job)
+- Timeline graphs/visualizations
+
+### Sequencing
+
+**Backend first (Lambert):**
+1. Create `SessionTimelineEventDto`
+2. Create `SessionTimelineService` (merge logic)
+3. Expose endpoint
+4. Unit tests
+
+**Frontend second (Ripley):**
+1. Add TypeScript type
+2. Add `useSessionTimeline(jobId)` hook
+3. Add timeline component to job detail view
+
+### Decision Document
+
+- File: `.squad/decisions/inbox/dallas-print-session-timeline-v1.md` — Full scope, API surface, trade-offs, DoD
+
+## Learnings
+
+- **"Print session" = PrintJob:** Don't invent a new entity when the existing model already serves as the anchor. Job state history and failure incidents both link via JobId.
+- **UNION before JOIN:** When multiple event streams need to appear in a unified timeline, prefer simple UNION-style merge (query both, sort by timestamp) over complex denormalized schemas.
+- **Contextual UX integration:** Timelines work best when attached to the entity they describe (job detail view) rather than as standalone pages disconnected from operator workflow.
+- **Backend-first sequencing for data UX:** When the frontend needs new API data, sequence backend completion first so frontend work has a stable contract.
+
+## Session: Print Session Timeline v1 — Complete (2026-03-27)
+
+**Role:** Lead, decision publisher, validation overseer  
+**Status:** COMPLETE — All artifacts delivered, tests pass, no new schema
+
+### Work Completed
+
+- **Decision finalized:** V1 = UNION of `JobStateHistory` + `FailureDetectionIncident`
+- **Scope locked:** Single endpoint, no new schema, modal-first UX
+- **Sequencing delivered:** Backend first (Lambert), frontend second (Ripley)
+- **Handoff validated:** Lambert completed backend, Ripley completed frontend integration, Kane validated gate
+
+### Orchestration Log
+
+Published: `.squad/orchestration-log/20260326-031539-dallas.md`
+
+### Session Complete
+
+- Backend endpoint: ✅ `GET /api/printers/{printerId}/session-timeline`
+- Frontend modal integration: ✅ Timeline tab in `FailureDetectionStatusModal.tsx`
+- Tests: ✅ 41/41 PASS (service, controller, component, regression)
+- Build: ✅ Clean, 0 errors
+- Format: ✅ dotnet format + ESLint clean
+
+**Next:** Merge to main and resolve CI dependencies if any.
