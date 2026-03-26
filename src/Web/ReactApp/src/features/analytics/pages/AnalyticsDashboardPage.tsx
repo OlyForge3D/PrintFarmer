@@ -19,15 +19,19 @@ import { ExportMenu } from '../components/ExportMenu';
 import { PredictiveAlertsPanel } from '../components/PredictiveAlertsPanel';
 import { CorrelationChartsSection } from '../components/CorrelationChartsSection';
 import { useMaintenanceForecast } from '../hooks/usePredictiveAnalytics';
+import type { TimePeriodFilterValue } from '@/common/components/ui/timePeriodOptions';
 
 export const AnalyticsDashboardPage: React.FC = () => {
-  const [days, setDays] = useState<number | undefined>(30);
+  const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
+  const days = period.type === 'preset' ? period.days : undefined;
+  const startDate = period.type === 'custom' ? period.startDate : undefined;
+  const endDate = period.type === 'custom' ? period.endDate : undefined;
 
-  const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days);
-  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365);
-  const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365);
-  const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days);
-  const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days);
+  const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days, startDate, endDate);
+  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365, startDate, endDate);
+  const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365, startDate, endDate);
+  const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days, startDate, endDate);
+  const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days, startDate, endDate);
   const { data: forecasts = [] } = useMaintenanceForecast(days);
 
   return (
@@ -37,7 +41,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
       icon={TrendingUpIcon}
       actions={
         <div className="flex items-center gap-3">
-          <TimePeriodFilter value={days} onChange={setDays} />
+          <TimePeriodFilter value={period} onChange={setPeriod} />
           <ExportMenu days={days} />
         </div>
       }

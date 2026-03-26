@@ -3606,9 +3606,16 @@ export class ApiClient {
   }
 
   // ============ Cost Tracking API methods ============
-  async getCostSummary(days?: number): Promise<import("@/types/api").CostSummary> {
+  async getCostSummary(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostSummary> {
+    const params: Record<string, string | number> = {};
+    if (startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    } else if (days !== undefined) {
+      params.days = days;
+    }
     const response = await this.client.get('/statistics/costs/summary', {
-      params: days !== undefined ? { days } : undefined,
+      params: Object.keys(params).length > 0 ? params : undefined,
     });
     return response.data;
   }
@@ -3618,16 +3625,30 @@ export class ApiClient {
     return response.data;
   }
 
-  async getCostsByPrinter(days?: number): Promise<import("@/types/api").CostByPrinter[]> {
+  async getCostsByPrinter(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostByPrinter[]> {
+    const params: Record<string, string | number> = {};
+    if (startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    } else if (days !== undefined) {
+      params.days = days;
+    }
     const response = await this.client.get('/statistics/costs/by-printer', {
-      params: days !== undefined ? { days } : undefined,
+      params: Object.keys(params).length > 0 ? params : undefined,
     });
     return response.data;
   }
 
-  async getCostsByMaterial(days?: number): Promise<import("@/types/api").CostByMaterial[]> {
+  async getCostsByMaterial(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostByMaterial[]> {
+    const params: Record<string, string | number> = {};
+    if (startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    } else if (days !== undefined) {
+      params.days = days;
+    }
     const response = await this.client.get('/statistics/costs/by-material', {
-      params: days !== undefined ? { days } : undefined,
+      params: Object.keys(params).length > 0 ? params : undefined,
     });
     return response.data;
   }

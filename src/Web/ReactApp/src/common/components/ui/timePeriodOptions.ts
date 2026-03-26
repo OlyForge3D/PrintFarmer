@@ -10,3 +10,7 @@ export const TIME_PERIOD_OPTIONS: readonly TimePeriodOption[] = [
   { label: '1 year', value: 365 },
   { label: 'All time', value: undefined },
 ] as const;
+
+export type TimePeriodFilterValue =
+  | { type: 'preset'; days: number | undefined }
+  | { type: 'custom'; startDate: string; endDate: string };

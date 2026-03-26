@@ -10,12 +10,17 @@ import {
   useCostsByPrinter,
   useCostsByMaterial,
 } from '@/common/hooks/useApi';
+import type { TimePeriodFilterValue } from '@/common/components/ui/timePeriodOptions';
 
 export const CostDashboardPage: React.FC = () => {
-  const [days, setDays] = useState<number | undefined>(30);
-  const { data: summary, isLoading: summaryLoading, error: summaryError } = useCostSummary(days);
-  const { data: printerCosts, isLoading: printerLoading, error: printerError } = useCostsByPrinter(days);
-  const { data: materialCosts, isLoading: materialLoading, error: materialError } = useCostsByMaterial(days);
+  const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
+  const days = period.type === 'preset' ? period.days : undefined;
+  const startDate = period.type === 'custom' ? period.startDate : undefined;
+  const endDate = period.type === 'custom' ? period.endDate : undefined;
+
+  const { data: summary, isLoading: summaryLoading, error: summaryError } = useCostSummary(days, startDate, endDate);
+  const { data: printerCosts, isLoading: printerLoading, error: printerError } = useCostsByPrinter(days, startDate, endDate);
+  const { data: materialCosts, isLoading: materialLoading, error: materialError } = useCostsByMaterial(days, startDate, endDate);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -103,7 +108,7 @@ export const CostDashboardPage: React.FC = () => {
       title="Cost Analytics"
       subtitle="Track print job costs and analyze spending patterns"
       icon={TrendingUpIcon}
-      actions={<TimePeriodFilter value={days} onChange={setDays} />}
+      actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
     >
       <div className="space-y-6">
         {/* Summary Cards */}

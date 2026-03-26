@@ -51,6 +51,7 @@ export interface QueueJobsTableProps {
   onPriority?: (jobId: string, priority: number) => void;
   onEdit?: (jobId: string) => void;
   onDispatch?: (jobId: string) => void;
+  onSchedule?: (jobId: string) => void;
   onReorder?: (moves: { jobId: string; newPosition: number }[]) => void;
 }
 
@@ -67,6 +68,7 @@ export function QueueJobsTable({
   onPriority,
   onEdit,
   onDispatch,
+  onSchedule,
   onReorder,
 }: QueueJobsTableProps) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -376,6 +378,19 @@ export function QueueJobsTable({
                       ) : (
                         "Start Print"
                       )}
+                    </Button>
+                  )}
+                  {(status === "Queued" || status === "Assigned") && onSchedule && (
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSchedule(jobId);
+                      }}
+                      variant="subtle"
+                      size="sm"
+                      title="Schedule this job for a specific time"
+                    >
+                      Schedule
                     </Button>
                   )}
                   {status === "Printing" && (

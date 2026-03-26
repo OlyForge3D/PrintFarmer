@@ -14,21 +14,26 @@ import { JobsOverTimeChart } from '../components/JobsOverTimeChart';
 import { CostOverTimeChart } from '../components/CostOverTimeChart';
 import { FilamentByMaterialChart } from '../components/FilamentByMaterialChart';
 import { PrinterUtilizationChart } from '../components/PrinterUtilizationChart';
+import type { TimePeriodFilterValue } from '@/common/components/ui/timePeriodOptions';
 
 export const StatisticsPage: React.FC = () => {
- const [days, setDays] = useState<number | undefined>(30);
- const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days);
- const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365);
- const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365);
- const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days);
- const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days);
+ const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
+ const days = period.type === 'preset' ? period.days : undefined;
+ const startDate = period.type === 'custom' ? period.startDate : undefined;
+ const endDate = period.type === 'custom' ? period.endDate : undefined;
+
+ const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days, startDate, endDate);
+ const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365, startDate, endDate);
+ const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365, startDate, endDate);
+ const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days, startDate, endDate);
+ const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days, startDate, endDate);
 
  return (
  <PageTemplate
  title="Print Statistics"
  subtitle="Track print jobs, costs, and printer utilization"
  icon={ChartIcon}
- actions={<TimePeriodFilter value={days} onChange={setDays} />}
+ actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
  >
  <div className="space-y-6">
  {/* KPI Cards */}

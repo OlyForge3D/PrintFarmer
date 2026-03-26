@@ -49,7 +49,7 @@ describe('CostDashboardPage', () => {
     render(<CostDashboardPage />);
     const btn30 = screen.getByRole('button', { name: '30 days' });
     expect(btn30).toHaveAttribute('aria-pressed', 'true');
-    expect(mockUseCostSummary).toHaveBeenCalledWith(30);
+    expect(mockUseCostSummary).toHaveBeenCalledWith(30, undefined, undefined);
   });
 
   it('passes days parameter to all three hooks when filter changes', async () => {
@@ -57,9 +57,9 @@ describe('CostDashboardPage', () => {
     render(<CostDashboardPage />);
 
     await user.click(screen.getByText('7 days'));
-    expect(mockUseCostSummary).toHaveBeenCalledWith(7);
-    expect(mockUseCostsByPrinter).toHaveBeenCalledWith(7);
-    expect(mockUseCostsByMaterial).toHaveBeenCalledWith(7);
+    expect(mockUseCostSummary).toHaveBeenCalledWith(7, undefined, undefined);
+    expect(mockUseCostsByPrinter).toHaveBeenCalledWith(7, undefined, undefined);
+    expect(mockUseCostsByMaterial).toHaveBeenCalledWith(7, undefined, undefined);
   });
 
   it('passes undefined for All time selection', async () => {
@@ -67,9 +67,9 @@ describe('CostDashboardPage', () => {
     render(<CostDashboardPage />);
 
     await user.click(screen.getByText('All time'));
-    expect(mockUseCostSummary).toHaveBeenCalledWith(undefined);
-    expect(mockUseCostsByPrinter).toHaveBeenCalledWith(undefined);
-    expect(mockUseCostsByMaterial).toHaveBeenCalledWith(undefined);
+    expect(mockUseCostSummary).toHaveBeenCalledWith(undefined, undefined, undefined);
+    expect(mockUseCostsByPrinter).toHaveBeenCalledWith(undefined, undefined, undefined);
+    expect(mockUseCostsByMaterial).toHaveBeenCalledWith(undefined, undefined, undefined);
   });
 
   it('renders KPI cards with summary data', () => {

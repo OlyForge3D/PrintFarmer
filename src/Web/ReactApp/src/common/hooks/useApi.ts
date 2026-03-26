@@ -121,10 +121,10 @@ export const queryKeys = {
   notifications: ['notifications'] as const,
   unreadCount: ['notifications', 'unread-count'] as const,
   notificationPreferences: ['notifications', 'preferences'] as const,
-  costSummary: (days?: number) => ['costs', 'summary', days] as const,
+  costSummary: (days?: number, startDate?: string, endDate?: string) => ['costs', 'summary', days, startDate, endDate] as const,
   costs: ['costs'] as const,
-  costsByPrinter: (days?: number) => ['costs', 'by-printer', days] as const,
-  costsByMaterial: (days?: number) => ['costs', 'by-material', days] as const,
+  costsByPrinter: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-printer', days, startDate, endDate] as const,
+  costsByMaterial: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-material', days, startDate, endDate] as const,
   costOverTime: ['costs', 'over-time'] as const,
   scheduledJobs: ['scheduled-jobs'] as const,
   scheduledJob: (jobId: string) => ['scheduled-jobs', jobId] as const,
@@ -1655,28 +1655,28 @@ export function useDeleteNotification() {
 
 // ============ Cost Tracking Hooks ============
 
-export function useCostSummary(days?: number, options?: QueryOptions<import("@/types/api").CostSummary>) {
+export function useCostSummary(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostSummary>) {
   return useQuery({
-    queryKey: queryKeys.costSummary(days),
-    queryFn: () => apiClient.getCostSummary(days),
+    queryKey: queryKeys.costSummary(days, startDate, endDate),
+    queryFn: () => apiClient.getCostSummary(days, startDate, endDate),
     staleTime: 300_000, // 5 minutes - cost data is relatively stable
     ...options,
   });
 }
 
-export function useCostsByPrinter(days?: number, options?: QueryOptions<import("@/types/api").CostByPrinter[]>) {
+export function useCostsByPrinter(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostByPrinter[]>) {
   return useQuery({
-    queryKey: queryKeys.costsByPrinter(days),
-    queryFn: () => apiClient.getCostsByPrinter(days),
+    queryKey: queryKeys.costsByPrinter(days, startDate, endDate),
+    queryFn: () => apiClient.getCostsByPrinter(days, startDate, endDate),
     staleTime: 300_000, // 5 minutes
     ...options,
   });
 }
 
-export function useCostsByMaterial(days?: number, options?: QueryOptions<import("@/types/api").CostByMaterial[]>) {
+export function useCostsByMaterial(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostByMaterial[]>) {
   return useQuery({
-    queryKey: queryKeys.costsByMaterial(days),
-    queryFn: () => apiClient.getCostsByMaterial(days),
+    queryKey: queryKeys.costsByMaterial(days, startDate, endDate),
+    queryFn: () => apiClient.getCostsByMaterial(days, startDate, endDate),
     staleTime: 300_000, // 5 minutes
     ...options,
   });

@@ -14,6 +14,7 @@ import { QueueJobsTable } from "../components/QueueJobsTable";
 import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
+import { ScheduleModal } from "@/features/scheduling/components/ScheduleModal";
 import { apiClient } from "@/services/api";
 import { printerSignalRService } from "@/services/printer-signalr";
 import { usePageTour } from "@/common/hooks/usePageTour";
@@ -147,6 +148,7 @@ export function PrintQueueDashboardPage() {
   const [dispatchUploadProgressByJobId, setDispatchUploadProgressByJobId] = useState<
     Record<string, DispatchUploadProgressDto>
   >({});
+  const [scheduleModalJobId, setScheduleModalJobId] = useState<string | null>(null);
 
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
     queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter],
@@ -470,6 +472,7 @@ export function PrintQueueDashboardPage() {
                   onAbortPrint={handleAbortPrint}
                   onPriority={handlePriorityChange}
                   onDispatch={handleDispatchJob}
+                  onSchedule={(jobId) => setScheduleModalJobId(jobId)}
                   onReorder={handleReorder}
                   onEdit={(jobId) => {
                     setSelectedJobId(jobId);
@@ -523,6 +526,13 @@ export function PrintQueueDashboardPage() {
           onSave={handleJobDetailsSaved}
         />
       )}
+
+      {/* Schedule Modal */}
+      <ScheduleModal
+        isOpen={scheduleModalJobId !== null}
+        onClose={() => setScheduleModalJobId(null)}
+        jobId={scheduleModalJobId || undefined}
+      />
     </PageTemplate>
   );
 }
