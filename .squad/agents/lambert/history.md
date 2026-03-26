@@ -64,6 +64,7 @@ From Dallas decision: Failure detection is a real-time monitoring state machine 
 ## Learnings
 
 - 2026-03-26: `/api/failure-detection/status` already exposes the operator-facing monitoring reason/source/target/outcome contract. For richer PrintFarmer-owned UX, the safest backend addition is optional `jobName`/`fileName` on `FailureDetectionPrinterStatusDto` and SignalR `FailureDetectionDto`, sourced from `IPrinterStatusCacheReader` with queued-job fallback in `PrintFailureMonitorService`.
+- 2026-03-26: Persisted failure-detection history landed as a narrow incident slice, not a generic audit system: `FailureDetectionIncident` stores only detected failures, `PrintFailureMonitorService` records them through scoped `IFailureDetectionIncidentHistoryService`, and `GET /api/failure-detection/history?printerId=&take=` returns newest-first `FailureDetectionDto` rows with optional persisted `id`.
 - 2026-03-25: Upstream `moonraker-obico` is a co-located agent, not just an ML client. It links to Obico with a server auth token, talks directly to Moonraker with API-key/WebSocket access, captures JPEGs locally, and can tunnel HTTP/WebSocket traffic plus Janus-based webcam streaming.
 - 2026-03-27: PrintFailureMonitorService updates in-memory status every 30s scan cycle. No persistence layer = no historical queries, no timeline = no schema change burden.
 - 2026-03-25: PrintFarmer’s failure-detection path is central-server driven. `PrintFailureMonitorService` selects the first enabled camera with a `SnapshotUrl` (or legacy `Printer.CameraSnapshotUrl`) and passes that URL to `ObicoFailureDetectionService`; stream-only cameras are currently ignored.
@@ -188,11 +189,29 @@ Implemented end-to-end backend persistence layer for failure-detection incident 
 - `src/migrations/Farm.Migrations.SqlServer/` (equivalent SQL Server)
 
 **Validation:**
-- ✅ Clean rebuild (dotnet build)
-- ✅ Full API test suite passing
-- ✅ Focused backend triad passing (Kane's QA gate validation)
+- ✅ PostgreSQL + SQL Server migration projects build clean
+- ✅ Farm.Web.Api.Tests build clean
+- ✅ Focused failure-detection backend tests passing (37/37)
 
 **Next:** Ripley integrates frontend UX. Backend ready for production queries.
 
 ---
 
+## 2026-03-26: Persisted Failure-Detection Incident History → LANDED
+
+**Role:** Backend Dev  
+**Status:** ✅ Complete — Orchestration log: lambert-failure-detection-incident-history.md
+
+- Created `FailureDetectionIncident` entity with focused field set (printerId, jobId, jobName, fileName, confidence, detectedAt, snapshotUrl, autoPaused)
+- `PrintFailureMonitorService` persists real incidents (not every scan)
+- New API endpoint: `GET /api/failure-detection/history?printerId={guid?}&take={int?}`
+- Backward-compatible contract—`FailureDetectionDto` carries optional persisted `id`
+
+**Validation:**
+- Focused backend triad: 100% passing (persistence, controller, monitor seam)
+- Edge cases: empty history, pagination, date boundaries ✅
+- Full test suite rebuild: no regressions
+
+**Guardrails:** Do not persist every scan; no acknowledge/workflow state yet; timeline page deferred; retention policy is future work.
+
+**Decisions merged:** #9

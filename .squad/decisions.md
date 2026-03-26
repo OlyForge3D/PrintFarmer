@@ -3369,3 +3369,91 @@ Enables fast validation of failure-history changes without re-running the entire
 
 ---
 
+
+## 9. Failure Detection Incident History — Backend Persistence (APPROVED)
+
+**Date:** 2026-03-26  
+**Author:** Lambert (Backend)  
+**Status:** APPROVED — Implementation Complete  
+**Urgency:** High (closes persisted history foundation)
+
+### Decision
+
+Persist only real failure-detection incidents in a narrow backend-owned history slice.
+
+### Why
+
+- The next honest backend step after in-session monitoring UX is recent persisted incident history.
+- We need enough storage for a future timeline/history UI without inventing a generalized audit/event system.
+- Operators care about the failure moment and its print context, not every healthy monitoring poll.
+
+### Implemented Shape
+
+- New entity: `FailureDetectionIncident`
+- Writer: `PrintFailureMonitorService` resolves scoped `IFailureDetectionIncidentHistoryService`
+- Read API: `GET /api/failure-detection/history?printerId={guid?}&take={int?}`
+- Shared contract: `FailureDetectionDto` now carries optional persisted `id`
+
+Persisted fields:
+- `printerId`
+- `jobId` (optional)
+- `jobName`
+- `fileName`
+- `confidence`
+- `detectedAt`
+- `snapshotUrl`
+- `autoPaused`
+
+### Guardrails
+
+- Do not persist every healthy scan.
+- Do not build acknowledge/workflow state yet.
+- Do not add a standalone timeline page until the frontend is ready to consume this slice.
+- Keep retention/generalized audit questions as future work.
+
+### Test Evidence
+
+- Backend triad (persistence, controller, monitor seam): 100% passing
+- Edge cases: empty history, pagination, date boundaries ✅
+
+### Operational Impact
+
+Persisted incident history is now available for frontend consumption. Enables drill-down modal and future timeline features.
+
+---
+
+## 10. Failure Detection Incident History — Frontend UX Integration (APPROVED)
+
+**Date:** 2026-03-26  
+**Author:** Ripley (Frontend)  
+**Status:** APPROVED — Implementation Complete  
+**Urgency:** High (closes full user-facing feature)
+
+### Decision
+
+Persisted incident history is available from `GET /api/failure-detection/history`, kept in `FailureDetectionStatusModal.tsx` as the primary drill-down surface.
+
+### Why
+
+- Printer cards remain focused on live operator context (`FailureDetectionMonitoringSummary.tsx`): coverage state, latest result, and next action.
+- Live SignalR incidents are merged with persisted history in the modal so a just-detected failure still appears immediately even before the next history refresh.
+- Modal-first design prevents premature timeline scope creep.
+
+### Implementation
+
+- Modal loads persisted incidents on mount
+- Live `FailureDetected` SignalR events merged with history
+- Shared helper: `src/Web/ReactApp/src/features/printers/utils/failure-detection-incidents.ts`
+- Job/file context and snapshot links displayed alongside live state
+
+### Test Evidence
+
+- 23 targeted React integration tests passed ✅
+- `npm run build` succeeded (0 TypeScript errors)
+- `npm run lint` passed
+
+### Operational Impact
+
+Operators can now navigate to a printer's detail modal and see both live failure-detection state and recent persisted incidents. Cards remain uncluttered with live-only focus.
+
+---

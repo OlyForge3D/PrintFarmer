@@ -190,10 +190,15 @@ Why? The frontend can use this ID to:
 
 ### Failure Detection (Implemented)
 - **Service:** `PrintFailureMonitorService`
-- **Entity:** `FailureDetectionEvent`
-- **Endpoint:** `/api/failure-detection/history`
+- **Entity:** `FailureDetectionIncident`
+- **Endpoint:** `/api/failure-detection/history?printerId={guid?}&take={int?}`
 - **SignalR:** `FailureDetected` event on `PrinterHub`
-- **Reference:** `.squad/decisions/inbox/lambert-spaghetti-backend.md`
+- **Reference:** `.squad/decisions/inbox/lambert-failure-detection-incident-history.md`
+
+Current concrete slice keeps scope intentionally narrow:
+- Persist only actual failure incidents, not every healthy scan
+- Reuse operator-facing `jobName` / `fileName` context from `ResolveJobContext`
+- Return the same `FailureDetectionDto` shape for history queries, including optional persisted `id`
 
 ### Future Use Cases
 - **Maintenance Alerts:** Detect print bed leveling drift, nozzle wear, etc.

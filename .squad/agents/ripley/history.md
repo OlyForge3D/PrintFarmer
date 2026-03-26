@@ -49,6 +49,8 @@ From Dallas decision: Failure detection is a real-time monitoring state machine,
 - 2026-03-26: `useFailureDetectionAlert()` is now the frontend session-memory seam for failure incidents. It still exposes the transient 60-second `event`, but also keeps up to five recent `FailureDetected` SignalR events per printer so cards and modals can show session-level incident history without a backend history endpoint.
 - 2026-03-26: The operator-facing failure-detection pattern is now `header icon badge for compact state` + `card-level operational summary panel for live session context`. Compact and detailed printer cards both reuse `FailureDetectionMonitoringSummary.tsx`, while `FailureDetectionStatusModal.tsx` accepts `recentEvents` for richer drill-down.
 - 2026-03-27: Failure detection is live monitoring, not historical audit. Modal is the right interaction depth; no timeline needed.
+- 2026-03-27: Persisted failure-detection history now belongs in the modal-first drill-down, not the card body. Frontend path is `apiClient.getFailureDetectionHistory()` → `useFailureDetectionHistory()` → `FailureDetectionStatusModal.tsx`, where persisted incidents are merged with live SignalR incidents via `features/printers/utils/failure-detection-incidents.ts` so operators see fresh alerts plus honest recent history.
+- 2026-03-27: `FailureDetectionMonitoringSummary.tsx` should stay live-and-action focused. Keep card surfaces centered on current coverage, last result, and operator action; move multi-incident history detail into the modal so cards do not imply durable timeline storage.
 
 ## 2026-03-27: Failure Detection UX — Scope Clarification (Cross-Agent)
 
@@ -80,3 +82,23 @@ Failure detection UX scope clarified: Badge + modal pattern is recommended. No t
 - Pattern consistent across both card types reduces cognitive load
 
 **Known gap:** Long-term incident history remains a backend follow-up (descoped from current work)
+
+## 2026-03-26: Persisted Failure-Detection History → Modal Integration → LANDED
+
+**Role:** Frontend Dev  
+**Status:** ✅ Complete — Orchestration log: 2026-03-26T02-58-26Z-ripley.md
+
+- Loaded persisted failure-detection incidents from backend history endpoint in `FailureDetectionStatusModal.tsx`
+- Merged persisted history with live SignalR events so fresh incidents appear immediately
+- Shared utility `failure-detection-incidents.ts` handles the merge logic
+- Modal now displays job/file context and snapshot links from persisted records
+- Printer cards remain focused on live monitoring (coverage, latest result, action)
+
+**Validation:**
+- 23 targeted React tests passed
+- `npm run build` ✅ (0 TypeScript errors)
+- `npm run lint` ✅
+
+**Architectural note:** Modal-first design keeps the feature scoped. Backend persists incidents; frontend merges with live events in the drill-down modal. Cards stay lean and live-focused.
+
+**Decisions merged:** #9 (backend persistence), #10 (frontend integration)
