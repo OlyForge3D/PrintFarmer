@@ -45,9 +45,26 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 - `ObicoServerController` validation follows the same GET-first contract so admin validation and runtime analysis stay aligned.
 - Focused verification ended green: coordinator re-ran the Obico test slice and confirmed 6/6 passing.
 
+## 2026-03-27: Failure Detection Timeline Decision — NO PERSISTENCE LAYER NEEDED
+
+**Role:** Backend affected  
+**Status:** Recommendation from Dallas (Lead) — Ready for implementation
+
+From Dallas decision: Failure detection is a real-time monitoring state machine (in-memory `FailureDetectionPrinterStatusDto`), not a persisted historical audit log. Recommendation is to **NOT implement a timeline view**. Current in-memory snapshot suffices.
+
+**Next steps for Lambert:**
+- Current in-memory snapshot is sufficient; no persistence layer needed.
+- If future requirement for audit logging surfaces (security/compliance), that's a separate decision and data-model change.
+- See decision entry in `.squad/decisions.md` (entry 4) for full context and open questions.
+
+**Files:**
+- `src/infra/Services/FailureDetection/FailureDetectionMonitorStatus.cs` — In-memory DTO, sufficient as-is
+- No schema changes, no scan-history table needed
+
 ## Learnings
 
 - 2026-03-25: Upstream `moonraker-obico` is a co-located agent, not just an ML client. It links to Obico with a server auth token, talks directly to Moonraker with API-key/WebSocket access, captures JPEGs locally, and can tunnel HTTP/WebSocket traffic plus Janus-based webcam streaming.
+- 2026-03-27: PrintFailureMonitorService updates in-memory status every 30s scan cycle. No persistence layer = no historical queries, no timeline = no schema change burden.
 - 2026-03-25: PrintFarmer’s failure-detection path is central-server driven. `PrintFailureMonitorService` selects the first enabled camera with a `SnapshotUrl` (or legacy `Printer.CameraSnapshotUrl`) and passes that URL to `ObicoFailureDetectionService`; stream-only cameras are currently ignored.
 - 2026-03-25: The concrete backend gaps exposed by the plugin comparison are snapshot delivery and reachability, not full plugin parity: PrintFarmer needs a first-class proxy/upload path for private or authenticated webcams, printer-aware reachability validation, and aligned GET-fallback behavior between runtime and admin validation.
 - 2026-03-25: Moonraker auth handling is materially weaker than the upstream plugin. `moonraker-obico` fetches and uses Moonraker API keys for REST/WebSocket access, while PrintFarmer’s Moonraker client currently ignores `PrinterCredential` on camera-discovery and related paths.
