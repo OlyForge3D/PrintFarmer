@@ -280,8 +280,8 @@ describe('CompactPrinterCard monitoring badge', () => {
       />
     );
 
-    // Icon-only badge, no inline text
-    expect(screen.queryByText('Guarding')).not.toBeInTheDocument();
+    // Summary widget shows "Guarding" text; shield badge is icon-only with aria label
+    expect(screen.getAllByText('Guarding').length).toBeGreaterThanOrEqual(1);
     // Shield icon with proper aria label should be present
     expect(screen.getByLabelText('Failure detection guarding')).toBeTruthy();
     // Button should exist with tooltip
@@ -515,8 +515,8 @@ describe('DetailedPrinterCard monitoring badge', () => {
       />
     );
 
-    // Icon-only badge, no inline text
-    expect(screen.queryByText('Guarding')).not.toBeInTheDocument();
+    // Summary widget shows "Guarding" text; shield badge is icon-only with aria label
+    expect(screen.getAllByText('Guarding').length).toBeGreaterThanOrEqual(1);
     // Shield icon with proper aria label should be present
     expect(screen.getByLabelText('Failure detection guarding')).toBeTruthy();
     // Button should exist with tooltip

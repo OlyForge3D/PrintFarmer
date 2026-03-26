@@ -28,8 +28,8 @@ describe('FailureDetectionMonitoringSummary', () => {
       />
     );
 
-    expect(screen.getByText('Covered')).toBeInTheDocument();
-    expect(screen.getByText('OK')).toBeInTheDocument();
+    const guardingElements = screen.getAllByText('Guarding');
+    expect(guardingElements.length).toBe(2); // headline + badge
     expect(screen.getByText(/Last scan/)).toBeInTheDocument();
   });
 
@@ -175,8 +175,8 @@ describe('FailureDetectionMonitoringSummary', () => {
         />
       );
 
-      const coveredElements = screen.getAllByText('Covered');
-      expect(coveredElements.length).toBeGreaterThanOrEqual(1);
+      const guardingElements = screen.getAllByText('Guarding');
+      expect(guardingElements.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

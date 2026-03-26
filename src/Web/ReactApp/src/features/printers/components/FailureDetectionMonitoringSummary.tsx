@@ -8,6 +8,7 @@ import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/
 import {
   formatFailureDetectionTimestamp,
   getFailureDetectionAttentionContent,
+  getFailureDetectionStateLabel,
 } from '@/features/printers/utils/failureDetectionStatus';
 
 type FailureDetectionMonitoringSummaryVariant = 'compact' | 'detailed';
@@ -60,7 +61,7 @@ function getHeadline(
 ): string {
   if (latestIncident?.autoPaused) return 'Print auto-paused';
   if (latestIncident) return 'Review required';
-  if (status?.state === 'monitoring' && status.lastOutcome === 'healthy') return 'Covered';
+  if (status?.state === 'monitoring' && status.lastOutcome === 'healthy') return getFailureDetectionStateLabel('monitoring');
   if (status?.state === 'monitoring' && status.lastOutcome === 'failure') return 'Failure detected';
   if (status?.state === 'monitoring' && status.lastOutcome === 'error') return 'Scan failed';
   if (status?.state === 'misconfigured') return 'Setup needed';
@@ -172,7 +173,7 @@ export function FailureDetectionMonitoringSummary({
           variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
           size="sm"
         >
-          {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? 'OK' : 'Idle'}
+          {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : 'Idle'}
         </Badge>
         {needsAction && snapshotUrl && (
           <a
@@ -207,7 +208,7 @@ export function FailureDetectionMonitoringSummary({
                 variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
                 size="sm"
               >
-                {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? 'Covered' : 'Standby'}
+                {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : 'Standby'}
               </Badge>
             </div>
             <p className="mt-1 text-sm leading-snug text-pf-text-secondary">{summary}</p>
