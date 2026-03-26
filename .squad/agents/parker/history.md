@@ -106,3 +106,50 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 **Files:** Documented in decisions.md; orchestration logs (`2026-03-26T01-45-41Z-parker.md`).
 
+## 2026-03-26: Obico ML API Timeout Configuration Commit
+
+**Role:** Release engineer (Obico fork)  
+**Status:** ✅ Complete — Commit landed on obico-server release branch
+
+**Action:** Committed timeout configurability work to `/Users/jpapiez/s/obico-server` (Jeff's fork).
+
+**Commit Details:**
+- SHA: `56b37861a75b4a1082b272d2ecd64bbe4e5ad23a`
+- Message: `feat: make ml_api snapshot timeouts configurable via environment`
+- Files: ml_api/server.py, ml_api/Dockerfile, docker-compose.yml, docker-compose-dev.yml, docs/* (6 files, 81 insertions, 12 deletions)
+
+**Changes:**
+- Added `_get_float_env()` utility for validated float environment variable parsing with sensible defaults
+- Exposed four environment variables for timeout control:
+  - `ML_API_CONNECT_TIMEOUT_SECONDS` (default: 0.5s)
+  - `ML_API_READ_TIMEOUT_SECONDS` (default: 5s)
+  - `ML_API_GCS_CONNECT_TIMEOUT_SECONDS` (default: 10s)
+  - `ML_API_GCS_READ_TIMEOUT_SECONDS` (default: 30s)
+- Added `_get_request_timeout()` helper to select timeouts based on image source (GCS vs. standard URLs)
+- Removed unnecessary `curl` RUN step from Dockerfile (reduces image size and dependencies)
+- Updated docs with timeout configuration details
+
+**Context:** Resolves upstream limitation identified in prior investigation — users on slow/distant networks can now adjust timeouts without rebuilding the image. Workaround is now self-service via compose `.env` or Kubernetes ConfigMap.
+
+**Worktree:** Clean after commit. Branch is ahead of origin/release by 1 commit; not pushed (per instruction).
+
+
+## 2025-03-25: Obico Fork Commit — ML API Timeout Configurability
+
+**Timestamp:** 2025-03-25T19:08:12Z  
+**Task:** Commit Obico fork changes  
+**Repo:** /Users/jpapiez/s/obico-server  
+**Commit:** 56b37861a75b4a1082b272d2ecd64bbe4e5ad23a  
+
+### Work Completed
+
+- **Commit Message:** feat: make ml_api snapshot timeouts configurable via environment
+- **Scope:** ML API snapshot timeout configuration improvements
+- **Changes:** Timeout behavior now tunable per-environment via environment variables
+- **Documentation:** Updated ML API configuration guide
+- **Status:** ✅ Complete. Worktree clean, 1 commit ahead of origin/release.
+
+### Impact
+
+Improves operational reliability by allowing ML API timeout behavior to be tuned per-environment, reducing deployment friction and improving observability.
+

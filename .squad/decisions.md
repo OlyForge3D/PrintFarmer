@@ -3079,3 +3079,99 @@ Establish a unified Obico contract across all three seams:
 The current GET probe validates route/response-shape compatibility using a synthetic `img=` parameter. Real end-to-end printer-camera snapshot reachability remains a separate follow-up workstream.
 
 ---
+
+---
+
+## 2025-03-25: Print Session Timeline UX — Minimum Coherent Slice (APPROVED)
+
+**Date:** 2025-03-25  
+**Author:** Dallas (Lead)  
+**Status:** Approved  
+**Urgency:** High
+
+### Context
+
+Jeff requested: "extend our UX to add live print session timeline/events, plus whatever else is needed."
+
+**Current state:**
+- PrintFarmer is the **single source of truth** for print job state via `PrintJob` domain model
+- Job state transitions are **tracked** in the database via `JobStateHistory`
+- Obico integration is **ML/failure-detection only** — not a session manager
+- No existing session timeline UX in PrintFarmer
+
+### Scope: First Slice (MVP)
+
+**What's IN:**
+
+1. **Job Details Modal Timeline Tab**
+   - New tabbed section in existing `JobDetailsModal` (Ripley's responsibility)
+   - Display job's state transition history as vertical timeline
+   - Each transition shows: state name, timestamp (UTC), duration in state, optional notes
+   - Populated from `JobStateHistory` records via new endpoint: `GET /api/jobs/{jobId}/timeline`
+
+2. **Backend Timeline Endpoint**
+   - Route: `GET /api/jobs/{jobId}/timeline` → `JobStateHistoryDto[]`
+   - Maps `JobStateHistory` domain records to `StateTransitionDto`
+   - Uses existing `IPrintJobManagementRepository`
+
+3. **Real-Time Event Publishing** (foundation only)
+   - Backend publishes `JobStateChangedEvent` to PrinterHub on state transitions
+   - DTO: `JobStateChangedEventDto` (name, jobId, oldState, newState, timestamp)
+   - Infrastructure setup only — no UI consumption yet
+
+4. **Job Details Modal Tab Structure**
+   - Add "Timeline" tab alongside existing "Details", "Notes", "Tags"
+   - Tab visible only when job has state history
+
+### Why This Slice
+
+- Minimum viable integration of session timeline without overcomplicating UI
+- Leverages existing `JobStateHistory` data already being tracked
+- Establishes patterns for real-time job-event publishing (future live updates)
+- Clear ownership: Ripley (modal), Dallas (endpoint), Parker (timeline data)
+
+### Follow-Up Boundaries
+
+- Live updates (SignalR-driven) are a separate slice
+- Detailed failure-detection context is a separate concern
+- Printer session context (sidebar) is owned by Ripley separately
+
+---
+
+## 2025-03-25: Ripley — Live Session UX Host Recommendation (APPROVED)
+
+**Date:** 2025-03-25  
+**Author:** Ripley (Frontend Lead)  
+**Status:** Approved  
+
+### Decision
+
+Host the first live print session UX inside `src/Web/ReactApp/src/features/printers/components/PrinterDetailsSidebar.tsx` as a new session-focused section, with `DetailedPrinterCard.tsx` surfacing only summary badges/entry points.
+
+### Why
+
+- Sidebar already owns richest per-printer detail surface and has room for deeper operator context
+- Already merges live printer state through `usePrinterDisplay()` and exposes quick links to history/files
+- Best place to combine realtime state, queue context, and failure-detection context
+- `DetailedPrinterCard` stays scannable; sidebar carries full timeline experience
+
+### Recommended First Slice
+
+- Session metadata header (job name, started/elapsed, ETA, queue position)
+- Live stats block (progress, temps, active state, lightweight ETA)
+- Failure-detection context block reusing existing monitoring status patterns
+- Scrollable event timeline fed from analytics/history APIs plus SignalR-derived live state changes
+
+### Reuse First
+
+- `usePrinterDisplay`, `useJobQueue`, `usePrinterHistory`, `usePrinterHistoryJob`
+- `useFailureDetectionAlert`, `usePrinterFailureDetectionStatus`
+- `PrintProgressBar`, `FailureDetectionMonitoringBadge`, `FailureDetectionStatusModal`, `CollapsibleSection`
+
+### Watch-outs
+
+- Current analytics timeline/state-history methods return loose `unknown` payloads; tighten typing before building
+- Current SignalR surface emits printer status and failure-detection events, but not dedicated session-event broadcasts
+- First slice needs hybrid of live status deltas + analytics/history backfill
+
+---
