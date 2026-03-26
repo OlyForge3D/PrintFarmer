@@ -143,6 +143,7 @@ export const CostDashboardPage: React.FC = () => {
               <DataTable
                 columns={printerTableColumns}
                 data={printerCosts}
+                getRowKey={(row: { printerName: string }) => row.printerName}
                 sortable
               />
             ) : (
@@ -167,6 +168,7 @@ export const CostDashboardPage: React.FC = () => {
               <DataTable
                 columns={materialTableColumns}
                 data={materialCosts}
+                getRowKey={(row: { materialType: string }) => row.materialType}
                 sortable
               />
             ) : (
