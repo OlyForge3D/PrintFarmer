@@ -552,7 +552,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       isOpen={isOpen}
       onClose={handleClose}
       title="Edit Printer"
-      size="xl"
+      width="max-w-4xl"
       footer={modalFooter}
     >
       {error && (

@@ -273,7 +273,7 @@ function AddPrinterModalContent({
       isOpen={isOpen}
       onClose={handleClose}
       title="Add New Printer"
-      size="xl"
+      width="max-w-4xl"
       footer={modalFooter}
     >
       {/* Error Message */}
