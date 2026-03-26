@@ -33,6 +33,62 @@ describe('FailureDetectionMonitoringSummary', () => {
     expect(screen.getByText(/Last scan/)).toBeInTheDocument();
   });
 
+  it('renders confidence gauge in compact variant when monitoring with confidence', () => {
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-1',
+      printerName: 'Voron 2.4',
+      state: 'monitoring',
+      reason: 'Monitoring via pooled server.',
+      isPrinting: true,
+      detectionSource: 'pooled',
+      detectionTarget: 'North bay camera',
+      lastOutcome: 'healthy',
+      lastAnalyzedAt: '2026-01-15T10:30:00Z',
+      lastConfidence: 0.15,
+      lastAutoPaused: false,
+    };
+
+    render(
+      <FailureDetectionMonitoringSummary
+        enabled={true}
+        status={status}
+        printerName="Voron 2.4"
+        variant="compact"
+      />
+    );
+
+    expect(screen.getByRole('img', { name: /confidence 15%/i })).toBeInTheDocument();
+    // Badge should NOT be rendered when gauge is present
+    expect(screen.queryByText('Guarding', { selector: '[class*="badge"]' })).toBeNull();
+  });
+
+  it('renders confidence gauge in detailed variant when monitoring with confidence', () => {
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-1',
+      printerName: 'Voron 2.4',
+      state: 'monitoring',
+      reason: 'Monitoring via pooled server.',
+      isPrinting: true,
+      detectionSource: 'pooled',
+      detectionTarget: 'North bay camera',
+      lastOutcome: 'healthy',
+      lastAnalyzedAt: '2026-01-15T10:30:00Z',
+      lastConfidence: 0.42,
+      lastAutoPaused: false,
+    };
+
+    render(
+      <FailureDetectionMonitoringSummary
+        enabled={true}
+        status={status}
+        printerName="Voron 2.4"
+        variant="detailed"
+      />
+    );
+
+    expect(screen.getByRole('img', { name: /confidence 42%/i })).toBeInTheDocument();
+  });
+
   it('renders auto-pause incident with snapshot link and action badge', () => {
     const status: FailureDetectionPrinterStatusDto = {
       printerId: 'printer-1',
@@ -70,7 +126,7 @@ describe('FailureDetectionMonitoringSummary', () => {
     );
 
     expect(screen.getByText('Print auto-paused')).toBeInTheDocument();
-    expect(screen.getByText('Action')).toBeInTheDocument();
+    expect(screen.getByText('Action:')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /snapshot/i })).toHaveAttribute(
       'href',
       'http://example.com/snapshot-1.jpg'

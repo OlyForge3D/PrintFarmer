@@ -5,6 +5,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { Badge } from '@/common/components/ui';
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
+import { ConfidenceGauge } from '@/features/printers/components/ConfidenceGauge';
 import {
   formatFailureDetectionTimestamp,
   getFailureDetectionAttentionContent,
@@ -147,6 +148,8 @@ export function FailureDetectionMonitoringSummary({
   const operatorAction = getOperatorAction(status, latestIncident, attention);
   const snapshotUrl = latestIncident?.snapshotUrl ?? status?.snapshotUrl;
   const needsAction = tone === 'critical' || tone === 'attention';
+  const confidence = latestIncident?.confidence ?? status?.lastConfidence ?? null;
+  const isMonitoring = status?.state === 'monitoring';
 
   // Compact: slim inline row — icon + headline + subline + badge
   if (variant === 'compact') {
@@ -169,12 +172,16 @@ export function FailureDetectionMonitoringSummary({
             </p>
           )}
         </div>
-        <Badge
-          variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
-          size="sm"
-        >
-          {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : 'Idle'}
-        </Badge>
+        {isMonitoring && confidence != null && tone === 'healthy' ? (
+          <ConfidenceGauge value={confidence} size="sm" />
+        ) : (
+          <Badge
+            variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
+            size="sm"
+          >
+            {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : 'Idle'}
+          </Badge>
+        )}
         {needsAction && snapshotUrl && (
           <a
             href={snapshotUrl}
@@ -202,16 +209,13 @@ export function FailureDetectionMonitoringSummary({
         <div className="flex items-start gap-2.5">
           <ShieldIcon className={clsx('mt-0.5 h-4 w-4 shrink-0', style.icon)} ariaLabel="Failure detection" />
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-pf-text-primary">{headline}</span>
-              <Badge
-                variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
-                size="sm"
-              >
-                {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : 'Standby'}
-              </Badge>
-            </div>
+            <span className="text-sm font-semibold text-pf-text-primary">{headline}</span>
             <p className="mt-1 text-sm leading-snug text-pf-text-secondary">{summary}</p>
+            {isMonitoring && confidence != null && !needsAction && (
+              <div className="mt-2">
+                <ConfidenceGauge value={confidence} size="lg" />
+              </div>
+            )}
           </div>
         </div>
         {needsAction && snapshotUrl && (

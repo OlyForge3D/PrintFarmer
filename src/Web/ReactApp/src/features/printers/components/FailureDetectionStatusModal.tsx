@@ -16,6 +16,7 @@ import {
   mergeFailureDetectionIncidents,
 } from '@/features/printers/utils/failure-detection-incidents';
 import { PrintSessionTimeline } from '@/features/printers/components/PrintSessionTimeline';
+import { ConfidenceGauge } from '@/features/printers/components/ConfidenceGauge';
 
 interface FailureDetectionStatusModalProps {
   isOpen: boolean;
@@ -260,6 +261,14 @@ export function FailureDetectionStatusModal({
             </Badge>
           </div>
           <p className="mt-3 text-sm leading-6 text-pf-text-primary">{detail}</p>
+          {status?.state === 'monitoring' && status.lastConfidence != null && (
+            <div className="mt-4 flex items-end gap-4">
+              <ConfidenceGauge value={status.lastConfidence} size="lg" />
+              <span className="pb-1 text-xs text-pf-text-secondary">
+                Latest scan confidence
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Detail tiles — always full width */}
