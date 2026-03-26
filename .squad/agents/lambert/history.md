@@ -131,3 +131,5 @@ Published: `.squad/orchestration-log/20260326-031539-lambert.md`
 - Max range is 730 days (2 years) — validated at controller level
 - All endpoints consistent: every statistics endpoint now supports the same 3 optional time params
 
+- 2026-03-26: Per-printer wattage cascade implemented: `printer.Wattage ?? printer.Model?.DefaultWattage ?? settings.AveragePrinterWattage`. Cost tests must create isolated PrinterModel entities to avoid seeded DefaultWattage values leaking into assertions. The `.Include(j => j.AssignedPrinter).ThenInclude(p => p.Model)` is required in `CalculateAndStoreCostsAsync` for the cascade to work.
+- 2026-03-26: When adding a field to a positional `record` like `PrinterModelDto`, every construction site across repos (EfCatalogRepository, CatalogService, CatalogCache) must be updated with a named parameter. Using `DefaultWattage: value` named syntax avoids positional breakage. Tests using named params (e.g., `Id:`, `Name:`) are unaffected by new defaulted params.

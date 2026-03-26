@@ -43,6 +43,10 @@ public record UpdatePrinterDto(
     int? BackendPort = null,
     int? FrontendPort = null,
 
+    // Cost tracking overrides
+    decimal? Wattage = null,
+    decimal? MachineHourlyRate = null,
+
     // Approval workflow
     bool? IsEnabled = null,
 

@@ -92,6 +92,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         backendPort: printerDetails.backendPort ?? undefined,
         frontendPort: printerDetails.frontendPort ?? undefined,
         obicoEnabled: printerDetails.obicoEnabled ?? false,
+        wattage: printerDetails.wattage ?? undefined,
+        machineHourlyRate: printerDetails.machineHourlyRate ?? undefined,
       };
       
       setFormData(initialFormData);
@@ -177,7 +179,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
-      'backendPort', 'frontendPort', 'obicoEnabled'
+      'backendPort', 'frontendPort', 'obicoEnabled',
+      'wattage', 'machineHourlyRate'
     ];
     
     for (const field of fields) {
@@ -1065,6 +1068,45 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               </div>
             </div>
             
+            {/* Cost Settings */}
+            <div className="border-t pt-5 mt-5">
+              <h4 className="text-lg font-medium text-pf-text-primary mb-4">Cost Settings</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  label="Wattage (W)"
+                  htmlFor="printer-wattage"
+                  helper="Power consumption in watts. Leave blank to use model default or global setting."
+                >
+                  <Input
+                    id="printer-wattage"
+                    type="number"
+                    value={formData.wattage ?? ''}
+                    onChange={e => handleInputChange('wattage', e.target.value ? parseFloat(e.target.value) : undefined)}
+                    placeholder="e.g. 250"
+                    min={0}
+                    step={1}
+                    title="Printer power consumption in watts"
+                  />
+                </FormField>
+                <FormField
+                  label="Machine Hourly Rate ($)"
+                  htmlFor="printer-hourly-rate"
+                  helper="Hourly operating cost. Leave blank to use the global default."
+                >
+                  <Input
+                    id="printer-hourly-rate"
+                    type="number"
+                    value={formData.machineHourlyRate ?? ''}
+                    onChange={e => handleInputChange('machineHourlyRate', e.target.value ? parseFloat(e.target.value) : undefined)}
+                    placeholder="e.g. 0.50"
+                    min={0}
+                    step={0.01}
+                    title="Machine hourly operating rate"
+                  />
+                </FormField>
+              </div>
+            </div>
+
             {/* Obico AI Failure Detection */}
             <FormField 
               label="Obico AI Monitoring" 

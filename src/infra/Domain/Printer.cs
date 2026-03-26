@@ -220,6 +220,11 @@ public class Printer
     public DateTime LastCapabilityUpdate { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    /// Power consumption in watts. Overrides the model's default wattage when set.
+    /// </summary>
+    public decimal? Wattage { get; set; }
+
+    /// <summary>
     /// Per-printer machine hourly rate override for cost tracking.
     /// If null, uses the default rate from CostTrackingSettings.
     /// </summary>

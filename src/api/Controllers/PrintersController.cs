@@ -846,7 +846,9 @@ public class PrintersController(
             p.Username,
             p.Password,
             p.ObicoEnabled,
-            p.ObicoServer?.Name);
+            p.ObicoServer?.Name,
+            p.Wattage,
+            p.MachineHourlyRate);
     }
 
     /// <summary>
@@ -1449,6 +1451,8 @@ public class PrintersController(
 
         p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;
         p.MaxPrintSpeed = dto.MaxPrintSpeed ?? p.MaxPrintSpeed;
+        p.Wattage = dto.Wattage ?? p.Wattage;
+        p.MachineHourlyRate = dto.MachineHourlyRate ?? p.MachineHourlyRate;
         p.LastCapabilityUpdate = DateTime.UtcNow;
 
         // Update toolheads if provided

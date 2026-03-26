@@ -1481,7 +1481,9 @@ public class PrintersService(
             MultiMaterial = modelTemplate?.MultiMaterial ?? false,
             SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
-            MaxBedTemp = modelTemplate?.MaxBedTemp
+            MaxBedTemp = modelTemplate?.MaxBedTemp,
+            Wattage = dto.Wattage,
+            MachineHourlyRate = dto.MachineHourlyRate
         };
 
         // Get default toolhead values from model's toolhead templates (nozzle diameter, max hotend temp, etc.)

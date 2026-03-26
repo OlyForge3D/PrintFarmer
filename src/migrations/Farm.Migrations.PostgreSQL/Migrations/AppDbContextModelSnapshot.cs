@@ -2883,6 +2883,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("Username")
                         .HasColumnType("text");
 
+                    b.Property<decimal?>("Wattage")
+                        .HasColumnType("numeric");
+
                     b.HasKey("Id");
 
                     b.HasIndex("LocationId");
@@ -2984,6 +2987,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<int?>("DefaultBackend")
                         .HasColumnType("integer");
+
+                    b.Property<decimal?>("DefaultWattage")
+                        .HasColumnType("numeric");
 
                     b.Property<bool>("HasBowdenTube")
                         .ValueGeneratedOnAdd()

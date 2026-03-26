@@ -43,6 +43,7 @@ public class JobCostCalculationService : IJobCostCalculationService
 
         PrintJob? job = await _db.PrintJobs
             .Include(j => j.AssignedPrinter)
+                .ThenInclude(p => p!.Model)
             .FirstOrDefaultAsync(j => j.Id == jobId, ct);
 
         if (job == null)
@@ -102,6 +103,7 @@ public class JobCostCalculationService : IJobCostCalculationService
     {
         PrintJob? job = await _db.PrintJobs
             .Include(j => j.AssignedPrinter)
+                .ThenInclude(p => p!.Model)
             .FirstOrDefaultAsync(j => j.Id == jobId, ct);
 
         if (job == null)
@@ -182,8 +184,11 @@ public class JobCostCalculationService : IJobCostCalculationService
 
     /// <summary>
     /// Calculates energy cost from print duration and electricity rate.
+    /// Wattage cascade: printer.Wattage → printer.Model.DefaultWattage → settings.AveragePrinterWattage.
     /// Formula: (printDurationHours × printerWattage / 1000) × electricityRatePerKwh
     /// </summary>
+    /// <param name="job">The print job with AssignedPrinter and Model loaded.</param>
+    /// <param name="settings">Global cost tracking settings for fallback values.</param>
     private decimal? CalculateEnergyCost(PrintJob job, CostTrackingSettings? settings)
     {
         if (!job.ActualPrintTime.HasValue || job.ActualPrintTime.Value.TotalHours <= 0 || settings == null)
@@ -192,7 +197,9 @@ public class JobCostCalculationService : IJobCostCalculationService
         }
 
         decimal printDurationHours = (decimal)job.ActualPrintTime.Value.TotalHours;
-        decimal printerWattage = settings.AveragePrinterWattage; // Could be enhanced with per-printer wattage in the future
+        decimal printerWattage = job.AssignedPrinter?.Wattage
+            ?? job.AssignedPrinter?.Model?.DefaultWattage
+            ?? settings.AveragePrinterWattage;
         decimal electricityRate = settings.ElectricityRatePerKwh;
 
         // Convert watts to kilowatts and multiply by hours and rate

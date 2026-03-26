@@ -130,7 +130,8 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             m.MultiMaterial,
             m.SupportsAutoLeveling,
             m.MaxBedTemp,
-            m.MaxPrintSpeed)).ToList();
+            m.MaxPrintSpeed,
+            DefaultWattage: m.DefaultWattage)).ToList();
         return list;
     }
 
@@ -162,7 +163,8 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                 model.SupportsAutoLeveling,
                 model.MaxBedTemp,
                 model.MaxPrintSpeed,
-                model.Toolheads.Select(t => new PrinterModelToolheadDto(
+                DefaultWattage: model.DefaultWattage,
+                Toolheads: model.Toolheads.Select(t => new PrinterModelToolheadDto(
                     t.Id,
                     t.Name,
                     t.Index,

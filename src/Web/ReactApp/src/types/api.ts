@@ -611,6 +611,10 @@ export interface CreatePrinterDto {
   cameraSnapshotUrl?: string;
   backendPort?: number;
   frontendPort?: number;
+  /** Power consumption in watts. Overrides the model's default wattage. */
+  wattage?: number;
+  /** Per-printer machine hourly rate override for cost tracking. */
+  machineHourlyRate?: number;
 }
 
 // Test connection request/response for verifying printer connectivity
@@ -682,6 +686,11 @@ export interface UpdatePrinterDto {
   backendPort?: number;
   frontendPort?: number;
   isEnabled?: boolean;
+  // Cost tracking overrides
+  /** Power consumption in watts. Overrides the model's default wattage. */
+  wattage?: number;
+  /** Per-printer machine hourly rate override for cost tracking. */
+  machineHourlyRate?: number;
   // Toolheads - for updating individual toolhead settings
   toolheads?: UpdateToolheadDto[];
 }
@@ -1062,6 +1071,8 @@ export interface PrinterModelDto {
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+  /** Default power consumption in watts for this printer model. */
+  defaultWattage?: number;
 
   // Toolhead templates for multi-toolhead printers
   toolheads?: PrinterModelToolheadDto[];
@@ -1163,6 +1174,10 @@ export interface PrinterDetails {
   obicoServerName?: string | null;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** Power consumption in watts. Overrides the model's default wattage. */
+  wattage?: number;
+  /** Per-printer machine hourly rate override for cost tracking. */
+  machineHourlyRate?: number;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
 }

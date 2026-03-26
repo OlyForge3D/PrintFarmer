@@ -92,6 +92,9 @@ public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOption
                 // Speed capabilities
                 m.MaxPrintSpeed,
 
+                // Default power consumption
+                DefaultWattage: m.DefaultWattage,
+
                 // Toolheads
                 m.Toolheads.OrderBy(t => t.Index).Select(t => new PrinterModelToolheadDto(
                     t.Id,

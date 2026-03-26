@@ -61,6 +61,9 @@ From Dallas decision: Failure detection is a real-time monitoring state machine,
 - `QueueJobsTable` has an `onSchedule` callback prop; the Schedule button appears for Queued/Assigned jobs alongside existing actions. `PrintQueueDashboardPage` wires this to open the `ScheduleModal` with the job pre-selected.
 - The Settings page is **metadata-driven**: backend classes with `[AppSetting]` + `[SettingDisplay]` attributes are auto-discovered by `SettingsService` and rendered dynamically by `SettingsPagelet`. No per-section frontend code is needed — adding a new settings section only requires backend attributes. CostTrackingSettings already has all required attributes and renders automatically under the "Operations" sidebar group.
 - `CostTrackingSettings` TypeScript interface added to `@/types/api` with typed convenience methods `apiClient.getCostTrackingSettings()` / `apiClient.updateCostTrackingSettings()` for direct access from cost features. The generic `getSettings<T>("CostTracking")` also works.
+- `AddPrinterModal` and `EditPrinterModal` both have a "Cost Settings" section with Wattage (W) and Machine Hourly Rate ($) fields. Empty values submit as `undefined` (backend treats as null), numeric values pass through. EditPrinterModal pre-populates from `printerDetails.wattage` / `printerDetails.machineHourlyRate` and includes both fields in dirty-state change detection.
+- Backend `PrinterDetailsDto` now returns `Wattage` and `MachineHourlyRate` from the Printer entity, and the TypeScript `PrinterDetails` interface mirrors them as `wattage?` and `machineHourlyRate?`.
+- `PrinterModelsCatalog` shows `defaultWattage` as a badge in the Features column when set on the model (e.g., "250W").
 
 ## 2026-03-27: Failure Detection UX — Scope Clarification (Cross-Agent)
 

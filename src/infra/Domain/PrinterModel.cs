@@ -74,5 +74,11 @@ public class PrinterModel
 
     public string? BedTextureUrl { get; set; } // URL to bed texture image (from OrcaSlicer assets)
 
+    /// <summary>
+    /// Default power consumption in watts for this printer model.
+    /// Used as fallback when per-printer wattage is not set.
+    /// </summary>
+    public decimal? DefaultWattage { get; set; }
+
     public bool IsActive { get; set; } = true;
 }

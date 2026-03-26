@@ -57,29 +57,35 @@ public class JobCostCalculationTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Helper to create a test printer
+    /// Helper to create a test printer with optional cost tracking overrides.
     /// </summary>
-    private async Task<Printer> CreateTestPrinterAsync(string? name = null, decimal? machineHourlyRate = null)
+    /// <param name="name">Optional printer name.</param>
+    /// <param name="machineHourlyRate">Per-printer hourly rate override.</param>
+    /// <param name="wattage">Per-printer wattage override.</param>
+    /// <param name="modelDefaultWattage">Default wattage to set on the printer model.</param>
+    private async Task<Printer> CreateTestPrinterAsync(
+        string? name = null,
+        decimal? machineHourlyRate = null,
+        decimal? wattage = null,
+        decimal? modelDefaultWattage = null)
     {
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Get or create default manufacturer and model
-        Manufacturer? manufacturer = await context.Manufacturers.FirstOrDefaultAsync();
-        if (manufacturer == null)
-        {
-            manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Test Manufacturer" };
-            context.Manufacturers.Add(manufacturer);
-            await context.SaveChangesAsync();
-        }
+        // Always create a fresh manufacturer and model to avoid picking up seeded DefaultWattage values
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = $"Test Mfg {Guid.NewGuid().ToString().Substring(0, 8)}" };
+        context.Manufacturers.Add(manufacturer);
+        await context.SaveChangesAsync();
 
-        PrinterModel? model = await context.PrinterModels.FirstOrDefaultAsync();
-        if (model == null)
+        var model = new PrinterModel
         {
-            model = new PrinterModel { Id = Guid.NewGuid(), Name = "Test Model", ManufacturerId = manufacturer.Id };
-            context.PrinterModels.Add(model);
-            await context.SaveChangesAsync();
-        }
+            Id = Guid.NewGuid(),
+            Name = $"Test Model {Guid.NewGuid().ToString().Substring(0, 8)}",
+            ManufacturerId = manufacturer.Id,
+            DefaultWattage = modelDefaultWattage
+        };
+        context.PrinterModels.Add(model);
+        await context.SaveChangesAsync();
 
         var printer = new Printer
         {
@@ -90,7 +96,8 @@ public class JobCostCalculationTests : IAsyncLifetime
             Backend = (int)PrinterBackend.Moonraker,
             ManufacturerId = manufacturer.Id,
             ModelId = model.Id,
-            MachineHourlyRate = machineHourlyRate
+            MachineHourlyRate = machineHourlyRate,
+            Wattage = wattage
         };
 
         context.Printers.Add(printer);
@@ -326,6 +333,142 @@ public class JobCostCalculationTests : IAsyncLifetime
         updatedJob.MachineTimeCostUsd.Should().Be(5m);
         updatedJob.LaborCostUsd.Should().Be(3m);
         updatedJob.TotalCostUsd.Should().Be(18.50m);
+    }
+
+    [Fact]
+    public async Task CalculateEnergyCost_WithPrinterWattageOverride_UsesOverride()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0.10m,
+            AveragePrinterWattage = 200m,
+            DefaultMachineHourlyRate = 5m,
+            LaborMarkupPercent = 0m
+        });
+
+        // Printer has explicit 400W override; model has 300W default
+        var printer = await CreateTestPrinterAsync("wattage-override", wattage: 400m, modelDefaultWattage: 300m);
+        var job = await CreateTestJobAsync(printer, printTime: TimeSpan.FromHours(1));
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+
+        // Energy cost: 1 hour × 400W / 1000 × $0.10/kWh = $0.04
+        updatedJob!.EnergyCostUsd.Should().Be(0.04m);
+    }
+
+    [Fact]
+    public async Task CalculateEnergyCost_WithModelDefault_UsesModelDefault()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0.10m,
+            AveragePrinterWattage = 200m,
+            DefaultMachineHourlyRate = 5m,
+            LaborMarkupPercent = 0m
+        });
+
+        // Printer has no wattage override; model has 300W default
+        var printer = await CreateTestPrinterAsync("model-default", wattage: null, modelDefaultWattage: 300m);
+        var job = await CreateTestJobAsync(printer, printTime: TimeSpan.FromHours(1));
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+
+        // Energy cost: 1 hour × 300W / 1000 × $0.10/kWh = $0.03
+        updatedJob!.EnergyCostUsd.Should().Be(0.03m);
+    }
+
+    [Fact]
+    public async Task CalculateEnergyCost_FullCascade_PrinterOverridesModelOverridesSettings()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0.10m,
+            AveragePrinterWattage = 200m,
+            DefaultMachineHourlyRate = 5m,
+            LaborMarkupPercent = 0m
+        });
+
+        // All three levels set: printer=500W wins over model=300W and settings=200W
+        var printer = await CreateTestPrinterAsync("full-cascade", wattage: 500m, modelDefaultWattage: 300m);
+        var job = await CreateTestJobAsync(printer, printTime: TimeSpan.FromHours(1));
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+
+        // Energy cost: 1 hour × 500W / 1000 × $0.10/kWh = $0.05
+        updatedJob!.EnergyCostUsd.Should().Be(0.05m);
+    }
+
+    [Fact]
+    public async Task CalculateEnergyCost_NoOverrides_UsesSettingsDefault()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        settingsService.Save(new CostTrackingSettings
+        {
+            EnableAutomaticCostCalculation = true,
+            ElectricityRatePerKwh = 0.10m,
+            AveragePrinterWattage = 250m,
+            DefaultMachineHourlyRate = 5m,
+            LaborMarkupPercent = 0m
+        });
+
+        // No wattage on printer, no DefaultWattage on model → falls back to settings (250W)
+        var printer = await CreateTestPrinterAsync("no-overrides");
+        var job = await CreateTestJobAsync(printer, printTime: TimeSpan.FromHours(1));
+
+        // Act
+        bool result = await service.CalculateAndStoreCostsAsync(job.Id, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        var updatedJob = await context.PrintJobs.FirstOrDefaultAsync(j => j.Id == job.Id);
+        updatedJob.Should().NotBeNull();
+
+        // Energy cost: 1 hour × 250W / 1000 × $0.10/kWh = $0.025 → rounds to $0.02 (banker's rounding)
+        updatedJob!.EnergyCostUsd.Should().Be(0.02m);
     }
 
     #endregion

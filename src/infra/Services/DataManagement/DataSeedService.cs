@@ -180,7 +180,8 @@ public class DataSeedService : IDataSeedService
                         SupportsAutoLeveling = dto.SupportsAutoLeveling,
                         MultiMaterial = dto.MultiMaterial,
                         MaxBedTemp = dto.MaxBedTemp,
-                        MaxPrintSpeed = dto.MaxPrintSpeed
+                        MaxPrintSpeed = dto.MaxPrintSpeed,
+                        DefaultWattage = dto.DefaultWattage
                     };
 
                     // Parse backend and motion type if provided
