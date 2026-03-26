@@ -63,6 +63,7 @@ From Dallas decision: Failure detection is a real-time monitoring state machine 
 
 ## Learnings
 
+- 2026-03-26: `/api/failure-detection/status` already exposes the operator-facing monitoring reason/source/target/outcome contract. For richer PrintFarmer-owned UX, the safest backend addition is optional `jobName`/`fileName` on `FailureDetectionPrinterStatusDto` and SignalR `FailureDetectionDto`, sourced from `IPrinterStatusCacheReader` with queued-job fallback in `PrintFailureMonitorService`.
 - 2026-03-25: Upstream `moonraker-obico` is a co-located agent, not just an ML client. It links to Obico with a server auth token, talks directly to Moonraker with API-key/WebSocket access, captures JPEGs locally, and can tunnel HTTP/WebSocket traffic plus Janus-based webcam streaming.
 - 2026-03-27: PrintFailureMonitorService updates in-memory status every 30s scan cycle. No persistence layer = no historical queries, no timeline = no schema change burden.
 - 2026-03-25: PrintFarmer’s failure-detection path is central-server driven. `PrintFailureMonitorService` selects the first enabled camera with a `SnapshotUrl` (or legacy `Printer.CameraSnapshotUrl`) and passes that URL to `ObicoFailureDetectionService`; stream-only cameras are currently ignored.
@@ -141,3 +142,27 @@ From Dallas decision: Failure detection is a real-time monitoring state machine 
 **Status:** Pending team decision
 
 Backend failure-detection scope clarified: Current in-memory snapshot (PrintFailureMonitorService) is sufficient. No timeline/event-store needed for MVP. If future compliance/audit requirement surfaces, that's a separate data-model decision. Awaiting team approval.
+
+## 2026-03-26: Failure Detection Backend — Job Context Enrichment → LANDED
+
+**Role:** Backend Dev  
+**Status:** ✅ Complete — Orchestration log: 20260325-193351-lambert.md
+
+- Extended `FailureDetectionPrinterStatusDto` and SignalR `FailureDetectionDto` with optional `jobName` and `fileName` fields
+- Implemented context resolution in `PrintFailureMonitorService`: cache-first + fallback to active queue record
+- Updated `ObicoFailureDetectionService` to surface resolved job context
+- SignalR hub broadcasts enriched events with complete alert identification
+
+**Validation:**
+- 25 focused failure-detection backend tests passed
+- Context resolution logic validated (cache-hit and fallback paths)
+- Backward compatibility confirmed with null field handling
+- API build passed with 0 new errors
+
+**Key integration:**
+- Frontend alerts now arrive with job identification via enriched SignalR events
+- PrintFarmer remains UX source of truth; no state duplication into Obico
+- Seamless enrichment without breaking existing deployments
+- Removed barrier to operator understanding which print is being monitored
+
+**Known gap:** Historical job context for past-session incidents requires backend history endpoint (descoped from current work)

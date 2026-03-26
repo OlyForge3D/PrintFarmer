@@ -3205,3 +3205,126 @@ The current GET probe validates route/response-shape compatibility using a synth
 
 ---
 
+
+## 5. Failure Detection UX: Two-Layer Printer Surface (APPROVED)
+
+**Date:** 2026-03-26  
+**Author:** Ripley (Frontend)  
+**Status:** APPROVED — Implementation Complete  
+**Urgency:** High (core operator workflow)
+
+### Problem
+
+Failure detection status needs to be visible in the printer-list view, but a badge alone doesn't provide enough context for operator workflow. Full modal is too heavy for routine status checks.
+
+### Decision
+
+Use a two-layer printer UX:
+
+1. Keep the header shield badge as the compact status affordance and modal trigger.
+2. Add a shared in-card operational summary panel that shows live coverage state, latest result, watching target, operator action, and in-memory session incidents.
+
+### Why
+
+- The badge alone is great for glanceability but too thin for operator workflow
+- A dedicated summary panel lets PrintFarmer stay the source of truth for the active printer session
+- Prevents header from becoming noise or forcing operators into modal for every question
+- Consistent surface across both compact and detailed card types reduces cognitive load
+
+### Implementation Details
+
+**Components:**
+- `FailureDetectionMonitoringSummary.tsx` — Displays live coverage state, latest result, monitoring target, operator action, recent incidents
+- Integrated into `CompactPrinterCard.tsx` and `DetailedPrinterCard.tsx`
+- Enhanced `useFailureDetectionAlert.ts` tracks and exposes in-session incident history
+- Updated `FailureDetectionStatusModal.tsx` carries recent incidents for drill-down
+
+**Key Features:**
+- Short-session incident memory for drill-down without backend query
+- Real-time updates via SignalR integration
+- Operator action visibility (e.g., "Paused by operator")
+- In-card context prevents modal fatigue
+
+### Test Evidence
+
+- 23 failure-detection frontend tests passed
+- Production React build succeeded with 0 new errors
+- Integration with Lambert's backend context enhancements verified
+
+### Operational Impact
+
+Operators can now quickly assess failure-detection status and incident context without leaving the printer list or opening a modal. In-session incident history provides immediate context for operational decisions.
+
+### Known Limitations
+
+- Historical incident context across multiple sessions not available (requires persisted backend history endpoint)
+- In-session memory cleared on page reload (by design; sessions are ephemeral)
+
+### Follow-Up Boundary
+
+Long-term incident history endpoint is descoped. Future work should address:
+- Persisted incident history API
+- Trend analysis across multiple sessions
+- Operator audit trail for incident responses
+
+---
+
+## 6. Failure Detection Backend: Job Context Enrichment (APPROVED)
+
+**Date:** 2026-03-26  
+**Author:** Lambert (Backend)  
+**Status:** APPROVED — Implementation Complete  
+**Urgency:** High (frontend alert context)
+
+### Problem
+
+Frontend failure-detection alerts arrive with monitoring status but lack active job context. Without knowing which print is being monitored, operators must cross-reference with other UI surfaces.
+
+### Decision
+
+Expose optional `jobName` and `fileName` on PrintFarmer-owned failure-detection API/SignalR payloads instead of trying to mirror fuller printer/job/session state into Obico.
+
+### Why
+
+- PrintFarmer remains the UX source of truth for printer/job/session context
+- Frontend already has monitoring state/reason/source via `/api/failure-detection/status`; gap was richer alert context when failure event arrives
+- `IPrinterStatusCacheReader` already has live backend job path; queue record provides safe fallback when cache is stale
+- Avoids duplicating state between Obico and PrintFarmer
+
+### Implementation Details
+
+**DTOs Enhanced:**
+- `FailureDetectionPrinterStatusDto` now carries optional `jobName` / `fileName`
+- `FailureDetectionDto` SignalR events now carry same optional context
+
+**Resolution Logic:**
+- `PrintFailureMonitorService` resolves fields from cached printer status first (live data)
+- Falls back to active PrintFarmer job queue record when cache is stale
+- Returns `null` for fields if neither source has data
+
+**Service Integration:**
+- `ObicoFailureDetectionService` surfaces resolved context
+- SignalR hub broadcasts enriched `FailureDetectionDto` with job context
+- Backward compatible—fields are optional and nullable
+
+### Test Evidence
+
+- 25 failure-detection backend tests passed
+- Context resolution logic validated (cache-hit + fallback paths)
+- Backward compatibility verified with null field handling
+- API build succeeded with 0 new errors
+
+### Operational Impact
+
+Frontend alerts now arrive with job identification, allowing operators to immediately understand which print is being monitored without additional lookups. Enrichment is seamless and non-breaking for existing deployments.
+
+### Known Limitations
+
+- Historical job context for past-session incidents not available (requires backend history endpoint)
+- Context resolution is best-effort; missing job info does not fail the alert, only leaves fields null
+
+### Follow-Up Boundary
+
+Backend incident history endpoint needed for long-term drill-down and trend analysis.
+
+---

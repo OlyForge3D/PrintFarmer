@@ -46,6 +46,8 @@ From Dallas decision: Failure detection is a real-time monitoring state machine,
 
 - 2026-03-26: The spaghetti-detection modal is presentational only. The live data path is `CompactPrinterCard` / `DetailedPrinterCard` → `usePrinterFailureDetectionStatus` → `apiClient.getFailureDetectionStatus()` → `GET /api/failure-detection/status`, then the hook filters `printers[]` by `printerId` before passing `status` into `FailureDetectionMonitoringBadge` / `FailureDetectionStatusModal`.
 - 2026-03-26: `FailureDetectionStatusModal.tsx` does not issue its own request or send a payload; if the modal shows a transport error, inspect the upstream card hook and `/api/failure-detection/status` contract first.
+- 2026-03-26: `useFailureDetectionAlert()` is now the frontend session-memory seam for failure incidents. It still exposes the transient 60-second `event`, but also keeps up to five recent `FailureDetected` SignalR events per printer so cards and modals can show session-level incident history without a backend history endpoint.
+- 2026-03-26: The operator-facing failure-detection pattern is now `header icon badge for compact state` + `card-level operational summary panel for live session context`. Compact and detailed printer cards both reuse `FailureDetectionMonitoringSummary.tsx`, while `FailureDetectionStatusModal.tsx` accepts `recentEvents` for richer drill-down.
 - 2026-03-27: Failure detection is live monitoring, not historical audit. Modal is the right interaction depth; no timeline needed.
 
 ## 2026-03-27: Failure Detection UX — Scope Clarification (Cross-Agent)
@@ -54,3 +56,27 @@ From Dallas decision: Failure detection is a real-time monitoring state machine,
 **Status:** Pending team decision
 
 Failure detection UX scope clarified: Badge + modal pattern is recommended. No timeline/historical event list. Current modal shows state, coverage, last scan, last outcome—sufficient for operators. Awaiting team approval to finalize badge/modal implementation.
+
+## 2026-03-26: Failure Detection UX — Two-Layer Surface → LANDED
+
+**Role:** Frontend Dev  
+**Status:** ✅ Complete — Orchestration log: 20260325-193351-ripley.md
+
+- Implemented shared failure-detection summary panel (`FailureDetectionMonitoringSummary.tsx`) for both compact and detailed printer cards
+- Panel shows live coverage state, latest result, monitoring target, operator action, and in-session incident memory
+- Enhanced `useFailureDetectionAlert.ts` to track and expose up to 5 recent incidents per printer (session-scoped memory)
+- Updated `FailureDetectionStatusModal.tsx` to carry recent incidents for drill-down
+- Kept header badge as compact glanceability affordance and modal trigger
+- Prevents header noise while giving operators quick access to failure-detection context without modal fatigue
+
+**Validation:**
+- 23 targeted failure-detection frontend tests passed
+- Production React build passed with 0 new TypeScript errors
+- ESLint passed with 0 new errors
+
+**Key integration:**
+- Merged with Lambert's backend job-context enrichment (`jobName`/`fileName` on API/SignalR payloads)
+- In-session incident history enables drill-down without requiring backend history endpoint
+- Pattern consistent across both card types reduces cognitive load
+
+**Known gap:** Long-term incident history remains a backend follow-up (descoped from current work)
