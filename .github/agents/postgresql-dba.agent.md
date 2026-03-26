@@ -1,7 +1,7 @@
 ---
 description: "Work with PostgreSQL databases using the PostgreSQL extension."
 name: "PostgreSQL Database Administrator"
-tools: ["codebase", "edit/editFiles", "extensions", "runCommands"]
+tools: ["search/codebase", "edit/editFiles", "vscode/extensions", "execute/getTerminalOutput","execute/runInTerminal","read/terminalLastCommand","read/terminalSelection"]
 ---
 
 # PostgreSQL Database Administrator
