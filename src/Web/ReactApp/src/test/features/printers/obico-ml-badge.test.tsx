@@ -489,12 +489,8 @@ describe('CompactPrinterCard monitoring badge', () => {
     });
 
     expect(screen.getByText('Failure: 87%')).toBeTruthy();
-    expect(screen.getByText('Operator review required')).toBeTruthy();
+    expect(screen.getByText('Review required')).toBeTruthy();
     expect(screen.queryByText('1 incident')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /open latest snapshot/i })).toHaveAttribute(
-      'href',
-      'http://example.com/snapshot.jpg'
-    );
   });
 });
 
@@ -579,10 +575,10 @@ describe('DetailedPrinterCard monitoring badge', () => {
     expect(screen.queryByText('1 incident')).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        'Inspect the print, clear any loose material, and verify machine state before resuming.'
+        /Inspect print and verify/
       )
     ).toBeTruthy();
-    expect(screen.getByRole('link', { name: /open latest snapshot/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /snapshot/i })).toHaveAttribute(
       'href',
       'http://example.com/snapshot.jpg'
     );

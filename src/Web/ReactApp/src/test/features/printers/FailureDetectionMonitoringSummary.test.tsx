@@ -4,7 +4,7 @@ import { FailureDetectionMonitoringSummary } from '@/features/printers/component
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
 
 describe('FailureDetectionMonitoringSummary', () => {
-  it('renders healthy operational coverage details for an active print', () => {
+  it('renders healthy coverage state with compact headline and badge', () => {
     const status: FailureDetectionPrinterStatusDto = {
       printerId: 'printer-1',
       printerName: 'Voron 2.4',
@@ -28,14 +28,12 @@ describe('FailureDetectionMonitoringSummary', () => {
       />
     );
 
-    expect(screen.getByText('Active coverage')).toBeInTheDocument();
-    expect(screen.getByText(/Last scan cleared the print/)).toBeInTheDocument();
-    expect(screen.getByText('Pooled')).toBeInTheDocument();
-    expect(screen.getByText(/Clear at/)).toBeInTheDocument();
-    expect(screen.getByText('North bay camera')).toBeInTheDocument();
+    expect(screen.getByText('Covered')).toBeInTheDocument();
+    expect(screen.getByText('OK')).toBeInTheDocument();
+    expect(screen.getByText(/Last scan/)).toBeInTheDocument();
   });
 
-  it('renders session incident history and snapshot access for live failures', () => {
+  it('renders auto-pause incident with snapshot link and action badge', () => {
     const status: FailureDetectionPrinterStatusDto = {
       printerId: 'printer-1',
       printerName: 'Voron 2.4',
@@ -59,13 +57,6 @@ describe('FailureDetectionMonitoringSummary', () => {
         autoPaused: true,
         snapshotUrl: 'http://example.com/snapshot-1.jpg',
       },
-      {
-        printerId: 'printer-1',
-        printerName: 'Voron 2.4',
-        confidence: 0.82,
-        detectedAt: '2026-01-15T10:24:30Z',
-        autoPaused: false,
-      },
     ];
 
     render(
@@ -79,12 +70,12 @@ describe('FailureDetectionMonitoringSummary', () => {
     );
 
     expect(screen.getByText('Print auto-paused')).toBeInTheDocument();
-    expect(screen.queryByText('Session incident log')).not.toBeInTheDocument();
-    expect(screen.queryByText('2 incidents')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /open latest snapshot/i })).toHaveAttribute(
+    expect(screen.getByText('Action')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /snapshot/i })).toHaveAttribute(
       'href',
       'http://example.com/snapshot-1.jpg'
     );
+    expect(screen.getByText(/Inspect print and verify/)).toBeInTheDocument();
   });
 
   it('surfaces operator action when coverage is blocked by setup issues', () => {
@@ -111,12 +102,36 @@ describe('FailureDetectionMonitoringSummary', () => {
       />
     );
 
-    expect(screen.getByText('Coverage blocked')).toBeInTheDocument();
-    expect(
-      screen.getAllByText('No enabled camera snapshot URL is configured.').length
-    ).toBeGreaterThan(1);
-    expect(
-      screen.getByText('Add or enable a snapshot camera for this printer.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Setup needed')).toBeInTheDocument();
+    expect(screen.getByText('Review')).toBeInTheDocument();
+    expect(screen.getByText(/Add or enable a snapshot camera/)).toBeInTheDocument();
+  });
+
+  it('shows standing by state when idle', () => {
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-1',
+      printerName: 'Voron 2.4',
+      state: 'idle',
+      reason: 'Printer is not actively printing.',
+      isPrinting: false,
+      detectionSource: 'pooled',
+      detectionTarget: 'North bay camera',
+      lastOutcome: 'none',
+      lastAnalyzedAt: null,
+      lastConfidence: null,
+      lastAutoPaused: false,
+    };
+
+    render(
+      <FailureDetectionMonitoringSummary
+        enabled={true}
+        status={status}
+        printerName="Voron 2.4"
+        variant="compact"
+      />
+    );
+
+    expect(screen.getByText('Standing by')).toBeInTheDocument();
+    expect(screen.getByText('Idle')).toBeInTheDocument();
   });
 });
