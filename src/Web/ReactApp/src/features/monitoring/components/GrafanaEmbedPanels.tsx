@@ -14,28 +14,26 @@ interface PanelConfig {
   title: string;
   /** DTO key whose value must be > 0 for the Grafana iframe to render */
   metricKey: keyof MonitoringMetricsSummaryDto;
-  noDataMessage: string;
-  noDataHint: string;
 }
 
 const PANELS: PanelConfig[] = [
-  { id: 5, title: 'Request Rate Over Time', metricKey: 'requestsPerSecond', noDataMessage: 'No HTTP traffic detected right now.', noDataHint: 'This panel will populate automatically when the API receives requests.' },
-  { id: 6, title: 'Response Latency Distribution', metricKey: 'requestsPerSecond', noDataMessage: 'No latency data available yet.', noDataHint: 'This panel will populate once the API starts handling requests.' },
-  { id: 9, title: 'Error Rate Over Time', metricKey: 'errorRatePercent', noDataMessage: 'No HTTP errors detected — everything looks healthy.', noDataHint: 'This panel will show error trends if 4xx or 5xx responses occur.' },
-  { id: 10, title: 'Memory Usage Over Time', metricKey: 'memoryUsageMb', noDataMessage: 'Memory metrics not available yet.', noDataHint: 'This panel will populate once .NET runtime metrics are being collected.' },
-  { id: 7, title: 'Printer Operations', metricKey: 'activePrinters', noDataMessage: 'No active printers detected right now.', noDataHint: 'This panel will populate automatically when printer activity is available.' },
-  { id: 8, title: 'Slicer Operations', metricKey: 'slicerJobsLast24h', noDataMessage: 'No slicer jobs detected in the last 24 hours.', noDataHint: 'This panel will populate automatically once slicing is active.' },
-  { id: 11, title: 'Database Operations Over Time', metricKey: 'databaseOperationsLast24h', noDataMessage: 'No database operation metrics available.', noDataHint: 'This panel will populate when database activity is tracked.' },
-  { id: 12, title: 'File Operations Over Time', metricKey: 'fileOperationsLast24h', noDataMessage: 'No file operation metrics available.', noDataHint: 'This panel will populate when file activity is tracked.' },
-  { id: 13, title: 'Request Rate by Endpoint', metricKey: 'requestsPerSecond', noDataMessage: 'No per-endpoint traffic data available yet.', noDataHint: 'This panel will show top endpoints once HTTP traffic is detected.' },
-  { id: 14, title: 'API Latency Percentiles Over Time', metricKey: 'p95LatencyMs', noDataMessage: 'No latency percentile data available yet.', noDataHint: 'This panel will show p50/p95/p99 latency once requests are processed.' },
-  { id: 15, title: 'Slowest Endpoints (P95)', metricKey: 'requestsPerSecond', noDataMessage: 'No per-endpoint latency data available yet.', noDataHint: 'This panel will rank endpoints by P95 latency once HTTP traffic is detected.' },
-  { id: 16, title: 'FD: Analysis Duration Over Time', metricKey: 'activePrinters', noDataMessage: 'No failure detection analysis data yet.', noDataHint: 'This panel will show ML API latency (p50/p95) once failure detection is active.' },
-  { id: 17, title: 'FD: Analyses & Failures Rate', metricKey: 'activePrinters', noDataMessage: 'No failure detection rate data yet.', noDataHint: 'This panel will show analysis and failure rates once printers are being monitored.' },
-  { id: 18, title: 'FD: ML Confidence Over Time', metricKey: 'activePrinters', noDataMessage: 'No confidence data available yet.', noDataHint: 'This panel will show confidence distribution and active printers once monitoring is active.' },
-  { id: 19, title: 'FD: Cycle Duration Over Time', metricKey: 'activePrinters', noDataMessage: 'No cycle duration data yet.', noDataHint: 'This panel will show how long each monitoring sweep takes — key for capacity planning.' },
-  { id: 20, title: 'FD: Active vs Configured Printers', metricKey: 'activePrinters', noDataMessage: 'No printer count data yet.', noDataHint: 'This panel will show configured vs actively monitored printer counts over time.' },
-  { id: 21, title: 'FD: Auto-Pauses Triggered', metricKey: 'activePrinters', noDataMessage: 'No auto-pause events yet.', noDataHint: 'This panel will show auto-pause, failure detection, and error counts as a bar chart.' },
+  { id: 5, title: 'Request Rate Over Time', metricKey: 'requestsPerSecond' },
+  { id: 6, title: 'Response Latency Distribution', metricKey: 'requestsPerSecond' },
+  { id: 9, title: 'Error Rate Over Time', metricKey: 'errorRatePercent' },
+  { id: 10, title: 'Memory Usage Over Time', metricKey: 'memoryUsageMb' },
+  { id: 7, title: 'Printer Operations', metricKey: 'activePrinters' },
+  { id: 8, title: 'Slicer Operations', metricKey: 'slicerJobsLast24h' },
+  { id: 11, title: 'Database Operations Over Time', metricKey: 'databaseOperationsLast24h' },
+  { id: 12, title: 'File Operations Over Time', metricKey: 'fileOperationsLast24h' },
+  { id: 13, title: 'Request Rate by Endpoint', metricKey: 'requestsPerSecond' },
+  { id: 14, title: 'API Latency Percentiles Over Time', metricKey: 'p95LatencyMs' },
+  { id: 15, title: 'Slowest Endpoints (P95)', metricKey: 'requestsPerSecond' },
+  { id: 16, title: 'FD: Analysis Duration Over Time', metricKey: 'activePrinters' },
+  { id: 17, title: 'FD: Analyses & Failures Rate', metricKey: 'activePrinters' },
+  { id: 18, title: 'FD: ML Confidence Over Time', metricKey: 'activePrinters' },
+  { id: 19, title: 'FD: Cycle Duration Over Time', metricKey: 'activePrinters' },
+  { id: 20, title: 'FD: Active vs Configured Printers', metricKey: 'activePrinters' },
+  { id: 21, title: 'FD: Auto-Pauses Triggered', metricKey: 'activePrinters' },
 ];
 
 const PANEL_VISIBILITY_KEY = 'monitoring-grafana-panels';
@@ -167,20 +165,10 @@ export function GrafanaEmbedPanels({ sessionKey = 0 }: { sessionKey?: number }) 
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {visiblePanels.map(panel => {
+            // Hide panels entirely when metrics confirm no data is available
             const metricValue = metrics?.[panel.metricKey];
-            const showFallback = metrics != null && (metricValue == null || metricValue === 0);
-
-            if (showFallback) {
-              return (
-                <Card key={panel.id}>
-                  <Card.Body className="h-62.5 flex flex-col items-center justify-center text-center px-6">
-                    <div className="text-pf-text-primary font-medium">{panel.title}</div>
-                    <div className="mt-2 text-sm text-pf-text-secondary">{panel.noDataMessage}</div>
-                    <div className="mt-1 text-xs text-pf-text-tertiary">{panel.noDataHint}</div>
-                  </Card.Body>
-                </Card>
-              );
-            }
+            const hasNoData = metrics != null && (metricValue == null || metricValue === 0);
+            if (hasNoData) return null;
 
             return <GrafanaPanel key={panel.id} panelId={panel.id} title={panel.title} sessionKey={sessionKey} />;
           })}
