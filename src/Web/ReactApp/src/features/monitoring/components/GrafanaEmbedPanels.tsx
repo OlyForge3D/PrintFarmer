@@ -28,12 +28,12 @@ const PANELS: PanelConfig[] = [
   { id: 13, title: 'Request Rate by Endpoint', metricKey: 'requestsPerSecond' },
   { id: 14, title: 'API Latency Percentiles Over Time', metricKey: 'p95LatencyMs' },
   { id: 15, title: 'Slowest Endpoints (P95)', metricKey: 'requestsPerSecond' },
-  { id: 16, title: 'FD: Analysis Duration Over Time', metricKey: 'activePrinters' },
-  { id: 17, title: 'FD: Analyses & Failures Rate', metricKey: 'activePrinters' },
-  { id: 18, title: 'FD: ML Confidence Over Time', metricKey: 'activePrinters' },
-  { id: 19, title: 'FD: Cycle Duration Over Time', metricKey: 'activePrinters' },
-  { id: 20, title: 'FD: Active vs Configured Printers', metricKey: 'activePrinters' },
-  { id: 21, title: 'FD: Auto-Pauses Triggered', metricKey: 'activePrinters' },
+  { id: 16, title: 'FD: Analysis Duration Over Time', metricKey: 'failureDetectionConfiguredPrinters' },
+  { id: 17, title: 'FD: Analyses & Failures Rate', metricKey: 'failureDetectionConfiguredPrinters' },
+  { id: 18, title: 'FD: ML Confidence Over Time', metricKey: 'failureDetectionConfiguredPrinters' },
+  { id: 19, title: 'FD: Cycle Duration Over Time', metricKey: 'failureDetectionConfiguredPrinters' },
+  { id: 20, title: 'FD: Active vs Configured Printers', metricKey: 'failureDetectionConfiguredPrinters' },
+  { id: 21, title: 'FD: Auto-Pauses Triggered', metricKey: 'failureDetectionConfiguredPrinters' },
 ];
 
 const PANEL_VISIBILITY_KEY = 'monitoring-grafana-panels';

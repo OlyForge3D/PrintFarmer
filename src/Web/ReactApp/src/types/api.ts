@@ -3019,6 +3019,7 @@ export interface MonitoringMetricsSummaryDto {
   databaseOperationsLast24h: number;
   slicerJobsLast24h: number;
   slicerSuccessRatePercent: number;
+  failureDetectionConfiguredPrinters: number;
   timestamp: string;
 }
 

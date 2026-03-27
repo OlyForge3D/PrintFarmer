@@ -72,8 +72,10 @@ public class MonitoringHealthService(
             "sum(increase(printfarmer_slicer_operations_total[24h]))", cancellationToken);
         var slicerSuccess = QueryPrometheusAsync(client, prometheusUrl,
             "(sum(rate(printfarmer_slicer_operations_total{success=\"true\"}[24h])) or vector(0)) / (sum(rate(printfarmer_slicer_operations_total[24h])) or vector(1)) * 100", cancellationToken);
+        var fdConfiguredPrinters = QueryPrometheusAsync(client, prometheusUrl,
+            "printfarmer_failure_detection_configured_printers", cancellationToken);
 
-        await Task.WhenAll(requestRate, apiCalls24h, topEndpoint, errorRate, clientErrorRate, p95Latency, p99Latency, memoryUsage, printerOps, printerSuccessRate, fileOps24h, avgFileSize24h, databaseOps24h, slicerJobs, slicerSuccess);
+        await Task.WhenAll(requestRate, apiCalls24h, topEndpoint, errorRate, clientErrorRate, p95Latency, p99Latency, memoryUsage, printerOps, printerSuccessRate, fileOps24h, avgFileSize24h, databaseOps24h, slicerJobs, slicerSuccess, fdConfiguredPrinters);
 
         var topEndpointResult = await topEndpoint;
 
@@ -95,6 +97,7 @@ public class MonitoringHealthService(
             DatabaseOperationsLast24h = (int)(await databaseOps24h),
             SlicerJobsLast24h = (int)(await slicerJobs),
             SlicerSuccessRatePercent = await slicerSuccess,
+            FailureDetectionConfiguredPrinters = (int)(await fdConfiguredPrinters),
         };
     }
 
@@ -124,6 +127,7 @@ public class MonitoringHealthService(
             QAsync("databaseOperationsLast24h", "sum(increase(printfarmer_database_operations_total[24h]))", asInt: true),
             QAsync("slicerJobsLast24h", "sum(increase(printfarmer_slicer_operations_total[24h]))", asInt: true),
             QAsync("slicerSuccessRatePercent", "(sum(rate(printfarmer_slicer_operations_total{success=\"true\"}[24h])) or vector(0)) / (sum(rate(printfarmer_slicer_operations_total[24h])) or vector(1)) * 100"),
+            QAsync("failureDetectionConfiguredPrinters", "printfarmer_failure_detection_configured_printers", asInt: true),
         };
 
         while (pending.Count > 0)
