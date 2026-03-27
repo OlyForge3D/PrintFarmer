@@ -14,7 +14,6 @@ import { ChartIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons'
 import { apiClient } from '@/services/api';
 import { MetricsSummaryWidgets } from '@/features/monitoring/components/MetricsSummaryWidgets';
 import { GrafanaEmbedPanels } from '@/features/monitoring/components/GrafanaEmbedPanels';
-import { FailureDetectionMetricsWidget } from '@/features/monitoring/components/FailureDetectionMetricsWidget';
 import type { MonitoringStatusDto } from '@/types/api';
 
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -23,12 +22,11 @@ const ADVANCED_PREFS_KEY = 'monitoring-advanced-visible';
 const PANEL_PREFS_KEY = 'monitoring-panels';
 
 interface PanelPrefs {
-  failureDetection: boolean;
   apiMetrics: boolean;
   grafana: boolean;
 }
 
-const DEFAULT_PANELS: PanelPrefs = { failureDetection: true, apiMetrics: true, grafana: true };
+const DEFAULT_PANELS: PanelPrefs = { apiMetrics: true, grafana: true };
 
 function loadPanelPrefs(): PanelPrefs {
   try {
@@ -106,9 +104,8 @@ export function MonitoringContent() {
       {/* Panel toggles */}
       <div className="flex items-center flex-wrap gap-2">
         <span className="text-xs font-medium text-pf-text-secondary mr-1">Panels:</span>
-        {(['failureDetection', 'apiMetrics', 'grafana'] as const).map(key => {
+        {(['apiMetrics', 'grafana'] as const).map(key => {
           const labels: Record<keyof PanelPrefs, string> = {
-            failureDetection: 'Failure Detection',
             apiMetrics: 'API Metrics',
             grafana: 'Grafana',
           };
@@ -126,10 +123,7 @@ export function MonitoringContent() {
         })}
       </div>
 
-      {/* Failure Detection metrics — works without Prometheus */}
-      {panels.failureDetection && <FailureDetectionMetricsWidget />}
-
-      {!anyAvailable && !panels.failureDetection && (
+      {!anyAvailable && (
         <Card>
           <Card.Body>
             <div className="text-center py-8 text-pf-text-secondary">
