@@ -9,7 +9,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Card, Spinner, Badge, Button } from '@/common/components/ui';
+import { Card, Spinner, Badge } from '@/common/components/ui';
 import { ChartIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import { MetricsSummaryWidgets } from '@/features/monitoring/components/MetricsSummaryWidgets';
@@ -18,35 +18,9 @@ import type { MonitoringStatusDto } from '@/types/api';
 
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
-const ADVANCED_PREFS_KEY = 'monitoring-advanced-visible';
-const PANEL_PREFS_KEY = 'monitoring-panels';
-
-interface PanelPrefs {
-  apiMetrics: boolean;
-  grafana: boolean;
-}
-
-const DEFAULT_PANELS: PanelPrefs = { apiMetrics: true, grafana: true };
-
-function loadPanelPrefs(): PanelPrefs {
-  try {
-    const raw = localStorage.getItem(PANEL_PREFS_KEY);
-    if (raw) return { ...DEFAULT_PANELS, ...(JSON.parse(raw) as Partial<PanelPrefs>) };
-  } catch { /* noop */ }
-  return { ...DEFAULT_PANELS };
-}
-
-function savePanelPrefs(prefs: PanelPrefs) {
-  try { localStorage.setItem(PANEL_PREFS_KEY, JSON.stringify(prefs)); } catch { /* noop */ }
-}
-
 export function MonitoringContent() {
   const sessionRefreshRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const [sessionKey, setSessionKey] = useState(0);
-  const [showAdvanced, setShowAdvanced] = useState(() => {
-    try { return localStorage.getItem(ADVANCED_PREFS_KEY) === 'true'; } catch { return false; }
-  });
-  const [panels, setPanels] = useState<PanelPrefs>(loadPanelPrefs);
 
   const { data: status, isLoading, error } = useQuery({
     queryKey: ['monitoring-status'],
@@ -75,20 +49,6 @@ export function MonitoringContent() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleAdvanced = () => {
-    const next = !showAdvanced;
-    setShowAdvanced(next);
-    try { localStorage.setItem(ADVANCED_PREFS_KEY, String(next)); } catch { /* noop */ }
-  };
-
-  const togglePanel = (key: keyof PanelPrefs) => {
-    setPanels(prev => {
-      const next = { ...prev, [key]: !prev[key] };
-      savePanelPrefs(next);
-      return next;
-    });
-  };
-
   if (isLoading) {
     return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
   }
@@ -101,28 +61,6 @@ export function MonitoringContent() {
 
   return (
     <div className="space-y-6">
-      {/* Panel toggles */}
-      <div className="flex items-center flex-wrap gap-2">
-        <span className="text-xs font-medium text-pf-text-secondary mr-1">Panels:</span>
-        {(['apiMetrics', 'grafana'] as const).map(key => {
-          const labels: Record<keyof PanelPrefs, string> = {
-            apiMetrics: 'API Metrics',
-            grafana: 'Grafana',
-          };
-          return (
-            <Button
-              key={key}
-              variant={panels[key] ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => togglePanel(key)}
-              className="rounded-full! px-2! py-0.5! text-xs!"
-            >
-              {labels[key]}
-            </Button>
-          );
-        })}
-      </div>
-
       {!anyAvailable && (
         <Card>
           <Card.Body>
@@ -142,35 +80,15 @@ export function MonitoringContent() {
           {/* Service status + deep links */}
           <div className="flex items-center justify-between flex-wrap gap-2">
             <ServiceStatusBar status={status} />
-            <div className="flex gap-2 items-center">
-              <Button
-                variant={showAdvanced ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={toggleAdvanced}
-              >
-                {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
-              </Button>
-              <DeepLinks status={status} />
-            </div>
+            <DeepLinks status={status} />
           </div>
 
-          {/* Essential metrics — always shown when Prometheus available */}
-          {panels.apiMetrics && status?.prometheus.available && <MetricsSummaryWidgets />}
+          {/* API metrics */}
+          {status?.prometheus.available && <MetricsSummaryWidgets />}
 
-          {/* Advanced: Grafana panels — opt-in */}
-          {panels.grafana && showAdvanced && status?.grafana.available && (
+          {/* Grafana panels */}
+          {status?.grafana.available && (
             <GrafanaEmbedPanels sessionKey={sessionKey} />
-          )}
-
-          {/* Info when Grafana not available but advanced requested */}
-          {showAdvanced && !status?.grafana.available && (
-            <Card>
-              <Card.Body>
-                <p className="text-sm text-pf-text-secondary">
-                  Grafana is not configured. Deploy the monitoring stack to enable detailed charts and dashboards.
-                </p>
-              </Card.Body>
-            </Card>
           )}
         </>
       )}
