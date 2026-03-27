@@ -77,4 +77,13 @@ public interface ICameraRepository
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     Task<List<Camera>> GetEnabledWithPrinterAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Finds a camera attached to a printer from a specific discovery source.
+    /// Used for upsert logic when backend plugins refresh camera URLs.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="source">The camera source (Moonraker, PrusaLink, etc.).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Camera?> FindByPrinterIdAndSourceAsync(Guid printerId, CameraSource source, CancellationToken ct);
 }

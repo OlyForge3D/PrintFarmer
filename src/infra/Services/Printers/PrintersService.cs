@@ -1567,6 +1567,31 @@ public class PrintersService(
 
         await AddAsync(p, ct);
 
+        // Create Camera entity if camera URLs were provided during discovery
+        if (!string.IsNullOrEmpty(dto.CameraStreamUrl) || !string.IsNullOrEmpty(dto.CameraSnapshotUrl))
+        {
+            CameraSource source = MapBackendToCameraSource(dto.Backend);
+            var camera = new Domain.Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = p.Id,
+                Name = $"{p.Name} Camera",
+                StreamUrl = dto.CameraStreamUrl,
+                SnapshotUrl = dto.CameraSnapshotUrl,
+                IsEnabled = true,
+                SortOrder = 0,
+                Source = source,
+                CameraType = CameraType.General,
+                HealthStatus = CameraHealthStatus.Healthy,
+                LastHealthCheck = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            _unitOfWork.Cameras.Add(camera);
+            await SaveChangesAsync(ct);
+            _logger.LogInformation("[CreatePrinterFromDto] Created Camera {CameraId} for new printer {PrinterName}", camera.Id, p.Name);
+        }
+
         // Return offline DTO for newly imported printer (hasn't fetched status yet)
         return CreateOfflinePrinterDto(p);
     }
@@ -3590,13 +3615,83 @@ public class PrintersService(
         }
 
         // Update printer in database - only set URLs if they are not null (i.e., cameras actually exist)
+        // Dual-write: keep Printer properties for backward compat until migration is complete
         _logger.LogInformation("RefreshCameraUrlsAsync: Updating database for printer {PrinterName}: CameraStreamUrl={StreamUrl}, CameraSnapshotUrl={SnapshotUrl}", printer.Name, streamUrl, snapshotUrl);
         printer.CameraStreamUrl = streamUrl;
         printer.CameraSnapshotUrl = snapshotUrl;
+
+        // Upsert Camera entity so the Cameras table is the source of truth going forward
+        if (!string.IsNullOrEmpty(streamUrl) || !string.IsNullOrEmpty(snapshotUrl))
+        {
+            await UpsertCameraForPrinterAsync(printer, backend, streamUrl, snapshotUrl, ct).ConfigureAwait(false);
+        }
+
         await SaveChangesAsync(ct).ConfigureAwait(false);
         _logger.LogInformation("RefreshCameraUrlsAsync: SaveChangesAsync completed - URLs saved: stream={StringIsNullOrEmpty}, snapshot={StringIsNullOrEmpty1}", !string.IsNullOrEmpty(streamUrl), !string.IsNullOrEmpty(snapshotUrl));
 
         // Return updated DTO
         return await GetPrinterDtoAsync(id, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Upserts a Camera entity for a printer during camera URL refresh.
+    /// Finds an existing camera by (printerId, source) and updates it, or creates a new one.
+    /// </summary>
+    /// <param name="printer">The printer entity.</param>
+    /// <param name="backend">The printer backend type.</param>
+    /// <param name="streamUrl">Detected camera stream URL.</param>
+    /// <param name="snapshotUrl">Detected camera snapshot URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task UpsertCameraForPrinterAsync(Printer printer, PrinterBackend backend, string? streamUrl, string? snapshotUrl, CancellationToken ct)
+    {
+        CameraSource source = MapBackendToCameraSource(backend);
+
+        Domain.Camera? existing = await _unitOfWork.Cameras.FindByPrinterIdAndSourceAsync(printer.Id, source, ct).ConfigureAwait(false);
+
+        if (existing is not null)
+        {
+            existing.StreamUrl = streamUrl;
+            existing.SnapshotUrl = snapshotUrl;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.HealthStatus = CameraHealthStatus.Healthy;
+            existing.LastHealthCheck = DateTime.UtcNow;
+            existing.ConsecutiveFailures = 0;
+            _logger.LogInformation("UpsertCameraForPrinterAsync: Updated existing Camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
+        }
+        else
+        {
+            var camera = new Domain.Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"{printer.Name} Camera",
+                StreamUrl = streamUrl,
+                SnapshotUrl = snapshotUrl,
+                IsEnabled = true,
+                SortOrder = 0,
+                Source = source,
+                CameraType = CameraType.General,
+                HealthStatus = CameraHealthStatus.Healthy,
+                LastHealthCheck = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            _unitOfWork.Cameras.Add(camera);
+            _logger.LogInformation("UpsertCameraForPrinterAsync: Created new Camera {CameraId} for printer {PrinterName}", camera.Id, printer.Name);
+        }
+    }
+
+    /// <summary>
+    /// Maps a PrinterBackend enum to the corresponding CameraSource enum.
+    /// </summary>
+    /// <param name="backend">The printer backend type.</param>
+    private static CameraSource MapBackendToCameraSource(PrinterBackend backend) => backend switch
+    {
+        PrinterBackend.Moonraker => CameraSource.Moonraker,
+        PrinterBackend.PrusaLink => CameraSource.PrusaLink,
+        PrinterBackend.OctoPrint => CameraSource.OctoPrint,
+        PrinterBackend.SDCP => CameraSource.SDCP,
+        PrinterBackend.FlashForge => CameraSource.FlashForge,
+        _ => CameraSource.Standalone,
+    };
 }
