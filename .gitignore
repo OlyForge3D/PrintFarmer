@@ -102,3 +102,6 @@ dotnet-install.sh.*
 
 # Installer build artifacts
 tools/installer/dist/
+.squad/decisions/inbox/
+.squad/sessions/
+.squad-workstream
