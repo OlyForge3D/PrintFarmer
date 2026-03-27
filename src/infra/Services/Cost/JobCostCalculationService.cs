@@ -144,8 +144,10 @@ public class JobCostCalculationService : IJobCostCalculationService
     }
 
     /// <summary>
-    /// Calculates material cost from Spoolman filament price and usage.
-    /// Formula: (usageGrams / filamentWeightGrams) × filamentPrice
+    /// Calculates material cost from filament usage and pricing.
+    /// Price cascade: spool.Price → filament.Price (spool-level price allows tracking sale/bulk pricing).
+    /// Weight cascade: spool.InitialWeightG → filament.Weight → 1000g default.
+    /// Formula: (actualFilamentUsage / spoolWeight) × price
     /// </summary>
     private async Task<decimal?> CalculateMaterialCostAsync(PrintJob job, CancellationToken ct)
     {
@@ -170,20 +172,54 @@ public class JobCostCalculationService : IJobCostCalculationService
                 job.FilamentName = filament.Name;
             }
 
-            if (!filament.Price.HasValue || filament.Price.Value <= 0)
+            // Look up spool instance for per-spool price and weight overrides
+            double? spoolPrice = null;
+            double? spoolInitialWeight = null;
+            if (job.SpoolmanSpoolId.HasValue)
             {
-                _logger.LogDebug("Spoolman filament {FilamentId} has no price data. Material cost will be null.", job.SpoolmanFilamentId.Value);
+                try
+                {
+                    SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(job.SpoolmanSpoolId.Value, ct);
+                    if (spool != null)
+                    {
+                        if (spool.Price is > 0)
+                        {
+                            spoolPrice = spool.Price;
+                        }
+
+                        if (spool.InitialWeightG is > 0)
+                        {
+                            spoolInitialWeight = spool.InitialWeightG;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to look up spool {SpoolId}. Falling back to filament defaults.", job.SpoolmanSpoolId.Value);
+                }
+            }
+
+            // Price cascade: spool price (sale/bulk) → filament product price (MSRP)
+            double? effectivePrice = spoolPrice ?? filament.Price;
+
+            if (!effectivePrice.HasValue || effectivePrice.Value <= 0)
+            {
+                _logger.LogDebug(
+                    "No price data for filament {FilamentId} or spool {SpoolId}. Material cost will be null.",
+                    job.SpoolmanFilamentId.Value,
+                    job.SpoolmanSpoolId);
                 return null;
             }
 
-            double spoolWeightGrams = filament.Weight ?? 1000.0; // Default to 1kg if not set
+            // Weight cascade: spool initial weight → filament product weight → 1kg default
+            double spoolWeightGrams = spoolInitialWeight ?? filament.Weight ?? 1000.0;
 
             if (spoolWeightGrams <= 0)
             {
                 spoolWeightGrams = 1000.0;
             }
 
-            decimal cost = (decimal)(job.ActualFilamentUsage.Value / spoolWeightGrams) * (decimal)filament.Price.Value;
+            decimal cost = (decimal)(job.ActualFilamentUsage.Value / spoolWeightGrams) * (decimal)effectivePrice.Value;
 
             return Math.Round(cost, 2);
         }

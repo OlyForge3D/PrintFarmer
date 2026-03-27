@@ -2401,6 +2401,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int?>("SpoolmanFilamentId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("SpoolmanSpoolId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 

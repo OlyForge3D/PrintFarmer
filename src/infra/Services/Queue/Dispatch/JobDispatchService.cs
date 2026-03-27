@@ -96,12 +96,14 @@ public class JobDispatchService(
         job.DispatchMode = (int)DispatchMode.Suggested;
 
         // If the job doesn't have a SpoolmanFilamentId, inherit from the printer's active spool
-        if (!job.SpoolmanFilamentId.HasValue && printer.CurrentSpoolId.HasValue)
+        if (printer.CurrentSpoolId.HasValue)
         {
             try
             {
                 var spool = await spoolmanService.GetSpoolByIdAsync(printer.CurrentSpoolId.Value, ct);
-                if (spool?.FilamentId != null)
+                job.SpoolmanSpoolId = printer.CurrentSpoolId.Value;
+
+                if (!job.SpoolmanFilamentId.HasValue && spool?.FilamentId != null)
                 {
                     job.SpoolmanFilamentId = spool.FilamentId;
                     logger.LogInformation(
