@@ -839,8 +839,8 @@ public class PrintersController(
             p.DateAcquired,
             (PrinterBackend)p.Backend,
             p.ApiKey,
-            p.CameraStreamUrl,
-            p.CameraSnapshotUrl,
+            null, // CameraStreamUrl — resolved from Cameras table via DTO layer
+            null, // CameraSnapshotUrl — resolved from Cameras table via DTO layer
             p.OriginalServerUrl,
             p.BackendPort,
             p.FrontendPort,
@@ -1408,9 +1408,7 @@ public class PrintersController(
             if (dto.ObicoEnabled.Value && !p.ObicoEnabled)
             {
                 // Enabling: validate camera exists
-                bool hasCamera = (p.Cameras != null && p.Cameras.Count != 0)
-                    || !string.IsNullOrWhiteSpace(p.CameraStreamUrl)
-                    || !string.IsNullOrWhiteSpace(p.CameraSnapshotUrl);
+                bool hasCamera = p.Cameras != null && p.Cameras.Count != 0;
                 if (!hasCamera)
                 {
                     return BadRequest(new { error = "Obico monitoring requires at least one camera configured on the printer." });
@@ -2724,8 +2722,6 @@ public class PrintersController(
                 originalServerUrl = printer.OriginalServerUrl,
                 backend = printer.Backend,
                 apiKey = printer.ApiKey,
-                cameraStreamUrl = printer.CameraStreamUrl,
-                cameraSnapshotUrl = printer.CameraSnapshotUrl,
                 backendPort = printer.BackendPort,
                 frontendPort = printer.FrontendPort,
                 notes = printer.Notes,
@@ -2807,16 +2803,6 @@ public class PrintersController(
                     printer.ApiKey = apiKeyVal?.ToString();
                 }
 
-                if (configDict.TryGetValue("cameraStreamUrl", out object? streamVal))
-                {
-                    printer.CameraStreamUrl = streamVal?.ToString();
-                }
-
-                if (configDict.TryGetValue("cameraSnapshotUrl", out object? snapshotVal))
-                {
-                    printer.CameraSnapshotUrl = snapshotVal?.ToString();
-                }
-
                 if (configDict.TryGetValue("notes", out object? notesVal))
                 {
                     printer.Notes = notesVal?.ToString();
@@ -2850,8 +2836,6 @@ public class PrintersController(
                     originalServerUrl = printer.OriginalServerUrl,
                     backend = printer.Backend,
                     apiKey = printer.ApiKey,
-                    cameraStreamUrl = printer.CameraStreamUrl,
-                    cameraSnapshotUrl = printer.CameraSnapshotUrl,
                     backendPort = printer.BackendPort,
                     frontendPort = printer.FrontendPort,
                     notes = printer.Notes,

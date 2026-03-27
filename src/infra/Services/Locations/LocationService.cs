@@ -78,7 +78,7 @@ public class LocationService : ILocationService
         Backend = (PrinterBackend)p.Backend,
         BackendPort = p.BackendPort,
         FrontendPort = p.FrontendPort,
-        CameraStreamUrl = p.CameraStreamUrl ?? string.Empty
+        CameraStreamUrl = string.Empty
     };
 
     public async Task<List<Location>> GetAllAsync(CancellationToken ct)

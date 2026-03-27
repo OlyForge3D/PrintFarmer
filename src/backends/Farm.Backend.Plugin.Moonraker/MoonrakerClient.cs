@@ -549,10 +549,8 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
         PrinterSpoolInfoDto? spoolInfo,
         CancellationToken ct = default)
     {
-        // Use camera URLs from database (discovered and validated during printer setup/refresh)
-        // These are validated URLs - null if no cameras are configured
-        string? cameraStreamUrl = printer.CameraStreamUrl;
-        string? cameraSnapshotUrl = printer.CameraSnapshotUrl;
+        // Camera URLs are now resolved from Cameras table by PrintersService.GetPrinterDtoAsync
+        // (bead 2 compat layer). Plugin sets null; the caller overrides with Camera table data.
 
         // Construct backend-specific PrinterDto
         return Task.FromResult(new PrinterDto(
@@ -567,8 +565,8 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             JobName: status.JobName,
             FileName: PrinterStatusDto.ExtractFileName(status.JobName),
             ThumbnailUrl: status.ThumbnailUrl,
-            CameraStreamUrl: cameraStreamUrl,
-            CameraSnapshotUrl: cameraSnapshotUrl,
+            CameraStreamUrl: null,
+            CameraSnapshotUrl: null,
             X: status.X,
             Y: status.Y,
             Z: status.Z,

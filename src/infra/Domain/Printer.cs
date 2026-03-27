@@ -147,18 +147,6 @@ public class Printer
     public PrinterCredential? Credential { get; set; }
 
     /// <summary>
-    /// Camera stream URL discovered from the printer backend.
-    /// Will be migrated to the Cameras navigation property in a future release.
-    /// </summary>
-    public string? CameraStreamUrl { get; set; }
-
-    /// <summary>
-    /// Camera snapshot URL discovered from the printer backend.
-    /// Will be migrated to the Cameras navigation property in a future release.
-    /// </summary>
-    public string? CameraSnapshotUrl { get; set; }
-
-    /// <summary>
     /// Cameras attached to this printer.
     /// Cameras are discovered from Moonraker, PrusaLink, OctoPrint, etc. or manually configured.
     /// </summary>

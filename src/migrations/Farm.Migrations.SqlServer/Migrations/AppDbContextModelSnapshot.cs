@@ -2776,12 +2776,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("BedPreConfirmed")
                         .HasColumnType("bit");
 
-                    b.Property<string>("CameraSnapshotUrl")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("CameraStreamUrl")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("nvarchar(max)");
 

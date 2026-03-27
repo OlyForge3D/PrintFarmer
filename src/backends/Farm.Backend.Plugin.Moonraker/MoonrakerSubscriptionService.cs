@@ -911,7 +911,7 @@ public sealed class MoonrakerSubscriptionService(
                 res.TryGetProperty("status", out JsonElement statusObj))
             {
                 _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
-                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.BackendUrl, printer.CameraStreamUrl, null, ct);
+                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.BackendUrl, null, null, ct);
             }
         }
         catch (JsonException ex)
@@ -953,7 +953,7 @@ public sealed class MoonrakerSubscriptionService(
                         printer.Name,
                         p[0].GetRawText());
 
-                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.BackendUrl, printer.CameraStreamUrl, null, ct);
+                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.BackendUrl, null, null, ct);
                 }
 
                 break;

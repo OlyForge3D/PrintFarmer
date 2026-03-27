@@ -1461,9 +1461,6 @@ public class PrintersService(
             BackendPort = dto.BackendPort ?? throw new InvalidOperationException($"BackendPort is required - discovery probes must always set it for backend {dto.Backend}"),
             FrontendPort = dto.FrontendPort,
 
-            // Use provided camera URLs from discovery, or leave null
-            CameraStreamUrl = dto.CameraStreamUrl,
-            CameraSnapshotUrl = dto.CameraSnapshotUrl,
             IsEnabled = dto.IsEnabled,
 
             // Copy hardware specifications from PrinterModel template
@@ -3594,13 +3591,8 @@ public class PrintersService(
             _logger.LogWarning(ex, "RefreshCameraUrlsAsync: Failed to refresh camera URLs for printer {Id}: {Message}", id, ex.Message);
         }
 
-        // Update printer in database - only set URLs if they are not null (i.e., cameras actually exist)
-        // Dual-write: keep Printer properties for backward compat until migration is complete
-        _logger.LogInformation("RefreshCameraUrlsAsync: Updating database for printer {PrinterName}: CameraStreamUrl={StreamUrl}, CameraSnapshotUrl={SnapshotUrl}", printer.Name, streamUrl, snapshotUrl);
-        printer.CameraStreamUrl = streamUrl;
-        printer.CameraSnapshotUrl = snapshotUrl;
-
-        // Upsert Camera entity so the Cameras table is the source of truth going forward
+        // Upsert Camera entity — Cameras table is the sole source of truth
+        _logger.LogInformation("RefreshCameraUrlsAsync: Updating cameras for printer {PrinterName}: StreamUrl={StreamUrl}, SnapshotUrl={SnapshotUrl}", printer.Name, streamUrl, snapshotUrl);
         if (!string.IsNullOrEmpty(streamUrl) || !string.IsNullOrEmpty(snapshotUrl))
         {
             await UpsertCameraForPrinterAsync(printer, backend, streamUrl, snapshotUrl, ct).ConfigureAwait(false);
