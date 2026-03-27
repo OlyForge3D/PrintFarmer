@@ -115,6 +115,39 @@ public class CostByMaterialDto
 }
 
 /// <summary>
+/// Per-job cost breakdown for the "Costs by Job" analytics tab.
+/// </summary>
+public class CostByJobDto
+{
+    public Guid JobId { get; set; }
+
+    public string JobName { get; set; } = string.Empty;
+
+    public string? PrinterName { get; set; }
+
+    public string? FilamentName { get; set; }
+
+    public string? MaterialType { get; set; }
+
+    public double? FilamentUsedGrams { get; set; }
+
+    public decimal TotalCostUsd { get; set; }
+
+    public decimal MaterialCostUsd { get; set; }
+
+    public decimal EnergyCostUsd { get; set; }
+
+    public decimal MachineTimeCostUsd { get; set; }
+
+    public decimal LaborCostUsd { get; set; }
+
+    /// <summary>Actual print duration in seconds.</summary>
+    public double? PrintTimeSeconds { get; set; }
+
+    public DateTime? CompletedAt { get; set; }
+}
+
+/// <summary>
 /// Request to update job cost with manual overrides.
 /// </summary>
 public class UpdateJobCostRequest

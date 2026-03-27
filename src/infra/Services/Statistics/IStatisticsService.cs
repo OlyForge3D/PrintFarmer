@@ -53,4 +53,9 @@ public interface IStatisticsService
     /// Returns cost data grouped by material type.
     /// </summary>
     Task<List<CostByMaterialDto>> GetCostsByMaterialAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns per-job cost breakdowns for completed jobs.
+    /// </summary>
+    Task<List<CostByJobDto>> GetCostsByJobAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default);
 }

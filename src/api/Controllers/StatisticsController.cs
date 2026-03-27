@@ -241,4 +241,26 @@ public class StatisticsController(IStatisticsService statisticsService) : Contro
         var result = await _statisticsService.GetCostsByMaterialAsync(days, startDate, endDate, ct);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Returns per-job cost breakdowns for completed print jobs.
+    /// </summary>
+    [HttpGet("costs/by-job")]
+    [ProducesResponseType(typeof(List<CostByJobDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetCostsByJobAsync(
+        [FromQuery] int? days,
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null,
+        CancellationToken ct = default)
+    {
+        IActionResult? validationError = ValidateDateRange(startDate, endDate);
+        if (validationError is not null)
+        {
+            return validationError;
+        }
+
+        var result = await _statisticsService.GetCostsByJobAsync(days, startDate, endDate, ct);
+        return Ok(result);
+    }
 }

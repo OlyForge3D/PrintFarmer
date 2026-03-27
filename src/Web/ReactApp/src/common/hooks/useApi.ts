@@ -125,6 +125,7 @@ export const queryKeys = {
   costs: ['costs'] as const,
   costsByPrinter: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-printer', days, startDate, endDate] as const,
   costsByMaterial: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-material', days, startDate, endDate] as const,
+  costsByJob: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-job', days, startDate, endDate] as const,
   costOverTime: ['costs', 'over-time'] as const,
   scheduledJobs: ['scheduled-jobs'] as const,
   scheduledJob: (jobId: string) => ['scheduled-jobs', jobId] as const,
@@ -1677,6 +1678,15 @@ export function useCostsByMaterial(days?: number, startDate?: string, endDate?: 
   return useQuery({
     queryKey: queryKeys.costsByMaterial(days, startDate, endDate),
     queryFn: () => apiClient.getCostsByMaterial(days, startDate, endDate),
+    staleTime: 300_000, // 5 minutes
+    ...options,
+  });
+}
+
+export function useCostsByJob(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostByJob[]>) {
+  return useQuery({
+    queryKey: queryKeys.costsByJob(days, startDate, endDate),
+    queryFn: () => apiClient.getCostsByJob(days, startDate, endDate),
     staleTime: 300_000, // 5 minutes
     ...options,
   });

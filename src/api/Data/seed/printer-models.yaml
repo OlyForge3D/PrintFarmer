@@ -82,7 +82,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 350
+  defaultWattage: 150
   supportedMaterials:
     - PLA
     - PETG
@@ -120,7 +120,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 350
+  defaultWattage: 150
   supportedMaterials:
     - PLA
     - PETG
@@ -157,7 +157,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 400
+  defaultWattage: 200
   supportedMaterials:
     - PLA
     - PETG
@@ -194,7 +194,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 100
   maxPrintSpeed: 1000
-  defaultWattage: 200
+  defaultWattage: 60
   supportedMaterials:
     - PLA
     - PETG
@@ -230,7 +230,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 600
-  defaultWattage: 400
+  defaultWattage: 250
   supportedMaterials:
     - PLA
     - PETG
@@ -268,7 +268,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 350
+  defaultWattage: 180
   supportedMaterials:
     - PLA
     - PETG
@@ -304,7 +304,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 350
+  defaultWattage: 200
   supportedMaterials:
     - PLA
     - PETG
@@ -341,7 +341,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 250
+  defaultWattage: 80
   supportedMaterials:
     - PLA
     - PETG
@@ -374,7 +374,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 300
+  defaultWattage: 120
   supportedMaterials:
     - PLA
     - PETG
@@ -407,7 +407,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 250
+  defaultWattage: 80
   supportedMaterials:
     - PLA
     - PETG
@@ -440,7 +440,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 300
+  defaultWattage: 120
   supportedMaterials:
     - PLA
     - PETG
@@ -474,7 +474,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 250
+  defaultWattage: 80
   supportedMaterials:
     - PLA
     - PETG
@@ -513,7 +513,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 350
+  defaultWattage: 175
   supportedMaterials:
     - PLA
     - PETG
@@ -552,7 +552,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 350
+  defaultWattage: 200
   supportedMaterials:
     - PLA
     - PETG
@@ -591,7 +591,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 400
+  defaultWattage: 250
   supportedMaterials:
     - PLA
     - PETG
@@ -630,7 +630,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 300
+  defaultWattage: 150
   supportedMaterials:
     - PLA
     - PETG
@@ -669,7 +669,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 350
+  defaultWattage: 175
   supportedMaterials:
     - PLA
     - PETG
@@ -706,7 +706,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 350
+  defaultWattage: 200
   supportedMaterials:
     - PLA
     - PETG
@@ -743,7 +743,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 400
+  defaultWattage: 250
   supportedMaterials:
     - PLA
     - PETG
@@ -781,7 +781,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 300
+  defaultWattage: 150
   supportedMaterials:
     - PLA
     - PETG
@@ -820,7 +820,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 350
+  defaultWattage: 200
   supportedMaterials:
     - PLA
     - PETG
@@ -861,7 +861,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 400
+  defaultWattage: 250
   supportedMaterials:
     - PLA
     - PETG
@@ -902,7 +902,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 450
+  defaultWattage: 300
   supportedMaterials:
     - PLA
     - PETG
@@ -943,7 +943,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 350
+  defaultWattage: 200
   supportedMaterials:
     - PLA
     - PETG
@@ -984,7 +984,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 400
+  defaultWattage: 250
   supportedMaterials:
     - PLA
     - PETG
@@ -1025,7 +1025,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 450
+  defaultWattage: 300
   supportedMaterials:
     - PLA
     - PETG
@@ -1066,7 +1066,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 350
+  defaultWattage: 200
   supportedMaterials:
     - PLA
     - PETG
@@ -1111,7 +1111,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 400
+  defaultWattage: 250
   supportedMaterials:
     - PLA
     - PETG
@@ -1156,7 +1156,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 450
+  defaultWattage: 300
   supportedMaterials:
     - PLA
     - PETG
@@ -1201,7 +1201,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 400
+  defaultWattage: 250
   supportedMaterials:
     - PLA
     - PETG
@@ -1246,7 +1246,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 450
+  defaultWattage: 300
   supportedMaterials:
     - PLA
     - PETG
@@ -1291,7 +1291,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
-  defaultWattage: 500
+  defaultWattage: 350
   supportedMaterials:
     - PLA
     - PETG
@@ -1337,7 +1337,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 200
+  defaultWattage: 150
   supportedMaterials:
     - PLA
     - PETG
@@ -1375,7 +1375,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 110
   maxPrintSpeed: 600
-  defaultWattage: 350
+  defaultWattage: 170
   supportedMaterials:
     - PLA
     - PETG
@@ -1417,7 +1417,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 100
   maxPrintSpeed: 180
-  defaultWattage: 120
+  defaultWattage: 80
   supportedMaterials:
     - PLA
     - PETG
@@ -1456,7 +1456,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 200
+  defaultWattage: 110
   supportedMaterials:
     - PLA
     - PETG
@@ -1495,7 +1495,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 200
+  defaultWattage: 110
   supportedMaterials:
     - PLA
     - PETG
@@ -1535,7 +1535,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 200
+  defaultWattage: 120
   supportedMaterials:
     - PLA
     - PETG
@@ -1575,7 +1575,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 200
+  defaultWattage: 120
   supportedMaterials:
     - PLA
     - PETG
@@ -1615,7 +1615,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 200
+  defaultWattage: 150
   supportedMaterials:
     - PLA
     - PETG
@@ -1655,7 +1655,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
-  defaultWattage: 250
+  defaultWattage: 180
   supportedMaterials:
     - PLA
     - PETG
@@ -1695,7 +1695,7 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
-  defaultWattage: 350
+  defaultWattage: 200
   supportedMaterials:
     - PLA
     - PETG

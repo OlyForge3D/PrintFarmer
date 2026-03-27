@@ -3653,6 +3653,20 @@ export class ApiClient {
     return response.data;
   }
 
+  async getCostsByJob(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostByJob[]> {
+    const params: Record<string, string | number> = {};
+    if (startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    } else if (days !== undefined) {
+      params.days = days;
+    }
+    const response = await this.client.get('/statistics/costs/by-job', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    });
+    return response.data;
+  }
+
   async getCostOverTime(): Promise<import("@/types/api").CostOverTime[]> {
     const response = await this.client.get('/statistics/cost-over-time');
     return response.data;

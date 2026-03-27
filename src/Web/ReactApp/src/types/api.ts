@@ -3345,6 +3345,22 @@ export interface CostByMaterial {
   totalFilamentUsageGrams: number;
 }
 
+export interface CostByJob {
+  jobId: string;
+  jobName: string;
+  printerName?: string;
+  filamentName?: string;
+  materialType?: string;
+  filamentUsedGrams?: number;
+  totalCostUsd: number;
+  materialCostUsd: number;
+  energyCostUsd: number;
+  machineTimeCostUsd: number;
+  laborCostUsd: number;
+  printTimeSeconds?: number;
+  completedAt?: string;
+}
+
 export interface CostOverTime {
   date: string;
   totalCostUsd: number;

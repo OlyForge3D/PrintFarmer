@@ -430,4 +430,47 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         .OrderByDescending(r => r.TotalCostUsd)
         .ToList();
     }
+
+    /// <inheritdoc/>
+    public async Task<List<CostByJobDto>> GetCostsByJobAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
+    {
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
+
+        var query = _db.PrintJobs
+            .Include(j => j.AssignedPrinter)
+            .Include(j => j.GcodeFile)
+            .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue);
+
+        if (effectiveStart.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime >= effectiveStart.Value);
+        }
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime <= effectiveEnd.Value);
+        }
+
+        var rows = await query
+            .OrderByDescending(j => j.ActualEndTime)
+            .Select(j => new CostByJobDto
+            {
+                JobId = j.Id,
+                JobName = j.Name ?? (j.GcodeFile != null ? j.GcodeFile.Name : "Untitled"),
+                PrinterName = j.AssignedPrinter != null ? j.AssignedPrinter.Name : null,
+                FilamentName = j.FilamentName,
+                MaterialType = j.RequiredMaterialType,
+                FilamentUsedGrams = j.ActualFilamentUsage,
+                TotalCostUsd = j.TotalCostUsd ?? 0m,
+                MaterialCostUsd = j.MaterialCostUsd ?? 0m,
+                EnergyCostUsd = j.EnergyCostUsd ?? 0m,
+                MachineTimeCostUsd = j.MachineTimeCostUsd ?? 0m,
+                LaborCostUsd = j.LaborCostUsd ?? 0m,
+                PrintTimeSeconds = j.ActualPrintTime.HasValue ? j.ActualPrintTime.Value.TotalSeconds : null,
+                CompletedAt = j.ActualEndTime,
+            })
+            .ToListAsync(ct);
+
+        return rows;
+    }
 }

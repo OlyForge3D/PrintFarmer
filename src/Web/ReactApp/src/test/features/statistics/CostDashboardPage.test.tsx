@@ -6,11 +6,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockUseCostSummary = vi.fn();
 const mockUseCostsByPrinter = vi.fn();
 const mockUseCostsByMaterial = vi.fn();
+const mockUseCostsByJob = vi.fn();
 
 vi.mock('@/common/hooks/useApi', () => ({
   useCostSummary: (...args: unknown[]) => mockUseCostSummary(...args),
   useCostsByPrinter: (...args: unknown[]) => mockUseCostsByPrinter(...args),
   useCostsByMaterial: (...args: unknown[]) => mockUseCostsByMaterial(...args),
+  useCostsByJob: (...args: unknown[]) => mockUseCostsByJob(...args),
 }));
 
 import { CostDashboardPage } from '@/features/statistics/pages/CostDashboardPage';
@@ -28,6 +30,7 @@ describe('CostDashboardPage', () => {
     mockUseCostSummary.mockReturnValue({ data: defaultSummary, isLoading: false, error: null });
     mockUseCostsByPrinter.mockReturnValue({ data: [], isLoading: false, error: null });
     mockUseCostsByMaterial.mockReturnValue({ data: [], isLoading: false, error: null });
+    mockUseCostsByJob.mockReturnValue({ data: [], isLoading: false, error: null });
   });
 
   it('renders page title and time period filter', () => {
