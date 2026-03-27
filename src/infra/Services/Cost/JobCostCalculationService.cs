@@ -158,7 +158,19 @@ public class JobCostCalculationService : IJobCostCalculationService
         {
             SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(job.SpoolmanFilamentId.Value, ct);
 
-            if (filament == null || !filament.Price.HasValue || filament.Price.Value <= 0)
+            if (filament == null)
+            {
+                _logger.LogDebug("Spoolman filament {FilamentId} not found. Material cost will be null.", job.SpoolmanFilamentId.Value);
+                return null;
+            }
+
+            // Backfill FilamentName from Spoolman if missing (enables Cost by Material grouping)
+            if (string.IsNullOrEmpty(job.FilamentName) && !string.IsNullOrEmpty(filament.Name))
+            {
+                job.FilamentName = filament.Name;
+            }
+
+            if (!filament.Price.HasValue || filament.Price.Value <= 0)
             {
                 _logger.LogDebug("Spoolman filament {FilamentId} has no price data. Material cost will be null.", job.SpoolmanFilamentId.Value);
                 return null;

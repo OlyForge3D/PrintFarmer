@@ -3,6 +3,9 @@ import { Button, Checkbox, Select, Spinner } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
 import { printJobQueueService, EnqueuePrintJobRequest } from '@/services/printJobQueueService';
+import { SpoolValidationModal } from '@/features/queue/components/SpoolValidationModal';
+import { validateSpoolForDispatch } from '@/features/queue/utils/spoolValidation';
+import type { SpoolValidationContext } from '@/features/queue/utils/spoolValidation';
 import { GcodeFile, SpoolmanFilament } from '@/types/api';
 import { CheckCircleIcon, PrinterIcon, ClockIcon } from '@/common/components/icons/MdiIcons';
 
@@ -93,6 +96,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
   const [startNowLoading, setStartNowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successState, setSuccessState] = useState<SuccessState | null>(null);
+  const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
   // Override state: allows user to bypass model matching and see all printers
   const [overrideModelFilter, setOverrideModelFilter] = useState(false);
@@ -203,23 +207,36 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
     }
   };
 
+  /** Dispatch a job, validating spool state first. */
+  const dispatchWithSpoolCheck = async (jobId: string, printerName: string) => {
+    const req = buildRequest();
+    const printerId = autoAssign ? undefined : selectedPrinter;
+
+    if (printerId) {
+      const ctx = await validateSpoolForDispatch(
+        { id: jobId, name: file.name, requiredMaterialType: req.requiredMaterialType },
+        { id: printerId, name: printerName },
+      );
+      if (ctx) {
+        setSpoolValidationCtx(ctx);
+        return;
+      }
+    }
+
+    await apiClient.dispatchPrintQueueJob(jobId);
+    setSuccessState({ jobId, printerName, isStarting: false, isStarted: true });
+  };
+
   const handleQueueAndStart = async () => {
     setStartNowLoading(true);
     setError(null);
     try {
       const req = buildRequest();
       const result = await printJobQueueService.enqueue(req);
-      
-      // Immediately dispatch the job
-      await apiClient.dispatchPrintQueueJob(result.id);
-      
+      const printerName = result.assignedPrinterName || 'Unknown Printer';
+
+      await dispatchWithSpoolCheck(result.id, printerName);
       setStartNowLoading(false);
-      setSuccessState({
-        jobId: result.id,
-        printerName: result.assignedPrinterName || 'Unknown Printer',
-        isStarting: false,
-        isStarted: true
-      });
     } catch (err) {
       setStartNowLoading(false);
       setError(err instanceof Error ? err.message : 'Failed to queue and start job');
@@ -228,23 +245,54 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
 
   const handleStartNow = async () => {
     if (!successState) return;
-    
+
     setSuccessState({ ...successState, isStarting: true, startError: undefined });
     try {
-      await apiClient.dispatchPrintQueueJob(successState.jobId);
-      setSuccessState({ ...successState, isStarting: false, isStarted: true });
+      await dispatchWithSpoolCheck(successState.jobId, successState.printerName);
+      if (!spoolValidationCtx) {
+        setSuccessState({ ...successState, isStarting: false, isStarted: true });
+      }
     } catch (err) {
-      setSuccessState({ 
-        ...successState, 
-        isStarting: false, 
+      setSuccessState({
+        ...successState,
+        isStarting: false,
         startError: err instanceof Error ? err.message : 'Failed to start print'
       });
+    }
+  };
+
+  /** Called when spool validation modal confirms (spool selected or user proceeds anyway). */
+  const handleSpoolValidated = async (jobId: string) => {
+    setSpoolValidationCtx(null);
+    try {
+      await apiClient.dispatchPrintQueueJob(jobId);
+      const printerName = successState?.printerName || 'Printer';
+      setSuccessState({ jobId, printerName, isStarting: false, isStarted: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start print');
+    } finally {
+      setStartNowLoading(false);
     }
   };
 
   // All printer compatibility filtering is now done server-side.
   // Printers returned from the API are already filtered by model, nozzle, and material.
   // When override is active, effectivePrinters contains all printers (no model filter).
+
+  // Spool validation modal may need to show even when the queue modal would be hidden
+  if (spoolValidationCtx) {
+    return (
+      <SpoolValidationModal
+        isOpen
+        onClose={() => {
+          setSpoolValidationCtx(null);
+          setStartNowLoading(false);
+        }}
+        onProceed={handleSpoolValidated}
+        context={spoolValidationCtx}
+      />
+    );
+  }
 
   if (!isOpen) return null;
 
