@@ -57,7 +57,7 @@ describe('FailureDetectionMonitoringSummary', () => {
       />
     );
 
-    expect(screen.getByRole('img', { name: /confidence 15%/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /confidence 85%/i })).toBeInTheDocument();
     // Badge should NOT be rendered when gauge is present
     expect(screen.queryByText('Guarding', { selector: '[class*="badge"]' })).toBeNull();
   });
@@ -86,7 +86,7 @@ describe('FailureDetectionMonitoringSummary', () => {
       />
     );
 
-    expect(screen.getByRole('img', { name: /confidence 42%/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /confidence 58%/i })).toBeInTheDocument();
   });
 
   it('renders auto-pause incident with snapshot link and action badge', () => {

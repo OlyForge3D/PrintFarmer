@@ -149,6 +149,7 @@ export function FailureDetectionMonitoringSummary({
   const snapshotUrl = latestIncident?.snapshotUrl ?? status?.snapshotUrl;
   const needsAction = tone === 'critical' || tone === 'attention';
   const confidence = latestIncident?.confidence ?? status?.lastConfidence ?? null;
+  const printHealth = confidence != null ? 1 - confidence : null;
   const isMonitoring = status?.state === 'monitoring';
 
   // Compact: slim inline row — icon + headline + subline + badge
@@ -173,7 +174,7 @@ export function FailureDetectionMonitoringSummary({
           )}
         </div>
         {isMonitoring && confidence != null && tone === 'healthy' ? (
-          <ConfidenceGauge value={confidence} size="sm" />
+          <ConfidenceGauge value={printHealth} size="sm" />
         ) : (
           <Badge
             variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
@@ -213,7 +214,7 @@ export function FailureDetectionMonitoringSummary({
             <p className="mt-1 text-sm leading-snug text-pf-text-secondary">{summary}</p>
             {isMonitoring && confidence != null && !needsAction && (
               <div className="mt-2">
-                <ConfidenceGauge value={confidence} size="lg" />
+                <ConfidenceGauge value={printHealth} size="lg" />
               </div>
             )}
           </div>

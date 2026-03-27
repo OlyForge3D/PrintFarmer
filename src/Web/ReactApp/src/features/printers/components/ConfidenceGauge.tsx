@@ -21,8 +21,8 @@ const SIZE_CONFIG = {
 let idCounter = 0;
 
 /**
- * Semicircular arc gauge that visualises a 0-100% confidence score
- * with a green → yellow → red gradient. An optional threshold tick mark
+ * Semicircular arc gauge that visualises a 0-100% print-health score
+ * with a red → yellow → green gradient. An optional threshold tick mark
  * shows the auto-pause trigger level.
  */
 export function ConfidenceGauge({ value, threshold, size = 'sm', className }: ConfidenceGaugeProps) {
@@ -79,9 +79,9 @@ export function ConfidenceGauge({ value, threshold, size = 'sm', className }: Co
       >
         <defs>
           <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#22c55e" />
-            <stop offset="45%" stopColor="#eab308" />
-            <stop offset="100%" stopColor="#ef4444" />
+            <stop offset="0%" stopColor="#ef4444" />
+            <stop offset="55%" stopColor="#eab308" />
+            <stop offset="100%" stopColor="#22c55e" />
           </linearGradient>
         </defs>
 
