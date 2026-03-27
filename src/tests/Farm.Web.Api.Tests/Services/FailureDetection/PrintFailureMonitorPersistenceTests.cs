@@ -88,12 +88,14 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
         Mock<IPrintersService> printersService = new(MockBehavior.Strict);
         FailureDetectionMonitorStatusStore monitorStatus = new();
         ILogger<PrintFailureMonitorService> logger = Mock.Of<ILogger<PrintFailureMonitorService>>();
+        FailureDetectionMetrics metrics = new();
 
         PrintFailureMonitorService service = new(
             scopeFactory.Object,
             monitorStatus,
             statusCache.Object,
             hub.Object,
+            metrics,
             logger);
 
         FailureDetectionResult result = FailureDetectionResult.Success(0.9421m, isFailureDetected: true);

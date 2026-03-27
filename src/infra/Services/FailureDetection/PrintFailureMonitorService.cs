@@ -38,6 +38,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
     private readonly IFailureDetectionMonitorStatus _monitorStatus;
     private readonly IPrinterStatusCacheReader _statusCache;
     private readonly IHubContext<PrinterHub> _hub;
+    private readonly FailureDetectionMetrics _metrics;
     private readonly ILogger<PrintFailureMonitorService> _logger;
 
     public PrintFailureMonitorService(
@@ -45,12 +46,14 @@ public sealed class PrintFailureMonitorService : BackgroundService
         IFailureDetectionMonitorStatus monitorStatus,
         IPrinterStatusCacheReader statusCache,
         IHubContext<PrinterHub> hub,
+        FailureDetectionMetrics metrics,
         ILogger<PrintFailureMonitorService> logger)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _monitorStatus = monitorStatus ?? throw new ArgumentNullException(nameof(monitorStatus));
         _statusCache = statusCache ?? throw new ArgumentNullException(nameof(statusCache));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
+        _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         ObicoSettings currentSettings = GetCurrentSettings();
@@ -309,16 +312,19 @@ public sealed class PrintFailureMonitorService : BackgroundService
                             : "Monitoring via global Obico ML settings.",
                     };
 
+                    var analysisStopwatch = Stopwatch.StartNew();
                     FailureDetectionResult result = await failureDetectionService.AnalyzeImageFromUrlAsync(
                         snapshotUrl,
                         obicoServerUrl,
                         obicoApiKey,
                         cancellationToken);
+                    analysisStopwatch.Stop();
 
                     checkedCount++;
 
                     if (result.ErrorMessage != null)
                     {
+                        _metrics.RecordError();
                         _logger.LogWarning(
                             "[PrintFailureMonitor] Analysis failed for printer {PrinterId} ({PrinterName}): {Error}",
                             printer.Id,
@@ -333,6 +339,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         });
                         continue;
                     }
+
+                    _metrics.RecordAnalysis(analysisStopwatch.Elapsed.TotalMilliseconds, (double)result.Confidence, result.IsFailureDetected);
 
                     if (result.IsFailureDetected)
                     {
@@ -388,6 +396,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
             }
 
             stopwatch.Stop();
+            _metrics.RecordCycle(stopwatch.Elapsed.TotalMilliseconds, activeCount, configuredPrinters.Count);
             _monitorStatus.UpdateSnapshot(CreateSnapshot(
                 currentSettings,
                 configuredPrinters.Count,
@@ -520,6 +529,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 failureEvent.AutoPaused = await printersService.PauseAsync(printer.Id, cancellationToken);
                 if (failureEvent.AutoPaused)
                 {
+                    _metrics.RecordAutoPause();
                     _logger.LogWarning(
                         "[PrintFailureMonitor] Auto-paused printer {PrinterId} after failure detection for job {JobId}",
                         printer.Id,

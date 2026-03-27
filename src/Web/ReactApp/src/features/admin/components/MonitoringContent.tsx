@@ -14,11 +14,33 @@ import { ChartIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons'
 import { apiClient } from '@/services/api';
 import { MetricsSummaryWidgets } from '@/features/monitoring/components/MetricsSummaryWidgets';
 import { GrafanaEmbedPanels } from '@/features/monitoring/components/GrafanaEmbedPanels';
+import { FailureDetectionMetricsWidget } from '@/features/monitoring/components/FailureDetectionMetricsWidget';
 import type { MonitoringStatusDto } from '@/types/api';
 
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 const ADVANCED_PREFS_KEY = 'monitoring-advanced-visible';
+const PANEL_PREFS_KEY = 'monitoring-panels';
+
+interface PanelPrefs {
+  failureDetection: boolean;
+  apiMetrics: boolean;
+  grafana: boolean;
+}
+
+const DEFAULT_PANELS: PanelPrefs = { failureDetection: true, apiMetrics: true, grafana: true };
+
+function loadPanelPrefs(): PanelPrefs {
+  try {
+    const raw = localStorage.getItem(PANEL_PREFS_KEY);
+    if (raw) return { ...DEFAULT_PANELS, ...(JSON.parse(raw) as Partial<PanelPrefs>) };
+  } catch { /* noop */ }
+  return { ...DEFAULT_PANELS };
+}
+
+function savePanelPrefs(prefs: PanelPrefs) {
+  try { localStorage.setItem(PANEL_PREFS_KEY, JSON.stringify(prefs)); } catch { /* noop */ }
+}
 
 export function MonitoringContent() {
   const sessionRefreshRef = useRef<ReturnType<typeof setInterval>>(undefined);
@@ -26,6 +48,7 @@ export function MonitoringContent() {
   const [showAdvanced, setShowAdvanced] = useState(() => {
     try { return localStorage.getItem(ADVANCED_PREFS_KEY) === 'true'; } catch { return false; }
   });
+  const [panels, setPanels] = useState<PanelPrefs>(loadPanelPrefs);
 
   const { data: status, isLoading, error } = useQuery({
     queryKey: ['monitoring-status'],
@@ -60,6 +83,14 @@ export function MonitoringContent() {
     try { localStorage.setItem(ADVANCED_PREFS_KEY, String(next)); } catch { /* noop */ }
   };
 
+  const togglePanel = (key: keyof PanelPrefs) => {
+    setPanels(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      savePanelPrefs(next);
+      return next;
+    });
+  };
+
   if (isLoading) {
     return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
   }
@@ -70,56 +101,84 @@ export function MonitoringContent() {
 
   const anyAvailable = status?.grafana.available || status?.jaeger.available || status?.prometheus.available;
 
-  if (!anyAvailable) {
-    return (
-      <Card>
-        <Card.Body>
-          <div className="text-center py-8 text-pf-text-secondary">
-            <ChartIcon className="w-12 h-12 mx-auto mb-3 opacity-40" />
-            <p className="text-lg font-medium mb-1">Monitoring Not Configured</p>
-            <p className="text-sm">
-              Deploy the monitoring stack (Prometheus, Grafana, Jaeger) to enable observability features.
-            </p>
-          </div>
-        </Card.Body>
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {/* Service status + deep links */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <ServiceStatusBar status={status} />
-        <div className="flex gap-2 items-center">
-          <Button
-            variant={showAdvanced ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={toggleAdvanced}
-          >
-            {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
-          </Button>
-          <DeepLinks status={status} />
-        </div>
+      {/* Panel toggles */}
+      <div className="flex items-center flex-wrap gap-2">
+        <span className="text-xs font-medium text-pf-text-secondary mr-1">Panels:</span>
+        {(['failureDetection', 'apiMetrics', 'grafana'] as const).map(key => {
+          const labels: Record<keyof PanelPrefs, string> = {
+            failureDetection: 'Failure Detection',
+            apiMetrics: 'API Metrics',
+            grafana: 'Grafana',
+          };
+          return (
+            <Button
+              key={key}
+              variant={panels[key] ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => togglePanel(key)}
+              className="rounded-full! px-2! py-0.5! text-xs!"
+            >
+              {labels[key]}
+            </Button>
+          );
+        })}
       </div>
 
-      {/* Essential metrics — always shown when Prometheus available */}
-      {status?.prometheus.available && <MetricsSummaryWidgets />}
+      {/* Failure Detection metrics — works without Prometheus */}
+      {panels.failureDetection && <FailureDetectionMetricsWidget />}
 
-      {/* Advanced: Grafana panels — opt-in */}
-      {showAdvanced && status?.grafana.available && (
-        <GrafanaEmbedPanels sessionKey={sessionKey} />
-      )}
-
-      {/* Info when Grafana not available but advanced requested */}
-      {showAdvanced && !status?.grafana.available && (
+      {!anyAvailable && !panels.failureDetection && (
         <Card>
           <Card.Body>
-            <p className="text-sm text-pf-text-secondary">
-              Grafana is not configured. Deploy the monitoring stack to enable detailed charts and dashboards.
-            </p>
+            <div className="text-center py-8 text-pf-text-secondary">
+              <ChartIcon className="w-12 h-12 mx-auto mb-3 opacity-40" />
+              <p className="text-lg font-medium mb-1">Monitoring Not Configured</p>
+              <p className="text-sm">
+                Deploy the monitoring stack (Prometheus, Grafana, Jaeger) to enable observability features.
+              </p>
+            </div>
           </Card.Body>
         </Card>
+      )}
+
+      {anyAvailable && (
+        <>
+          {/* Service status + deep links */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <ServiceStatusBar status={status} />
+            <div className="flex gap-2 items-center">
+              <Button
+                variant={showAdvanced ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={toggleAdvanced}
+              >
+                {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
+              </Button>
+              <DeepLinks status={status} />
+            </div>
+          </div>
+
+          {/* Essential metrics — always shown when Prometheus available */}
+          {panels.apiMetrics && status?.prometheus.available && <MetricsSummaryWidgets />}
+
+          {/* Advanced: Grafana panels — opt-in */}
+          {panels.grafana && showAdvanced && status?.grafana.available && (
+            <GrafanaEmbedPanels sessionKey={sessionKey} />
+          )}
+
+          {/* Info when Grafana not available but advanced requested */}
+          {showAdvanced && !status?.grafana.available && (
+            <Card>
+              <Card.Body>
+                <p className="text-sm text-pf-text-secondary">
+                  Grafana is not configured. Deploy the monitoring stack to enable detailed charts and dashboards.
+                </p>
+              </Card.Body>
+            </Card>
+          )}
+        </>
       )}
     </div>
   );
