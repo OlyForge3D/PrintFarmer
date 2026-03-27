@@ -116,7 +116,7 @@ function getDetailedSummary(
   const scanTime = formatFailureDetectionTimestamp(status.lastAnalyzedAt);
   if (status.state === 'monitoring') {
     if (status.lastOutcome === 'healthy') {
-      return scanTime ? `Clear at ${scanTime}.` : 'Watching current print.';
+      return scanTime ? `Last scan ${scanTime}` : 'Watching current print.';
     }
     if (status.lastOutcome === 'error') {
       return 'Latest scan failed — check camera connectivity.';
@@ -161,12 +161,10 @@ export function FailureDetectionMonitoringSummary({
       >
         <ShieldIcon className={clsx('h-4 w-4 shrink-0', style.icon)} ariaLabel="Failure detection" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-pf-text-primary">{headline}</span>
-            {subline && (
-              <span className="hidden text-xs text-pf-text-tertiary sm:inline">· {subline}</span>
-            )}
-          </div>
+          <span className="text-sm font-medium text-pf-text-primary">{headline}</span>
+          {subline && (
+            <p className="mt-0.5 text-xs leading-tight text-pf-text-tertiary">{subline}</p>
+          )}
           {needsAction && operatorAction && (
             <p className="mt-0.5 truncate text-xs leading-tight text-pf-text-secondary">
               {operatorAction}
@@ -207,18 +205,16 @@ export function FailureDetectionMonitoringSummary({
       {...(latestIncident ? { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' } : {})}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-2.5">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
           <ShieldIcon className={clsx('mt-0.5 h-4 w-4 shrink-0', style.icon)} ariaLabel="Failure detection" />
           <div className="min-w-0">
             <span className="text-sm font-semibold text-pf-text-primary">{headline}</span>
             <p className="mt-1 text-sm leading-snug text-pf-text-secondary">{summary}</p>
-            {isMonitoring && confidence != null && !needsAction && (
-              <div className="mt-2">
-                <ConfidenceGauge value={printHealth} size="lg" />
-              </div>
-            )}
           </div>
         </div>
+        {isMonitoring && confidence != null && !needsAction && (
+          <ConfidenceGauge value={printHealth} size="lg" />
+        )}
         {needsAction && snapshotUrl && (
           <a
             href={snapshotUrl}
