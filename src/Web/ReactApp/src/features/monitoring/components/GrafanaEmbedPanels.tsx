@@ -165,10 +165,19 @@ export function GrafanaEmbedPanels({ sessionKey = 0 }: { sessionKey?: number }) 
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {visiblePanels.map(panel => {
-            // Hide panels entirely when metrics confirm no data is available
             const metricValue = metrics?.[panel.metricKey];
-            const hasNoData = metrics != null && (metricValue == null || metricValue === 0);
-            if (hasNoData) return null;
+            const showFallback = metrics != null && (metricValue == null || metricValue === 0);
+
+            if (showFallback) {
+              return (
+                <Card key={panel.id}>
+                  <Card.Body className="h-62.5 flex flex-col items-center justify-center text-center px-6">
+                    <div className="text-pf-text-primary font-medium">{panel.title}</div>
+                    <div className="mt-2 text-sm text-pf-text-secondary">No data available yet</div>
+                  </Card.Body>
+                </Card>
+              );
+            }
 
             return <GrafanaPanel key={panel.id} panelId={panel.id} title={panel.title} sessionKey={sessionKey} />;
           })}
