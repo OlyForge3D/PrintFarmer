@@ -26,6 +26,7 @@ public record UpdateModelRequest(
 
     // Cost/energy defaults
     decimal? DefaultWattage = null,
+    decimal? DefaultHourlyRate = null,
 
     // Toolhead templates (contains nozzle diameter and max hotend temp)
     PrinterModelToolheadDto[]? Toolheads = null);

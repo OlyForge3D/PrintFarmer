@@ -104,6 +104,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
 
           // Cost/energy defaults
           defaultWattage: model.defaultWattage,
+          defaultHourlyRate: model.defaultHourlyRate,
         };
         
         setFormData(initialData);
@@ -149,7 +150,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
     const fields: (keyof UpdateModelRequest)[] = [
       'name', 'motionType', 'maxX', 'maxY', 'maxZ', 'defaultBackend',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
-      'supportsAutoLeveling', 'maxBedTemp', 'maxPrintSpeed', 'defaultWattage'
+      'supportsAutoLeveling', 'maxBedTemp', 'maxPrintSpeed', 'defaultWattage', 'defaultHourlyRate'
     ];
     
     for (const field of fields) {
@@ -609,6 +610,15 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                   value={formData.defaultWattage || ''}
                   onChange={e => handleInputChange('defaultWattage', parseFloat(e.target.value) || undefined)}
                   placeholder="120"
+                />
+              </FormField>
+              <FormField label="Default Hourly Rate ($)" helper="Machine hourly rate used for cost calculations">
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={formData.defaultHourlyRate || ''}
+                  onChange={e => handleInputChange('defaultHourlyRate', parseFloat(e.target.value) || undefined)}
+                  placeholder="0.50"
                 />
               </FormField>
             </div>

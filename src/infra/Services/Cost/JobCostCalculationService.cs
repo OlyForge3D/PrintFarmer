@@ -233,8 +233,10 @@ public class JobCostCalculationService : IJobCostCalculationService
 
         decimal printDurationHours = (decimal)job.ActualPrintTime.Value.TotalHours;
 
-        // Use per-printer rate if available, otherwise use default
-        decimal machineHourlyRate = job.AssignedPrinter?.MachineHourlyRate ?? settings.DefaultMachineHourlyRate;
+        // Use per-printer rate if available, then model default, then global setting
+        decimal machineHourlyRate = job.AssignedPrinter?.MachineHourlyRate
+            ?? job.AssignedPrinter?.Model?.DefaultHourlyRate
+            ?? settings.DefaultMachineHourlyRate;
 
         decimal machineTimeCost = printDurationHours * machineHourlyRate;
 

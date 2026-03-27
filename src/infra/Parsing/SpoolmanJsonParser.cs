@@ -130,6 +130,13 @@ public static class SpoolmanJsonParser
         // Comment
         string? comment = TryGetString(el, "comment");
 
+        // Filament product ID (nested under filament.id or direct filament_id)
+        int? filamentId = TryGetIntNullable(el, "filament_id");
+        if (filamentId is null && el.TryGetProperty("filament", out JsonElement filamentEl) && filamentEl.ValueKind == JsonValueKind.Object)
+        {
+            filamentId = TryGetIntNullable(filamentEl, "id");
+        }
+
         // Dates: registered, first used, last used (tolerant to various names and formats)
         DateTime? registeredAt = TryGetDateTime(el, "registered");
         DateTime? firstUsedAt = TryGetDateTime(el, "first_used");
@@ -156,7 +163,8 @@ public static class SpoolmanJsonParser
             LotNumber: lotNumber,
             Archived: archivedFlag,
             Price: price,
-            Comment: comment);
+            Comment: comment,
+            FilamentId: filamentId);
     }
 
     /// <summary>

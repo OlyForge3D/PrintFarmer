@@ -1073,6 +1073,8 @@ export interface PrinterModelDto {
   maxPrintSpeed?: number;
   /** Default power consumption in watts for this printer model. */
   defaultWattage?: number;
+  /** Default machine hourly rate for cost calculations. */
+  defaultHourlyRate?: number;
 
   // Toolhead templates for multi-toolhead printers
   toolheads?: PrinterModelToolheadDto[];
@@ -1441,6 +1443,7 @@ export interface UpdateModelRequest {
   maxBedTemp?: number;
   maxPrintSpeed?: number;
   defaultWattage?: number;
+  defaultHourlyRate?: number;
 
   // Toolhead templates
   toolheads?: PrinterModelToolheadDto[];

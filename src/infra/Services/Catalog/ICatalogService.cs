@@ -86,6 +86,7 @@ public interface ICatalogService
     /// <param name="maxBedTemp">Optional maximum bed temperature in Celsius.</param>
     /// <param name="maxPrintSpeed">Optional maximum print speed in mm/s.</param>
     /// <param name="defaultWattage">Optional default power consumption in watts.</param>
+    /// <param name="defaultHourlyRate">Optional default machine hourly rate.</param>
     /// <param name="toolheads">Optional array of toolhead configurations.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<PrinterModelDto?> UpdateModelAsync(
@@ -104,6 +105,7 @@ public interface ICatalogService
         int? maxBedTemp,
         int? maxPrintSpeed,
         decimal? defaultWattage,
+        decimal? defaultHourlyRate,
         PrinterModelToolheadDto[]? toolheads,
         CancellationToken ct);
 

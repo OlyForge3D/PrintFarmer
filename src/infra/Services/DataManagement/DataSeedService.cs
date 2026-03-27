@@ -181,7 +181,8 @@ public class DataSeedService : IDataSeedService
                         MultiMaterial = dto.MultiMaterial,
                         MaxBedTemp = dto.MaxBedTemp,
                         MaxPrintSpeed = dto.MaxPrintSpeed,
-                        DefaultWattage = dto.DefaultWattage
+                        DefaultWattage = dto.DefaultWattage,
+                        DefaultHourlyRate = dto.DefaultHourlyRate
                     };
 
                     // Parse backend and motion type if provided
@@ -221,6 +222,7 @@ public class DataSeedService : IDataSeedService
                     existing.MaxBedTemp = dto.MaxBedTemp ?? existing.MaxBedTemp;
                     existing.MaxPrintSpeed = dto.MaxPrintSpeed ?? existing.MaxPrintSpeed;
                     existing.DefaultWattage = dto.DefaultWattage ?? existing.DefaultWattage;
+                    existing.DefaultHourlyRate = dto.DefaultHourlyRate ?? existing.DefaultHourlyRate;
 
                     if (!string.IsNullOrEmpty(dto.DefaultBackend) &&
                         Enum.TryParse<PrinterBackend>(dto.DefaultBackend, out PrinterBackend updatedBackend))

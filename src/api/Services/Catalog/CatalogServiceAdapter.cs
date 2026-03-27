@@ -76,6 +76,7 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
             req.MaxBedTemp,
             req.MaxPrintSpeed,
             req.DefaultWattage,
+            req.DefaultHourlyRate,
             req.Toolheads,
             ct);
     }

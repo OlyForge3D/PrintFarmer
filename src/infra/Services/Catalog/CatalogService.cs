@@ -218,7 +218,8 @@ public class CatalogService(
             model.MaxZ,
             model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
             Array.Empty<string>(),
-            DefaultWattage: model.DefaultWattage);
+            DefaultWattage: model.DefaultWattage,
+            DefaultHourlyRate: model.DefaultHourlyRate);
     }
 
     public async Task<PrinterModelDto?> UpdateModelAsync(
@@ -237,6 +238,7 @@ public class CatalogService(
         int? maxBedTemp,
         int? maxPrintSpeed,
         decimal? defaultWattage,
+        decimal? defaultHourlyRate,
         PrinterModelToolheadDto[]? toolheads,
         CancellationToken ct)
     {
@@ -292,6 +294,7 @@ public class CatalogService(
         }
 
         model.DefaultWattage = defaultWattage;
+        model.DefaultHourlyRate = defaultHourlyRate;
 
         if (supportedFilamentTypeIds != null)
         {
@@ -412,7 +415,8 @@ public class CatalogService(
             entity.MaxZ,
             entity.DefaultBackend.HasValue ? (PrinterBackend)entity.DefaultBackend.Value : (PrinterBackend?)null,
             Array.Empty<string>(),
-            DefaultWattage: entity.DefaultWattage) : null;
+            DefaultWattage: entity.DefaultWattage,
+            DefaultHourlyRate: entity.DefaultHourlyRate) : null;
 
         // Store in cache (including nulls to avoid repeated queries for non-existent entries)
         _modelNameCache[cacheKey] = result;

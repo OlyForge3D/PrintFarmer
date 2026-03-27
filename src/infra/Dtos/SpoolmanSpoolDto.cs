@@ -32,7 +32,8 @@ public record SpoolmanSpoolDto(
     string? LotNumber = null,
     bool? Archived = null,
     double? Price = null,
-    string? Comment = null)
+    string? Comment = null,
+    int? FilamentId = null)
 {
     public double? UsedPercent
     {

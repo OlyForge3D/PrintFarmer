@@ -80,5 +80,12 @@ public class PrinterModel
     /// </summary>
     public decimal? DefaultWattage { get; set; }
 
+    /// <summary>
+    /// Default machine hourly rate for this printer model.
+    /// Used as fallback when per-printer hourly rate is not set.
+    /// Cascade: printer.MachineHourlyRate → model.DefaultHourlyRate → settings.DefaultMachineHourlyRate.
+    /// </summary>
+    public decimal? DefaultHourlyRate { get; set; }
+
     public bool IsActive { get; set; } = true;
 }

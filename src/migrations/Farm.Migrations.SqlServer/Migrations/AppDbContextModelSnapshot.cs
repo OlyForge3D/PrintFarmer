@@ -2990,6 +2990,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("DefaultBackend")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("DefaultHourlyRate")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal?>("DefaultWattage")
                         .HasColumnType("decimal(18,2)");
 
