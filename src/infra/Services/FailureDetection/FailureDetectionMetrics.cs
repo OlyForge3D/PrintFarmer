@@ -28,12 +28,10 @@ public sealed class FailureDetectionMetrics
 
     private static readonly Histogram<double> s_analysisDurationMs = s_meter.CreateHistogram<double>(
         "printfarmer.failure_detection.analysis_duration_ms",
-        unit: "ms",
         description: "Duration of individual Obico ML API calls");
 
     private static readonly Histogram<double> s_cycleDurationMs = s_meter.CreateHistogram<double>(
         "printfarmer.failure_detection.cycle_duration_ms",
-        unit: "ms",
         description: "Duration of a full monitoring cycle across all printers");
 
     private static readonly Histogram<double> s_confidence = s_meter.CreateHistogram<double>(
