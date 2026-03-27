@@ -1440,6 +1440,7 @@ export interface UpdateModelRequest {
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+  defaultWattage?: number;
 
   // Toolhead templates
   toolheads?: PrinterModelToolheadDto[];

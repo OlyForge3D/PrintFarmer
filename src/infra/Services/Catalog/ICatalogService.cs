@@ -85,6 +85,7 @@ public interface ICatalogService
     /// <param name="supportsAutoLeveling">Optional flag indicating auto-leveling support.</param>
     /// <param name="maxBedTemp">Optional maximum bed temperature in Celsius.</param>
     /// <param name="maxPrintSpeed">Optional maximum print speed in mm/s.</param>
+    /// <param name="defaultWattage">Optional default power consumption in watts.</param>
     /// <param name="toolheads">Optional array of toolhead configurations.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<PrinterModelDto?> UpdateModelAsync(
@@ -102,6 +103,7 @@ public interface ICatalogService
         bool? supportsAutoLeveling,
         int? maxBedTemp,
         int? maxPrintSpeed,
+        decimal? defaultWattage,
         PrinterModelToolheadDto[]? toolheads,
         CancellationToken ct);
 

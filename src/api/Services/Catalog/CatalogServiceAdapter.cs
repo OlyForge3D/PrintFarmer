@@ -75,6 +75,7 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
             req.SupportsAutoLeveling,
             req.MaxBedTemp,
             req.MaxPrintSpeed,
+            req.DefaultWattage,
             req.Toolheads,
             ct);
     }

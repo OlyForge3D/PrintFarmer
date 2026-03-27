@@ -453,24 +453,40 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
 
         var rows = await query
             .OrderByDescending(j => j.ActualEndTime)
-            .Select(j => new CostByJobDto
+            .Select(j => new
             {
-                JobId = j.Id,
-                JobName = j.Name ?? (j.GcodeFile != null ? j.GcodeFile.Name : "Untitled"),
+                j.Id,
+                j.Name,
+                GcodeFileName = j.GcodeFile != null ? j.GcodeFile.Name : null,
                 PrinterName = j.AssignedPrinter != null ? j.AssignedPrinter.Name : null,
-                FilamentName = j.FilamentName,
-                MaterialType = j.RequiredMaterialType,
-                FilamentUsedGrams = j.ActualFilamentUsage,
-                TotalCostUsd = j.TotalCostUsd ?? 0m,
-                MaterialCostUsd = j.MaterialCostUsd ?? 0m,
-                EnergyCostUsd = j.EnergyCostUsd ?? 0m,
-                MachineTimeCostUsd = j.MachineTimeCostUsd ?? 0m,
-                LaborCostUsd = j.LaborCostUsd ?? 0m,
-                PrintTimeSeconds = j.ActualPrintTime.HasValue ? j.ActualPrintTime.Value.TotalSeconds : null,
-                CompletedAt = j.ActualEndTime,
+                j.FilamentName,
+                j.RequiredMaterialType,
+                j.ActualFilamentUsage,
+                j.TotalCostUsd,
+                j.MaterialCostUsd,
+                j.EnergyCostUsd,
+                j.MachineTimeCostUsd,
+                j.LaborCostUsd,
+                j.ActualPrintTime,
+                j.ActualEndTime,
             })
             .ToListAsync(ct);
 
-        return rows;
+        return rows.Select(j => new CostByJobDto
+        {
+            JobId = j.Id,
+            JobName = j.Name ?? j.GcodeFileName ?? "Untitled",
+            PrinterName = j.PrinterName,
+            FilamentName = j.FilamentName,
+            MaterialType = j.RequiredMaterialType,
+            FilamentUsedGrams = j.ActualFilamentUsage,
+            TotalCostUsd = j.TotalCostUsd ?? 0m,
+            MaterialCostUsd = j.MaterialCostUsd ?? 0m,
+            EnergyCostUsd = j.EnergyCostUsd ?? 0m,
+            MachineTimeCostUsd = j.MachineTimeCostUsd ?? 0m,
+            LaborCostUsd = j.LaborCostUsd ?? 0m,
+            PrintTimeSeconds = j.ActualPrintTime?.TotalSeconds,
+            CompletedAt = j.ActualEndTime,
+        }).ToList();
     }
 }

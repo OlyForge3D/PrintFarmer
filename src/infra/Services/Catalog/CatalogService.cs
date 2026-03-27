@@ -236,6 +236,7 @@ public class CatalogService(
         bool? supportsAutoLeveling,
         int? maxBedTemp,
         int? maxPrintSpeed,
+        decimal? defaultWattage,
         PrinterModelToolheadDto[]? toolheads,
         CancellationToken ct)
     {
@@ -289,6 +290,8 @@ public class CatalogService(
         {
             model.MaxPrintSpeed = maxPrintSpeed.Value;
         }
+
+        model.DefaultWattage = defaultWattage;
 
         if (supportedFilamentTypeIds != null)
         {

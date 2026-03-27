@@ -153,10 +153,10 @@ public class DataSeedService : IDataSeedService
                     continue;
                 }
 
-                bool exists = await _context.PrinterModels
-                    .AnyAsync(pm => pm.ManufacturerId == manufacturerId && pm.Name == dto.Name);
+                PrinterModel? existing = await _context.PrinterModels
+                    .FirstOrDefaultAsync(pm => pm.ManufacturerId == manufacturerId && pm.Name == dto.Name);
 
-                if (!exists)
+                if (existing == null)
                 {
                     var printerModel = new PrinterModel
                     {
@@ -198,6 +198,41 @@ public class DataSeedService : IDataSeedService
                     }
 
                     _context.PrinterModels.Add(printerModel);
+                }
+                else
+                {
+                    // Upsert: update existing model with seed data values
+                    existing.MaxX = dto.BuildVolume?.X ?? existing.MaxX;
+                    existing.MaxY = dto.BuildVolume?.Y ?? existing.MaxY;
+                    existing.MaxZ = dto.BuildVolume?.Z ?? existing.MaxZ;
+                    existing.HasHeatedBed = dto.HasHeatedBed;
+                    existing.HasEnclosure = dto.HasEnclosure;
+                    existing.HasCarbonFilter = dto.HasCarbonFilter;
+                    existing.HasHepaFilter = dto.HasHepaFilter;
+                    existing.HasBowdenTube = dto.HasBowdenTube;
+                    existing.HasPtfeLiner = dto.HasPtfeLiner;
+                    existing.HasLinearRails = dto.HasLinearRails;
+                    existing.HasLeadScrews = dto.HasLeadScrews;
+                    existing.HasToolchanger = dto.HasToolchanger;
+                    existing.HasFilamentCutter = dto.HasFilamentCutter;
+                    existing.HasHeatedChamber = dto.HasHeatedChamber;
+                    existing.SupportsAutoLeveling = dto.SupportsAutoLeveling;
+                    existing.MultiMaterial = dto.MultiMaterial;
+                    existing.MaxBedTemp = dto.MaxBedTemp ?? existing.MaxBedTemp;
+                    existing.MaxPrintSpeed = dto.MaxPrintSpeed ?? existing.MaxPrintSpeed;
+                    existing.DefaultWattage = dto.DefaultWattage ?? existing.DefaultWattage;
+
+                    if (!string.IsNullOrEmpty(dto.DefaultBackend) &&
+                        Enum.TryParse<PrinterBackend>(dto.DefaultBackend, out PrinterBackend updatedBackend))
+                    {
+                        existing.DefaultBackend = (int)updatedBackend;
+                    }
+
+                    if (!string.IsNullOrEmpty(dto.MotionType) &&
+                        Enum.TryParse<MotionType>(dto.MotionType, out MotionType updatedMotionType))
+                    {
+                        existing.MotionType = (int)updatedMotionType;
+                    }
                 }
             }
 
