@@ -31,7 +31,6 @@ public sealed class PrintFailureMonitorService : BackgroundService
     private const string PrinterStateIdle = "idle";
     private const string PrinterStateMisconfigured = "misconfigured";
     private const string PrinterStateMonitoring = "monitoring";
-    private static readonly TimeSpan MonitoringStartupGracePeriod = TimeSpan.FromMinutes(2);
     private const string StartingIdleReason = "Print is starting — monitoring will begin after warmup.";
     private const string WarmupIdleReason = "Print just started — monitoring will begin shortly.";
     private const string NotPrintingReason = "Printer is not actively printing.";
@@ -69,7 +68,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
         _logger.LogInformation("[PrintFailureMonitor] Service starting");
 
         // Initial delay to allow database and printers to initialize
-        await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+        await Task.Delay(TimeSpan.FromSeconds(GetCurrentSettings().StartupDelaySeconds), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -106,7 +105,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
         PrinterStatusDto? status,
         PrintJobStatus? activeJobStatus,
         DateTime? activeJobStartedAtUtc,
-        DateTime utcNow)
+        DateTime utcNow,
+        int warmupGracePeriodSeconds = 120)
     {
         if (status is null
             || !status.IsOnline
@@ -122,7 +122,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
 
         if (activeJobStatus == PrintJobStatus.Printing
             && activeJobStartedAtUtc.HasValue
-            && activeJobStartedAtUtc.Value >= utcNow - MonitoringStartupGracePeriod)
+            && activeJobStartedAtUtc.Value >= utcNow - TimeSpan.FromSeconds(warmupGracePeriodSeconds))
         {
             return (false, WarmupIdleReason);
         }
@@ -231,7 +231,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         cachedPrinterStatus,
                         activeJob?.Status,
                         activeJob?.StartedAtUtc,
-                        DateTime.UtcNow);
+                        DateTime.UtcNow,
+                        currentSettings.WarmupGracePeriodSeconds);
                     bool isPrinting = monitoringWindow.ShouldMonitor;
                     var jobContext = ResolveJobContext(cachedPrinterStatus, activeJob?.JobName);
                     var (detectionSource, detectionTarget, obicoServerUrl, obicoApiKey) = ResolveDetectionTarget(printer, obicoServers, currentSettings);

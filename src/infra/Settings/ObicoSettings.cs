@@ -50,6 +50,33 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     [JsonPropertyName("autoPauseOnFailure")]
     public bool AutoPauseOnFailure { get; set; } = true;
 
+    [SettingDisplay(
+        Name = "Startup Delay (seconds)",
+        Description = "How long the monitor waits after application start before beginning scans. Allows the database and printer connections to initialize. Setting this too low causes a burst of errors on every restart.",
+        InputType = SettingInputType.Number,
+        MinValue = 5,
+        MaxValue = 120)]
+    [JsonPropertyName("startupDelaySeconds")]
+    public int StartupDelaySeconds { get; set; } = 30;
+
+    [SettingDisplay(
+        Name = "Print Warmup Grace Period (seconds)",
+        Description = "How long to wait after a print starts before scanning for failures. Skips the nozzle heating, purge line, and first-layer adhesion phases that frequently trigger false positives. Reducing this significantly increases the risk of false auto-pauses.",
+        InputType = SettingInputType.Number,
+        MinValue = 0,
+        MaxValue = 600)]
+    [JsonPropertyName("warmupGracePeriodSeconds")]
+    public int WarmupGracePeriodSeconds { get; set; } = 120;
+
+    [SettingDisplay(
+        Name = "Analysis Request Timeout (seconds)",
+        Description = "Maximum time to wait for the Obico ML API to respond to a single snapshot analysis request. If the ML service is overloaded or unreachable, a long timeout will stall the entire monitoring cycle and delay checks for all other printers.",
+        InputType = SettingInputType.Number,
+        MinValue = 5,
+        MaxValue = 60)]
+    [JsonPropertyName("analysisTimeoutSeconds")]
+    public int AnalysisTimeoutSeconds { get; set; } = 15;
+
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(ObicoApiUrl))
@@ -71,6 +98,21 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
         if (ScanIntervalSeconds < 10 || ScanIntervalSeconds > 300)
         {
             throw new System.ComponentModel.DataAnnotations.ValidationException("Scan interval must be between 10 and 300 seconds.");
+        }
+
+        if (StartupDelaySeconds < 5 || StartupDelaySeconds > 120)
+        {
+            throw new System.ComponentModel.DataAnnotations.ValidationException("Startup delay must be between 5 and 120 seconds.");
+        }
+
+        if (WarmupGracePeriodSeconds < 0 || WarmupGracePeriodSeconds > 600)
+        {
+            throw new System.ComponentModel.DataAnnotations.ValidationException("Warmup grace period must be between 0 and 600 seconds.");
+        }
+
+        if (AnalysisTimeoutSeconds < 5 || AnalysisTimeoutSeconds > 60)
+        {
+            throw new System.ComponentModel.DataAnnotations.ValidationException("Analysis timeout must be between 5 and 60 seconds.");
         }
     }
 }

@@ -11,7 +11,6 @@ namespace Farm.Infrastructure.Services.FailureDetection;
 /// </summary>
 public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
 {
-    private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(15);
     private static readonly string[] DetectionConfidencePropertyNames = ["confidence", "score", "probability", "p"];
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -212,7 +211,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         try
         {
             using HttpClient httpClient = _httpClientFactory.CreateClient();
-            httpClient.Timeout = HttpTimeout;
+            httpClient.Timeout = TimeSpan.FromSeconds(_settingsService.Get<ObicoSettings>().AnalysisTimeoutSeconds);
 
             _logger.LogDebug("[ObicoFailureDetection] Fetching image from {SnapshotUrl}", snapshotUrl);
 
@@ -392,7 +391,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     private HttpClient CreateObicoClient(string obicoServerUrl, string? apiKey)
     {
         HttpClient httpClient = _httpClientFactory.CreateClient("ObicoML");
-        httpClient.Timeout = HttpTimeout;
+        httpClient.Timeout = TimeSpan.FromSeconds(_settingsService.Get<ObicoSettings>().AnalysisTimeoutSeconds);
         httpClient.BaseAddress = new Uri(obicoServerUrl.TrimEnd('/') + "/");
 
         if (!string.IsNullOrWhiteSpace(apiKey))
