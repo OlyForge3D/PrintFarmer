@@ -145,89 +145,148 @@ public class JobCostCalculationService : IJobCostCalculationService
 
     /// <summary>
     /// Calculates material cost from filament usage and pricing.
-    /// Price cascade: spool.Price → filament.Price (spool-level price allows tracking sale/bulk pricing).
+    /// Price cascade: spool.Price → filament.Price → material type default → global default.
     /// Weight cascade: spool.InitialWeightG → filament.Weight → 1000g default.
-    /// Formula: (actualFilamentUsage / spoolWeight) × price
+    /// Formula: (actualFilamentUsage / spoolWeight) × pricePerKg
     /// </summary>
     private async Task<decimal?> CalculateMaterialCostAsync(PrintJob job, CancellationToken ct)
     {
-        if (!job.SpoolmanFilamentId.HasValue || !job.ActualFilamentUsage.HasValue || job.ActualFilamentUsage.Value <= 0)
+        if (!job.ActualFilamentUsage.HasValue || job.ActualFilamentUsage.Value <= 0)
         {
             return null;
         }
 
-        try
+        CostTrackingSettings? settings = _settingsService.Get<CostTrackingSettings>();
+
+        double? effectivePrice = null;
+        double spoolWeightGrams = 1000.0;
+        string? materialType = null;
+
+        // Try Spoolman data first when available
+        if (job.SpoolmanFilamentId.HasValue)
         {
-            SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(job.SpoolmanFilamentId.Value, ct);
-
-            if (filament == null)
+            try
             {
-                _logger.LogDebug("Spoolman filament {FilamentId} not found. Material cost will be null.", job.SpoolmanFilamentId.Value);
-                return null;
-            }
+                SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(job.SpoolmanFilamentId.Value, ct);
 
-            // Backfill FilamentName from Spoolman if missing (enables Cost by Material grouping)
-            if (string.IsNullOrEmpty(job.FilamentName) && !string.IsNullOrEmpty(filament.Name))
-            {
-                job.FilamentName = filament.Name;
-            }
-
-            // Look up spool instance for per-spool price and weight overrides
-            double? spoolPrice = null;
-            double? spoolInitialWeight = null;
-            if (job.SpoolmanSpoolId.HasValue)
-            {
-                try
+                if (filament != null)
                 {
-                    SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(job.SpoolmanSpoolId.Value, ct);
-                    if (spool != null)
-                    {
-                        if (spool.Price is > 0)
-                        {
-                            spoolPrice = spool.Price;
-                        }
+                    materialType = filament.Material;
 
-                        if (spool.InitialWeightG is > 0)
+                    // Backfill FilamentName from Spoolman if missing
+                    if (string.IsNullOrEmpty(job.FilamentName) && !string.IsNullOrEmpty(filament.Name))
+                    {
+                        job.FilamentName = filament.Name;
+                    }
+
+                    // Look up spool instance for per-spool price and weight overrides
+                    double? spoolPrice = null;
+                    double? spoolInitialWeight = null;
+                    if (job.SpoolmanSpoolId.HasValue)
+                    {
+                        try
                         {
-                            spoolInitialWeight = spool.InitialWeightG;
+                            SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(job.SpoolmanSpoolId.Value, ct);
+                            if (spool != null)
+                            {
+                                if (spool.Price is > 0)
+                                {
+                                    spoolPrice = spool.Price;
+                                }
+
+                                if (spool.InitialWeightG is > 0)
+                                {
+                                    spoolInitialWeight = spool.InitialWeightG;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to look up spool {SpoolId}. Falling back to filament defaults.", job.SpoolmanSpoolId.Value);
                         }
                     }
+
+                    // Price cascade level 1-2: spool price → filament product price
+                    effectivePrice = spoolPrice ?? filament.Price;
+
+                    // Weight cascade: spool initial weight → filament product weight → 1kg default
+                    spoolWeightGrams = spoolInitialWeight ?? filament.Weight ?? 1000.0;
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to look up spool {SpoolId}. Falling back to filament defaults.", job.SpoolmanSpoolId.Value);
-                }
             }
-
-            // Price cascade: spool price (sale/bulk) → filament product price (MSRP)
-            double? effectivePrice = spoolPrice ?? filament.Price;
-
-            if (!effectivePrice.HasValue || effectivePrice.Value <= 0)
+            catch (Exception ex)
             {
-                _logger.LogDebug(
-                    "No price data for filament {FilamentId} or spool {SpoolId}. Material cost will be null.",
-                    job.SpoolmanFilamentId.Value,
-                    job.SpoolmanSpoolId);
-                return null;
+                _logger.LogDebug(ex, "Failed to look up Spoolman filament {FilamentId}. Falling back to defaults.", job.SpoolmanFilamentId.Value);
             }
-
-            // Weight cascade: spool initial weight → filament product weight → 1kg default
-            double spoolWeightGrams = spoolInitialWeight ?? filament.Weight ?? 1000.0;
-
-            if (spoolWeightGrams <= 0)
-            {
-                spoolWeightGrams = 1000.0;
-            }
-
-            decimal cost = (decimal)(job.ActualFilamentUsage.Value / spoolWeightGrams) * (decimal)effectivePrice.Value;
-
-            return Math.Round(cost, 2);
         }
-        catch (Exception ex)
+
+        // Price cascade level 3: material type default from settings
+        if ((!effectivePrice.HasValue || effectivePrice.Value <= 0) && settings != null)
         {
-            _logger.LogWarning(ex, "Failed to calculate material cost for job {JobId}.", job.Id);
+            // Resolve material type from: Spoolman → job.RequiredMaterialType → job.FilamentName
+            string? resolvedMaterial = materialType
+                ?? job.RequiredMaterialType
+                ?? job.FilamentName;
+
+            if (!string.IsNullOrEmpty(resolvedMaterial))
+            {
+                decimal matchedPrice = LookupMaterialPrice(resolvedMaterial, settings.MaterialPriceDefaults);
+                if (matchedPrice > 0)
+                {
+                    effectivePrice = (double)matchedPrice;
+                }
+            }
+        }
+
+        // Price cascade level 4: global fallback from settings
+        if ((!effectivePrice.HasValue || effectivePrice.Value <= 0)
+            && settings != null
+            && settings.DefaultFilamentPricePerKg > 0)
+        {
+            effectivePrice = (double)settings.DefaultFilamentPricePerKg;
+        }
+
+        if (!effectivePrice.HasValue || effectivePrice.Value <= 0)
+        {
+            _logger.LogDebug(
+                "No price data available for job {JobId} (FilamentId={FilamentId}, SpoolId={SpoolId}). Material cost will be null.",
+                job.Id,
+                job.SpoolmanFilamentId,
+                job.SpoolmanSpoolId);
             return null;
         }
+
+        if (spoolWeightGrams <= 0)
+        {
+            spoolWeightGrams = 1000.0;
+        }
+
+        decimal cost = (decimal)(job.ActualFilamentUsage.Value / spoolWeightGrams) * (decimal)effectivePrice.Value;
+
+        return Math.Round(cost, 2);
+    }
+
+    /// <summary>
+    /// Looks up a material price from the defaults dictionary using case-insensitive
+    /// substring matching. For example, "PolyTerra PLA Charcoal Black" matches "PLA".
+    /// </summary>
+    private static decimal LookupMaterialPrice(string materialName, Dictionary<string, decimal> defaults)
+    {
+        // Try exact match first (case-insensitive via dictionary comparer)
+        if (defaults.TryGetValue(materialName, out decimal exactPrice))
+        {
+            return exactPrice;
+        }
+
+        // Try substring match: check if materialName contains any known material key
+        foreach (KeyValuePair<string, decimal> entry in defaults)
+        {
+            if (materialName.Contains(entry.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                return entry.Value;
+            }
+        }
+
+        return 0m;
     }
 
     /// <summary>

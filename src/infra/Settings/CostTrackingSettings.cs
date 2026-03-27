@@ -63,6 +63,39 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     [JsonPropertyName("averagePrinterWattage")]
     public decimal AveragePrinterWattage { get; set; } = 250m;
 
+    /// <summary>
+    /// Global fallback price per kilogram when no Spoolman or material-specific price is available.
+    /// </summary>
+    [SettingDisplay(
+        Name = "Default Filament Price (per kg)",
+        Description = "Fallback filament price per kilogram when Spoolman pricing and material defaults are unavailable.",
+        InputType = SettingInputType.Number,
+        MinValue = 0,
+        MaxValue = 500)]
+    [JsonPropertyName("defaultFilamentPricePerKg")]
+    public decimal DefaultFilamentPricePerKg { get; set; } = 25m;
+
+    /// <summary>
+    /// Per-material-type default prices ($/kg). Keys are material names (e.g., "PLA", "PETG").
+    /// Used when Spoolman spool/filament has no price set.
+    /// </summary>
+    [SettingDisplay(
+        Name = "Material Price Defaults",
+        Description = "Default price per kilogram for each material type. Used when Spoolman pricing is unavailable.",
+        InputType = SettingInputType.Custom)]
+    [JsonPropertyName("materialPriceDefaults")]
+    public Dictionary<string, decimal> MaterialPriceDefaults { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["PLA"] = 20m,
+        ["PETG"] = 25m,
+        ["ABS"] = 22m,
+        ["TPU"] = 30m,
+        ["ASA"] = 28m,
+        ["Nylon"] = 35m,
+        ["PC"] = 40m,
+        ["PVA"] = 45m,
+    };
+
     public void Validate()
     {
         if (ElectricityRatePerKwh < 0 || ElectricityRatePerKwh > 10)
@@ -88,6 +121,20 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
         if (AveragePrinterWattage < 0 || AveragePrinterWattage > 5000)
         {
             throw new System.ComponentModel.DataAnnotations.ValidationException("Average printer wattage must be between 0 and 5000.");
+        }
+
+        if (DefaultFilamentPricePerKg < 0 || DefaultFilamentPricePerKg > 500)
+        {
+            throw new System.ComponentModel.DataAnnotations.ValidationException("Default filament price must be between 0 and 500.");
+        }
+
+        foreach (KeyValuePair<string, decimal> entry in MaterialPriceDefaults)
+        {
+            if (entry.Value < 0 || entry.Value > 500)
+            {
+                throw new System.ComponentModel.DataAnnotations.ValidationException(
+                    $"Material price for '{entry.Key}' must be between 0 and 500.");
+            }
         }
     }
 }

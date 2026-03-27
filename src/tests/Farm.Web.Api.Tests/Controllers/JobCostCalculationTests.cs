@@ -178,17 +178,20 @@ public class JobCostCalculationTests : IAsyncLifetime
         updatedJob.Should().NotBeNull();
         updatedJob!.CostCalculatedAt.Should().NotBeNull();
 
+        // Material cost: 50g / 1000g × $25/kg (global default, no Spoolman) = $1.25
+        updatedJob.MaterialCostUsd.Should().Be(1.25m);
+
         // Energy cost: 2 hours × 200W / 1000 × $0.12/kWh = $0.048 → rounds to $0.05
         updatedJob.EnergyCostUsd.Should().Be(0.05m);
 
         // Machine time cost: 2 hours × $10/hour = $20.00
         updatedJob.MachineTimeCostUsd.Should().Be(20.00m);
 
-        // Labor cost: (0.05 + 20.00) × 25% = $5.01
-        updatedJob.LaborCostUsd.Should().Be(5.01m);
+        // Labor cost: (1.25 + 0.05 + 20.00) × 25% = $5.325 → rounds to $5.32
+        updatedJob.LaborCostUsd.Should().Be(5.32m);
 
-        // Total: 0.05 + 20.00 + 5.01 = $25.06
-        updatedJob.TotalCostUsd.Should().Be(25.06m);
+        // Total: 1.25 + 0.05 + 20.00 + 5.32 = $26.62
+        updatedJob.TotalCostUsd.Should().Be(26.62m);
     }
 
     [Fact]
