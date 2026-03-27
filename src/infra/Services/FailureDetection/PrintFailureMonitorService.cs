@@ -218,15 +218,20 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 {
                     previousPrinterStatuses.TryGetValue(printer.Id, out FailureDetectionPrinterStatusDto? previousStatus);
 
-                    // Prefer Camera entities, but fall back to legacy printer fields if no cameras exist
-                    Camera? camera = printer.Cameras.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c.SnapshotUrl));
+                    // Prefer cameras with Bed/Nozzle type (best angle for print failure detection),
+                    // then General, then any enabled camera with a snapshot URL
+                    Camera? camera = printer.Cameras
+                        .Where(c => !string.IsNullOrWhiteSpace(c.SnapshotUrl))
+                        .OrderBy(c => c.CameraType switch
+                        {
+                            CameraType.Bed => 0,
+                            CameraType.Nozzle => 1,
+                            CameraType.General => 2,
+                            _ => 3,
+                        })
+                        .ThenBy(c => c.SortOrder)
+                        .FirstOrDefault();
                     string? snapshotUrl = camera?.SnapshotUrl;
-
-                    // Fallback to legacy printer field if no Camera entities have snapshot URLs
-                    if (string.IsNullOrWhiteSpace(snapshotUrl))
-                    {
-                        snapshotUrl = printer.CameraSnapshotUrl;
-                    }
 
                     activeJobsByPrinter.TryGetValue(printer.Id, out ActivePrintWindow? activeJob);
                     PrinterStatusDto? cachedPrinterStatus = _statusCache.GetStatus(printer.Id);
