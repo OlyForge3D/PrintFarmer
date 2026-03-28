@@ -637,7 +637,7 @@ export function SpoolsTab() {
         </div>
       )}
 
-      {!spoolmanError && (spools.length > 0 || totalCount > 0) && (
+      {!spoolmanError && (spools.length > 0 || totalCount > 0 || hasActiveSpoolFilters) && (
         <>
           {/* Filters */}
           <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4" data-testid="spool-filters">
@@ -911,7 +911,7 @@ export function SpoolsTab() {
               onDelete={(s) => setDeleteConfirm({ type: 'single', spool: s })}
             />
           )}
-          {displayedSpools.length === 0 && totalCount > 0 && (
+          {displayedSpools.length === 0 && (totalCount > 0 || hasActiveSpoolFilters) && (
             <div className="text-center py-8 text-pf-text-secondary">
               No spools match the current filters.
             </div>
@@ -919,7 +919,7 @@ export function SpoolsTab() {
         </>
       )}
 
-      {!spoolmanError && spools.length === 0 && !loading && (
+      {!spoolmanError && spools.length === 0 && !loading && !hasActiveSpoolFilters && (
         <div className="text-center py-8">
           <PackageIcon className="h-16 w-16 text-pf-text-secondary mx-auto mb-4" />
           <div className="text-pf-text-secondary">
