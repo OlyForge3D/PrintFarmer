@@ -145,13 +145,19 @@ public class JobCostCalculationService : IJobCostCalculationService
 
     /// <summary>
     /// Calculates material cost from filament usage and pricing.
+    /// Usage cascade: ActualFilamentUsage → EstimatedFilamentUsage.
     /// Price cascade: spool.Price → filament.Price → material type default → global default.
     /// Weight cascade: spool.InitialWeightG → filament.Weight → 1000g default.
-    /// Formula: (actualFilamentUsage / spoolWeight) × pricePerKg
+    /// Formula: (filamentUsageGrams / spoolWeight) × pricePerKg
     /// </summary>
     private async Task<decimal?> CalculateMaterialCostAsync(PrintJob job, CancellationToken ct)
     {
-        if (!job.ActualFilamentUsage.HasValue || job.ActualFilamentUsage.Value <= 0)
+        // Usage cascade: actual → estimated
+        double? filamentUsageGrams = job.ActualFilamentUsage is > 0
+            ? job.ActualFilamentUsage
+            : job.EstimatedFilamentUsage;
+
+        if (!filamentUsageGrams.HasValue || filamentUsageGrams.Value <= 0)
         {
             return null;
         }
@@ -260,7 +266,7 @@ public class JobCostCalculationService : IJobCostCalculationService
             spoolWeightGrams = 1000.0;
         }
 
-        decimal cost = (decimal)(job.ActualFilamentUsage.Value / spoolWeightGrams) * (decimal)effectivePrice.Value;
+        decimal cost = (decimal)(filamentUsageGrams.Value / spoolWeightGrams) * (decimal)effectivePrice.Value;
 
         return Math.Round(cost, 2);
     }
@@ -352,5 +358,39 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal laborCost = subtotal * (settings.LaborMarkupPercent / 100m);
 
         return Math.Round(laborCost, 2);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> RecalculateAllAsync(CancellationToken ct = default)
+    {
+        List<Guid> jobIds = await _db.PrintJobs
+            .Where(j => j.Status == PrintJobStatus.Completed)
+            .Where(j => j.TotalCostUsd == null || j.MaterialCostUsd == null)
+            .Select(j => j.Id)
+            .ToListAsync(ct);
+
+        _logger.LogInformation("Recalculating costs for {Count} completed jobs.", jobIds.Count);
+
+        int recalculated = 0;
+        foreach (Guid jobId in jobIds)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                bool success = await RecalculateCostsWithOverridesAsync(jobId, ct: ct);
+                if (success)
+                {
+                    recalculated++;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to recalculate costs for job {JobId}. Skipping.", jobId);
+            }
+        }
+
+        _logger.LogInformation("Successfully recalculated costs for {Recalculated}/{Total} jobs.", recalculated, jobIds.Count);
+        return recalculated;
     }
 }
