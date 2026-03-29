@@ -58,7 +58,7 @@ public class BackgroundServicesController(IBackgroundServiceMonitor serviceMonit
         BackgroundServicesSummary summary = new()
         {
             TotalServices = statuses.Count,
-            RunningServices = statuses.Count(s => s.IsRunning),
+            RunningServices = statuses.Count(s => s.IsEnabled && s.IsRunning),
             EnabledServices = statuses.Count(s => s.IsEnabled),
             DisabledServices = statuses.Count(s => !s.IsEnabled),
             ServicesWithErrors = statuses.Count(s => s.LastError != null),
@@ -70,7 +70,7 @@ public class BackgroundServicesController(IBackgroundServiceMonitor serviceMonit
                     g => new CategorySummary
                     {
                         Total = g.Count(),
-                        Running = g.Count(s => s.IsRunning),
+                        Running = g.Count(s => s.IsEnabled && s.IsRunning),
                         WithErrors = g.Count(s => s.LastError != null)
                     })
         };
