@@ -23,8 +23,11 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
     /// <summary>Buffer size for TCP read/write operations (4 KB).</summary>
     private const int BufferSize = 4096;
 
-    /// <summary>Response terminator indicating success.</summary>
-    private const string OkTerminator = "ok\n";
+    /// <summary>Response terminator indicating success (LF variant).</summary>
+    private const string OkTerminatorLf = "ok\n";
+
+    /// <summary>Response terminator indicating success (CR+LF variant).</summary>
+    private const string OkTerminatorCrLf = "ok\r\n";
 
     public FlashForgeClient(ILogger<FlashForgeClient> logger, BackendTimeoutSettings timeouts)
     {
@@ -85,7 +88,8 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             responseBuilder.Append(Encoding.ASCII.GetString(buffer, 0, bytesRead));
             string currentResponse = responseBuilder.ToString();
 
-            if (currentResponse.Contains(OkTerminator, StringComparison.Ordinal))
+            if (currentResponse.Contains(OkTerminatorCrLf, StringComparison.Ordinal)
+                || currentResponse.Contains(OkTerminatorLf, StringComparison.Ordinal))
             {
                 break;
             }
@@ -420,7 +424,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
         byte[] buffer = new byte[BufferSize];
         var responseBuilder = new StringBuilder();
 
-        // Read until we see "ok\n" or timeout
+        // Read until we see "ok" terminator or timeout
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
 
@@ -433,7 +437,9 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             }
 
             responseBuilder.Append(Encoding.ASCII.GetString(buffer, 0, bytesRead));
-            if (responseBuilder.ToString().Contains(OkTerminator, StringComparison.Ordinal))
+            string current = responseBuilder.ToString();
+            if (current.Contains(OkTerminatorCrLf, StringComparison.Ordinal)
+                || current.Contains(OkTerminatorLf, StringComparison.Ordinal))
             {
                 break;
             }
