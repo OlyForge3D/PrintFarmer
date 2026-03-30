@@ -256,6 +256,7 @@ public class PrintersController(
             PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, apiKey, ct),
             PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, apiKey, ct),
             PrinterBackend.SDCP => await TestSdcpConnectionAsync(serverUrl, backendPort, ct),
+            PrinterBackend.FlashForge => await TestFlashForgeConnectionAsync(serverUrl, backendPort, ct),
             _ => new TestConnectionResponse { Success = false, Message = $"Unsupported backend type: {backend}" }
         };
     }
@@ -280,6 +281,40 @@ public class PrintersController(
             return ok
                 ? new TestConnectionResponse { Success = true, Message = "Successfully connected to SDCP printer." }
                 : new TestConnectionResponse { Success = false, Message = "SDCP endpoint did not respond." };
+        }
+        catch (OperationCanceledException)
+        {
+            return new TestConnectionResponse { Success = false, Message = "Connection timed out" };
+        }
+        catch (Exception ex)
+        {
+            return new TestConnectionResponse { Success = false, Message = $"Connection failed: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Tests FlashForge connection by performing a TCP handshake via the FlashForge client.
+    /// </summary>
+    private async Task<TestConnectionResponse> TestFlashForgeConnectionAsync(Uri serverUrl, int? backendPort, CancellationToken ct)
+    {
+        Uri uriToTest = serverUrl;
+        if (backendPort.HasValue)
+        {
+            uriToTest = new UriBuilder(serverUrl) { Port = backendPort.Value }.Uri;
+        }
+
+        try
+        {
+            Farm.Infrastructure.Contracts.Printers.IBackendClient client = _backendClientFactory.GetClient(PrinterBackend.FlashForge);
+            if (client is not Farm.Infrastructure.Services.Printers.ISupportsConnectionTest connectionTestClient)
+            {
+                return new TestConnectionResponse { Success = false, Message = "FlashForge client is not available." };
+            }
+
+            bool ok = await connectionTestClient.TestConnectionAsync(uriToTest, ct);
+            return ok
+                ? new TestConnectionResponse { Success = true, Message = "Successfully connected to FlashForge printer." }
+                : new TestConnectionResponse { Success = false, Message = "FlashForge printer did not respond." };
         }
         catch (OperationCanceledException)
         {

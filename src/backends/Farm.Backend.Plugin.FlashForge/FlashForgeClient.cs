@@ -49,6 +49,10 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
     }
 
     /// <inheritdoc />
+    public Task<bool> TestConnectionAsync(Uri baseUrl, CancellationToken ct = default)
+        => TestConnectionAsync(baseUrl.ToString(), ct);
+
+    /// <inheritdoc />
     public async Task<string> SendCommandAsync(string host, int port, string command, CancellationToken ct = default)
     {
         using var client = new TcpClient();

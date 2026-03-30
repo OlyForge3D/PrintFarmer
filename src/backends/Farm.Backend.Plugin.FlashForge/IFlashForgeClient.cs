@@ -17,6 +17,7 @@ public interface IFlashForgeClient : IBackendClient,
     ISupportsCompositeStatus,
     ISupportsPrinterInformation,
     ISupportsTemperatureControl,
+    ISupportsConnectionTest,
     IDisposable
 {
     /// <summary>
@@ -24,14 +25,6 @@ public interface IFlashForgeClient : IBackendClient,
     /// Most models use 8899, but some (e.g., Adventurer 5X) use 8080.
     /// </summary>
     public const int DefaultPort = 8899;
-
-    /// <summary>
-    /// Tests connectivity to a FlashForge printer by performing a TCP handshake (~M601 S1).
-    /// </summary>
-    /// <param name="baseUrl">The base URL of the printer (e.g., http://printer-ip:8899)</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>True if the printer responded to the handshake</returns>
-    Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default);
 
     /// <summary>
     /// Sends a raw FlashForge command over TCP and returns the response.
