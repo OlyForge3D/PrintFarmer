@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
@@ -67,7 +67,6 @@ import {
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
-import { toast } from 'sonner';
 
 // Animation styles
 // Use unique keyframe/class names to avoid collisions with other injected styles.
@@ -132,17 +131,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printerId ?? '');
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
-
-  const applyTemplateMutation = useMutation({
-    mutationFn: () => apiClient.applyModelTemplate(printerId!),
-    onSuccess: () => {
-      toast.success('Configuration updated successfully');
-      queryClient.invalidateQueries({ queryKey: ['printers'] });
-    },
-    onError: () => {
-      toast.error('Failed to apply configuration update');
-    },
-  });
 
   const [isClosing, setIsClosing] = useState(false);
   const closeTimeoutRef = useRef<number | null>(null);
@@ -636,29 +624,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           iconCenter={<CloseIcon className="h-6 w-6" />}
         ></Button>
       </div>
-
-      {/* Catalog Update Banner */}
-      {printer.hasCatalogUpdate && (
-        <div className="flex items-start gap-3 px-4 py-3 bg-blue-500/10 border-b border-blue-400/20">
-          <svg className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-blue-300">Configuration update available</p>
-            <p className="text-xs text-pf-text-secondary mt-0.5">
-              The <span className="text-pf-text-primary">{printer.modelName}</span> catalog template has been updated. Apply it to get the latest configuration defaults.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => applyTemplateMutation.mutate()}
-            disabled={applyTemplateMutation.isPending}
-            className="shrink-0 text-xs px-2.5 py-1 rounded-md bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/30 text-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {applyTemplateMutation.isPending ? 'Applying…' : 'Apply'}
-          </button>
-        </div>
-      )}
 
       {/* Scrollable Content */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-pf-sidebar">

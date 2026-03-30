@@ -12,20 +12,27 @@
 
 import React, { useState } from 'react';
 import { Link } from 'react-router';
-import { AlertIcon, WrenchIcon, GearIcon } from '@/common/components/icons/MdiIcons';
+import { AlertIcon, WrenchIcon, GearIcon, CloudDownloadIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { useMaintenanceAlerts } from '@/features/maintenance/hooks/useMaintenanceAlerts';
 import { useMaintenanceComponents } from '@/features/maintenance/hooks/useMaintenanceComponents';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { usePrinters } from '@/common/hooks/useApi';
+import { toast } from 'sonner';
 
 interface AlertItem {
   id: string;
   icon: React.ReactNode;
   message: string;
-  link: string;
-  severity: 'critical' | 'warning';
+  /** Navigation link — mutually exclusive with onAction */
+  link?: string;
+  /** Inline action — mutually exclusive with link */
+  onAction?: () => void;
+  actionLabel?: string;
+  actionPending?: boolean;
+  severity: 'critical' | 'warning' | 'info';
 }
 
 export function CriticalAlertsBanner() {
@@ -34,6 +41,19 @@ export function CriticalAlertsBanner() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole('farm_admin');
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const { data: printers } = usePrinters();
+  const queryClient = useQueryClient();
+
+  const applyAllTemplatesMutation = useMutation({
+    mutationFn: () => apiClient.applyAllModelTemplates(),
+    onSuccess: (result) => {
+      toast.success(`Configuration updated for ${result.updated} printer${result.updated !== 1 ? 's' : ''}`);
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+    },
+    onError: () => {
+      toast.error('Failed to apply configuration updates');
+    },
+  });
 
   const { data: servicesSummary } = useQuery({
     queryKey: ['background-services-summary'],
@@ -83,6 +103,20 @@ export function CriticalAlertsBanner() {
     });
   }
 
+  // Catalog template updates pending
+  const printersWithUpdates = (printers ?? []).filter(p => p.hasCatalogUpdate);
+  if (printersWithUpdates.length > 0) {
+    items.push({
+      id: 'catalog-updates',
+      icon: <CloudDownloadIcon className="h-4 w-4" />,
+      message: `${printersWithUpdates.length} printer${printersWithUpdates.length !== 1 ? 's have' : ' has'} a configuration update available`,
+      onAction: () => applyAllTemplatesMutation.mutate(),
+      actionLabel: applyAllTemplatesMutation.isPending ? 'Applying…' : 'Apply All',
+      actionPending: applyAllTemplatesMutation.isPending,
+      severity: 'info',
+    });
+  }
+
   const visible = items.filter((item) => !dismissed.has(item.id));
   if (visible.length === 0) return null;
 
@@ -94,13 +128,29 @@ export function CriticalAlertsBanner() {
           className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border ${
             item.severity === 'critical'
               ? 'bg-pf-error/10 border-pf-error/30 text-pf-error'
+              : item.severity === 'info'
+              ? 'bg-blue-500/10 border-blue-400/20 text-blue-300'
               : 'bg-pf-warning/10 border-pf-warning/30 text-pf-warning'
           }`}
         >
           {item.icon}
-          <Link to={item.link} className="flex-1 text-sm font-medium hover:underline">
-            {item.message}
-          </Link>
+          {item.link ? (
+            <Link to={item.link} className="flex-1 text-sm font-medium hover:underline">
+              {item.message}
+            </Link>
+          ) : (
+            <span className="flex-1 text-sm font-medium">{item.message}</span>
+          )}
+          {item.onAction && (
+            <Button
+              variant="unstyled"
+              onClick={item.onAction}
+              disabled={item.actionPending}
+              className="text-xs px-2.5 py-1 rounded-md bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/30 text-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {item.actionLabel ?? 'Apply'}
+            </Button>
+          )}
           <Button
             variant="unstyled"
             onClick={() => setDismissed((prev) => new Set(prev).add(item.id))}
