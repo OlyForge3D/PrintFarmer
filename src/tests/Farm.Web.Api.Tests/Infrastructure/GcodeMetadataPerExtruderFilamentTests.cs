@@ -1,4 +1,4 @@
-// Tests for per-extruder filament parsing (Phase 2). Properties added by Phase 1 domain changes.
+﻿// Tests for per-extruder filament parsing (Phase 2). Properties added by Phase 1 domain changes.
 // These tests reference FilamentPerExtruderWeightG, FilamentPerExtruderLengthMm, and ExtruderCount
 // which will be added to GcodeMetadataExtracted by Lambert in Phase 1.
 

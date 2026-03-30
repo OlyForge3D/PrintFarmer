@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Dtos.DataManagement;
+﻿namespace Farm.Infrastructure.Dtos.DataManagement;
 
 /// <summary>
 /// Represents the catalog-manifest.yaml structure used for update detection.

@@ -661,6 +661,11 @@ public class PrintJobManagementService(
 
                         job.Status = PrintJobStatus.Printing;
                         job.ActualStartTime = DateTime.UtcNow;
+
+                        // TODO: Snapshot per-extruder slicer estimates into PrintJobToolheadUsage records
+                        // This requires access to AppDbContext.Toolheads and AppDbContext.Set<PrintJobToolheadUsage>()
+                        // Consider refactoring to call a service method that can access the full DbContext
+                        // See Phase 3 Task 3d implementation notes
                         _logger.LogInformation("Print job {JobId} successfully uploaded and started on printer {PrinterId}", jobId, job.AssignedPrinterId);
                     }
                     else

@@ -526,6 +526,25 @@ public interface ISupportsFilamentUsageQuery
 }
 
 /// <summary>
+/// Capability interface for backends that can report actual filament usage broken down by extruder/toolhead.
+/// Used for multi-toolhead printers (toolchangers) and MMU printers to accurately track
+/// per-spool filament consumption after job completion.
+/// </summary>
+public interface ISupportsPerExtruderFilamentUsage
+{
+    /// <summary>
+    /// Retrieves actual filament usage per extruder for the most recently completed print job.
+    /// Returns a dictionary mapping toolhead index (0-based) to grams used, or null if per-extruder data is unavailable.
+    /// Fallback: if per-extruder data isn't available, the caller will use single-total from ISupportsFilamentUsageQuery.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="credential">Optional authentication credentials for the printer</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>Dictionary mapping toolhead index to grams used, or null if per-extruder data is unavailable</returns>
+    Task<Dictionary<int, double>?> GetLastJobFilamentUsagePerExtruderAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backends that support raw G-code execution.
 /// Allows sending arbitrary G-code commands directly to the printer firmware.
 /// Useful for executing specialized commands not covered by standard capabilities.

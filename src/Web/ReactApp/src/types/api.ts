@@ -62,6 +62,22 @@ export interface PrintJobStatusDto {
   thumbnailUrl?: string;
   error?: string;
 }
+
+/**
+ * Per-toolhead filament usage record for a print job.
+ * Tracks which spool/filament was used by each toolhead during a print.
+ */
+export interface PrintJobToolheadUsage {
+  id: string;
+  printJobId: string;
+  toolheadIndex: number;
+  spoolmanSpoolId?: number;
+  filamentUsageGrams?: number;
+  filamentName?: string;
+  filamentColor?: string;
+  materialCostUsd?: number;
+}
+
 // Mirror existing shared models from Farm.Web.Shared
 
 // ============== Printer Base Interfaces ==============
@@ -765,6 +781,25 @@ export const NozzleTypeStringLabels: Record<string, string> = {
   'Unknown': 'Unknown'
 };
 
+// ============== Toolhead Types ==============
+/**
+ * Distinguishes physical toolheads from MMU/AMS virtual gate slots.
+ * Backend serializes enums as strings via JsonStringEnumConverter.
+ */
+export enum ToolheadType {
+  Physical = 0,
+  MmuGate = 1,
+}
+
+/**
+ * String-keyed toolhead type labels for use with JSON string enum serialization.
+ * Backend sends ToolheadType as string ("Physical", "MmuGate")
+ */
+export const ToolheadTypeLabels: Record<string, string> = {
+  Physical: 'Physical Toolhead',
+  MmuGate: 'MMU Gate',
+};
+
 // ============== Nozzle Interface Types ==============
 /**
  * Defines the nozzle thread/interface type that determines compatibility between hotends and nozzles.
@@ -1145,6 +1180,11 @@ export interface ToolheadDto {
   supportedMaterials?: string[];
   isPrimary: boolean;
   lastUpdated?: Date;
+  // Multi-toolhead filament tracking
+  toolheadType?: ToolheadType | string;
+  currentSpoolId?: number;
+  currentMaterial?: string;
+  currentFilamentColor?: string;
 }
 
 // Printer details for edit page
@@ -1653,6 +1693,10 @@ export interface GcodeFile {
   bottomSolidLayers?: number;
   maxVolumetricSpeed?: number;
   ironingEnabled?: boolean;
+  // Multi-toolhead filament tracking
+  filamentPerExtruderWeightG?: number[];
+  filamentPerExtruderLengthMm?: number[];
+  extruderCount?: number;
 }
 
 export interface GetGcodeFilesRequest {
@@ -1740,6 +1784,8 @@ export interface JobQueuePrintJob {
   projectFileId?: string;
   createdAt: Date;
   updatedAt: Date;
+  /** Per-toolhead filament usage tracking */
+  toolheadUsages?: PrintJobToolheadUsage[];
 }
 
 /**
@@ -2162,6 +2208,8 @@ export interface QueuedPrintJobDto {
   actualCost?: number;
   /** URL to the G-code file thumbnail image */
   thumbnailUrl?: string;
+  /** Per-toolhead filament usage tracking */
+  toolheadUsages?: PrintJobToolheadUsage[];
 }
 
 export interface QueueGcodeFileMetaDto {

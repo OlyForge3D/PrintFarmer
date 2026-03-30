@@ -656,6 +656,15 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("ExtractedPrinterModelName")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("ExtruderCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FilamentPerExtruderLengthMm")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FilamentPerExtruderWeightG")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("FileHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -2538,6 +2547,44 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("PrintJobStatistics");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJobToolheadUsage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FilamentColor")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("FilamentName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<double?>("FilamentUsageGrams")
+                        .HasColumnType("float");
+
+                    b.Property<decimal?>("MaterialCostUsd")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("PrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("SpoolmanSpoolId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ToolheadIndex")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrintJobId", "ToolheadIndex")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PrintJobToolheadUsages_PrintJobId_ToolheadIndex");
+
+                    b.ToTable("PrintJobToolheadUsages");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProject", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3673,6 +3720,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CurrentFilamentColor")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("CurrentMaterial")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("CurrentSpoolId")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("ExtruderModelId")
                         .HasColumnType("uniqueidentifier");
 
@@ -3704,10 +3762,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("ToolheadModelDefId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("ToolheadType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CurrentSpoolId");
 
                     b.HasIndex("ExtruderModelId");
 
@@ -4598,6 +4663,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("PrinterModel");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJobToolheadUsage", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
+                        .WithMany("ToolheadUsages")
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PrintJob");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectFile", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
@@ -5056,6 +5132,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("StateHistory");
 
                     b.Navigation("Statistics");
+
+                    b.Navigation("ToolheadUsages");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProject", b =>

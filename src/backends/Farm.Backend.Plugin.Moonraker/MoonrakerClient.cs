@@ -35,7 +35,8 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     ISupportsCompositeStatus,
     ISupportsControlRestart,
     ISupportsGcodeExecution,
-    ISupportsFilamentUsageQuery
+    ISupportsFilamentUsageQuery,
+    ISupportsPerExtruderFilamentUsage
 {
     private readonly HttpClient _http = http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
@@ -3312,6 +3313,99 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to get filament usage from Moonraker history");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Retrieves per-extruder filament usage for the most recently completed print job.
+    /// Checks Moonraker history metadata for per-extruder keys (filament_used_0, filament_used_1, etc.)
+    /// and converts from mm to grams using slicer metadata ratio.
+    /// Returns null if per-extruder data is unavailable (falls back to single-total).
+    /// </summary>
+#pragma warning disable CA1033
+    async Task<Dictionary<int, double>?> ISupportsPerExtruderFilamentUsage.GetLastJobFilamentUsagePerExtruderAsync(
+        string baseUrl, PrinterCredential? credential, CancellationToken ct)
+#pragma warning restore CA1033
+    {
+        try
+        {
+            // 1. Get most recent completed job from history
+            HistoryListResponse? history = await GetHistoryListAsync(baseUrl, limit: 1, order: "desc", ct: ct);
+            HistoryJob? lastJob = history?.Jobs?.FirstOrDefault();
+            if (lastJob is null)
+            {
+                return null;
+            }
+
+            // 2. Get file metadata for mm-to-grams conversion ratio
+            GCodeMetadata? metadata = null;
+            double gramsPerMm = 1.0 / 335.0; // PLA default fallback
+            if (!string.IsNullOrEmpty(lastJob.Filename))
+            {
+                try
+                {
+                    metadata = await GetFileMetadataAsync(baseUrl, lastJob.Filename, ct);
+                    if (metadata?.FilamentWeightTotal is > 0 && metadata?.FilamentTotal is > 0)
+                    {
+                        gramsPerMm = metadata.FilamentWeightTotal.Value / metadata.FilamentTotal.Value;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not fetch metadata for per-extruder conversion, using default density");
+                }
+            }
+
+            // 3. Try to get per-extruder data from history job metadata
+            if (lastJob.Metadata is { Count: > 0 })
+            {
+                var perExtruder = new Dictionary<int, double>();
+
+                // Check for filament_used_X keys (some Moonraker versions with multi-extruder support)
+                // Reasonable max toolheads = 16
+                for (int i = 0; i < 16; i++)
+                {
+                    if (lastJob.Metadata.TryGetValue($"filament_used_{i}", out object? val))
+                    {
+                        double mm = 0;
+                        if (val is JsonElement je && je.ValueKind == JsonValueKind.Number && je.TryGetDouble(out double jeDouble))
+                        {
+                            mm = jeDouble;
+                        }
+                        else if (val is double dbl)
+                        {
+                            mm = dbl;
+                        }
+                        else if (val is int intVal)
+                        {
+                            mm = intVal;
+                        }
+                        else if (val is long longVal)
+                        {
+                            mm = longVal;
+                        }
+
+                        if (mm > 0)
+                        {
+                            perExtruder[i] = mm * gramsPerMm;
+                        }
+                    }
+                }
+
+                // Only return if we found multiple extruders (multi-toolhead scenario)
+                if (perExtruder.Count > 1)
+                {
+                    return perExtruder;
+                }
+            }
+
+            // No per-extruder data available; caller will use single-total fallback
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get per-extruder filament usage from Moonraker history");
             return null;
         }
     }

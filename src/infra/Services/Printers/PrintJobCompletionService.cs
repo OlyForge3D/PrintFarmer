@@ -344,37 +344,105 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
             // Try to get actual filament usage from the backend
             IBackendClient? client = _backendFactory.GetClient(printer.Backend);
-            double? usageGrams = null;
+            PrinterCredential? credential = !string.IsNullOrEmpty(printer.ApiKey)
+                ? new PrinterCredential { ApiKey = printer.ApiKey }
+                : null;
 
-            if (client is ISupportsFilamentUsageQuery usageQuery)
+            // Try per-extruder usage first (for multi-toolhead printers)
+            Dictionary<int, double>? perExtruderUsage = null;
+            if (client is ISupportsPerExtruderFilamentUsage perExtruderQuery)
             {
-                PrinterCredential? credential = !string.IsNullOrEmpty(printer.ApiKey)
-                    ? new PrinterCredential { ApiKey = printer.ApiKey }
-                    : null;
-
-                usageGrams = await usageQuery.GetLastJobFilamentUsageGramsAsync(
+                perExtruderUsage = await perExtruderQuery.GetLastJobFilamentUsagePerExtruderAsync(
                     printer.ServerUrl, credential, ct);
             }
 
-            // Fallback to slicer estimate if no actual data
-            usageGrams ??= job.EstimatedFilamentUsage;
-
-            if (usageGrams is > 0)
+            if (perExtruderUsage is { Count: > 0 })
             {
-                job.ActualFilamentUsage = usageGrams;
-            }
+                // Multi-toolhead path
+                double totalGrams = perExtruderUsage.Values.Sum();
+                job.ActualFilamentUsage = totalGrams;
 
-            // Record consumption in Spoolman if printer has an active spool
-            if (printer.CurrentSpoolId.HasValue && usageGrams is > 0)
-            {
-                bool consumed = await _spoolmanService.ConsumeFilamentAsync(
-                    printer.CurrentSpoolId.Value, usageGrams.Value, ct);
+                // Get toolhead spool assignments for this printer
+                var toolheads = await _db.Toolheads
+                    .Where(t => t.PrinterId == printerId)
+                    .OrderBy(t => t.Index)
+                    .ToListAsync(ct);
 
-                if (consumed)
+                foreach (var (toolIndex, grams) in perExtruderUsage)
                 {
-                    _logger.LogInformation(
-                        "[PrintJobCompletionService] Recorded {UsedGrams:F1}g filament consumption on spool {SpoolId} for job {JobId}",
-                        usageGrams.Value, printer.CurrentSpoolId.Value, job.Id);
+                    var toolhead = toolheads.FirstOrDefault(t => t.Index == toolIndex);
+                    var usage = new PrintJobToolheadUsage
+                    {
+                        Id = Guid.NewGuid(),
+                        PrintJobId = job.Id,
+                        ToolheadIndex = toolIndex,
+                        SpoolmanSpoolId = toolhead?.CurrentSpoolId,
+                        FilamentUsageGrams = grams,
+                        FilamentName = toolhead?.CurrentMaterial,
+                        FilamentColor = toolhead?.CurrentFilamentColor
+                    };
+                    _db.Set<PrintJobToolheadUsage>().Add(usage);
+
+                    // Consume from this toolhead's spool in Spoolman
+                    if (toolhead?.CurrentSpoolId.HasValue == true && grams > 0)
+                    {
+                        await _spoolmanService.ConsumeFilamentAsync(
+                            toolhead.CurrentSpoolId.Value, grams, ct);
+                        _logger.LogInformation(
+                            "[PrintJobCompletionService] Recorded {UsedGrams:F1}g on spool {SpoolId} (T{ToolIndex}) for job {JobId}",
+                            grams, toolhead.CurrentSpoolId.Value, toolIndex, job.Id);
+                    }
+                }
+            }
+            else
+            {
+                // Single-spool path (existing behavior)
+                double? usageGrams = null;
+                if (client is ISupportsFilamentUsageQuery usageQuery)
+                {
+                    usageGrams = await usageQuery.GetLastJobFilamentUsageGramsAsync(
+                        printer.ServerUrl, credential, ct);
+                }
+
+                // Fallback to slicer estimate if no actual data
+                usageGrams ??= job.EstimatedFilamentUsage;
+
+                if (usageGrams is > 0)
+                {
+                    job.ActualFilamentUsage = usageGrams;
+
+                    // Also create a single toolhead usage record for consistency
+                    var primaryToolhead = await _db.Toolheads
+                        .FirstOrDefaultAsync(t => t.PrinterId == printerId && t.IsPrimary, ct);
+
+                    if (primaryToolhead is not null)
+                    {
+                        var usage = new PrintJobToolheadUsage
+                        {
+                            Id = Guid.NewGuid(),
+                            PrintJobId = job.Id,
+                            ToolheadIndex = 0,
+                            SpoolmanSpoolId = printer.CurrentSpoolId ?? primaryToolhead.CurrentSpoolId,
+                            FilamentUsageGrams = usageGrams,
+                            FilamentName = primaryToolhead.CurrentMaterial,
+                            FilamentColor = primaryToolhead.CurrentFilamentColor
+                        };
+                        _db.Set<PrintJobToolheadUsage>().Add(usage);
+                    }
+                }
+
+                // Record consumption in Spoolman if printer has an active spool (existing)
+                if (printer.CurrentSpoolId.HasValue && usageGrams is > 0)
+                {
+                    bool consumed = await _spoolmanService.ConsumeFilamentAsync(
+                        printer.CurrentSpoolId.Value, usageGrams.Value, ct);
+
+                    if (consumed)
+                    {
+                        _logger.LogInformation(
+                            "[PrintJobCompletionService] Recorded {UsedGrams:F1}g filament consumption on spool {SpoolId} for job {JobId}",
+                            usageGrams.Value, printer.CurrentSpoolId.Value, job.Id);
+                    }
                 }
             }
         }
