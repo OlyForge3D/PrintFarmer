@@ -32,6 +32,15 @@ function AddPrinterModalContent({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  /** Returns the default backend API port for a given printer backend type. */
+  const getDefaultBackendPort = (backend: PrinterBackend): number => {
+    switch (backend) {
+      case PrinterBackend.FlashForge: return 8899;
+      case PrinterBackend.Moonraker: return 7125;
+      default: return 80;
+    }
+  };
+
   const [formData, setFormData] = useState<CreatePrinterDto>({
     name: '',
     serverUrl: '',
@@ -59,10 +68,14 @@ function AddPrinterModalContent({
   const [showApiKey, setShowApiKey] = useState(false);
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    setFormData(prev => {
+      const next = { ...prev, [field]: value };
+      // Auto-set backend port when backend type changes
+      if (field === 'backend') {
+        next.backendPort = getDefaultBackendPort(value as PrinterBackend);
+      }
+      return next;
+    });
     // Filter models when manufacturer changes
     if (field === 'manufacturerId' && value) {
       const filtered = models.filter(m => m.manufacturerId === value);
@@ -393,9 +406,9 @@ function AddPrinterModalContent({
                 <FormField label="Backend Port (API)">
                   <Input
                     type="number"
-                    value={formData.backendPort ?? (formData.backend === PrinterBackend.FlashForge ? 8899 : 7125)}
-                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || (formData.backend === PrinterBackend.FlashForge ? 8899 : 7125))}
-                    placeholder={formData.backend === PrinterBackend.FlashForge ? '8899' : '7125'}
+                    value={formData.backendPort ?? getDefaultBackendPort(formData.backend)}
+                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || getDefaultBackendPort(formData.backend))}
+                    placeholder={String(getDefaultBackendPort(formData.backend))}
                     min={1}
                     max={65535}
                     aria-label="Backend port"
