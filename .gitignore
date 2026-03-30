@@ -55,6 +55,9 @@ wwwroot/
 /publish/
 deployment/
 
+# Agent/build log output
+logs/
+
 # Test artifacts
 *.trx
 *.coverage
