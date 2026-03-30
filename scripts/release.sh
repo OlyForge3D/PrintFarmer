@@ -4,22 +4,51 @@ set -euo pipefail
 # Release Script
 # Merges development → main, strips .squad/ files, tags, and pushes to OlyForge3D.
 #
-# Usage: ./scripts/release.sh [version-tag]
-# Example: ./scripts/release.sh v0.2.0
+# Usage: ./scripts/release.sh [major|minor|patch]
+#   patch (default) — v0.1.0 → v0.1.1
+#   minor           — v0.1.0 → v0.2.0
+#   major           — v0.1.0 → v1.0.0
 #
-# If no version tag is given, uses the contents of the VERSION file.
+# Or provide an explicit tag: ./scripts/release.sh v2.0.0
 
-TAG="${1:-}"
-if [[ -z "$TAG" ]]; then
-  if [[ -f VERSION ]]; then
-    TAG="$(cat VERSION)"
-  else
-    echo "❌ Usage: $0 <version-tag>"
-    echo "   Example: $0 v0.2.0"
-    echo "   Or create a VERSION file in the repo root."
+# --- Version bump logic ---
+bump_version() {
+  local current="$1" level="$2"
+  # Strip leading 'v' if present
+  local ver="${current#v}"
+  local major minor patch
+  IFS='.' read -r major minor patch <<< "$ver"
+  major="${major:-0}"; minor="${minor:-0}"; patch="${patch:-0}"
+
+  case "$level" in
+    major) major=$((major + 1)); minor=0; patch=0 ;;
+    minor) minor=$((minor + 1)); patch=0 ;;
+    patch) patch=$((patch + 1)) ;;
+  esac
+  echo "v${major}.${minor}.${patch}"
+}
+
+# Ensure we're at the repo root
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Determine the new version
+ARG="${1:-patch}"
+case "$ARG" in
+  major|minor|patch)
+    CURRENT="$(cat VERSION 2>/dev/null || echo "v0.0.0")"
+    TAG="$(bump_version "$CURRENT" "$ARG")"
+    ;;
+  v*)
+    # Explicit version tag provided
+    TAG="$ARG"
+    ;;
+  *)
+    echo "❌ Usage: $0 [major|minor|patch|vX.Y.Z]"
+    echo "   Default: patch"
     exit 1
-  fi
-fi
+    ;;
+esac
 
 RELEASE_REMOTE="release"
 FORBIDDEN_PATHS=(.squad/ .ai-team/ .ai-team-templates/ team-docs/ docs/proposals/ devnotes/)
