@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Radio, FileUpload } from '@/common/components/ui';
-import { DatabaseIcon, DownloadIcon, UploadIcon, RefreshIcon, CheckCircleIcon, AlertCircleIcon } from '@/common/components/icons/MdiIcons';
+import { DatabaseIcon, DownloadIcon, UploadIcon, RefreshIcon, CheckCircleIcon, AlertCircleIcon, CloudDownloadIcon } from '@/common/components/icons/MdiIcons';
 import { 
   exportCatalog, 
   exportPrinters, 
@@ -10,9 +10,12 @@ import {
   importFull, 
   reloadSeed, 
   downloadAsJson, 
-  generateExportFilename 
+  generateExportFilename,
+  getCatalogVersion,
+  checkCatalogUpdates,
+  applyCatalogUpdates,
 } from '@/services/adminDataService';
-import { ImportMode, type ImportResponseDto, type ExportHistoryItem } from '@/types/adminData';
+import { ImportMode, type ImportResponseDto, type ExportHistoryItem, type CatalogVersionDto, type CatalogUpdateCheckResult, type CatalogUpdateApplyResult } from '@/types/adminData';
 
 export function DataManagementPage() {
   const [loading, setLoading] = useState(false);
@@ -21,6 +24,12 @@ export function DataManagementPage() {
   const [importResult, setImportResult] = useState<ImportResponseDto | null>(null);
   const [importMode, setImportMode] = useState<ImportMode>(ImportMode.Merge);
   const [exportHistory, setExportHistory] = useState<ExportHistoryItem[]>([]);
+
+  // Catalog update state
+  const [catalogVersion, setCatalogVersion] = useState<CatalogVersionDto | null>(null);
+  const [updateCheck, setUpdateCheck] = useState<CatalogUpdateCheckResult | null>(null);
+  const [updateResult, setUpdateResult] = useState<CatalogUpdateApplyResult | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   const addToHistory = useCallback((type: 'catalog' | 'printers' | 'full', filename: string) => {
     const item: ExportHistoryItem = {
@@ -138,6 +147,58 @@ export function DataManagementPage() {
       setError(`Failed to reload seed data: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckUpdates = async () => {
+    setCatalogLoading(true);
+    setError(null);
+    setSuccess(null);
+    setUpdateCheck(null);
+    setUpdateResult(null);
+    try {
+      const [version, check] = await Promise.all([
+        getCatalogVersion(),
+        checkCatalogUpdates(),
+      ]);
+      setCatalogVersion(version);
+      setUpdateCheck(check);
+      if (check.error) {
+        setError(`Update check failed: ${check.error}`);
+      } else if (check.updateAvailable) {
+        setSuccess(`Update available: ${check.changedFiles.length} file(s) changed.`);
+      } else {
+        setSuccess('Catalog is up to date.');
+      }
+    } catch (err) {
+      setError(`Failed to check for updates: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  const handleApplyUpdates = async () => {
+    setCatalogLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await applyCatalogUpdates();
+      setUpdateResult(result);
+      if (result.success) {
+        setSuccess(`Catalog updated to ${result.appliedVersion}. Categories updated: ${result.updatedCategories.join(', ')}.`);
+        setUpdateCheck(null);
+        setCatalogVersion({
+          version: result.appliedVersion,
+          appliedAt: result.appliedAt,
+          source: 'remote',
+        });
+      } else {
+        setError(`Update failed: ${result.error ?? 'Unknown error'}`);
+      }
+    } catch (err) {
+      setError(`Failed to apply updates: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setCatalogLoading(false);
     }
   };
 
@@ -382,6 +443,103 @@ export function DataManagementPage() {
             <p>
               <strong>Note:</strong> This operation uses merge mode and will not overwrite existing data. 
               Seed data is stored in <code className="bg-pf-bg-2 px-1 py-0.5 rounded-sm">data/seed/</code> YAML files.
+            </p>
+          </div>
+        </div>
+
+        {/* Catalog Updates Section */}
+        <div className="bg-pf-bg-1 rounded-lg p-6 border border-pf-border">
+          <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center">
+            <CloudDownloadIcon className="w-5 h-5 mr-2" />
+            Catalog Updates
+          </h2>
+          <p className="text-sm text-pf-text-secondary mb-4">
+            Check for and apply catalog data updates from the PrintFarmer repository. Updates include new manufacturers, printer models, and components.
+          </p>
+
+          {/* Current Version */}
+          {catalogVersion && (
+            <div className="mb-4 p-3 bg-pf-bg-2 rounded-sm border border-pf-border text-sm">
+              <span className="text-pf-text-secondary">Current version:</span>{' '}
+              <span className="font-semibold text-pf-text-primary">
+                {catalogVersion.version ?? 'Not tracked'}
+              </span>
+              {catalogVersion.appliedAt && (
+                <>
+                  <span className="text-pf-text-secondary ml-4">Applied:</span>{' '}
+                  <span className="text-pf-text-primary">
+                    {new Date(catalogVersion.appliedAt).toLocaleString()}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-3">
+            <Button
+              onClick={handleCheckUpdates}
+              disabled={loading || catalogLoading}
+              variant="secondary"
+              iconLeft={<RefreshIcon className="w-4 h-4" />}
+            >
+              Check for Updates
+            </Button>
+            {updateCheck?.updateAvailable && !updateResult?.success && (
+              <Button
+                onClick={handleApplyUpdates}
+                disabled={loading || catalogLoading}
+                variant="primary"
+                iconLeft={<CloudDownloadIcon className="w-4 h-4" />}
+              >
+                Apply Updates
+              </Button>
+            )}
+          </div>
+
+          {/* Changed Files List */}
+          {updateCheck?.updateAvailable && updateCheck.changedFiles.length > 0 && !updateResult?.success && (
+            <div className="mt-4 p-4 bg-pf-bg-2 rounded-sm border border-pf-border">
+              <h3 className="text-sm font-semibold text-pf-text-primary mb-2">
+                Changed Files ({updateCheck.changedFiles.length})
+              </h3>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {updateCheck.changedFiles.map((file, idx) => (
+                  <div key={idx} className="flex items-center text-xs">
+                    <span className={`inline-block w-16 px-1.5 py-0.5 rounded-sm text-center font-medium mr-2 ${
+                      file.changeType === 'Added'
+                        ? 'bg-pf-success/20 text-pf-success'
+                        : file.changeType === 'Removed'
+                          ? 'bg-pf-error/20 text-pf-error'
+                          : 'bg-pf-warning/20 text-pf-warning'
+                    }`}>
+                      {file.changeType}
+                    </span>
+                    <span className="text-pf-text-secondary mr-2">[{file.category}]</span>
+                    <span className="text-pf-text-primary font-mono">{file.fileName}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Apply Result */}
+          {updateResult?.success && (
+            <div className="mt-4 p-4 bg-pf-success/10 border border-pf-success/30 rounded-sm">
+              <div className="flex items-center mb-2">
+                <CheckCircleIcon className="w-4 h-4 text-pf-success mr-2" />
+                <h3 className="text-sm font-semibold text-pf-success">Update Applied</h3>
+              </div>
+              <div className="text-xs text-pf-text-secondary space-y-1">
+                <p>Version: <span className="font-semibold text-pf-text-primary">{updateResult.previousVersion ?? 'none'}</span> → <span className="font-semibold text-pf-text-primary">{updateResult.appliedVersion}</span></p>
+                <p>Categories updated: <span className="font-semibold text-pf-text-primary">{updateResult.updatedCategories.join(', ')}</span></p>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4 text-xs text-pf-text-secondary">
+            <p>
+              <strong>Note:</strong> Updates are fetched from the PrintFarmer GitHub repository and applied using merge mode. Existing custom data is preserved.
             </p>
           </div>
         </div>

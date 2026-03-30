@@ -223,6 +223,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 string name = entry.Entity.Name ?? string.Empty;
                 entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
+
                 // Always bump UpdatedAt so catalog update detection picks up the change
                 if (entry.State == EntityState.Modified)
                 {
