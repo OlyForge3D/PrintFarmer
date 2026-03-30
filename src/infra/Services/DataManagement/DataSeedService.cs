@@ -107,11 +107,13 @@ public class DataSeedService : IDataSeedService
                 }
                 else
                 {
-                    // Update existing filament types with new properties if they weren't set
+                    // Upsert: update existing filament type properties from seed data
+                    existing.DefaultHotendTemp = dto.DefaultHotendTemp;
+                    existing.DefaultBedTemp = dto.DefaultBedTemp;
                     existing.IsAbrasive = dto.IsAbrasive;
                     existing.NeedsEnclosure = dto.NeedsEnclosure;
-                    existing.DefaultPricePerKg ??= dto.DefaultPricePerKg;
-                    existing.DefaultDensity ??= dto.DefaultDensity;
+                    existing.DefaultPricePerKg = dto.DefaultPricePerKg ?? existing.DefaultPricePerKg;
+                    existing.DefaultDensity = dto.DefaultDensity ?? existing.DefaultDensity;
                 }
             }
 
@@ -153,10 +155,10 @@ public class DataSeedService : IDataSeedService
                     continue;
                 }
 
-                bool exists = await _context.PrinterModels
-                    .AnyAsync(pm => pm.ManufacturerId == manufacturerId && pm.Name == dto.Name);
+                PrinterModel? existing = await _context.PrinterModels
+                    .FirstOrDefaultAsync(pm => pm.ManufacturerId == manufacturerId && pm.Name == dto.Name);
 
-                if (!exists)
+                if (existing == null)
                 {
                     var printerModel = new PrinterModel
                     {
@@ -180,7 +182,9 @@ public class DataSeedService : IDataSeedService
                         SupportsAutoLeveling = dto.SupportsAutoLeveling,
                         MultiMaterial = dto.MultiMaterial,
                         MaxBedTemp = dto.MaxBedTemp,
-                        MaxPrintSpeed = dto.MaxPrintSpeed
+                        MaxPrintSpeed = dto.MaxPrintSpeed,
+                        DefaultWattage = dto.DefaultWattage,
+                        DefaultHourlyRate = dto.DefaultHourlyRate
                     };
 
                     // Parse backend and motion type if provided
@@ -197,6 +201,42 @@ public class DataSeedService : IDataSeedService
                     }
 
                     _context.PrinterModels.Add(printerModel);
+                }
+                else
+                {
+                    // Upsert: update existing model with seed data values
+                    existing.MaxX = dto.BuildVolume?.X ?? existing.MaxX;
+                    existing.MaxY = dto.BuildVolume?.Y ?? existing.MaxY;
+                    existing.MaxZ = dto.BuildVolume?.Z ?? existing.MaxZ;
+                    existing.HasHeatedBed = dto.HasHeatedBed;
+                    existing.HasEnclosure = dto.HasEnclosure;
+                    existing.HasCarbonFilter = dto.HasCarbonFilter;
+                    existing.HasHepaFilter = dto.HasHepaFilter;
+                    existing.HasBowdenTube = dto.HasBowdenTube;
+                    existing.HasPtfeLiner = dto.HasPtfeLiner;
+                    existing.HasLinearRails = dto.HasLinearRails;
+                    existing.HasLeadScrews = dto.HasLeadScrews;
+                    existing.HasToolchanger = dto.HasToolchanger;
+                    existing.HasFilamentCutter = dto.HasFilamentCutter;
+                    existing.HasHeatedChamber = dto.HasHeatedChamber;
+                    existing.SupportsAutoLeveling = dto.SupportsAutoLeveling;
+                    existing.MultiMaterial = dto.MultiMaterial;
+                    existing.MaxBedTemp = dto.MaxBedTemp ?? existing.MaxBedTemp;
+                    existing.MaxPrintSpeed = dto.MaxPrintSpeed ?? existing.MaxPrintSpeed;
+                    existing.DefaultWattage = dto.DefaultWattage ?? existing.DefaultWattage;
+                    existing.DefaultHourlyRate = dto.DefaultHourlyRate ?? existing.DefaultHourlyRate;
+
+                    if (!string.IsNullOrEmpty(dto.DefaultBackend) &&
+                        Enum.TryParse<PrinterBackend>(dto.DefaultBackend, out PrinterBackend updatedBackend))
+                    {
+                        existing.DefaultBackend = (int)updatedBackend;
+                    }
+
+                    if (!string.IsNullOrEmpty(dto.MotionType) &&
+                        Enum.TryParse<MotionType>(dto.MotionType, out MotionType updatedMotionType))
+                    {
+                        existing.MotionType = (int)updatedMotionType;
+                    }
                 }
             }
 
@@ -462,10 +502,10 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            bool exists = await _context.HotendModelDefinitions
-                .AnyAsync(h => h.Name == dto.Name && h.ManufacturerId == manufacturerId);
+            HotendModelDefinition? existing = await _context.HotendModelDefinitions
+                .FirstOrDefaultAsync(h => h.Name == dto.Name && h.ManufacturerId == manufacturerId);
 
-            if (!exists)
+            if (existing == null)
             {
                 _context.HotendModelDefinitions.Add(new HotendModelDefinition
                 {
@@ -478,6 +518,14 @@ public class DataSeedService : IDataSeedService
                     Description = dto.Description,
                     Url = dto.Url
                 });
+            }
+            else
+            {
+                existing.MaxTemp = dto.MaxTemp;
+                existing.IsHighFlow = dto.IsHighFlow;
+                existing.MaxFlowRate = dto.MaxFlowRate;
+                existing.Description = dto.Description;
+                existing.Url = dto.Url;
             }
         }
 
@@ -506,10 +554,10 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            bool exists = await _context.ExtruderModelDefinitions
-                .AnyAsync(e => e.Name == dto.Name && e.ManufacturerId == manufacturerId);
+            ExtruderModelDefinition? existing = await _context.ExtruderModelDefinitions
+                .FirstOrDefaultAsync(e => e.Name == dto.Name && e.ManufacturerId == manufacturerId);
 
-            if (!exists)
+            if (existing == null)
             {
                 _context.ExtruderModelDefinitions.Add(new ExtruderModelDefinition
                 {
@@ -521,6 +569,13 @@ public class DataSeedService : IDataSeedService
                     Description = dto.Description,
                     Url = dto.Url
                 });
+            }
+            else
+            {
+                existing.GearRatio = dto.GearRatio;
+                existing.IsDirectDrive = dto.IsDirectDrive;
+                existing.Description = dto.Description;
+                existing.Url = dto.Url;
             }
         }
 
@@ -549,10 +604,10 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            bool exists = await _context.ToolheadModelDefinitions
-                .AnyAsync(t => t.Name == dto.Name && t.ManufacturerId == manufacturerId);
+            ToolheadModelDefinition? existing = await _context.ToolheadModelDefinitions
+                .FirstOrDefaultAsync(t => t.Name == dto.Name && t.ManufacturerId == manufacturerId);
 
-            if (!exists)
+            if (existing == null)
             {
                 _context.ToolheadModelDefinitions.Add(new ToolheadModelDefinition
                 {
@@ -562,6 +617,11 @@ public class DataSeedService : IDataSeedService
                     Description = dto.Description,
                     Url = dto.Url
                 });
+            }
+            else
+            {
+                existing.Description = dto.Description;
+                existing.Url = dto.Url;
             }
         }
 
@@ -762,19 +822,19 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            bool exists = await _context.NozzleModelDefinitions
-                .AnyAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturerId);
-
-            if (!exists)
+            // Parse nozzle type
+            NozzleType nozzleType = NozzleType.Brass;
+            if (!string.IsNullOrEmpty(dto.NozzleType) &&
+                Enum.TryParse<NozzleType>(dto.NozzleType.Replace(" ", string.Empty), out NozzleType parsedType))
             {
-                // Parse nozzle type
-                NozzleType nozzleType = NozzleType.Brass;
-                if (!string.IsNullOrEmpty(dto.NozzleType) &&
-                    Enum.TryParse<NozzleType>(dto.NozzleType.Replace(" ", string.Empty), out NozzleType parsedType))
-                {
-                    nozzleType = parsedType;
-                }
+                nozzleType = parsedType;
+            }
 
+            NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
+                .FirstOrDefaultAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturerId);
+
+            if (existing == null)
+            {
                 _context.NozzleModelDefinitions.Add(new NozzleModelDefinition
                 {
                     Id = Guid.NewGuid(),
@@ -786,6 +846,14 @@ public class DataSeedService : IDataSeedService
                     Description = dto.Description,
                     Url = dto.Url
                 });
+            }
+            else
+            {
+                existing.Diameter = dto.Diameter;
+                existing.MaxTemp = dto.MaxTemp;
+                existing.NozzleType = nozzleType;
+                existing.Description = dto.Description;
+                existing.Url = dto.Url;
             }
         }
 
@@ -896,10 +964,10 @@ public class DataSeedService : IDataSeedService
 
             foreach (MaintenanceTaskSeedDto dto in tasksData)
             {
-                bool exists = await _context.MaintenanceTasks
-                    .AnyAsync(t => t.TaskName == dto.TaskName);
+                MaintenanceTask? existing = await _context.MaintenanceTasks
+                    .FirstOrDefaultAsync(t => t.TaskName == dto.TaskName);
 
-                if (!exists)
+                if (existing == null)
                 {
                     _context.MaintenanceTasks.Add(new MaintenanceTask
                     {
@@ -929,6 +997,29 @@ public class DataSeedService : IDataSeedService
                         UpdatedAt = DateTime.UtcNow
                     });
                 }
+                else
+                {
+                    existing.Description = dto.Description;
+                    existing.Category = dto.Category;
+                    existing.IntervalHours = dto.IntervalHours;
+                    existing.IntervalDays = dto.IntervalDays;
+                    existing.EstimatedDurationMinutes = dto.EstimatedDurationMinutes;
+                    existing.Priority = dto.Priority;
+                    existing.IsActive = dto.IsActive;
+                    existing.RequiresEnclosure = dto.RequiresEnclosure;
+                    existing.RequiresCarbonFilter = dto.RequiresCarbonFilter;
+                    existing.RequiresHepaFilter = dto.RequiresHepaFilter;
+                    existing.RequiresBowdenTube = dto.RequiresBowdenTube;
+                    existing.RequiresPtfeLiner = dto.RequiresPtfeLiner;
+                    existing.RequiresLinearRails = dto.RequiresLinearRails;
+                    existing.RequiresLeadScrews = dto.RequiresLeadScrews;
+                    existing.RequiresToolchanger = dto.RequiresToolchanger;
+                    existing.RequiresFilamentCutter = dto.RequiresFilamentCutter;
+                    existing.RequiresHeatedChamber = dto.RequiresHeatedChamber;
+                    existing.RequiresHeatedBed = dto.RequiresHeatedBed;
+                    existing.RequiresMultiMaterial = dto.RequiresMultiMaterial;
+                    existing.UpdatedAt = DateTime.UtcNow;
+                }
             }
 
             await _context.SaveChangesAsync();
@@ -957,10 +1048,10 @@ public class DataSeedService : IDataSeedService
 
             foreach (MaintenanceComponentSeedDto dto in componentsData)
             {
-                bool exists = await _context.MaintenanceComponents
-                    .AnyAsync(c => c.Name == dto.Name && c.Category == dto.Category);
+                MaintenanceComponent? existing = await _context.MaintenanceComponents
+                    .FirstOrDefaultAsync(c => c.Name == dto.Name && c.Category == dto.Category);
 
-                if (!exists)
+                if (existing == null)
                 {
                     _context.MaintenanceComponents.Add(new MaintenanceComponent
                     {
@@ -977,6 +1068,16 @@ public class DataSeedService : IDataSeedService
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     });
+                }
+                else
+                {
+                    existing.Description = dto.Description;
+                    existing.Sku = dto.Sku;
+                    existing.UnitCost = dto.UnitCost;
+                    existing.Supplier = dto.Supplier;
+                    existing.Url = dto.Url;
+                    existing.MinimumStock = dto.RecommendedMinimumStock;
+                    existing.UpdatedAt = DateTime.UtcNow;
                 }
             }
 
@@ -1010,46 +1111,51 @@ public class DataSeedService : IDataSeedService
 
             foreach (MaintenancePlanSeedDto dto in plansData)
             {
-                bool exists = await _context.MaintenancePlans
-                    .AnyAsync(p => p.Name == dto.Name);
+                MaintenancePlan? existing = await _context.MaintenancePlans
+                    .Include(p => p.PlanTasks)
+                    .FirstOrDefaultAsync(p => p.Name == dto.Name);
 
-                if (exists)
+                if (existing == null)
                 {
-                    continue;
-                }
-
-                var plan = new MaintenancePlan
-                {
-                    Id = Guid.NewGuid(),
-                    Name = dto.Name,
-                    Description = dto.Description,
-                    IsActive = dto.IsActive,
-                    IsDefault = true,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                };
-
-                // Resolve task names to PlanTask join entities
-                int sortOrder = 0;
-                foreach (string taskName in dto.Tasks)
-                {
-                    if (tasksByName.TryGetValue(taskName, out MaintenanceTask? task))
+                    var plan = new MaintenancePlan
                     {
-                        plan.PlanTasks.Add(new PlanTask
+                        Id = Guid.NewGuid(),
+                        Name = dto.Name,
+                        Description = dto.Description,
+                        IsActive = dto.IsActive,
+                        IsDefault = true,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                    };
+
+                    // Resolve task names to PlanTask join entities
+                    int sortOrder = 0;
+                    foreach (string taskName in dto.Tasks)
+                    {
+                        if (tasksByName.TryGetValue(taskName, out MaintenanceTask? task))
                         {
-                            Id = Guid.NewGuid(),
-                            MaintenancePlanId = plan.Id,
-                            MaintenanceTaskId = task.Id,
-                            SortOrder = sortOrder++,
-                        });
+                            plan.PlanTasks.Add(new PlanTask
+                            {
+                                Id = Guid.NewGuid(),
+                                MaintenancePlanId = plan.Id,
+                                MaintenanceTaskId = task.Id,
+                                SortOrder = sortOrder++,
+                            });
+                        }
+                        else
+                        {
+                            _logger.LogWarning("[SeedData] Plan '{PlanName}' references unknown task '{TaskName}', skipping", dto.Name, taskName);
+                        }
                     }
-                    else
-                    {
-                        _logger.LogWarning("[SeedData] Plan '{PlanName}' references unknown task '{TaskName}', skipping", dto.Name, taskName);
-                    }
-                }
 
-                _context.MaintenancePlans.Add(plan);
+                    _context.MaintenancePlans.Add(plan);
+                }
+                else
+                {
+                    existing.Description = dto.Description;
+                    existing.IsActive = dto.IsActive;
+                    existing.UpdatedAt = DateTime.UtcNow;
+                }
             }
 
             await _context.SaveChangesAsync();

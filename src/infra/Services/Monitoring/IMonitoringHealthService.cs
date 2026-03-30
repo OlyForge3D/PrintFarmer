@@ -65,6 +65,9 @@ public record MonitoringMetricsSummaryDto
 
     public double SlicerSuccessRatePercent { get; init; }
 
+    /// <summary>Number of printers opted into failure detection.</summary>
+    public int FailureDetectionConfiguredPrinters { get; init; }
+
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
 }
 

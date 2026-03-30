@@ -1,0 +1,6 @@
+mdiCloudDownload: string
+mdiCloudSync: string
+mdiCloudCheckVariant: string
+mdiUpdate: string
+mdiCloudArrowDown: string
+mdiCloudDownloadOutline: string

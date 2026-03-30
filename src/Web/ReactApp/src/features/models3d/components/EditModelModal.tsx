@@ -101,6 +101,10 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
           
           // Speed capabilities
           maxPrintSpeed: model.maxPrintSpeed,
+
+          // Cost/energy defaults
+          defaultWattage: model.defaultWattage,
+          defaultHourlyRate: model.defaultHourlyRate,
         };
         
         setFormData(initialData);
@@ -146,7 +150,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
     const fields: (keyof UpdateModelRequest)[] = [
       'name', 'motionType', 'maxX', 'maxY', 'maxZ', 'defaultBackend',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
-      'supportsAutoLeveling', 'maxBedTemp', 'maxPrintSpeed'
+      'supportsAutoLeveling', 'maxBedTemp', 'maxPrintSpeed', 'defaultWattage', 'defaultHourlyRate'
     ];
     
     for (const field of fields) {
@@ -580,9 +584,9 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
             </div>
           </div>
 
-          {/* Performance */}
+          {/* Performance & Cost */}
           <div className="mb-4">
-            <h5 className="text-md font-medium text-pf-text-primary mb-3">Performance</h5>
+            <h5 className="text-md font-medium text-pf-text-primary mb-3">Performance & Cost</h5>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField label="Max Print Speed (mm/s)">
                 <Input
@@ -598,6 +602,23 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                   onChange={(backend) => handleInputChange('defaultBackend', backend)}
                   valueType="string"
                   className="w-full px-3 py-2 rounded-lg bg-pf-bg-0 border border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent text-pf-text-primary text-sm"
+                />
+              </FormField>
+              <FormField label="Default Wattage (W)" helper="Power consumption used for energy cost calculations">
+                <Input
+                  type="number"
+                  value={formData.defaultWattage || ''}
+                  onChange={e => handleInputChange('defaultWattage', parseFloat(e.target.value) || undefined)}
+                  placeholder="120"
+                />
+              </FormField>
+              <FormField label="Default Hourly Rate ($)" helper="Machine hourly rate used for cost calculations">
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={formData.defaultHourlyRate || ''}
+                  onChange={e => handleInputChange('defaultHourlyRate', parseFloat(e.target.value) || undefined)}
+                  placeholder="0.50"
                 />
               </FormField>
             </div>

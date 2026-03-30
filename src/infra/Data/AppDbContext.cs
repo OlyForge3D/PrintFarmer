@@ -162,6 +162,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Obico ML Servers
     public DbSet<ObicoServer> ObicoServers => Set<ObicoServer>();
 
+    // Failure-detection incident history
+    public DbSet<FailureDetectionIncident> FailureDetectionIncidents => Set<FailureDetectionIncident>();
+
+    // Catalog version tracking for update detection
+    public DbSet<CatalogVersion> CatalogVersions => Set<CatalogVersion>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -217,6 +223,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 string name = entry.Entity.Name ?? string.Empty;
                 entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
+
+                // Always bump UpdatedAt so catalog update detection picks up the change
+                if (entry.State == EntityState.Modified)
+                {
+                    entry.Entity.UpdatedAt = DateTime.UtcNow;
+                }
             }
         }
     }

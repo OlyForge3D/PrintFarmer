@@ -64,6 +64,16 @@ public class PrinterModelSeedDto
 
     public int? MaxPrintSpeed { get; set; }
 
+    /// <summary>
+    /// Default power consumption in watts for this printer model.
+    /// </summary>
+    public decimal? DefaultWattage { get; set; }
+
+    /// <summary>
+    /// Default machine hourly rate for cost calculations.
+    /// </summary>
+    public decimal? DefaultHourlyRate { get; set; }
+
     public List<string>? SupportedMaterials { get; set; }
 
     public List<ToolheadAssignmentDto>? Toolheads { get; set; }

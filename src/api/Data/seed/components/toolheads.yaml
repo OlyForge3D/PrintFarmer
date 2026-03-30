@@ -284,6 +284,15 @@
   defaultExtruder: AD5X Extruder
   defaultNozzle: Flashforge Brass Nozzle
 
+# Snapmaker Toolheads
+- name: U1 Toolhead
+  manufacturer: Snapmaker
+  description: Toolchanger-compatible toolhead for Snapmaker U1 with dedicated extruder MCU
+  url: https://snapmaker.com/en/u1
+  defaultHotend: U1 Hotend
+  defaultExtruder: U1 Extruder
+  defaultNozzle: Snapmaker U1 Stainless Steel Nozzle
+
 # Phrozen Toolheads
 - name: Arco Toolhead
   manufacturer: Phrozen

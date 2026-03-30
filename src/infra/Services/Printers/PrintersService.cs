@@ -531,64 +531,53 @@ public class PrintersService(
     {
         Printer? p = await _unitOfWork.Printers.FindByIdWithIncludesAsync(id, ct) ?? throw new KeyNotFoundException();
 
+        // Resolve camera URLs from Cameras table
+        (string? camStream, string? camSnapshot) = await ResolveCameraUrlsFromTableAsync(id, ct);
+
         // Delegate to the appropriate backend status client
         // Each status client is responsible for retrieving typed status from its backend
         // and building the complete PrinterDto (including spool info via IManagedSpoolProvider)
         try
         {
             IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
-            return await statusClient.GetPrinterDtoAsync(p, ct);
+            PrinterDto dto = await statusClient.GetPrinterDtoAsync(p, ct);
+
+            // Override camera URLs from Cameras table when available
+            if (!string.IsNullOrEmpty(camStream) || !string.IsNullOrEmpty(camSnapshot))
+            {
+                dto = dto with
+                {
+                    CameraStreamUrl = camStream ?? dto.CameraStreamUrl,
+                    CameraSnapshotUrl = camSnapshot ?? dto.CameraSnapshotUrl,
+                };
+            }
+
+            return dto;
         }
         catch (Exception ex)
         {
             // Log and return an offline/fallback DTO so that write operations (assign/unassign)
             // don't surface transient backend errors as 500 to the client.
             _logger.LogWarning(ex, "Failed to retrieve status for printer {PId}", p.Id);
-            return CreateOfflinePrinterDto(p);
+            return CreateOfflinePrinterDto(p, camStream, camSnapshot);
         }
     }
 
     /// <summary>
-    /// Retrieves camera URLs (stream and snapshot) for all printers that support camera functionality.
+    /// Retrieves camera URLs (stream and snapshot) for all printers from the Cameras table.
     /// </summary>
     /// <param name="ct">Cancellation token for async operation</param>
-    /// <returns>Array of DTOs containing printer camera URLs (may be null if camera not supported)</returns>
+    /// <returns>Array of DTOs containing printer camera URLs (may be null if no cameras configured)</returns>
     /// <remarks>
-    /// Queries each printer's backend to retrieve camera stream and snapshot URLs.
-    /// Handles backends that don't support camera operations gracefully (returns null URLs).
-    /// URLs are returned as-is without validation; frontend handles accessibility checks.
+    /// Resolves camera URLs from the Cameras table (first enabled camera per printer).
+    /// This avoids network calls to each backend and uses the persisted camera data.
     /// </remarks>
     public async Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllAsync(ct);
         PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
         {
-            string? streamUrl = null;
-            string? snapshotUrl = null;
-
-            var backend = (PrinterBackend)p.Backend;
-
-            // Check if this backend supports camera operations
-            BackendCapabilities backendCapabilities = _capabilityFactory.GetSupportedCapabilities(backend);
-            if ((backendCapabilities & BackendCapabilities.Camera) == BackendCapabilities.Camera)
-            {
-                try
-                {
-                    // Use capability factory for polymorphic camera URL retrieval
-                    // Note: We return URLs as-is without validation. The presence of a URL
-                    // indicates camera support. Frontend can validate accessibility.
-                    if (_capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient))
-                    {
-                        streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
-                        snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug("Failed to get camera URLs for printer {PId}: {Message}", p.Id, ex.Message);
-                }
-            }
-
+            (string? streamUrl, string? snapshotUrl) = await ResolveCameraUrlsFromTableAsync(p.Id, ct).ConfigureAwait(false);
             return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
         }));
         return dtos;
@@ -655,10 +644,13 @@ public class PrintersService(
     public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
+        Dictionary<Guid, (string? StreamUrl, string? SnapshotUrl)> cameraUrls = await BatchResolveCameraUrlsAsync(ct);
         List<PrinterFastDto> dtos = [];
 
         foreach (Printer p in items)
         {
+            cameraUrls.TryGetValue(p.Id, out (string? StreamUrl, string? SnapshotUrl) cam);
+
             try
             {
                 // Get real-time status for each printer
@@ -682,9 +674,8 @@ public class PrintersService(
                     InMaintenance: p.InMaintenance,
                     IsEnabled: p.IsEnabled,
 
-                    // Camera URLs from database (discovered at registration)
-                    CameraStreamUrl: p.CameraStreamUrl,
-                    CameraSnapshotUrl: p.CameraSnapshotUrl));
+                    CameraStreamUrl: cam.StreamUrl,
+                    CameraSnapshotUrl: cam.SnapshotUrl));
             }
             catch (Exception ex)
             {
@@ -710,9 +701,8 @@ public class PrintersService(
                     InMaintenance: p.InMaintenance,
                     IsEnabled: p.IsEnabled,
 
-                    // Camera URLs from database (discovered at registration)
-                    CameraStreamUrl: p.CameraStreamUrl,
-                    CameraSnapshotUrl: p.CameraSnapshotUrl));
+                    CameraStreamUrl: cam.StreamUrl,
+                    CameraSnapshotUrl: cam.SnapshotUrl));
             }
         }
 
@@ -736,11 +726,14 @@ public class PrintersService(
     public async Task<CompletePrinterDto[]> GetAllCompleteDtosAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
+        Dictionary<Guid, (string? StreamUrl, string? SnapshotUrl)> cameraUrls = await BatchResolveCameraUrlsAsync(ct);
         List<CompletePrinterDto> dtos = [];
         IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
 
         foreach (Printer p in items)
         {
+            cameraUrls.TryGetValue(p.Id, out (string? StreamUrl, string? SnapshotUrl) cam);
+
             try
             {
                 // Try to get cached status first (from SignalR updates)
@@ -758,10 +751,9 @@ public class PrintersService(
                         CameraSnapshotUrl: null,
                         SpoolInfo: null);
 
-                // Use database camera URLs (discovered at registration) - they use frontend port
-                // Fall back to status camera URLs only if database URLs are not set
-                string? cameraStreamUrl = !string.IsNullOrEmpty(p.CameraStreamUrl)
-                    ? p.CameraStreamUrl
+                // Use camera URLs from Cameras table, fall back to status camera URLs
+                string? cameraStreamUrl = !string.IsNullOrEmpty(cam.StreamUrl)
+                    ? cam.StreamUrl
                     : status.CameraStreamUrl;
 
                 // Static configuration from database
@@ -804,7 +796,9 @@ public class PrintersService(
                     SpoolInfo: status.SpoolInfo ?? await BuildDbSpoolInfoAsync(p, ct),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
-                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
+                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
+                    ObicoEnabled: p.ObicoEnabled,
+                    HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue)));
             }
             catch (Exception ex)
             {
@@ -836,7 +830,7 @@ public class PrintersService(
                     JobName: null,
                     FileName: null,
                     ThumbnailUrl: null,
-                    CameraStreamUrl: p.CameraStreamUrl, // From database
+                    CameraStreamUrl: cam.StreamUrl, // From Cameras table
                     X: null,
                     Y: null,
                     Z: null,
@@ -848,7 +842,9 @@ public class PrintersService(
                     SpoolInfo: await BuildDbSpoolInfoAsync(p, ct),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
-                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
+                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
+                    ObicoEnabled: p.ObicoEnabled,
+                    HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue)));
             }
         }
 
@@ -914,6 +910,7 @@ public class PrintersService(
         using StreamWriter writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
 
         List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
+        Dictionary<Guid, (string? StreamUrl, string? SnapshotUrl)> cameraBatch = await BatchResolveCameraUrlsAsync(ct);
         IQueryable<Printer> query = printers.AsQueryable();
 
         // Export fields matching discovery DTO format for consistency
@@ -989,8 +986,9 @@ public class PrintersService(
                 }
             }
 
-            string cameraStreamUrl = p.CameraStreamUrl ?? string.Empty;
-            string cameraSnapshotUrl = p.CameraSnapshotUrl ?? string.Empty;
+            cameraBatch.TryGetValue(p.Id, out (string? StreamUrl, string? SnapshotUrl) cam);
+            string cameraStreamUrl = cam.StreamUrl ?? string.Empty;
+            string cameraSnapshotUrl = cam.SnapshotUrl ?? string.Empty;
             string dateAcquired = p.DateAcquired?.ToString("O") ?? string.Empty;
             string locationName = p.Location?.Name ?? string.Empty;
             string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(ipAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{EscapeCsvValue(username)},{EscapeCsvValue(password)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
@@ -1229,7 +1227,7 @@ public class PrintersService(
         return dict;
     }
 
-    private static PrinterDto CreateOfflinePrinterDto(Printer p)
+    private static PrinterDto CreateOfflinePrinterDto(Printer p, string? cameraStreamUrl = null, string? cameraSnapshotUrl = null)
     {
         return new PrinterDto(
             Id: p.Id,
@@ -1243,8 +1241,8 @@ public class PrintersService(
             JobName: null,
             FileName: null,
             ThumbnailUrl: null,
-            CameraStreamUrl: null,
-            CameraSnapshotUrl: null,
+            CameraStreamUrl: cameraStreamUrl,
+            CameraSnapshotUrl: cameraSnapshotUrl,
             X: null,
             Y: null,
             Z: null,
@@ -1263,7 +1261,9 @@ public class PrintersService(
             SpoolInfo: null,
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
-            Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description));
+            Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
+            ObicoEnabled: p.ObicoEnabled,
+            HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue));
     }
 
     /// <summary>
@@ -1464,9 +1464,6 @@ public class PrintersService(
             BackendPort = dto.BackendPort ?? throw new InvalidOperationException($"BackendPort is required - discovery probes must always set it for backend {dto.Backend}"),
             FrontendPort = dto.FrontendPort,
 
-            // Use provided camera URLs from discovery, or leave null
-            CameraStreamUrl = dto.CameraStreamUrl,
-            CameraSnapshotUrl = dto.CameraSnapshotUrl,
             IsEnabled = dto.IsEnabled,
 
             // Copy hardware specifications from PrinterModel template
@@ -1478,7 +1475,9 @@ public class PrintersService(
             MultiMaterial = modelTemplate?.MultiMaterial ?? false,
             SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
-            MaxBedTemp = modelTemplate?.MaxBedTemp
+            MaxBedTemp = modelTemplate?.MaxBedTemp,
+            Wattage = dto.Wattage,
+            MachineHourlyRate = dto.MachineHourlyRate
         };
 
         // Get default toolhead values from model's toolhead templates (nozzle diameter, max hotend temp, etc.)
@@ -1561,6 +1560,31 @@ public class PrintersService(
         }
 
         await AddAsync(p, ct);
+
+        // Create Camera entity if camera URLs were provided during discovery
+        if (!string.IsNullOrEmpty(dto.CameraStreamUrl) || !string.IsNullOrEmpty(dto.CameraSnapshotUrl))
+        {
+            CameraSource source = MapBackendToCameraSource(dto.Backend);
+            var camera = new Domain.Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = p.Id,
+                Name = $"{p.Name} Camera",
+                StreamUrl = dto.CameraStreamUrl,
+                SnapshotUrl = dto.CameraSnapshotUrl,
+                IsEnabled = true,
+                SortOrder = 0,
+                Source = source,
+                CameraType = CameraType.General,
+                HealthStatus = CameraHealthStatus.Healthy,
+                LastHealthCheck = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            _unitOfWork.Cameras.Add(camera);
+            await SaveChangesAsync(ct);
+            _logger.LogInformation("[CreatePrinterFromDto] Created Camera {CameraId} for new printer {PrinterName}", camera.Id, p.Name);
+        }
 
         // Return offline DTO for newly imported printer (hasn't fetched status yet)
         return CreateOfflinePrinterDto(p);
@@ -1679,6 +1703,7 @@ public class PrintersService(
         if (updated)
         {
             printer.LastCapabilityUpdate = DateTime.UtcNow;
+            printer.LastModelSyncAt = DateTime.UtcNow;
             _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", modelTemplate.Name, printer.Name);
         }
         else
@@ -1697,11 +1722,8 @@ public class PrintersService(
     /// <returns>Snapshot image as byte array (JPEG format), or null if camera unavailable or snapshot fails</returns>
     /// <exception cref="KeyNotFoundException">Thrown when printer not found</exception>
     /// <remarks>
-    /// Attempts to fetch snapshot from printer's camera URL (CameraSnapshotUrl from database).
-    /// Returns null if:
-    /// - Camera URL not configured
-    /// - Camera unreachable or returns error
-    /// - Backend does not support camera capability
+    /// Resolves the snapshot URL from the Cameras table (first enabled camera with a SnapshotUrl).
+    /// Falls back to querying the backend if no camera record exists.
     /// Image format typically JPEG; client responsible for rendering.
     /// </remarks>
     public async Task<byte[]?> GetCameraSnapshotAsync(Guid id, CancellationToken ct)
@@ -1714,21 +1736,26 @@ public class PrintersService(
 
         try
         {
-            // Use capability factory for polymorphic camera snapshot retrieval
-            var backendEnum = (PrinterBackend)p.Backend;
-            if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out ISupportsCamera? cameraClient) && cameraClient != null)
-            {
-                // Try to get camera snapshot URL from the client
-                string snapUrl = backendEnum == PrinterBackend.Moonraker
-                    ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
-                    : p.BackendUrl;
+            // Resolve snapshot URL from Cameras table (source of truth)
+            (_, string? snapshotUrl) = await ResolveCameraUrlsFromTableAsync(id, ct).ConfigureAwait(false);
 
-                // Get camera snapshot URL using capability interface
-                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(snapshotUrl))
+            // Fallback to backend query if no camera record
+            if (string.IsNullOrWhiteSpace(snapshotUrl))
+            {
+                var backendEnum = (PrinterBackend)p.Backend;
+                if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out ISupportsCamera? cameraClient) && cameraClient != null)
                 {
-                    return await FetchBytesFromUrlAsync(snapshotUrl, p.ApiKey, ct).ConfigureAwait(false);
+                    string snapUrl = backendEnum == PrinterBackend.Moonraker
+                        ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
+                        : p.BackendUrl;
+
+                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
                 }
+            }
+
+            if (!string.IsNullOrWhiteSpace(snapshotUrl))
+            {
+                return await FetchBytesFromUrlAsync(snapshotUrl, p.ApiKey, ct).ConfigureAwait(false);
             }
 
             return null;
@@ -1770,24 +1797,8 @@ public class PrintersService(
             return (null, null);
         }
 
-        try
-        {
-            // Use capability factory for polymorphic camera URL retrieval
-            var backend = (PrinterBackend)p.Backend;
-            if (_capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient))
-            {
-                string? streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
-                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
-                return (streamUrl, snapshotUrl);
-            }
-
-            return (null, null);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("Failed to get camera URLs for printer {Id}: {Message}", id, ex.Message);
-            return (null, null);
-        }
+        // Resolve from Cameras table (source of truth)
+        return await ResolveCameraUrlsFromTableAsync(id, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -3584,14 +3595,127 @@ public class PrintersService(
             _logger.LogWarning(ex, "RefreshCameraUrlsAsync: Failed to refresh camera URLs for printer {Id}: {Message}", id, ex.Message);
         }
 
-        // Update printer in database - only set URLs if they are not null (i.e., cameras actually exist)
-        _logger.LogInformation("RefreshCameraUrlsAsync: Updating database for printer {PrinterName}: CameraStreamUrl={StreamUrl}, CameraSnapshotUrl={SnapshotUrl}", printer.Name, streamUrl, snapshotUrl);
-        printer.CameraStreamUrl = streamUrl;
-        printer.CameraSnapshotUrl = snapshotUrl;
+        // Upsert Camera entity — Cameras table is the sole source of truth
+        _logger.LogInformation("RefreshCameraUrlsAsync: Updating cameras for printer {PrinterName}: StreamUrl={StreamUrl}, SnapshotUrl={SnapshotUrl}", printer.Name, streamUrl, snapshotUrl);
+        if (!string.IsNullOrEmpty(streamUrl) || !string.IsNullOrEmpty(snapshotUrl))
+        {
+            await UpsertCameraForPrinterAsync(printer, backend, streamUrl, snapshotUrl, ct).ConfigureAwait(false);
+        }
+
         await SaveChangesAsync(ct).ConfigureAwait(false);
         _logger.LogInformation("RefreshCameraUrlsAsync: SaveChangesAsync completed - URLs saved: stream={StringIsNullOrEmpty}, snapshot={StringIsNullOrEmpty1}", !string.IsNullOrEmpty(streamUrl), !string.IsNullOrEmpty(snapshotUrl));
 
         // Return updated DTO
         return await GetPrinterDtoAsync(id, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Upserts a Camera entity for a printer during camera URL refresh.
+    /// Finds an existing camera by (printerId, source) and updates it, or creates a new one.
+    /// </summary>
+    /// <param name="printer">The printer entity.</param>
+    /// <param name="backend">The printer backend type.</param>
+    /// <param name="streamUrl">Detected camera stream URL.</param>
+    /// <param name="snapshotUrl">Detected camera snapshot URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task UpsertCameraForPrinterAsync(Printer printer, PrinterBackend backend, string? streamUrl, string? snapshotUrl, CancellationToken ct)
+    {
+        CameraSource source = MapBackendToCameraSource(backend);
+
+        Domain.Camera? existing = await _unitOfWork.Cameras.FindByPrinterIdAndSourceAsync(printer.Id, source, ct).ConfigureAwait(false);
+
+        if (existing is not null)
+        {
+            existing.StreamUrl = streamUrl;
+            existing.SnapshotUrl = snapshotUrl;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.HealthStatus = CameraHealthStatus.Healthy;
+            existing.LastHealthCheck = DateTime.UtcNow;
+            existing.ConsecutiveFailures = 0;
+            _logger.LogInformation("UpsertCameraForPrinterAsync: Updated existing Camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
+        }
+        else
+        {
+            var camera = new Domain.Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"{printer.Name} Camera",
+                StreamUrl = streamUrl,
+                SnapshotUrl = snapshotUrl,
+                IsEnabled = true,
+                SortOrder = 0,
+                Source = source,
+                CameraType = CameraType.General,
+                HealthStatus = CameraHealthStatus.Healthy,
+                LastHealthCheck = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            _unitOfWork.Cameras.Add(camera);
+            _logger.LogInformation("UpsertCameraForPrinterAsync: Created new Camera {CameraId} for printer {PrinterName}", camera.Id, printer.Name);
+        }
+    }
+
+    /// <summary>
+    /// Maps a PrinterBackend enum to the corresponding CameraSource enum.
+    /// </summary>
+    /// <param name="backend">The printer backend type.</param>
+    private static CameraSource MapBackendToCameraSource(PrinterBackend backend) => backend switch
+    {
+        PrinterBackend.Moonraker => CameraSource.Moonraker,
+        PrinterBackend.PrusaLink => CameraSource.PrusaLink,
+        PrinterBackend.OctoPrint => CameraSource.OctoPrint,
+        PrinterBackend.SDCP => CameraSource.SDCP,
+        PrinterBackend.FlashForge => CameraSource.FlashForge,
+        _ => CameraSource.Standalone,
+    };
+
+    /// <summary>
+    /// Resolves camera URLs from the Cameras table for a given printer.
+    /// Returns the first enabled camera ordered by SortOrder, preferring General type.
+    /// This is the compatibility layer that allows printer DTOs to expose camera fields
+    /// without reading from the deprecated Printer.CameraStreamUrl/CameraSnapshotUrl columns.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<(string? StreamUrl, string? SnapshotUrl)> ResolveCameraUrlsFromTableAsync(Guid printerId, CancellationToken ct)
+    {
+        List<Domain.Camera> cameras = await _unitOfWork.Cameras.GetByPrinterIdAsync(printerId, ct).ConfigureAwait(false);
+
+        Domain.Camera? camera = cameras
+            .Where(c => c.IsEnabled)
+            .OrderBy(c => c.SortOrder)
+            .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
+            .FirstOrDefault();
+
+        return camera is not null
+            ? (camera.StreamUrl, camera.SnapshotUrl)
+            : (null, null);
+    }
+
+    /// <summary>
+    /// Batch-loads camera URLs from the Cameras table for all printers.
+    /// Returns a dictionary keyed by printer ID with the first enabled camera's URLs.
+    /// Used by bulk DTO methods to avoid N+1 queries.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<Dictionary<Guid, (string? StreamUrl, string? SnapshotUrl)>> BatchResolveCameraUrlsAsync(CancellationToken ct)
+    {
+        List<Domain.Camera> allCameras = await _unitOfWork.Cameras.GetEnabledAsync(ct).ConfigureAwait(false);
+
+        return allCameras
+            .Where(c => c.PrinterId.HasValue)
+            .GroupBy(c => c.PrinterId!.Value)
+            .ToDictionary(
+                g => g.Key,
+                g =>
+                {
+                    Domain.Camera? best = g
+                        .OrderBy(c => c.SortOrder)
+                        .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
+                        .FirstOrDefault();
+                    return best is not null ? (best.StreamUrl, best.SnapshotUrl) : ((string?)null, (string?)null);
+                });
     }
 }

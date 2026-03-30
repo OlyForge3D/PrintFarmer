@@ -36,6 +36,8 @@ public sealed class AutoDispatchBackgroundService(
     {
         logger.LogInformation("[AutoDispatch] Background service started");
 
+        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             DispatchTriggerEvent triggerEvent;
@@ -55,6 +57,42 @@ public sealed class AutoDispatchBackgroundService(
         }
 
         logger.LogInformation("[AutoDispatch] Background service stopping");
+    }
+
+    private async Task ReconcileStartupEligiblePrintersAsync(CancellationToken ct)
+    {
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        DispatchSettings settings = await db.DispatchSettings.AsNoTracking().FirstAsync(ct);
+        if (!settings.AutoDispatchEnabled || settings.AutoDispatchMode == AutoDispatchMode.Manual)
+        {
+            return;
+        }
+
+        List<Guid> printerIds = await db.Printers
+            .AsNoTracking()
+            .Where(p =>
+                p.IsEnabled
+                && p.IsAvailable
+                && p.AutoDispatchEnabled
+                && (p.AutoDispatchState == AutoDispatchState.Ready || p.BedPreConfirmed)
+                && !db.PrintJobs.Any(j =>
+                    j.AssignedPrinterId == p.Id
+                    && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                && db.PrintJobs.Any(j =>
+                    j.Status == PrintJobStatus.Queued
+                    && (j.AssignedPrinterId == null || j.AssignedPrinterId == p.Id)))
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+
+        foreach (Guid printerId in printerIds)
+        {
+            logger.LogInformation(
+                "[AutoDispatch] Re-queueing eligible printer {PrinterId} during startup reconciliation",
+                printerId);
+            trigger.NotifyJobQueued(printerId);
+        }
     }
 
     private async Task HandlePrinterIdleAsync(Guid printerId, bool skipIdleThreshold, CancellationToken serviceCt)
@@ -169,14 +207,14 @@ public sealed class AutoDispatchBackgroundService(
             return;
         }
 
-        // Respect the auto-print bed-clear gate: if auto-print is enabled,
+        // Respect the per-printer auto-dispatch ready gate: if automatic dispatch is enabled,
         // only dispatch when the operator has confirmed the bed is clear (Ready state)
         // OR when they've pre-confirmed the bed is clear (BedPreConfirmed = true).
-        if (printer.AutoPrintEnabled && printer.AutoPrintState != AutoPrintState.Ready && !printer.BedPreConfirmed)
+        if (printer.AutoDispatchEnabled && printer.AutoDispatchState != AutoDispatchState.Ready && !printer.BedPreConfirmed)
         {
             logger.LogDebug(
-                "[AutoDispatch] Printer {PrinterId} has auto-print enabled but state is {State} and bed not pre-confirmed — waiting for operator confirmation",
-                printerId, printer.AutoPrintState);
+                "[AutoDispatch] Printer {PrinterId} has automatic dispatch enabled but state is {State} and bed not pre-confirmed — waiting for operator confirmation",
+                printerId, printer.AutoDispatchState);
             return;
         }
 
@@ -284,12 +322,12 @@ public sealed class AutoDispatchBackgroundService(
                 jobToUpdate.DispatchMode = (int)DispatchMode.Auto;
             }
 
-            if (printer.AutoPrintEnabled)
+            if (printer.AutoDispatchEnabled)
             {
                 Printer? printerToUpdate = await db.Printers.FindAsync([printerId], ct);
                 if (printerToUpdate is not null)
                 {
-                    printerToUpdate.AutoPrintState = AutoPrintState.None;
+                    printerToUpdate.AutoDispatchState = AutoDispatchState.None;
                     printerToUpdate.BedPreConfirmed = false; // Reset pre-clear flag after dispatch
                 }
             }

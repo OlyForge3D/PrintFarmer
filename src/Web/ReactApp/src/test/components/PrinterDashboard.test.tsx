@@ -22,6 +22,16 @@ vi.mock('@/common/hooks/useApi', async () => ({
   useModels: vi.fn(() => ({ data: [] })),
   useFilamentTypes: vi.fn(() => ({ data: [] })),
   useUpdatePrinter: () => ({ mutateAsync: vi.fn() }),
+  useFailureDetectionHistory: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+  })),
+  usePrintSessionTimeline: vi.fn(() => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  })),
   useJobQueue: vi.fn(() => ({ 
     data: [], 
     isLoading: false, 

@@ -10,6 +10,7 @@ import {
   CreatePrinterDto,
   CreateToolheadModelDto,
   ExtruderModelDefinition,
+  FailureDetectionEvent,
   FilamentPresets,
   FilamentTypeDto,
   GcodeFile,
@@ -64,7 +65,9 @@ import {
   NotificationDto,
   ObicoServer,
   CreateObicoServerRequest,
+  JobStateHistoryDto,
   UpdateObicoServerRequest,
+  TimezoneInfo,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -118,10 +121,11 @@ export const queryKeys = {
   notifications: ['notifications'] as const,
   unreadCount: ['notifications', 'unread-count'] as const,
   notificationPreferences: ['notifications', 'preferences'] as const,
-  costSummary: ['costs', 'summary'] as const,
+  costSummary: (days?: number, startDate?: string, endDate?: string) => ['costs', 'summary', days, startDate, endDate] as const,
   costs: ['costs'] as const,
-  costsByPrinter: ['costs', 'by-printer'] as const,
-  costsByMaterial: ['costs', 'by-material'] as const,
+  costsByPrinter: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-printer', days, startDate, endDate] as const,
+  costsByMaterial: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-material', days, startDate, endDate] as const,
+  costsByJob: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-job', days, startDate, endDate] as const,
   costOverTime: ['costs', 'over-time'] as const,
   scheduledJobs: ['scheduled-jobs'] as const,
   scheduledJob: (jobId: string) => ['scheduled-jobs', jobId] as const,
@@ -129,6 +133,12 @@ export const queryKeys = {
   timezones: ['timezones'] as const,
   obicoServers: ['obico-servers'] as const,
   obicoServer: (id: string) => ['obico-servers', id] as const,
+  failureDetectionHistory: (printerId?: string, take?: number) => (
+    ['failure-detection', 'history', printerId ?? null, take ?? null] as const
+  ),
+  printSessionTimeline: (jobId?: string) => (
+    ['job-queue-analytics', 'jobs', jobId ?? null, 'state-history'] as const
+  ),
 } as const;
 
 // ============ Printer Hooks ============
@@ -263,6 +273,40 @@ export function usePrinterDetails(id: string, options?: QueryOptions<PrinterDeta
       // Don't retry on 404 (printer not found, likely deleted)
       if (error?.statusCode === 404) return false;
       // Retry other errors up to 2 times
+      return failureCount < 2;
+    },
+    ...options,
+  });
+}
+
+export function useFailureDetectionHistory(
+  printerId?: string,
+  take = 5,
+  options?: QueryOptions<FailureDetectionEvent[]>
+) {
+  return useQuery({
+    queryKey: queryKeys.failureDetectionHistory(printerId, take),
+    queryFn: () => apiClient.getFailureDetectionHistory({ printerId, take }),
+    enabled: !!printerId,
+    staleTime: 30_000,
+    ...options,
+  });
+}
+
+export function usePrintSessionTimeline(
+  jobId?: string,
+  options?: QueryOptions<JobStateHistoryDto>
+) {
+  return useQuery({
+    queryKey: queryKeys.printSessionTimeline(jobId),
+    queryFn: () => apiClient.getAnalyticsJobStateHistory(jobId!),
+    enabled: !!jobId,
+    staleTime: 30_000,
+    retry: (failureCount, error) => {
+      if (error?.statusCode === 404) {
+        return false;
+      }
+
       return failureCount < 2;
     },
     ...options,
@@ -1612,28 +1656,37 @@ export function useDeleteNotification() {
 
 // ============ Cost Tracking Hooks ============
 
-export function useCostSummary(options?: QueryOptions<import("@/types/api").CostSummary>) {
+export function useCostSummary(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostSummary>) {
   return useQuery({
-    queryKey: queryKeys.costSummary,
-    queryFn: () => apiClient.getCostSummary(),
+    queryKey: queryKeys.costSummary(days, startDate, endDate),
+    queryFn: () => apiClient.getCostSummary(days, startDate, endDate),
     staleTime: 300_000, // 5 minutes - cost data is relatively stable
     ...options,
   });
 }
 
-export function useCostsByPrinter(options?: QueryOptions<import("@/types/api").CostByPrinter[]>) {
+export function useCostsByPrinter(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostByPrinter[]>) {
   return useQuery({
-    queryKey: queryKeys.costsByPrinter,
-    queryFn: () => apiClient.getCostsByPrinter(),
+    queryKey: queryKeys.costsByPrinter(days, startDate, endDate),
+    queryFn: () => apiClient.getCostsByPrinter(days, startDate, endDate),
     staleTime: 300_000, // 5 minutes
     ...options,
   });
 }
 
-export function useCostsByMaterial(options?: QueryOptions<import("@/types/api").CostByMaterial[]>) {
+export function useCostsByMaterial(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostByMaterial[]>) {
   return useQuery({
-    queryKey: queryKeys.costsByMaterial,
-    queryFn: () => apiClient.getCostsByMaterial(),
+    queryKey: queryKeys.costsByMaterial(days, startDate, endDate),
+    queryFn: () => apiClient.getCostsByMaterial(days, startDate, endDate),
+    staleTime: 300_000, // 5 minutes
+    ...options,
+  });
+}
+
+export function useCostsByJob(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostByJob[]>) {
+  return useQuery({
+    queryKey: queryKeys.costsByJob(days, startDate, endDate),
+    queryFn: () => apiClient.getCostsByJob(days, startDate, endDate),
     staleTime: 300_000, // 5 minutes
     ...options,
   });
@@ -1669,7 +1722,7 @@ export function useScheduledJob(jobId: string, options?: QueryOptions<import("@/
   });
 }
 
-export function useTimezones(options?: QueryOptions<string[]>) {
+export function useTimezones(options?: QueryOptions<TimezoneInfo[]>) {
   return useQuery({
     queryKey: queryKeys.timezones,
     queryFn: () => apiClient.getTimezones(),

@@ -4,6 +4,7 @@ import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { useConfirmBedClear, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
 import { queryKeys } from '@/common/hooks/useApi';
+import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { toast } from 'sonner';
 import type { AutoDispatchStatus, Printer } from '@/types/api';
 
@@ -19,7 +20,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
   const skipNextJob = useSkipNextJob();
   const cancelAutoDispatch = useCancelAutoDispatch();
 
-  if (autoDispatchStatus.state !== 'PendingReady') return null;
+  if (!requiresBedClearConfirmation(autoDispatchStatus)) return null;
 
   const isAnyPending = confirmBedClear.isPending || skipNextJob.isPending || cancelAutoDispatch.isPending;
 
@@ -113,7 +114,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
           iconCenter={<CheckCircleIcon className="h-4 w-4" />}
           aria-label={`Confirm bed clear for ${printerName}`}
           title="Confirm bed is clear"
-          className="flex-1 h-9 !p-0"
+          className="flex-1 h-9 p-0!"
         />
         <Button
           variant="primary"
@@ -124,7 +125,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
           iconCenter={<SkipForwardIcon className="h-4 w-4" />}
           aria-label="Skip next queued job"
           title="Skip this job"
-          className="flex-1 h-9 !p-0"
+          className="flex-1 h-9 p-0!"
         />
         <Button
           variant="secondary"
@@ -135,7 +136,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
           iconCenter={<CloseIcon className="h-4 w-4" />}
           aria-label="Cancel auto-dispatch"
           title="Cancel auto-dispatch"
-          className="flex-1 h-9 !p-0"
+          className="flex-1 h-9 p-0!"
         />
       </div>
     </div>

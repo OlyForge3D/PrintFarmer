@@ -1,5 +1,3 @@
-import type React from 'react';
-
 /**
  * Shared utility for printer status indicator colors using pf-* design tokens.
  * 
@@ -33,19 +31,15 @@ export function getStatusIndicatorColor(options: StatusColorOptions): string {
 }
 
 /**
- * Get the header background style for a printer card based on state.
- * Returns an inline style object to allow semi-transparent overlays using
- * the known design-system color values.
- *
- * Color values are derived from the printfarmer-dark.css design tokens.
+ * Get the header background classes for a printer card based on state.
  */
-export function getStatusHeaderStyle(options: StatusColorOptions): React.CSSProperties {
+export function getStatusHeaderClassName(options: StatusColorOptions): string {
   const { isOnline, isPrinting, isPaused, isShutdown } = options;
-  if (!isOnline) return { background: 'rgba(100,116,139,0.15)' };     // slate-500 @ 15% — offline
-  if (isPrinting) return { background: 'rgba(34,197,94,0.30)' };      // green-500 — vibrant green for printing
-  if (isPaused) return { background: 'rgba(245,158,11,0.30)' };       // amber-500 — warm amber for paused
-  if (isShutdown) return { background: 'rgba(239,68,68,0.30)' };      // red-500 — error/shutdown
-  return { background: 'rgba(59,130,246,0.25)' };                     // blue-500 — blue for idle
+  if (!isOnline) return 'bg-slate-500/15';
+  if (isPrinting) return 'bg-green-500/30';
+  if (isPaused) return 'bg-amber-500/30';
+  if (isShutdown) return 'bg-red-500/30';
+  return 'bg-blue-500/25';
 }
 
 /**

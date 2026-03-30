@@ -1,13 +1,19 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { RotateCw } from 'lucide-react';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Badge } from '@/common/components/ui';
-import { CameraIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { Alert, Button, Badge } from '@/common/components/ui';
+import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
 import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
 import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
+import {
+  getCameraMediaTransformClassName,
+  useCameraViewPreferences,
+} from '@/features/cameras/hooks/useCameraViewPreferences';
+import { getCameraAttentionContent } from '@/features/cameras/utils/cameraAttention';
 
 /**
  * CamerasPage - Display all enabled cameras in a grid view
@@ -153,11 +159,22 @@ const cameraTypeLabels: Record<CameraType, string> = {
  * CameraViewCard - Individual camera feed card
  */
 function CameraViewCard({ camera }: CameraViewCardProps) {
-  const [imageError, setImageError] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('stream');
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   const hasSnapshot = !!camera.snapshotUrl;
   const hasStream = !!camera.streamUrl;
+  const {
+    cameraMode,
+    setCameraMode,
+    rotation,
+    rotateClockwise,
+    hasModeToggle,
+  } = useCameraViewPreferences({
+    preferenceKey: `camera:${camera.id}`,
+    defaultMode: hasStream ? 'stream' : 'snapshot',
+    hasStream,
+    hasSnapshot,
+  });
 
   // Determine which URL to show
   const activeUrl = cameraMode === 'stream' && hasStream
@@ -167,67 +184,61 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
     : hasStream
     ? camera.streamUrl
     : camera.snapshotUrl;
+  const imageError = !!activeUrl && failedUrl === activeUrl;
+  const mediaClassName = getCameraMediaTransformClassName(rotation);
+  const cameraAttention = getCameraAttentionContent({
+    healthStatus: camera.healthStatus,
+    healthMessage: camera.healthMessage,
+    hasStream,
+    hasSnapshot,
+    imageError,
+    cameraMode,
+  });
+  const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
 
   return (
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
       {/* Camera feed */}
       <div className="relative w-full aspect-video bg-pf-bg-2">
-        {activeUrl && !imageError ? (
+        {cameraMode === 'stream' && hasStream && activeUrl ? (
+          <iframe
+            src={activeUrl}
+            title={`${camera.name} live camera feed`}
+            className={`border-0 bg-black ${mediaClassName}`}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+          />
+        ) : activeUrl && !imageError ? (
           <img
             src={activeUrl}
             alt={`${camera.name} camera feed`}
-            className="absolute inset-0 w-full h-full object-cover"
+            className={`object-cover ${mediaClassName}`}
             loading="lazy"
-            onError={() => setImageError(true)}
+            onError={() => setFailedUrl(activeUrl ?? '')}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
-            <span className="text-sm">{imageError ? 'Camera unavailable' : 'No feed URL'}</span>
-          </div>
-        )}
-
-        {/* Health status - top left */}
-        <div className="absolute top-2 left-2">
-          <CameraHealthBadge healthStatus={camera.healthStatus} size="sm" />
-        </div>
-
-        {/* Source badge - top right */}
-        <div className="absolute top-2 right-2">
-          <Badge variant="default" size="sm" className="backdrop-blur-sm bg-pf-bg-1/80">
-            {sourceLabels[camera.source]}
-          </Badge>
-        </div>
-
-        {/* Camera mode toggle - bottom right (only if both modes available) */}
-        {hasSnapshot && hasStream && (
-          <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
-            <Button
-              type="button"
-              variant={cameraMode === 'snapshot' ? 'primary' : 'subtle'}
-              size="sm"
-              onClick={() => setCameraMode('snapshot')}
-              className="!p-1 !h-auto"
-              title="Snapshot"
-              aria-label="Snapshot mode"
-              iconCenter={<ImageIcon className="w-4 h-4" />}
-            />
-            <Button
-              type="button"
-              variant={cameraMode === 'stream' ? 'primary' : 'subtle'}
-              size="sm"
-              onClick={() => setCameraMode('stream')}
-              className="!p-1 !h-auto"
-              title="Stream"
-              aria-label="Stream mode"
-              iconCenter={<VideoIcon className="w-4 h-4" />}
-            />
+            <span className="text-center text-sm font-medium text-pf-text-secondary">
+              {cameraAttention?.title
+                ?? (cameraMode === 'snapshot' ? 'Snapshot preview unavailable' : 'Camera unavailable')}
+            </span>
+            {cameraAttention?.issue && (
+              <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+                {cameraAttention.issue}
+              </span>
+            )}
+            {cameraAttention?.action && (
+              <span className="mt-2 max-w-xs text-center text-xs text-pf-text-secondary">
+                Action: {cameraAttention.action}
+              </span>
+            )}
           </div>
         )}
       </div>
 
       {/* Camera info */}
-      <div className="p-3 bg-pf-bg-1">
+      <div className="space-y-3 p-3 bg-pf-bg-1">
         <div className="flex items-center gap-2 mb-1">
           <CameraIcon className="w-4 h-4 text-pf-text-tertiary shrink-0" />
           <div className="min-w-0 flex-1">
@@ -242,13 +253,83 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
             )}
           </div>
         </div>
-        {camera.cameraType !== 'General' && (
-          <div className="mt-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <CameraHealthBadge healthStatus={camera.healthStatus} size="sm" />
+          <Badge variant="default" size="sm">
+            {sourceLabels[camera.source]}
+          </Badge>
+          {camera.cameraType !== 'General' && (
             <Badge variant="default" size="sm">
               {cameraTypeLabels[camera.cameraType]}
             </Badge>
-          </div>
+          )}
+        </div>
+
+        {showInlineAttention && cameraAttention && (
+          <Alert
+            type={cameraAttention.tone}
+            title={cameraAttention.title}
+            className="rounded-lg border px-3 py-2 text-xs leading-5"
+          >
+            <p>{cameraAttention.issue}</p>
+            <p className="mt-1 font-medium">Action: {cameraAttention.action}</p>
+          </Alert>
         )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex items-center gap-2 rounded-full bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
+            <span>{cameraMode === 'stream' ? 'Live stream' : 'Snapshot preview'}</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={rotateClockwise}
+              className="h-8 w-8 rounded-full p-0"
+              title="Rotate camera clockwise"
+              aria-label="Rotate camera clockwise"
+              iconCenter={<RotateCw className="w-4 h-4" />}
+            />
+            {hasModeToggle && (
+              <div className="flex gap-1 rounded-full border border-pf-border bg-pf-bg-2 p-1">
+                <Button
+                  type="button"
+                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCameraMode('snapshot')}
+                  className="h-8 w-8 rounded-full p-0"
+                  title="Snapshot"
+                  aria-label="Snapshot mode"
+                  iconCenter={<ImageIcon className="w-4 h-4" />}
+                />
+                <Button
+                  type="button"
+                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCameraMode('stream')}
+                  className="h-8 w-8 rounded-full p-0"
+                  title="Stream"
+                  aria-label="Stream mode"
+                  iconCenter={<VideoIcon className="w-4 h-4" />}
+                />
+              </div>
+            )}
+            {activeUrl && (
+              <a
+                href={cameraMode === 'stream' && hasStream ? camera.streamUrl : activeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-8 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
+                title={`Open ${camera.name} in a new tab`}
+                aria-label={`Open ${camera.name} in a new tab`}
+              >
+                <ExternalLinkIcon className="w-4 h-4" />
+              </a>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

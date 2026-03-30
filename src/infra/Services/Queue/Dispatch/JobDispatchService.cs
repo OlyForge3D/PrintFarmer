@@ -16,6 +16,7 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 public class JobDispatchService(
     IDispatchScorer scorer,
     IPrintJobManagementService printJobManagement,
+    ISpoolmanService spoolmanService,
     AppDbContext db,
     ILogger<JobDispatchService> logger) : IJobDispatchService
 {
@@ -93,6 +94,28 @@ public class JobDispatchService(
         job.DispatchedAt = DateTime.UtcNow;
         job.DispatchScore = printerScore?.TotalScore;
         job.DispatchMode = (int)DispatchMode.Suggested;
+
+        // If the job doesn't have a SpoolmanFilamentId, inherit from the printer's active spool
+        if (printer.CurrentSpoolId.HasValue)
+        {
+            try
+            {
+                var spool = await spoolmanService.GetSpoolByIdAsync(printer.CurrentSpoolId.Value, ct);
+                job.SpoolmanSpoolId = printer.CurrentSpoolId.Value;
+
+                if (!job.SpoolmanFilamentId.HasValue && spool?.FilamentId != null)
+                {
+                    job.SpoolmanFilamentId = spool.FilamentId;
+                    logger.LogInformation(
+                        "Inherited SpoolmanFilamentId {FilamentId} from printer {PrinterName} spool {SpoolId}",
+                        spool.FilamentId, printer.Name, printer.CurrentSpoolId.Value);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to look up spool {SpoolId} for filament inheritance", printer.CurrentSpoolId.Value);
+            }
+        }
 
         db.DispatchLogs.Add(new DispatchLog
         {

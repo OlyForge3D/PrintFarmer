@@ -186,6 +186,12 @@ public class PrintJob
     public int? SpoolmanFilamentId { get; set; }
 
     /// <summary>
+    /// Spoolman spool ID (physical spool instance) used for this job.
+    /// Set on dispatch from the printer's active spool.
+    /// </summary>
+    public int? SpoolmanSpoolId { get; set; }
+
+    /// <summary>
     /// Denormalized filament display name (e.g., "PolyTerra PLA Charcoal Black").
     /// </summary>
     [MaxLength(255)]

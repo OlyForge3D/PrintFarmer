@@ -12,15 +12,45 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
 {
     private readonly AppDbContext _db = db;
 
-    public async Task<StatisticsSummaryDto> GetSummaryAsync(int? days, CancellationToken ct = default)
+    /// <summary>
+    /// Resolves the effective date range from query parameters.
+    /// Priority: startDate/endDate > days > defaultDays > all-time.
+    /// </summary>
+    private static (DateTime? Start, DateTime? End) ResolveEffectiveDateRange(
+        int? days, DateTime? startDate, DateTime? endDate, int? defaultDays = null)
     {
-        int effectiveDays = days.HasValue ? Math.Clamp(days.Value, 1, 365) : 0;
-        var since = effectiveDays > 0 ? DateTime.UtcNow.AddDays(-effectiveDays) : (DateTime?)null;
+        if (startDate.HasValue || endDate.HasValue)
+        {
+            return (startDate, endDate);
+        }
+
+        if (days.HasValue)
+        {
+            int clamped = Math.Clamp(days.Value, 1, 730);
+            return (DateTime.UtcNow.AddDays(-clamped), null);
+        }
+
+        if (defaultDays.HasValue)
+        {
+            return (DateTime.UtcNow.AddDays(-defaultDays.Value), null);
+        }
+
+        return (null, null);
+    }
+
+    public async Task<StatisticsSummaryDto> GetSummaryAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
+    {
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
 
         var query = _db.Set<PrintJob>().AsQueryable();
-        if (since.HasValue)
+        if (effectiveStart.HasValue)
         {
-            query = query.Where(j => j.QueuedAt >= since.Value);
+            query = query.Where(j => j.QueuedAt >= effectiveStart.Value);
+        }
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
         int totalJobs = await query.CountAsync(ct);
@@ -57,22 +87,30 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         };
     }
 
-    public async Task<List<DailyJobCountDto>> GetJobsOverTimeAsync(int days, CancellationToken ct = default)
+    public async Task<List<DailyJobCountDto>> GetJobsOverTimeAsync(int? days = null, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
-        days = Math.Clamp(days, 1, 365);
-        var since = DateTime.UtcNow.AddDays(-days);
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate, defaultDays: 30);
+        var since = effectiveStart ?? DateTime.UtcNow.AddDays(-30);
+        var until = effectiveEnd ?? DateTime.UtcNow;
 
-        var rows = await _db.Set<PrintJob>()
+        var query = _db.Set<PrintJob>()
             .Where(j => j.QueuedAt >= since)
             .Where(j => j.Status == PrintJobStatus.Completed
                      || j.Status == PrintJobStatus.Failed
-                     || j.Status == PrintJobStatus.Cancelled)
+                     || j.Status == PrintJobStatus.Cancelled);
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
+        }
+
+        var rows = await query
             .GroupBy(j => new { j.QueuedAt.Date, j.Status })
             .Select(g => new { g.Key.Date, g.Key.Status, Count = g.Count() })
             .ToListAsync(ct);
 
         var result = new List<DailyJobCountDto>();
-        for (var d = since.Date; d <= DateTime.UtcNow.Date; d = d.AddDays(1))
+        for (var d = since.Date; d <= until.Date; d = d.AddDays(1))
         {
             result.Add(new DailyJobCountDto
             {
@@ -86,19 +124,27 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         return result;
     }
 
-    public async Task<List<DailyCostDto>> GetCostOverTimeAsync(int days, CancellationToken ct = default)
+    public async Task<List<DailyCostDto>> GetCostOverTimeAsync(int? days = null, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
-        days = Math.Clamp(days, 1, 365);
-        var since = DateTime.UtcNow.AddDays(-days);
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate, defaultDays: 30);
+        var since = effectiveStart ?? DateTime.UtcNow.AddDays(-30);
+        var until = effectiveEnd ?? DateTime.UtcNow;
 
-        var rows = await _db.Set<PrintJob>()
-            .Where(j => j.QueuedAt >= since && j.ActualCost.HasValue)
+        var query = _db.Set<PrintJob>()
+            .Where(j => j.QueuedAt >= since && j.ActualCost.HasValue);
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
+        }
+
+        var rows = await query
             .GroupBy(j => j.QueuedAt.Date)
             .Select(g => new { Date = g.Key, TotalCost = g.Sum(j => j.ActualCost!.Value) })
             .ToListAsync(ct);
 
         var result = new List<DailyCostDto>();
-        for (var d = since.Date; d <= DateTime.UtcNow.Date; d = d.AddDays(1))
+        for (var d = since.Date; d <= until.Date; d = d.AddDays(1))
         {
             result.Add(new DailyCostDto
             {
@@ -110,16 +156,21 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         return result;
     }
 
-    public async Task<List<FilamentByMaterialDto>> GetFilamentByMaterialAsync(int? days, CancellationToken ct = default)
+    public async Task<List<FilamentByMaterialDto>> GetFilamentByMaterialAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
-        int? clampedDays = days.HasValue ? Math.Clamp(days.Value, 1, 365) : null;
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
+
         var query = _db.Set<PrintJob>()
             .Where(j => j.ActualFilamentUsage.HasValue && j.ActualFilamentUsage > 0);
 
-        if (clampedDays.HasValue)
+        if (effectiveStart.HasValue)
         {
-            var since = DateTime.UtcNow.AddDays(-clampedDays.Value);
-            query = query.Where(j => j.QueuedAt >= since);
+            query = query.Where(j => j.QueuedAt >= effectiveStart.Value);
+        }
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
         var rows = await query
@@ -136,16 +187,21 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         return result;
     }
 
-    public async Task<List<PrinterUtilizationDto>> GetPrinterUtilizationAsync(int? days, CancellationToken ct = default)
+    public async Task<List<PrinterUtilizationDto>> GetPrinterUtilizationAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
-        int? clampedDays = days.HasValue ? Math.Clamp(days.Value, 1, 365) : null;
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
+
         var query = _db.Set<PrintJob>()
             .Where(j => j.AssignedPrinterId.HasValue);
 
-        if (clampedDays.HasValue)
+        if (effectiveStart.HasValue)
         {
-            var since = DateTime.UtcNow.AddDays(-clampedDays.Value);
-            query = query.Where(j => j.QueuedAt >= since);
+            query = query.Where(j => j.QueuedAt >= effectiveStart.Value);
+        }
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
         var rawJobs = await query
@@ -195,16 +251,21 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
     }
 
     /// <inheritdoc />
-    public async Task<CostStatisticsSummaryDto> GetCostsSummaryAsync(int? days, CancellationToken ct = default)
+    public async Task<CostStatisticsSummaryDto> GetCostsSummaryAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
-        DateTime? startDate = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : null;
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
 
         var query = _db.PrintJobs
             .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue);
 
-        if (startDate.HasValue)
+        if (effectiveStart.HasValue)
         {
-            query = query.Where(j => j.ActualEndTime >= startDate.Value);
+            query = query.Where(j => j.ActualEndTime >= effectiveStart.Value);
+        }
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime <= effectiveEnd.Value);
         }
 
         var jobs = await query.ToListAsync(ct);
@@ -238,12 +299,20 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
     }
 
     /// <inheritdoc />
-    public async Task<List<CostByTimePeriodDto>> GetCostsByTimePeriodAsync(int? days, CancellationToken ct = default)
+    public async Task<List<CostByTimePeriodDto>> GetCostsByTimePeriodAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
-        DateTime startDate = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : DateTime.UtcNow.AddDays(-30);
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate, defaultDays: 30);
+        var since = effectiveStart ?? DateTime.UtcNow.AddDays(-30);
 
-        var rows = await _db.PrintJobs
-            .Where(j => j.Status == PrintJobStatus.Completed && j.ActualEndTime >= startDate && j.TotalCostUsd.HasValue)
+        var query = _db.PrintJobs
+            .Where(j => j.Status == PrintJobStatus.Completed && j.ActualEndTime >= since && j.TotalCostUsd.HasValue);
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime <= effectiveEnd.Value);
+        }
+
+        var rows = await query
             .GroupBy(j => j.ActualEndTime!.Value.Date)
             .Select(g => new
             {
@@ -272,17 +341,22 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
     }
 
     /// <inheritdoc />
-    public async Task<List<CostByPrinterDto>> GetCostsByPrinterAsync(int? days, CancellationToken ct = default)
+    public async Task<List<CostByPrinterDto>> GetCostsByPrinterAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
-        DateTime? startDate = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : null;
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
 
         var query = _db.PrintJobs
             .Include(j => j.AssignedPrinter)
             .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue && j.AssignedPrinterId != null);
 
-        if (startDate.HasValue)
+        if (effectiveStart.HasValue)
         {
-            query = query.Where(j => j.ActualEndTime >= startDate.Value);
+            query = query.Where(j => j.ActualEndTime >= effectiveStart.Value);
+        }
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime <= effectiveEnd.Value);
         }
 
         var rows = await query
@@ -317,16 +391,21 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
     }
 
     /// <inheritdoc />
-    public async Task<List<CostByMaterialDto>> GetCostsByMaterialAsync(int? days, CancellationToken ct = default)
+    public async Task<List<CostByMaterialDto>> GetCostsByMaterialAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
-        DateTime? startDate = days.HasValue ? DateTime.UtcNow.AddDays(-days.Value) : null;
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
 
         var query = _db.PrintJobs
             .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue && !string.IsNullOrEmpty(j.FilamentName));
 
-        if (startDate.HasValue)
+        if (effectiveStart.HasValue)
         {
-            query = query.Where(j => j.ActualEndTime >= startDate.Value);
+            query = query.Where(j => j.ActualEndTime >= effectiveStart.Value);
+        }
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime <= effectiveEnd.Value);
         }
 
         var rows = await query
@@ -350,5 +429,64 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         })
         .OrderByDescending(r => r.TotalCostUsd)
         .ToList();
+    }
+
+    /// <inheritdoc/>
+    public async Task<List<CostByJobDto>> GetCostsByJobAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
+    {
+        var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
+
+        var query = _db.PrintJobs
+            .Include(j => j.AssignedPrinter)
+            .Include(j => j.GcodeFile)
+            .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue);
+
+        if (effectiveStart.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime >= effectiveStart.Value);
+        }
+
+        if (effectiveEnd.HasValue)
+        {
+            query = query.Where(j => j.ActualEndTime <= effectiveEnd.Value);
+        }
+
+        var rows = await query
+            .OrderByDescending(j => j.ActualEndTime)
+            .Select(j => new
+            {
+                j.Id,
+                j.Name,
+                GcodeFileName = j.GcodeFile != null ? j.GcodeFile.Name : null,
+                PrinterName = j.AssignedPrinter != null ? j.AssignedPrinter.Name : null,
+                j.FilamentName,
+                j.RequiredMaterialType,
+                j.ActualFilamentUsage,
+                j.TotalCostUsd,
+                j.MaterialCostUsd,
+                j.EnergyCostUsd,
+                j.MachineTimeCostUsd,
+                j.LaborCostUsd,
+                j.ActualPrintTime,
+                j.ActualEndTime,
+            })
+            .ToListAsync(ct);
+
+        return rows.Select(j => new CostByJobDto
+        {
+            JobId = j.Id,
+            JobName = j.Name ?? j.GcodeFileName ?? "Untitled",
+            PrinterName = j.PrinterName,
+            FilamentName = j.FilamentName,
+            MaterialType = j.RequiredMaterialType,
+            FilamentUsedGrams = j.ActualFilamentUsage,
+            TotalCostUsd = j.TotalCostUsd ?? 0m,
+            MaterialCostUsd = j.MaterialCostUsd ?? 0m,
+            EnergyCostUsd = j.EnergyCostUsd ?? 0m,
+            MachineTimeCostUsd = j.MachineTimeCostUsd ?? 0m,
+            LaborCostUsd = j.LaborCostUsd ?? 0m,
+            PrintTimeSeconds = j.ActualPrintTime?.TotalSeconds,
+            CompletedAt = j.ActualEndTime,
+        }).ToList();
     }
 }

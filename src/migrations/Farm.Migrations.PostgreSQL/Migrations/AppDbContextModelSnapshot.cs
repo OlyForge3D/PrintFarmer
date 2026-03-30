@@ -227,6 +227,30 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("Cameras", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CatalogVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AppliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ManifestHash")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("CatalogVersions");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -425,6 +449,48 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("FailedLoginAttempts");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FailureDetectionIncident", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AutoPaused")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("Confidence")
+                        .HasColumnType("decimal(5,4)");
+
+                    b.Property<DateTime>("DetectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("JobName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SnapshotUrl")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DetectedAt");
+
+                    b.HasIndex("PrinterId", "DetectedAt");
+
+                    b.ToTable("FailureDetectionIncidents");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentType", b =>
@@ -1008,13 +1074,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("GcodeFileId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("GcodeFileId1")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid>("HarvestDiscoveredFileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("HarvestDiscoveredFileId1")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
@@ -1023,11 +1083,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("GcodeFileId");
 
-                    b.HasIndex("GcodeFileId1");
-
                     b.HasIndex("HarvestDiscoveredFileId");
-
-                    b.HasIndex("HarvestDiscoveredFileId1");
 
                     b.ToTable("HarvestFileGcodeFileMappings");
                 });
@@ -1154,12 +1210,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("OriginalJobId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("PrintJobId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("PrintJobId1")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid>("RetryJobId")
                         .HasColumnType("uuid");
 
@@ -1179,10 +1229,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("OriginalJobId");
-
-                    b.HasIndex("PrintJobId");
-
-                    b.HasIndex("PrintJobId1");
 
                     b.HasIndex("RetryJobId");
 
@@ -1551,9 +1597,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("PrinterId1")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid?>("PrinterMaintenanceScheduleId")
                         .HasColumnType("uuid");
 
@@ -1572,8 +1615,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PerformedAt");
 
                     b.HasIndex("PrinterId");
-
-                    b.HasIndex("PrinterId1");
 
                     b.HasIndex("PrinterMaintenanceScheduleId");
 
@@ -2384,6 +2425,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int?>("SpoolmanFilamentId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("SpoolmanSpoolId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
@@ -2737,10 +2781,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("ApiKey")
                         .HasColumnType("text");
 
-                    b.Property<bool>("AutoPrintEnabled")
+                    b.Property<bool>("AutoDispatchEnabled")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("AutoPrintState")
+                    b.Property<int>("AutoDispatchState")
                         .HasColumnType("integer");
 
                     b.Property<int>("Backend")
@@ -2753,12 +2797,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<bool>("BedPreConfirmed")
                         .HasColumnType("boolean");
-
-                    b.Property<string>("CameraSnapshotUrl")
-                        .HasColumnType("text");
-
-                    b.Property<string>("CameraStreamUrl")
-                        .HasColumnType("text");
 
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("text");
@@ -2791,6 +2829,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("LastHistorySeedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastModelSyncAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("LocationId")
@@ -2865,6 +2906,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("Username")
                         .HasColumnType("text");
+
+                    b.Property<decimal?>("Wattage")
+                        .HasColumnType("numeric");
 
                     b.HasKey("Id");
 
@@ -2967,6 +3011,12 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<int?>("DefaultBackend")
                         .HasColumnType("integer");
+
+                    b.Property<decimal?>("DefaultHourlyRate")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("DefaultWattage")
+                        .HasColumnType("numeric");
 
                     b.Property<bool>("HasBowdenTube")
                         .ValueGeneratedOnAdd()
@@ -3071,6 +3121,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -3178,9 +3231,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("PrinterId1")
-                        .HasColumnType("uuid");
-
                     b.Property<double>("TotalFilamentUsedGrams")
                         .HasColumnType("double precision");
 
@@ -3204,9 +3254,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("LastSyncTime");
 
                     b.HasIndex("PrinterId")
-                        .IsUnique();
-
-                    b.HasIndex("PrinterId1")
                         .IsUnique();
 
                     b.ToTable("PrinterStatisticsSet");
@@ -4134,6 +4181,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Manufacturer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FailureDetectionIncident", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Printer");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.GcodeFile", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.FolderNode", "Folder")
@@ -4201,30 +4259,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.HarvestFileGcodeFileMapping", b =>
                 {
-                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", null)
+                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
                         .WithMany("HarvestFileMappings")
                         .HasForeignKey("GcodeFileId")
                         .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
 
-                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
-                        .WithMany()
-                        .HasForeignKey("GcodeFileId1")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.HarvestDiscoveredFile", null)
+                    b.HasOne("Farm.Infrastructure.Domain.HarvestDiscoveredFile", "HarvestDiscoveredFile")
                         .WithMany("GcodeFileMappings")
                         .HasForeignKey("HarvestDiscoveredFileId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.HarvestDiscoveredFile", "HarvestDiscoveredFile")
-                        .WithMany()
-                        .HasForeignKey("HarvestDiscoveredFileId1")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("FK_HarvestFileGcodeFileMappings_HarvestDiscoveredFiles_Harves~1");
 
                     b.Navigation("GcodeFile");
 
@@ -4256,21 +4301,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.JobRetry", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "OriginalJob")
-                        .WithMany()
+                        .WithMany("RetriesAsOriginal")
                         .HasForeignKey("OriginalJobId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", null)
-                        .WithMany("RetriesAsAttempt")
-                        .HasForeignKey("PrintJobId");
-
-                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", null)
-                        .WithMany("RetriesAsOriginal")
-                        .HasForeignKey("PrintJobId1");
-
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "RetryJob")
-                        .WithMany()
+                        .WithMany("RetriesAsAttempt")
                         .HasForeignKey("RetryJobId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
@@ -4345,14 +4382,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany()
+                        .WithMany("MaintenanceLogs")
                         .HasForeignKey("PrinterId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
-                        .WithMany("MaintenanceLogs")
-                        .HasForeignKey("PrinterId1");
 
                     b.HasOne("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", "PrinterMaintenanceSchedule")
                         .WithMany()
@@ -4721,14 +4754,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterStatistics", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithOne()
+                        .WithOne("Statistics")
                         .HasForeignKey("Farm.Infrastructure.Domain.PrinterStatistics", "PrinterId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
-                        .WithOne("Statistics")
-                        .HasForeignKey("Farm.Infrastructure.Domain.PrinterStatistics", "PrinterId1");
 
                     b.Navigation("Printer");
                 });

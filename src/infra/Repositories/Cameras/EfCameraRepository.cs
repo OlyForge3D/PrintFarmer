@@ -149,4 +149,12 @@ public class EfCameraRepository : ICameraRepository
             .ThenBy(c => c.Name)
             .ToListAsync(ct);
     }
+
+    /// <inheritdoc/>
+    public async Task<Camera?> FindByPrinterIdAndSourceAsync(Guid printerId, CameraSource source, CancellationToken ct)
+    {
+        return await _dbContext.Cameras
+            .Where(c => c.PrinterId == printerId && c.Source == source)
+            .FirstOrDefaultAsync(ct);
+    }
 }

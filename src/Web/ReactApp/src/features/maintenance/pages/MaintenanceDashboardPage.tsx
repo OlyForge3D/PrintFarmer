@@ -13,6 +13,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
+import './MaintenanceDashboardPage.css';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import {
   WrenchIcon,
@@ -197,7 +198,7 @@ export function MaintenanceDashboardPage() {
           <Tabs.Tab id="schedule" icon={<CalendarIcon className="h-4 w-4" />}>
             Schedule
             {overdueCount > 0 && (
-              <Badge variant="error" className="ml-1.5 text-[10px] px-1.5 py-0 min-w-[18px]">
+              <Badge variant="error" className="pf-maintenance-schedule-badge ml-1.5 text-[10px] px-1.5 py-0">
                 {overdueCount}
               </Badge>
             )}
@@ -245,7 +246,7 @@ export function MaintenanceDashboardPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="p-4 max-h-[560px] overflow-y-auto">
+                    <div className="pf-maintenance-priority-list-scroll p-4 overflow-y-auto">
                       <MaintenancePriorityList
                         alerts={alerts}
                         isLoading={alertsLoading}
@@ -353,7 +354,7 @@ export function MaintenanceDashboardPage() {
                     </Tabs.Panel>
 
                     <Tabs.Panel id="timeline">
-                      <div className="p-5 max-h-[600px] overflow-y-auto">
+                      <div className="pf-maintenance-timeline-scroll p-5 overflow-y-auto">
                         <MaintenanceTimeline
                           tasks={upcomingTasks}
                           isLoading={tasksLoading}
@@ -509,7 +510,7 @@ export function MaintenanceDashboardPage() {
                           Track component replacements across your fleet
                         </p>
                       </div>
-                      <div className="p-5 max-h-[600px] overflow-y-auto">
+                      <div className="pf-maintenance-timeline-scroll p-5 overflow-y-auto">
                         <ComponentReplacementHistory
                           replacements={replacements}
                           componentNames={componentNames}

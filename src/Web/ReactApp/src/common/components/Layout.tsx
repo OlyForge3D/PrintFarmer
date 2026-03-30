@@ -44,6 +44,7 @@ import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
+import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { AutoDispatchStatus } from '@/types/api';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinterSignalRPanel';
@@ -82,6 +83,7 @@ type NavigationElement = NavigationItem | NavigationDivider | NavigationSectionH
 
 const isDivider = (item: NavigationElement): item is NavigationDivider => 'isDivider' in item && item.isDivider === true;
 const isSectionHeader = (item: NavigationElement): item is NavigationSectionHeader => 'isSectionHeader' in item && item.isSectionHeader === true;
+const isNavigationItem = (item: NavigationElement): item is NavigationItem => !isDivider(item) && !isSectionHeader(item);
 
 const navigation: NavigationElement[] = [
   // — Operations —
@@ -261,7 +263,7 @@ export function Layout() {
   const navigate = useNavigate();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const pendingAttentionCount = useMemo(
-    () => ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter(s => s.state === 'PendingReady').length,
+    () => ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter((status) => requiresBedClearConfirmation(status)).length,
     [allAutoDispatchStatuses]
   );
   const location = useLocation();
@@ -366,7 +368,7 @@ export function Layout() {
       // Auto-expand groups containing current route during initialization
       // Note: filteredNavigation not available yet, so use navigation directly
       for (const item of navigation) {
-        if (!isDivider(item) && item.children) {
+        if (isNavigationItem(item) && item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild && !(item.name in parsed)) {
             parsed[item.name] = true;
@@ -379,7 +381,7 @@ export function Layout() {
       // If parsing fails, at least auto-expand current route
       const autoExpanded: Record<string, boolean> = {};
       for (const item of navigation) {
-        if (!isDivider(item) && item.children) {
+        if (isNavigationItem(item) && item.children) {
           const hasActiveChild = item.children.some(c => path.startsWith(c.href));
           if (hasActiveChild) {
             autoExpanded[item.name] = true;
@@ -406,7 +408,7 @@ export function Layout() {
       
       // Find item to get child count (from filtered list so it's permission-safe)
       const itemDef = filteredNavigation.find(i => i.name === name);
-      const childCount = itemDef && !isDivider(itemDef) ? itemDef.children?.length ?? 0 : 0;
+      const childCount = itemDef && isNavigationItem(itemDef) ? itemDef.children?.length ?? 0 : 0;
       const message = nextValue
         ? `${name} section expanded. ${childCount} item${childCount === 1 ? '' : 's'}.`
         : `${name} section collapsed.`;
@@ -445,7 +447,7 @@ export function Layout() {
     
     // Auto-expand groups containing current route
     for (const item of filteredNavigation) {
-      if (!isDivider(item) && item.children) {
+      if (isNavigationItem(item) && item.children) {
         const hasActiveChild = item.children.some(c => path.startsWith(c.href));
         // Only auto-expand if user hasn't explicitly set it
         if (hasActiveChild && expanded[item.name] === undefined) {
@@ -731,6 +733,7 @@ export function Layout() {
                       ) : (
                         <NavLink
                           to={navItem.href}
+                          end
                           onClick={() => { setSidebarOpen(false); }}
                           className={({ isActive }: { isActive: boolean }) =>
                             `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
@@ -841,6 +844,7 @@ export function Layout() {
                     ) : (
                       <NavLink
                         to={navItem.href}
+                        end
                         onClick={() => { /* top-level nav */ }}
                         className={({ isActive }: { isActive: boolean }) =>
                           `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive

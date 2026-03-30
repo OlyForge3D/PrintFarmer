@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.AutoPrint;
+using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Interfaces;
@@ -24,7 +24,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly ILogger<PrintJobCompletionService> _logger;
     private readonly INotificationService? _notificationService;
     private readonly IPrintCostCalculator? _costCalculator;
-    private readonly IAutoPrintService? _autoPrintService;
+    private readonly IAutoDispatchService? _autoDispatchService;
     private readonly IBackendClientFactory? _backendFactory;
     private readonly ISpoolmanService? _spoolmanService;
     private readonly IAutoDispatchTrigger? _autoDispatchTrigger;
@@ -85,7 +85,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         ILogger<PrintJobCompletionService> logger,
         INotificationService? notificationService = null,
         IPrintCostCalculator? costCalculator = null,
-        IAutoPrintService? autoPrintService = null,
+        IAutoDispatchService? autoDispatchService = null,
         IBackendClientFactory? backendFactory = null,
         ISpoolmanService? spoolmanService = null,
         IAutoDispatchTrigger? autoDispatchTrigger = null,
@@ -97,7 +97,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _notificationService = notificationService;
         _costCalculator = costCalculator;
-        _autoPrintService = autoPrintService;
+        _autoDispatchService = autoDispatchService;
         _backendFactory = backendFactory;
         _spoolmanService = spoolmanService;
         _autoDispatchTrigger = autoDispatchTrigger;
@@ -238,16 +238,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             }
         }
 
-        // Trigger auto-print ready-gate if enabled
-        if (_autoPrintService != null)
+        // Trigger the auto-dispatch ready gate if enabled
+        if (_autoDispatchService != null)
         {
             try
             {
-                await _autoPrintService.TransitionToPendingReadyAsync(printerId, ct);
+                await _autoDispatchService.TransitionToPendingReadyAsync(printerId, ct);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to trigger auto-print transition for printer {PrinterId}", printerId);
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to trigger auto-dispatch transition for printer {PrinterId}", printerId);
             }
         }
 

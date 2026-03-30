@@ -14,6 +14,8 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
@@ -24,6 +26,7 @@ using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 
 namespace Farm.Web.Api.Controllers;
@@ -47,6 +50,9 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
     Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
+    IOptions<ObicoSettings> obicoSettings,
+    Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
+    IPrintFarmerTelemetryService telemetryService,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!)
     : ControllerBase
@@ -62,6 +68,9 @@ public class PrintersController(
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
     private readonly Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService _obicoServerAssignment = obicoServerAssignment;
+    private readonly ObicoSettings _obicoSettings = obicoSettings.Value;
+    private readonly Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService _printerSessionTimelineService = printerSessionTimelineService;
+    private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -830,8 +839,8 @@ public class PrintersController(
             p.DateAcquired,
             (PrinterBackend)p.Backend,
             p.ApiKey,
-            p.CameraStreamUrl,
-            p.CameraSnapshotUrl,
+            null, // CameraStreamUrl — resolved from Cameras table via DTO layer
+            null, // CameraSnapshotUrl — resolved from Cameras table via DTO layer
             p.OriginalServerUrl,
             p.BackendPort,
             p.FrontendPort,
@@ -840,7 +849,10 @@ public class PrintersController(
             p.Username,
             p.Password,
             p.ObicoEnabled,
-            p.ObicoServer?.Name);
+            p.ObicoServer?.Name,
+            p.Wattage,
+            p.MachineHourlyRate,
+            p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue));
     }
 
     /// <summary>
@@ -1397,9 +1409,7 @@ public class PrintersController(
             if (dto.ObicoEnabled.Value && !p.ObicoEnabled)
             {
                 // Enabling: validate camera exists
-                bool hasCamera = (p.Cameras != null && p.Cameras.Count != 0)
-                    || !string.IsNullOrWhiteSpace(p.CameraStreamUrl)
-                    || !string.IsNullOrWhiteSpace(p.CameraSnapshotUrl);
+                bool hasCamera = p.Cameras != null && p.Cameras.Count != 0;
                 if (!hasCamera)
                 {
                     return BadRequest(new { error = "Obico monitoring requires at least one camera configured on the printer." });
@@ -1411,7 +1421,17 @@ public class PrintersController(
                 ObicoServer? assigned = await _obicoServerAssignment.AssignServerAsync(p.Id, ct);
                 if (assigned is null)
                 {
-                    return BadRequest(new { error = "No available Obico server. Add and enable at least one Obico server in Settings." });
+                    if (!_obicoSettings.Enabled || string.IsNullOrWhiteSpace(_obicoSettings.ObicoApiUrl))
+                    {
+                        return BadRequest(new
+                        {
+                            error = "No available Obico ML configuration. Open Settings > Obico Failure Detection to add a pooled Obico ML server or configure the global fallback."
+                        });
+                    }
+
+                    _logger.LogInformation(
+                        "[PRINTERS] No pooled Obico server available for printer {PrinterName}; using global Obico Failure Detection settings fallback",
+                        p.Name);
                 }
             }
             else if (!dto.ObicoEnabled.Value && p.ObicoEnabled)
@@ -1433,6 +1453,8 @@ public class PrintersController(
 
         p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;
         p.MaxPrintSpeed = dto.MaxPrintSpeed ?? p.MaxPrintSpeed;
+        p.Wattage = dto.Wattage ?? p.Wattage;
+        p.MachineHourlyRate = dto.MachineHourlyRate ?? p.MachineHourlyRate;
         p.LastCapabilityUpdate = DateTime.UtcNow;
 
         // Update toolheads if provided
@@ -1522,7 +1544,8 @@ public class PrintersController(
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
-            FrontendUrl: p.FrontendUrl);
+            FrontendUrl: p.FrontendUrl,
+            ObicoEnabled: p.ObicoEnabled);
 
         return Ok(dtoResponse);
     }
@@ -1692,6 +1715,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.SendHomeAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("home_all", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1711,6 +1735,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.HomeXYAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("home_xy", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1730,6 +1755,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.HomeZAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("home_z", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1738,7 +1764,7 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, [FromBody] TempTargets targets, CancellationToken ct)
+    public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, [FromBody] Farm.Infrastructure.TempTargets targets, CancellationToken ct)
     {
         if (targets is null)
         {
@@ -1746,6 +1772,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
+        _telemetryService.RecordPrinterOperation("set_temperature", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1762,6 +1789,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
+        _telemetryService.RecordPrinterOperation("move", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1778,6 +1806,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
+        _telemetryService.RecordPrinterOperation("move_to", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1794,6 +1823,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.PauseAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("pause", id.ToString(), ok);
 
         return ok
             ? new CommandResult(true, null)
@@ -1815,6 +1845,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.ResumeAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("resume", id.ToString(), ok);
 
         return ok
             ? new CommandResult(true, null)
@@ -1836,6 +1867,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.CancelPrintAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("cancel", id.ToString(), ok);
 
         return ok
             ? new CommandResult(true, null)
@@ -1857,6 +1889,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.EmergencyStopAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("emergency_stop", id.ToString(), ok);
 
         return ok
             ? new CommandResult(true, null)
@@ -1908,6 +1941,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> FirmwareRestartAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.FirmwareRestartAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("firmware_restart", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1931,6 +1965,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> DisableMotorsAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.DisableMotorsAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("disable_motors", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1963,6 +1998,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.SendGcodeAsync(id, request.Command.Trim(), ct);
+        _telemetryService.RecordPrinterOperation("send_gcode", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -1984,6 +2020,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> LoadFilamentAsync(Guid id, CancellationToken ct)
     {
         CommandResult result = await _printersService.LoadFilamentAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("load_filament", id.ToString(), result.Success);
         return MapCommandResult(result);
     }
 
@@ -2003,6 +2040,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> UnloadFilamentAsync(Guid id, CancellationToken ct)
     {
         CommandResult result = await _printersService.UnloadFilamentAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("unload_filament", id.ToString(), result.Success);
         return MapCommandResult(result);
     }
 
@@ -2022,6 +2060,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> ChangeFilamentAsync(Guid id, CancellationToken ct)
     {
         CommandResult result = await _printersService.ChangeFilamentAsync(id, ct);
+        _telemetryService.RecordPrinterOperation("change_filament", id.ToString(), result.Success);
         return MapCommandResult(result);
     }
 
@@ -2049,6 +2088,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.SendGcodeAsync(id, $"MMU_CHANGE_TOOL TOOL={tool}", ct);
+        _telemetryService.RecordPrinterOperation("mmu_change_tool", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -2065,6 +2105,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> MmuEjectAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.SendGcodeAsync(id, "MMU_EJECT", ct);
+        _telemetryService.RecordPrinterOperation("mmu_eject", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -2081,6 +2122,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> MmuLoadAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.SendGcodeAsync(id, "MMU_LOAD", ct);
+        _telemetryService.RecordPrinterOperation("mmu_load", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -2097,6 +2139,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> MmuHomeAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.SendGcodeAsync(id, "MMU_HOME", ct);
+        _telemetryService.RecordPrinterOperation("mmu_home", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -2119,6 +2162,7 @@ public class PrintersController(
         }
 
         bool ok = await _printersService.SendGcodeAsync(id, $"MMU_SELECT_TOOL TOOL={tool}", ct);
+        _telemetryService.RecordPrinterOperation("mmu_select_tool", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -2135,6 +2179,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> MmuRecoverAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.SendGcodeAsync(id, "MMU_RECOVER", ct);
+        _telemetryService.RecordPrinterOperation("mmu_recover", id.ToString(), ok);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
 
@@ -2155,6 +2200,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> SetActiveSpoolAsync(Guid id, [FromBody] SetActiveSpoolRequest? request, CancellationToken ct)
     {
         CommandResult result = await _printersService.SetActiveSpoolAsync(id, request?.SpoolId, ct);
+        _telemetryService.RecordPrinterOperation("set_active_spool", id.ToString(), result.Success);
         return MapCommandResult(result);
     }
 
@@ -2403,6 +2449,38 @@ public class PrintersController(
         }
     }
 
+    /// <summary>
+    /// Retrieves the recent print-session timeline for a single printer.
+    /// </summary>
+    /// <param name="id">The printer identifier.</param>
+    /// <param name="take">Maximum number of sessions to return.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Recent sessions composed from persisted jobs and failure incidents.</returns>
+    [HttpGet("{id:guid}/session-timeline")]
+    [ProducesResponseType(typeof(PrinterSessionTimelineDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterSessionTimelineDto>> GetSessionTimelineAsync(
+        Guid id,
+        [FromQuery] int take = Farm.Infrastructure.Services.Printers.PrinterSessionTimelineService.DefaultTake,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            PrinterSessionTimelineDto timeline = await _printerSessionTimelineService.GetRecentAsync(id, take, ct);
+            return Ok(timeline);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get session timeline for printer {Id}: {Message}", id, ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve printer session timeline" });
+        }
+    }
+
     // ===== HISTORY ENDPOINTS =====
     [HttpGet("{id}/history")]
     [ProducesResponseType(typeof(HistoryListResponse), 200)]
@@ -2645,8 +2723,6 @@ public class PrintersController(
                 originalServerUrl = printer.OriginalServerUrl,
                 backend = printer.Backend,
                 apiKey = printer.ApiKey,
-                cameraStreamUrl = printer.CameraStreamUrl,
-                cameraSnapshotUrl = printer.CameraSnapshotUrl,
                 backendPort = printer.BackendPort,
                 frontendPort = printer.FrontendPort,
                 notes = printer.Notes,
@@ -2728,16 +2804,6 @@ public class PrintersController(
                     printer.ApiKey = apiKeyVal?.ToString();
                 }
 
-                if (configDict.TryGetValue("cameraStreamUrl", out object? streamVal))
-                {
-                    printer.CameraStreamUrl = streamVal?.ToString();
-                }
-
-                if (configDict.TryGetValue("cameraSnapshotUrl", out object? snapshotVal))
-                {
-                    printer.CameraSnapshotUrl = snapshotVal?.ToString();
-                }
-
                 if (configDict.TryGetValue("notes", out object? notesVal))
                 {
                     printer.Notes = notesVal?.ToString();
@@ -2771,8 +2837,6 @@ public class PrintersController(
                     originalServerUrl = printer.OriginalServerUrl,
                     backend = printer.Backend,
                     apiKey = printer.ApiKey,
-                    cameraStreamUrl = printer.CameraStreamUrl,
-                    cameraSnapshotUrl = printer.CameraSnapshotUrl,
                     backendPort = printer.BackendPort,
                     frontendPort = printer.FrontendPort,
                     notes = printer.Notes,

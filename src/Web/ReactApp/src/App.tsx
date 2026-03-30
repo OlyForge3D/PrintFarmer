@@ -290,11 +290,25 @@ function App() {
 
     // Listen for Obico ML failure detection events
     const unsubscribe = printerSignalRService.onFailureDetected((event) => {
-      const confidenceStr = event.confidence.toFixed(0);
-      const pauseMsg = event.autoPaused ? ' (print auto-paused)' : '';
+      const confidencePercent = Math.round(event.confidence * 100);
+      const action = event.snapshotUrl
+        ? {
+            label: 'View',
+            onClick: () => window.open(event.snapshotUrl, '_blank', 'noopener,noreferrer'),
+          }
+        : undefined;
+
+      if (event.autoPaused) {
+        toast.error(
+          `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Print auto-paused.`,
+          { duration: 10_000, action }
+        );
+        return;
+      }
+
       toast.warning(
-        `⚠️ Failure detected on ${event.printerName} (confidence: ${confidenceStr}%)${pauseMsg}`,
-        { duration: 8000 }
+        `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Review the printer now.`,
+        { duration: 10_000, action }
       );
     });
 

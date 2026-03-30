@@ -5,6 +5,7 @@ import {
   LogLevel,
 } from "@microsoft/signalr";
 import {
+  AutoDispatchStatus,
   PrinterStatusUpdate,
   JobQueueUpdateDto,
   DiscoveryProgressDto,
@@ -25,6 +26,9 @@ type DiscoveryCompletedCallback = (completed: DiscoveryCompletedDto) => void;
 type PrinterImportProgressCallback = (progress: unknown) => void;
 type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => void;
 type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
+type AutoDispatchStatusCallback = (status: AutoDispatchStatus) => void;
+
+const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
 export class PrinterSignalRService {
   // Keep a local cache of last statuses for debugging
@@ -264,6 +268,19 @@ export class PrinterSignalRService {
       }
     );
 
+    this.connection.on(
+      AUTO_DISPATCH_STATE_CHANGED_EVENT,
+      (status: AutoDispatchStatus) => {
+        this.autoDispatchStatusCallbacks.forEach((cb) => {
+          try {
+            cb(status);
+          } catch (e) {
+            console.error("Auto-dispatch status callback error:", e);
+          }
+        });
+      }
+    );
+
     this.connection.onclose(() => this.notifyConnectionState(false));
     this.connection.onreconnecting(() => this.notifyConnectionState(false));
     this.connection.onreconnected(() => {
@@ -305,6 +322,7 @@ export class PrinterSignalRService {
   private printerImportProgressCallbacks: PrinterImportProgressCallback[] = [];
   private dispatchUploadProgressCallbacks: DispatchUploadProgressCallback[] = [];
   private failureDetectionCallbacks: FailureDetectionCallback[] = [];
+  private autoDispatchStatusCallbacks: AutoDispatchStatusCallback[] = [];
 
   constructor() {
     this.loadSettings().then(() => {
@@ -594,6 +612,14 @@ export class PrinterSignalRService {
     };
   }
 
+  onAutoDispatchStateChanged(callback: AutoDispatchStatusCallback): () => void {
+    this.autoDispatchStatusCallbacks.push(callback);
+    return () => {
+      const idx = this.autoDispatchStatusCallbacks.indexOf(callback);
+      if (idx > -1) this.autoDispatchStatusCallbacks.splice(idx, 1);
+    };
+  }
+
   get connectionState(): HubConnectionState {
     return this.connection?.state ?? HubConnectionState.Disconnected;
   }
@@ -612,6 +638,8 @@ export class PrinterSignalRService {
     this.discoveryCompletedCallbacks = [];
     this.printerImportProgressCallbacks = [];
     this.dispatchUploadProgressCallbacks = [];
+    this.failureDetectionCallbacks = [];
+    this.autoDispatchStatusCallbacks = [];
     if (this.connection) {
       this.connection.stop();
       this.connection = null;

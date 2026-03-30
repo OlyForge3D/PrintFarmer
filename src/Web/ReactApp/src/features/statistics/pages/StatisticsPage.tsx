@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/common/components/ui/Card';
-import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
 import { ChartIcon } from '@/common/components/icons/MdiIcons';
 import {
  useStatisticsSummary,
@@ -14,46 +14,26 @@ import { JobsOverTimeChart } from '../components/JobsOverTimeChart';
 import { CostOverTimeChart } from '../components/CostOverTimeChart';
 import { FilamentByMaterialChart } from '../components/FilamentByMaterialChart';
 import { PrinterUtilizationChart } from '../components/PrinterUtilizationChart';
-
-const PERIOD_OPTIONS = [
- { label: '7 days', value: 7 },
- { label: '30 days', value: 30 },
- { label: '90 days', value: 90 },
- { label: 'All time', value: undefined },
-] as const;
+import type { TimePeriodFilterValue } from '@/common/components/ui/timePeriodOptions';
 
 export const StatisticsPage: React.FC = () => {
- const [days, setDays] = useState<number | undefined>(30);
- const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days);
- const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365);
- const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365);
- const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days);
- const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days);
+ const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
+ const days = period.type === 'preset' ? period.days : undefined;
+ const startDate = period.type === 'custom' ? period.startDate : undefined;
+ const endDate = period.type === 'custom' ? period.endDate : undefined;
+
+ const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days, startDate, endDate);
+ const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365, startDate, endDate);
+ const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365, startDate, endDate);
+ const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days, startDate, endDate);
+ const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days, startDate, endDate);
 
  return (
  <PageTemplate
  title="Print Statistics"
  subtitle="Track print jobs, costs, and printer utilization"
  icon={ChartIcon}
- actions={
- <div className="flex gap-2" role="group" aria-label="Time period filter">
- {PERIOD_OPTIONS.map((opt) => (
- <Button
- variant="unstyled"
- key={opt.label}
- onClick={() => setDays(opt.value)}
- className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
- days === opt.value
- ? 'bg-pf-primary text-white'
- : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
- }`}
- aria-pressed={days === opt.value}
- >
- {opt.label}
- </Button>
- ))}
- </div>
- }
+ actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
  >
  <div className="space-y-6">
  {/* KPI Cards */}

@@ -106,38 +106,47 @@ function ServiceStatusRow({ service }: { service: BackgroundServiceStatus }) {
 
   return (
     <div
-      className={`flex items-center justify-between p-3 rounded-lg border ${bgClass} ${borderClass}`}
+      className={`p-3 rounded-lg border ${bgClass} ${borderClass}`}
     >
-      <div className="flex items-center gap-3 min-w-0">
-        {getStatusIcon(service)}
-        <div className="min-w-0">
-          <p className={`text-sm font-medium truncate ${textClass}`}>
-            {service.displayName}
-          </p>
-          {service.description && (
-            <p className="text-xs text-pf-text-tertiary truncate">{service.description}</p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          {getStatusIcon(service)}
+          <div className="min-w-0">
+            <p className={`text-sm font-medium truncate ${textClass}`}>
+              {service.displayName}
+            </p>
+            {service.description && (
+              <p className="text-xs text-pf-text-tertiary truncate">{service.description}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          {service.lastError ? (
+            <span className="text-xs text-pf-error-text">
+              Error
+            </span>
+          ) : (
+            <span className="text-xs text-pf-text-tertiary">
+              {formatLastRun(service.lastRunTime)}
+            </span>
+          )}
+          {service.category && (
+            <span className="px-2 py-0.5 text-xs rounded-full bg-pf-bg-2 text-pf-text-secondary">
+              {service.category}
+            </span>
           )}
         </div>
       </div>
-      <div className="flex items-center gap-2 shrink-0 ml-2">
-        {service.lastError ? (
-          <span
-            className="text-xs text-pf-error-text max-w-32 truncate"
-            title={service.lastError}
-          >
-            Error
-          </span>
-        ) : (
-          <span className="text-xs text-pf-text-tertiary">
-            {formatLastRun(service.lastRunTime)}
-          </span>
-        )}
-        {service.category && (
-          <span className="px-2 py-0.5 text-xs rounded-full bg-pf-bg-2 text-pf-text-secondary">
-            {service.category}
-          </span>
-        )}
-      </div>
+      {service.lastError && (
+        <div className="mt-2 ml-7 p-2 rounded bg-pf-error-bg/50 border border-pf-error-border/50">
+          <p className="text-xs text-pf-error-text">{service.lastError}</p>
+          {service.lastErrorTime && (
+            <p className="text-xs text-pf-text-tertiary mt-1">
+              {formatLastRun(service.lastErrorTime)}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

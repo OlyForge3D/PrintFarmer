@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.Authorization;
@@ -15,10 +16,12 @@ namespace Farm.Api.Controllers;
 [Produces("application/json")]
 public class JobQueueAnalyticsController(
     IPrintJobManagementService printJobManagementService,
+    IJobCostCalculationService jobCostCalculationService,
     ILogger<JobQueueAnalyticsController> logger,
     IWebhookService webhookService) : ControllerBase
 {
     private readonly IPrintJobManagementService _printJobManagementService = printJobManagementService ?? throw new ArgumentNullException(nameof(printJobManagementService));
+    private readonly IJobCostCalculationService _jobCostCalculationService = jobCostCalculationService ?? throw new ArgumentNullException(nameof(jobCostCalculationService));
     private readonly ILogger<JobQueueAnalyticsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IWebhookService _webhookService = webhookService;
 
@@ -868,6 +871,30 @@ public class JobQueueAnalyticsController(
         {
             _logger.LogError(ex, "Error updating cost for job {JobId}", id);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update cost" });
+        }
+    }
+
+    /// <summary>
+    /// Recalculates costs for all completed jobs that are missing cost data.
+    /// Uses the current cost settings and price cascade (including default material prices).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The number of jobs that were successfully recalculated.</returns>
+    [HttpPost("recalculate-costs")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> RecalculateAllCostsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Bulk cost recalculation requested.");
+            int recalculated = await _jobCostCalculationService.RecalculateAllAsync(cancellationToken);
+            return Ok(new { recalculated, message = $"Successfully recalculated costs for {recalculated} jobs." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during bulk cost recalculation.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to recalculate costs." });
         }
     }
 }

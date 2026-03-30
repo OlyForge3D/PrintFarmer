@@ -141,7 +141,7 @@ export default function HistoryJobTable({
                 {/* Actions */}
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-center gap-1">
-                    {job.status === "completed" && (
+                    {(job.status === "completed" || job.status === "cancelled") && (
                       <Button
                         onClick={() => onRerun(job.id)}
                         variant="ghost"

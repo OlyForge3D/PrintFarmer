@@ -59,10 +59,18 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
         };
     }
 
-    public async Task<List<MaintenanceForecastDto>> ForecastMaintenanceAsync(int? days, CancellationToken ct = default)
+    /// <inheritdoc/>
+    public async Task<List<MaintenanceForecastDto>> ForecastMaintenanceAsync(int? days, Guid? printerId = null, CancellationToken ct = default)
     {
         var horizon = days ?? 90;
-        var printers = await _db.Printers.ToListAsync(ct);
+
+        IQueryable<Printer> printerQuery = _db.Printers;
+        if (printerId.HasValue)
+        {
+            printerQuery = printerQuery.Where(p => p.Id == printerId.Value);
+        }
+
+        var printers = await printerQuery.ToListAsync(ct);
         var printerIds = printers.Select(p => p.Id).ToList();
 
         var allStats = await _db.Set<PrinterStatistics>()
@@ -124,12 +132,13 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
         return forecasts;
     }
 
-    public async Task<List<PredictiveAlertDto>> GetActiveAlertsAsync(CancellationToken ct = default)
+    /// <inheritdoc/>
+    public async Task<List<PredictiveAlertDto>> GetActiveAlertsAsync(Guid? printerId = null, CancellationToken ct = default)
     {
         var alerts = new List<PredictiveAlertDto>();
 
         // Alert: High recent failure rate
-        double recentFailureRate = await GetRecentFailureRateAsync(7, ct);
+        double recentFailureRate = await GetRecentFailureRateAsync(7, printerId, ct);
         if (recentFailureRate > HighFailureRateThreshold)
         {
             alerts.Add(new PredictiveAlertDto
@@ -142,7 +151,7 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
         }
 
         // Alert: Printers approaching maintenance thresholds
-        var maintenanceForecasts = await ForecastMaintenanceAsync(null, ct);
+        var maintenanceForecasts = await ForecastMaintenanceAsync(null, printerId, ct);
         foreach (var forecast in maintenanceForecasts)
         {
             foreach (var task in forecast.UpcomingTasks.Where(t => t.Priority == "High"))
@@ -158,7 +167,13 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
         }
 
         // Alert: Printers with declining success rate
-        var printers = await _db.Printers.Select(p => new { p.Id, p.Name }).ToListAsync(ct);
+        IQueryable<Printer> printerQuery = _db.Printers;
+        if (printerId.HasValue)
+        {
+            printerQuery = printerQuery.Where(p => p.Id == printerId.Value);
+        }
+
+        var printers = await printerQuery.Select(p => new { p.Id, p.Name }).ToListAsync(ct);
         foreach (var printer in printers)
         {
             double trend = await GetRecentPrinterTrendAsync(printer.Id, ct);
@@ -274,21 +289,26 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
         return Math.Clamp(recentRate / previousRate, 0.5, 1.5);
     }
 
-    private async Task<double> GetRecentFailureRateAsync(int days, CancellationToken ct)
+    private async Task<double> GetRecentFailureRateAsync(int days, Guid? printerId, CancellationToken ct)
     {
         var since = DateTime.UtcNow.AddDays(-days);
-        int total = await _db.Set<PrintJob>()
+        IQueryable<PrintJob> baseQuery = _db.Set<PrintJob>()
             .Where(j => j.QueuedAt >= since)
-            .Where(j => j.Status == PrintJobStatus.Completed || j.Status == PrintJobStatus.Failed)
-            .CountAsync(ct);
+            .Where(j => j.Status == PrintJobStatus.Completed || j.Status == PrintJobStatus.Failed);
+
+        if (printerId.HasValue)
+        {
+            baseQuery = baseQuery.Where(j => j.AssignedPrinterId == printerId.Value);
+        }
+
+        int total = await baseQuery.CountAsync(ct);
 
         if (total == 0)
         {
             return 0;
         }
 
-        int failed = await _db.Set<PrintJob>()
-            .Where(j => j.QueuedAt >= since)
+        int failed = await baseQuery
             .Where(j => j.Status == PrintJobStatus.Failed)
             .CountAsync(ct);
 

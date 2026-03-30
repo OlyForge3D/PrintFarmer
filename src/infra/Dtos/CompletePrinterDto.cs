@@ -47,4 +47,6 @@ public record CompletePrinterDto(
     PrinterSpoolInfoDto? SpoolInfo,
     string? BackendUrl = null,
     string? FrontendUrl = null,
-    LocationSummaryDto? Location = null);
+    LocationSummaryDto? Location = null,
+    bool ObicoEnabled = false,
+    bool HasCatalogUpdate = false);

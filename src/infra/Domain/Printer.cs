@@ -147,18 +147,6 @@ public class Printer
     public PrinterCredential? Credential { get; set; }
 
     /// <summary>
-    /// Camera stream URL discovered from the printer backend.
-    /// Will be migrated to the Cameras navigation property in a future release.
-    /// </summary>
-    public string? CameraStreamUrl { get; set; }
-
-    /// <summary>
-    /// Camera snapshot URL discovered from the printer backend.
-    /// Will be migrated to the Cameras navigation property in a future release.
-    /// </summary>
-    public string? CameraSnapshotUrl { get; set; }
-
-    /// <summary>
     /// Cameras attached to this printer.
     /// Cameras are discovered from Moonraker, PrusaLink, OctoPrint, etc. or manually configured.
     /// </summary>
@@ -220,6 +208,18 @@ public class Printer
     public DateTime LastCapabilityUpdate { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    /// When this printer last had the catalog model template applied to it.
+    /// Null means the template has never been applied.
+    /// Used to detect when a catalog update is available (Model.UpdatedAt > LastModelSyncAt).
+    /// </summary>
+    public DateTime? LastModelSyncAt { get; set; }
+
+    /// <summary>
+    /// Power consumption in watts. Overrides the model's default wattage when set.
+    /// </summary>
+    public decimal? Wattage { get; set; }
+
+    /// <summary>
     /// Per-printer machine hourly rate override for cost tracking.
     /// If null, uses the default rate from CostTrackingSettings.
     /// </summary>
@@ -277,21 +277,23 @@ public class Printer
     /// </summary>
     public DateTime? LastHistorySeedUtc { get; set; }
 
-    // AutoPrint Ready-Gate properties
+    // AutoDispatch Ready-Gate properties
 
     /// <summary>
     /// When enabled, the printer transitions to PendingReady after a job completes,
     /// waiting for operator confirmation before dispatching the next queued job.
     /// </summary>
-    public bool AutoPrintEnabled { get; set; }
+    public bool AutoDispatchEnabled { get; set; }
 
     /// <summary>
-    /// Current auto-print workflow state.
+    /// Current auto-dispatch ready-gate workflow state.
     /// None = feature disabled or no pending action.
     /// PendingReady = job completed, waiting for operator "bed clear" confirmation.
     /// Ready = operator confirmed, next queued job will be dispatched.
+    /// Dismissed = operator intentionally dismissed the current prompt until the
+    /// next queue/completion transition re-arms it.
     /// </summary>
-    public AutoPrintState AutoPrintState { get; set; } = AutoPrintState.None;
+    public AutoDispatchState AutoDispatchState { get; set; } = AutoDispatchState.None;
 
     /// <summary>
     /// Indicates the operator has pre-confirmed the bed is clear.

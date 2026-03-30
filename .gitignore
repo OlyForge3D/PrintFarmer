@@ -55,6 +55,9 @@ wwwroot/
 /publish/
 deployment/
 
+# Agent/build log output
+logs/
+
 # Test artifacts
 *.trx
 *.coverage
@@ -87,6 +90,7 @@ prusa_preseed/
 
 # TLS certs
 deploy/nginx/certs/
+/nginx/certs/
 
 # Playwright
 .playwright-mcp/
@@ -101,3 +105,6 @@ dotnet-install.sh.*
 
 # Installer build artifacts
 tools/installer/dist/
+.squad/decisions/inbox/
+.squad/sessions/
+.squad-workstream

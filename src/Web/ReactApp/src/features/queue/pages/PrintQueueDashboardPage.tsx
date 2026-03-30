@@ -14,6 +14,10 @@ import { QueueJobsTable } from "../components/QueueJobsTable";
 import JobDetailsModal from "../components/JobDetailsModal";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import DispatchLogTab from "../components/DispatchLogTab";
+import { SpoolValidationModal } from "../components/SpoolValidationModal";
+import { validateSpoolForDispatch } from "../utils/spoolValidation";
+import type { SpoolValidationContext } from "../utils/spoolValidation";
+import { ScheduleModal } from "@/features/scheduling/components/ScheduleModal";
 import { apiClient } from "@/services/api";
 import { printerSignalRService } from "@/services/printer-signalr";
 import { usePageTour } from "@/common/hooks/usePageTour";
@@ -147,6 +151,8 @@ export function PrintQueueDashboardPage() {
   const [dispatchUploadProgressByJobId, setDispatchUploadProgressByJobId] = useState<
     Record<string, DispatchUploadProgressDto>
   >({});
+  const [scheduleModalJobId, setScheduleModalJobId] = useState<string | null>(null);
+  const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
     queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter],
@@ -298,7 +304,8 @@ export function PrintQueueDashboardPage() {
     }
   }, [invalidateQueue]);
 
-  const handleDispatchJob = useCallback(async (jobId: string) => {
+  /** Actually send the dispatch request for a job (no spool check). */
+  const executeDispatch = useCallback(async (jobId: string) => {
     setDispatchingJobId(jobId);
     setDispatchUploadProgressByJobId((prev) => {
       const copy = { ...prev };
@@ -321,6 +328,41 @@ export function PrintQueueDashboardPage() {
       });
     }
   }, [invalidateQueue]);
+
+  /** Validate spool state before dispatching; shows modal if issues found. */
+  const handleDispatchJob = useCallback(async (jobId: string) => {
+    const jobWrapper = jobs.find(j => j.job.id === jobId);
+    if (!jobWrapper?.assignedPrinter) {
+      await executeDispatch(jobId);
+      return;
+    }
+
+    setDispatchingJobId(jobId);
+    try {
+      const ctx = await validateSpoolForDispatch(
+        {
+          id: jobWrapper.job.id,
+          name: jobWrapper.job.name || jobWrapper.gcodeFile?.name,
+          requiredMaterialType: jobWrapper.job.requiredMaterialType || jobWrapper.gcodeFile?.materialType,
+        },
+        { id: jobWrapper.assignedPrinter.id, name: jobWrapper.assignedPrinter.name },
+      );
+
+      if (ctx) {
+        // Spool issue found — show validation modal
+        setSpoolValidationCtx(ctx);
+        setDispatchingJobId(null);
+      } else {
+        // No issues — dispatch directly
+        setDispatchingJobId(null);
+        await executeDispatch(jobId);
+      }
+    } catch {
+      // Validation fetch failed — don't block dispatch
+      setDispatchingJobId(null);
+      await executeDispatch(jobId);
+    }
+  }, [jobs, executeDispatch]);
 
   // Dispatch upload progress subscription (SignalR)
   useEffect(() => {
@@ -384,7 +426,7 @@ export function PrintQueueDashboardPage() {
     <PageTemplate
       title="Print Queue Dashboard"
       subtitle="View and manage all queued and printing jobs"
-      actions={<HelpButton onClick={startTour} />}
+      titleActions={<HelpButton onClick={startTour} />}
     >
       {displayError && (
         <Alert type="error" className="mb-4">
@@ -470,6 +512,7 @@ export function PrintQueueDashboardPage() {
                   onAbortPrint={handleAbortPrint}
                   onPriority={handlePriorityChange}
                   onDispatch={handleDispatchJob}
+                  onSchedule={(jobId) => setScheduleModalJobId(jobId)}
                   onReorder={handleReorder}
                   onEdit={(jobId) => {
                     setSelectedJobId(jobId);
@@ -523,6 +566,24 @@ export function PrintQueueDashboardPage() {
           onSave={handleJobDetailsSaved}
         />
       )}
+
+      {/* Schedule Modal */}
+      <ScheduleModal
+        isOpen={scheduleModalJobId !== null}
+        onClose={() => setScheduleModalJobId(null)}
+        jobId={scheduleModalJobId || undefined}
+      />
+
+      {/* Spool Validation Modal — shown before dispatch when spool issues detected */}
+      <SpoolValidationModal
+        isOpen={spoolValidationCtx !== null}
+        onClose={() => setSpoolValidationCtx(null)}
+        onProceed={(jobId) => {
+          setSpoolValidationCtx(null);
+          executeDispatch(jobId);
+        }}
+        context={spoolValidationCtx}
+      />
     </PageTemplate>
   );
 }

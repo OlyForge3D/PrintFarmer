@@ -186,6 +186,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.Dispatch.IAutoDispatchTrigger>(autoDispatchTrigger);
 
         _ = services.Configure<Farm.Infrastructure.Settings.BackendTimeoutSettings>(configuration.GetSection(Farm.Infrastructure.Settings.BackendTimeoutSettings.SectionName));
+        _ = services.Configure<Farm.Infrastructure.Settings.ObicoSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ObicoSettings.SectionName));
         RegisterBackendClientPlugins(services, configuration);  // Register backend client plugins FIRST - they register HTTP clients
         RegisterHttpClients(services);
         RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients
@@ -211,6 +212,14 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IDataSeedService, DataSeedService>();
         _ = services.AddScoped<IDataExportService, DataExportService>();
         _ = services.AddScoped<IDataImportService, DataImportService>();
+
+        // Catalog update detection service
+        _ = services.AddScoped<ICatalogUpdateService, CatalogUpdateService>();
+        _ = services.AddHttpClient("CatalogUpdate", client =>
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("PrintFarmer/1.0");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
 
         // Network URL rewriting (stateless, safe as Singleton)
         _ = services.AddSingleton<INetworkUrlRewriteService, NetworkUrlRewriteService>();
@@ -521,6 +530,10 @@ public static class ServiceCollectionExtensions
 
         // Register Obico failure detection service - AI-powered print failure detection
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService, Farm.Infrastructure.Services.FailureDetection.FailureDetectionIncidentHistoryService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.FailureDetection.IFailureDetectionMonitorStatus, Farm.Infrastructure.Services.FailureDetection.FailureDetectionMonitorStatusStore>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.FailureDetection.FailureDetectionMetrics>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService, Farm.Infrastructure.Services.Printers.PrinterSessionTimelineService>();
 
         // Register Obico server assignment service - auto-assigns printers to healthy servers
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService, Farm.Infrastructure.Services.FailureDetection.ObicoServerAssignmentService>();

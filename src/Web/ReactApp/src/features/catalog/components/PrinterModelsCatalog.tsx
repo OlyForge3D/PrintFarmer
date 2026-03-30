@@ -117,7 +117,8 @@ export function PrinterModelsCatalog() {
           {item.hasEnclosure && <Badge variant="info" size="sm">Enclosure</Badge>}
           {item.multiMaterial && <Badge variant="success" size="sm">Multi-Material</Badge>}
           {item.supportsAutoLeveling && <Badge variant="success" size="sm">Auto-Level</Badge>}
-          {!item.hasHeatedBed && !item.hasEnclosure && !item.multiMaterial && !item.supportsAutoLeveling && (
+          {item.defaultWattage != null && <Badge variant="default" size="sm">{item.defaultWattage}W</Badge>}
+          {!item.hasHeatedBed && !item.hasEnclosure && !item.multiMaterial && !item.supportsAutoLeveling && item.defaultWattage == null && (
             <span className="text-sm text-pf-text-muted">Basic</span>
           )}
         </div>

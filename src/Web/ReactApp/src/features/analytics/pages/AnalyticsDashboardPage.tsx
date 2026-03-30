@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/common/components/ui/Card';
-import { Button } from '@/common/components/ui';
 import { Tabs } from '@/common/components/ui/Tabs';
+import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -19,23 +19,19 @@ import { ExportMenu } from '../components/ExportMenu';
 import { PredictiveAlertsPanel } from '../components/PredictiveAlertsPanel';
 import { CorrelationChartsSection } from '../components/CorrelationChartsSection';
 import { useMaintenanceForecast } from '../hooks/usePredictiveAnalytics';
-
-const PERIOD_OPTIONS = [
-  { label: '7 days', value: 7 },
-  { label: '30 days', value: 30 },
-  { label: '90 days', value: 90 },
-  { label: '1 year', value: 365 },
-  { label: 'All time', value: undefined },
-] as const;
+import type { TimePeriodFilterValue } from '@/common/components/ui/timePeriodOptions';
 
 export const AnalyticsDashboardPage: React.FC = () => {
-  const [days, setDays] = useState<number | undefined>(30);
+  const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
+  const days = period.type === 'preset' ? period.days : undefined;
+  const startDate = period.type === 'custom' ? period.startDate : undefined;
+  const endDate = period.type === 'custom' ? period.endDate : undefined;
 
-  const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days);
-  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365);
-  const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365);
-  const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days);
-  const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days);
+  const { data: summary, isLoading: summaryLoading } = useStatisticsSummary(days, startDate, endDate);
+  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useJobsOverTime(days ?? 365, startDate, endDate);
+  const { data: costData, isLoading: costLoading, error: costError } = useCostOverTime(days ?? 365, startDate, endDate);
+  const { data: filamentData, isLoading: filamentLoading, error: filamentError } = useFilamentByMaterial(days, startDate, endDate);
+  const { data: utilizationData, isLoading: utilizationLoading, error: utilizationError } = usePrinterUtilization(days, startDate, endDate);
   const { data: forecasts = [] } = useMaintenanceForecast(days);
 
   return (
@@ -45,23 +41,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
       icon={TrendingUpIcon}
       actions={
         <div className="flex items-center gap-3">
-          <div className="flex gap-1" role="group" aria-label="Time period filter">
-            {PERIOD_OPTIONS.map((opt) => (
-              <Button
-                variant="unstyled"
-                key={opt.label}
-                onClick={() => setDays(opt.value)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  days === opt.value
-                    ? 'bg-pf-primary text-white'
-                    : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
-                }`}
-                aria-pressed={days === opt.value}
-              >
-                {opt.label}
-              </Button>
-            ))}
-          </div>
+          <TimePeriodFilter value={period} onChange={setPeriod} />
           <ExportMenu days={days} />
         </div>
       }

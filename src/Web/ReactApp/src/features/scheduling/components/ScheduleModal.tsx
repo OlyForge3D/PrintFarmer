@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button, Input, Select, FormField } from '@/common/components/ui';
-import { useScheduleJob, useTimezones } from '@/common/hooks/useApi';
+import { Button, Input, Select, FormField, Spinner } from '@/common/components/ui';
+import { useScheduleJob, useTimezones, queryKeys } from '@/common/hooks/useApi';
+import { apiClient } from '@/services/api';
 import type { RecurrenceType, ScheduleJobRequest } from '@/types/api';
 
 interface ScheduleModalProps {
@@ -20,7 +22,17 @@ export function ScheduleModal({ isOpen, onClose, initialDate, jobId }: ScheduleM
   const [recurrenceInterval, setRecurrenceInterval] = useState(1);
 
   const { data: timezones = [] } = useTimezones();
+  const { data: availableJobs = [], isLoading: jobsLoading } = useQuery({
+    queryKey: queryKeys.jobQueue(),
+    queryFn: () => apiClient.getJobQueue(),
+    staleTime: 30_000,
+    enabled: isOpen,
+  });
   const scheduleJobMutation = useScheduleJob();
+
+  const schedulableJobs = availableJobs.filter(
+    (j) => j.job.status === 'Queued' || j.job.status === 'Assigned'
+  );
 
   useEffect(() => {
     if (isOpen && initialDate) {
@@ -102,13 +114,30 @@ export function ScheduleModal({ isOpen, onClose, initialDate, jobId }: ScheduleM
       footer={footerButtons}
     >
       <div className="space-y-4">
-        <FormField label="Job ID" htmlFor="jobId" required>
-          <Input
-            id="jobId"
-            value={selectedJobId}
-            onChange={(e) => setSelectedJobId(e.target.value)}
-            placeholder="Enter job ID to schedule"
-          />
+        <FormField label="Print Job" htmlFor="jobId" required>
+          {jobsLoading ? (
+            <div className="flex items-center gap-2 py-2">
+              <Spinner size="sm" />
+              <span className="text-sm text-pf-text-secondary">Loading jobs…</span>
+            </div>
+          ) : schedulableJobs.length === 0 ? (
+            <div className="rounded-md border border-pf-border bg-pf-bg-1 p-3 text-sm text-pf-text-secondary">
+              No pending jobs available to schedule.
+            </div>
+          ) : (
+            <Select
+              id="jobId"
+              value={selectedJobId}
+              onChange={(e) => setSelectedJobId(e.target.value)}
+            >
+              <option value="">Select a job…</option>
+              {schedulableJobs.map((j) => (
+                <option key={j.job.id} value={j.job.id}>
+                  {j.job.name || j.gcodeFile?.name || 'Unnamed Job'} — {j.assignedPrinter?.name || 'Unassigned'}
+                </option>
+              ))}
+            </Select>
+          )}
         </FormField>
 
         <FormField label="Scheduled Date" htmlFor="scheduledDate" required>
@@ -136,8 +165,8 @@ export function ScheduleModal({ isOpen, onClose, initialDate, jobId }: ScheduleM
             onChange={(e) => setTimezone(e.target.value)}
           >
             {timezones.map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
+              <option key={tz.id} value={tz.id}>
+                {tz.displayName} ({tz.offset})
               </option>
             ))}
           </Select>

@@ -82,6 +82,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 150
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -119,6 +121,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 150
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -155,6 +159,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 200
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -191,6 +197,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 100
   maxPrintSpeed: 1000
+  defaultWattage: 60
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -226,6 +234,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 600
+  defaultWattage: 250
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -263,6 +273,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 180
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -298,6 +310,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 200
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -334,6 +348,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 80
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -366,6 +382,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 120
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -398,6 +416,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 80
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -430,6 +450,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 120
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -463,6 +485,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 80
+  defaultHourlyRate: 0.4
   supportedMaterials:
     - PLA
     - PETG
@@ -501,6 +525,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 175
+  defaultHourlyRate: 0.75
   supportedMaterials:
     - PLA
     - PETG
@@ -539,6 +565,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 200
+  defaultHourlyRate: 0.85
   supportedMaterials:
     - PLA
     - PETG
@@ -577,6 +605,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 250
+  defaultHourlyRate: 1.0
   supportedMaterials:
     - PLA
     - PETG
@@ -615,6 +645,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 150
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -653,6 +685,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 175
+  defaultHourlyRate: 0.7
   supportedMaterials:
     - PLA
     - PETG
@@ -689,6 +723,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 200
+  defaultHourlyRate: 0.8
   supportedMaterials:
     - PLA
     - PETG
@@ -725,6 +761,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 250
+  defaultHourlyRate: 0.9
   supportedMaterials:
     - PLA
     - PETG
@@ -762,6 +800,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 150
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -800,6 +840,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 200
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -840,6 +882,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 250
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -880,6 +924,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 300
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -920,6 +966,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 200
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -960,6 +1008,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 250
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1000,6 +1050,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 300
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1040,6 +1092,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 200
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1084,6 +1138,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 250
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1128,6 +1184,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 300
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1172,6 +1230,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 250
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1216,6 +1276,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 300
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1260,6 +1322,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
+  defaultWattage: 350
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1305,6 +1369,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 150
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1342,6 +1408,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 110
   maxPrintSpeed: 600
+  defaultWattage: 170
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1383,6 +1451,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 100
   maxPrintSpeed: 180
+  defaultWattage: 80
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1421,6 +1491,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 110
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1459,6 +1531,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 110
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1498,6 +1572,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 120
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1537,6 +1613,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 120
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1576,6 +1654,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 150
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1615,6 +1695,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
+  defaultWattage: 180
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1654,6 +1736,8 @@
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
+  defaultWattage: 200
+  defaultHourlyRate: 0.5
   supportedMaterials:
     - PLA
     - PETG
@@ -1676,4 +1760,53 @@
     - slicerModelName: Prusa XL
       slicerType: OrcaSlicer
     - slicerModelName: Original Prusa XL
+      slicerType: PrusaSlicer
+
+# Snapmaker Multi-Toolhead Printers
+- name: Snapmaker U1
+  manufacturer: Snapmaker
+  buildVolume:
+    x: 270
+    y: 270
+    z: 270
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  hasCarbonFilter: false
+  hasHepaFilter: false
+  hasBowdenTube: false
+  hasPtfeLiner: false
+  hasLinearRails: true
+  hasLeadScrews: false
+  hasToolchanger: true
+  hasFilamentCutter: false
+  hasHeatedChamber: false
+  multiMaterial: true
+  supportsAutoLeveling: true
+  maxBedTemp: 110
+  maxPrintSpeed: 250
+  defaultWattage: 350
+  defaultHourlyRate: 0.6
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+    - PA
+  toolheads:
+    - name: T0
+      toolhead: U1 Toolhead
+    - name: T1
+      toolhead: U1 Toolhead
+    - name: T2
+      toolhead: U1 Toolhead
+    - name: T3
+      toolhead: U1 Toolhead
+  aliases:
+    - slicerModelName: Snapmaker U1
+      slicerType: OrcaSlicer
+    - slicerModelName: Snapmaker U1
       slicerType: PrusaSlicer

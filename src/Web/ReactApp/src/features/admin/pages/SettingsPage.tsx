@@ -17,6 +17,7 @@ import {
   SettingGroupMetadata,
 } from '@/services/settingsApi';
 import { ObicoServersSection } from '@/features/admin/components/ObicoServersSection';
+import { FailureDetectionStatusCard } from '@/features/admin/components/FailureDetectionStatusCard';
 
 /** Sidebar navigation item for settings sections */
 interface NavItem {
@@ -307,7 +308,7 @@ export function SettingsPage() {
       title="Settings"
       subtitle="Configure PrintFarmer application settings"
       icon={SettingsIcon}
-      actions={<HelpButton onClick={startTour} />}
+      titleActions={<HelpButton onClick={startTour} />}
     >
       {loading ? (
         <div className="text-center text-pf-text-secondary">Loading settings...</div>
@@ -316,8 +317,11 @@ export function SettingsPage() {
       ) : (
         <div className="flex gap-6" style={{ height: 'calc(100vh - 160px)' }}>
           {/* Sidebar Navigation - Hidden on small screens */}
-          <nav className="hidden lg:block w-56 shrink-0" data-tour="settings-nav">
-            <div className="pr-2">
+          <nav
+            className="hidden lg:flex w-56 shrink-0 min-h-0 flex-col overflow-hidden rounded-xl border border-pf-border bg-pf-card/60"
+            data-tour="settings-nav"
+          >
+            <div className="h-full overflow-y-auto overscroll-contain pr-2 py-3">
               <div className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wider mb-3">
                 Sections
               </div>
@@ -344,26 +348,6 @@ export function SettingsPage() {
                   </ul>
                 </div>
               ))}
-              {/* Integrations */}
-              <div className="mb-4">
-                <div className="text-xs font-medium text-pf-text-secondary mb-2 px-2">
-                  Integrations
-                </div>
-                <ul className="space-y-0.5 ml-3">
-                  <li>
-                    <Button
-                      variant={activeSection === 'obico-servers' ? 'tab' : 'subtle'}
-                      type="button"
-                      onClick={() => scrollToSection('obico-servers')}
-                      className={`w-full justify-start px-3 py-1.5 text-sm
-                        ${activeSection === 'obico-servers' ? 'font-medium' : ''}`}
-                      aria-current={activeSection === 'obico-servers' ? 'true' : undefined}
-                    >
-                      Obico ML Servers
-                    </Button>
-                  </li>
-                </ul>
-              </div>
             </div>
           </nav>
 
@@ -390,17 +374,16 @@ export function SettingsPage() {
                         onChange={(field, value) => handleFieldChange(meta.key, field, value)}
                         fieldErrors={fieldErrorsBySection[meta.key]}
                       />
+                      {meta.key === 'Obico' && (
+                        <div className="mt-4 space-y-4">
+                          <FailureDetectionStatusCard />
+                          <ObicoServersSection />
+                        </div>
+                      )}
                     </div>
                   );
                 })
               )}
-              {/* Obico ML Servers - standalone section */}
-              <div
-                ref={el => { sectionRefs.current['obico-servers'] = el; }}
-                id="section-obico-servers"
-              >
-                <ObicoServersSection />
-              </div>
             </div>
             {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
             <div className="py-4 flex justify-end border-t border-pf-border mt-4" data-tour="settings-save">

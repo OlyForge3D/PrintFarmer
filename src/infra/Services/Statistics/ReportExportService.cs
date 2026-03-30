@@ -24,11 +24,11 @@ public class ReportExportService(
     {
         QuestPDF.Settings.License = LicenseType.Community;
 
-        var summary = await _statisticsService.GetSummaryAsync(request.Days, ct)
+        var summary = await _statisticsService.GetSummaryAsync(request.Days, ct: ct)
             ?? new StatisticsSummaryDto();
-        var utilization = await _statisticsService.GetPrinterUtilizationAsync(request.Days, ct)
+        var utilization = await _statisticsService.GetPrinterUtilizationAsync(request.Days, ct: ct)
             ?? [];
-        var filament = await _statisticsService.GetFilamentByMaterialAsync(request.Days, ct)
+        var filament = await _statisticsService.GetFilamentByMaterialAsync(request.Days, ct: ct)
             ?? [];
 
         var document = Document.Create(container =>
@@ -82,13 +82,13 @@ public class ReportExportService(
     public async Task<byte[]> GenerateCostCsvAsync(ReportRequest request, CancellationToken ct = default)
     {
         int days = request.Days ?? 365;
-        var costData = await _statisticsService.GetCostOverTimeAsync(days, ct);
+        var costData = await _statisticsService.GetCostOverTimeAsync(days, ct: ct);
         return WriteCsv(costData);
     }
 
     public async Task<byte[]> GenerateUtilizationCsvAsync(ReportRequest request, CancellationToken ct = default)
     {
-        var utilization = await _statisticsService.GetPrinterUtilizationAsync(request.Days, ct);
+        var utilization = await _statisticsService.GetPrinterUtilizationAsync(request.Days, ct: ct);
         return WriteCsv(utilization);
     }
 

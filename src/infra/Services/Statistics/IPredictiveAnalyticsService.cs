@@ -15,10 +15,15 @@ public interface IPredictiveAnalyticsService
     /// <summary>
     /// Forecasts printer maintenance needs based on usage patterns.
     /// </summary>
-    Task<List<MaintenanceForecastDto>> ForecastMaintenanceAsync(int? days, CancellationToken ct = default);
+    /// <param name="days">Number of days to forecast ahead.</param>
+    /// <param name="printerId">Optional printer ID to scope the forecast to a single printer.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<MaintenanceForecastDto>> ForecastMaintenanceAsync(int? days, Guid? printerId = null, CancellationToken ct = default);
 
     /// <summary>
     /// Returns active predictive alerts based on current data patterns.
     /// </summary>
-    Task<List<PredictiveAlertDto>> GetActiveAlertsAsync(CancellationToken ct = default);
+    /// <param name="printerId">Optional printer ID to scope alerts to a single printer.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<PredictiveAlertDto>> GetActiveAlertsAsync(Guid? printerId = null, CancellationToken ct = default);
 }

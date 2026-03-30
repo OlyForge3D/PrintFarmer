@@ -49,14 +49,18 @@ const COMMAND_CENTER_STYLES = `
 .ad-beacon { animation: ad-beacon 2s ease-in-out infinite; }
 `;
 
-type AutoDispatchStateFilter = 'all' | 'pendingReady' | 'printing' | 'ready' | 'disabled' | 'idle';
+type AutoDispatchStateFilter = 'all' | 'queued' | 'pendingReady' | 'printing' | 'ready' | 'disabled' | 'idle';
 type AutoDispatchSortMode = 'state' | 'name';
+
+function isDispatchReady(printer: AutoDispatchDetailedStatus): boolean {
+  return printer.isReady || !!printer.bedPreConfirmed;
+}
 
 function getAutoDispatchStatePriority(printer: AutoDispatchDetailedStatus): number {
   if (!printer.enabled) return 4;
   if (printer.state === 'PendingReady') return 0;
   if (printer.currentJobName) return 1;
-  if (printer.isReady) return 2;
+  if (isDispatchReady(printer)) return 2;
   return 3;
 }
 
@@ -79,7 +83,7 @@ function computeFarmStats(printers: AutoDispatchDetailedStatus[]): FarmStats {
     if (!p.enabled) { stats.disabled++; continue; }
     if (p.currentJobName) { stats.printing++; continue; }
     if (p.state === 'PendingReady') { stats.pending++; continue; }
-    if (p.isReady) { stats.ready++; continue; }
+    if (isDispatchReady(p)) { stats.ready++; continue; }
     stats.idle++;
   }
   return stats;
@@ -165,11 +169,13 @@ export function AutoDispatchDashboardPage() {
       list = list.filter(p => {
         const isPrinting = !!p.currentJobName;
         const isPendingReady = p.state === 'PendingReady';
+        const isReady = isDispatchReady(p);
+        if (stateFilter === 'queued') return p.queueDepth > 0;
         if (stateFilter === 'disabled') return !p.enabled;
         if (stateFilter === 'printing') return p.enabled && isPrinting;
         if (stateFilter === 'pendingReady') return p.enabled && isPendingReady;
-        if (stateFilter === 'ready') return p.enabled && p.isReady && !isPrinting;
-        if (stateFilter === 'idle') return p.enabled && !isPrinting && !isPendingReady && !p.isReady;
+        if (stateFilter === 'ready') return p.enabled && isReady && !isPrinting;
+        if (stateFilter === 'idle') return p.enabled && !isPrinting && !isPendingReady && !isReady;
         return true;
       });
     }
@@ -179,6 +185,8 @@ export function AutoDispatchDashboardPage() {
       if (sortMode === 'state') {
         const diff = getAutoDispatchStatePriority(a) - getAutoDispatchStatePriority(b);
         if (diff !== 0) return diff;
+        const queueDepthDiff = b.queueDepth - a.queueDepth;
+        if (queueDepthDiff !== 0) return queueDepthDiff;
         return (a.printerName ?? '').localeCompare(b.printerName ?? '');
       }
       return (a.printerName ?? '').localeCompare(b.printerName ?? '');
@@ -187,6 +195,10 @@ export function AutoDispatchDashboardPage() {
   }, [status?.printers, stateFilter, sortMode]);
 
   const farmStats = useMemo(() => computeFarmStats(status?.printers ?? []), [status?.printers]);
+  const queuedPrinterCount = useMemo(
+    () => (status?.printers ?? []).filter((printer) => printer.queueDepth > 0).length,
+    [status?.printers],
+  );
 
   const handleGlobalToggle = (enabled: boolean) => {
     setGlobalEnabledMutation.mutate(enabled);
@@ -274,6 +286,7 @@ export function AutoDispatchDashboardPage() {
             <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Filter printers by state">
               {([
                 ['all', 'All', undefined],
+                ['queued', 'Queued Jobs', queuedPrinterCount],
                 ['pendingReady', 'Attention', farmStats.pending],
                 ['printing', 'Printing', farmStats.printing],
                 ['ready', 'Ready', farmStats.ready],
@@ -358,7 +371,7 @@ type AccentKey = 'disabled' | 'printing' | 'ready' | 'pending' | 'idle';
 function getAccentKey(printer: AutoDispatchDetailedStatus, isPrinting: boolean, isPendingReady: boolean): AccentKey {
   if (!printer.enabled) return 'disabled';
   if (isPrinting) return 'printing';
-  if (printer.isReady) return 'ready';
+  if (isDispatchReady(printer)) return 'ready';
   if (isPendingReady) return 'pending';
   return 'idle';
 }

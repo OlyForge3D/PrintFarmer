@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formatPrinterState } from '../printerStateDisplay';
+import type { AutoDispatchStatus } from '@/types/api';
+import {
+  formatPrinterState,
+  getPrinterDisplayState,
+  isPendingReadyState,
+  requiresBedClearConfirmation,
+} from '../printerStateDisplay';
 
 describe('printerStateDisplay utils', () => {
   describe('formatPrinterState', () => {
@@ -44,6 +50,154 @@ describe('printerStateDisplay utils', () => {
     it('should trim whitespace', () => {
       expect(formatPrinterState('  Idle  ')).toBe('Idle');
       expect(formatPrinterState('  printing  ')).toBe('Printing');
+    });
+
+    it('should split compound states into separate words', () => {
+      expect(formatPrinterState('PendingReady')).toBe('Pending Ready');
+      expect(formatPrinterState('pending_ready')).toBe('Pending Ready');
+      expect(formatPrinterState('pending-ready')).toBe('Pending Ready');
+    });
+  });
+
+  describe('isPendingReadyState', () => {
+    it('recognizes PendingReady regardless of casing or separators', () => {
+      expect(isPendingReadyState('PendingReady')).toBe(true);
+      expect(isPendingReadyState('pendingready')).toBe(true);
+      expect(isPendingReadyState('pending_ready')).toBe(true);
+      expect(isPendingReadyState('Pending Ready')).toBe(true);
+    });
+
+    it('returns false for other states', () => {
+      expect(isPendingReadyState(undefined)).toBe(false);
+      expect(isPendingReadyState('Ready')).toBe(false);
+      expect(isPendingReadyState('Printing')).toBe(false);
+    });
+  });
+
+  describe('getPrinterDisplayState', () => {
+    it('prefers Pending Ready when auto-dispatch requires bed-clear confirmation', () => {
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: 'PendingReady',
+        isOnline: true,
+      })).toBe('Pending Ready');
+    });
+
+    it('falls back to offline when the printer is not online', () => {
+      expect(getPrinterDisplayState({
+        printerState: 'PendingReady',
+        autoDispatchState: 'PendingReady',
+        isOnline: false,
+      })).toBe('Offline');
+    });
+
+    it('uses the printer state when no pending bed-clear confirmation exists', () => {
+      expect(getPrinterDisplayState({
+        printerState: 'Printing',
+        autoDispatchState: 'Ready',
+        isOnline: true,
+      })).toBe('Printing');
+    });
+
+    it('uses the failed bed-clear gate from the detailed status payload as a Pending Ready fallback', () => {
+      const autoDispatchStatus: AutoDispatchStatus = {
+        printerId: 'printer-1',
+        enabled: true,
+        state: 'None',
+        queueDepth: 2,
+        readyGateChecks: [
+          {
+            name: 'Bed Clear Confirmed',
+            passed: false,
+            message: 'Waiting for operator to confirm bed is clear',
+            checkedAt: '2026-03-25T00:00:00Z',
+          },
+        ],
+      };
+
+      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(true);
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: autoDispatchStatus.state,
+        autoDispatchStatus,
+        isOnline: true,
+      })).toBe('Pending Ready');
+    });
+
+    it('does not show Pending Ready when the failed bed-clear gate says no confirmation is needed', () => {
+      const autoDispatchStatus: AutoDispatchStatus = {
+        printerId: 'printer-1',
+        enabled: true,
+        state: 'None',
+        queueDepth: 0,
+        readyGateChecks: [
+          {
+            name: 'Bed Clear Confirmed',
+            passed: false,
+            message: 'No confirmation needed yet',
+            checkedAt: '2026-03-25T00:00:00Z',
+          },
+        ],
+      };
+
+      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(false);
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: autoDispatchStatus.state,
+        autoDispatchStatus,
+        isOnline: true,
+      })).toBe('Complete');
+    });
+
+    it('keeps the Pending Ready fallback when a stale summary row still carries waiting-for-operator copy', () => {
+      const autoDispatchStatus: AutoDispatchStatus = {
+        printerId: 'printer-1',
+        enabled: true,
+        state: 'None',
+        queueDepth: 2,
+        readyGateChecks: [
+          {
+            name: 'Bed Clear Confirmed',
+            passed: false,
+            message: 'Waiting for operator to confirm bed is clear',
+            checkedAt: '2026-03-25T00:00:00Z',
+          },
+        ],
+        attentionMessage: 'Print completed. 2 queued jobs are blocked until you clear the bed and confirm ready.',
+      };
+
+      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(true);
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: autoDispatchStatus.state,
+        autoDispatchStatus,
+        isOnline: true,
+      })).toBe('Pending Ready');
+    });
+
+    it('treats a failed bed-clear gate with queued work as Pending Ready even when the gate copy is missing', () => {
+      const autoDispatchStatus: AutoDispatchStatus = {
+        printerId: 'printer-1',
+        enabled: true,
+        state: 'None',
+        queueDepth: 1,
+        readyGateChecks: [
+          {
+            name: 'Bed Clear Confirmed',
+            passed: false,
+            message: '',
+            checkedAt: '2026-03-25T00:00:00Z',
+          },
+        ],
+      };
+
+      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(true);
+      expect(getPrinterDisplayState({
+        printerState: 'Complete',
+        autoDispatchState: autoDispatchStatus.state,
+        autoDispatchStatus,
+        isOnline: true,
+      })).toBe('Pending Ready');
     });
   });
 });

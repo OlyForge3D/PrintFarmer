@@ -78,6 +78,16 @@ public class CreatePrinterFromDiscoveryDto : DiscoveryPrinterInfoDto
     public int? CurrentSpoolId { get; set; }
 
     /// <summary>
+    /// Power consumption in watts. Overrides the model's default wattage when set.
+    /// </summary>
+    public decimal? Wattage { get; set; }
+
+    /// <summary>
+    /// Per-printer machine hourly rate override for cost tracking.
+    /// </summary>
+    public decimal? MachineHourlyRate { get; set; }
+
+    /// <summary>
     /// Toolhead configurations for multi-toolhead printers.
     /// If provided during import, these will be created instead of the default single toolhead.
     /// If null, a default single toolhead will be created.

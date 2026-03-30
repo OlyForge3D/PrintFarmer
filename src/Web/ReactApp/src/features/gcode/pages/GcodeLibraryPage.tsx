@@ -87,7 +87,7 @@ export const GcodeLibraryPage: React.FC = () => {
       subtitle="Browse and manage your G-code files"
       padding="px-4"
       backgroundColor="bg-pf-bg-2"
-      actions={<HelpButton onClick={startTour} />}
+      titleActions={<HelpButton onClick={startTour} />}
     >
       <div className="space-y-4 h-full flex flex-col">
         {/* Filter Panel */}

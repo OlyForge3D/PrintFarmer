@@ -30,13 +30,18 @@ public class DiscoveryHeartbeatMonitorService(
             "pf-icon-network",
             CheckIntervalSeconds);
         _serviceMonitor.ReportStarted(ServiceId);
-        _serviceMonitor.ReportEnabled(ServiceId, true);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                CheckHeartbeat();
+                bool enabled = IsDiscoveryEnabled();
+                _serviceMonitor.ReportEnabled(ServiceId, enabled);
+
+                if (enabled)
+                {
+                    CheckHeartbeat();
+                }
             }
             catch (Exception ex)
             {
@@ -78,5 +83,14 @@ public class DiscoveryHeartbeatMonitorService(
         {
             _serviceMonitor.ReportError(ServiceId, $"Last heartbeat {age.TotalSeconds:F0}s ago — discovery service may be down");
         }
+    }
+
+    private bool IsDiscoveryEnabled()
+    {
+        using IServiceScope scope = _serviceScopeFactory.CreateScope();
+        ISettingsService settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+
+        return settingsService.GetByKey(NetworkDiscoverySettings.SectionName) is NetworkDiscoverySettings settings
+            && settings.EnableDiscovery;
     }
 }

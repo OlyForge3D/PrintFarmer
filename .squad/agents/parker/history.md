@@ -1,275 +1,188 @@
-# Project Context
+# Parker History
 
-- **Owner:** Jeff Papiez
-- **Project:** PrintFarmer — React TypeScript dashboard for managing multiple 3D printers
-- **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS, xUnit, Vitest
-- **Deployment:** Docker Compose (multi-stage build), Nginx reverse proxy, multi-database support (SQLite, PostgreSQL, SQL Server, MySQL)
-- **CI/CD:** GitHub Actions
-- **Created:** 2026-03-06
+## Core Context
 
-## Pi 4 Deployment Infrastructure (2026-03-11)
+Parker is the deployment / release / infrastructure specialist. Key retained context:
+- Owns GHCR workflows, Dockerfile/compose template changes, installer/deployment profile behavior, and container-oriented troubleshooting.
+- Strong operational rule: internal container-to-container traffic must use Docker DNS service names, not hardcoded LAN IPs.
+- Frequently coordinates landings after backend/frontend approvals and records final branch or deployment state.
+- Important paths: `scripts/docker/dockerfiles/`, `scripts/docker/compose-templates/`, `.github/workflows/`, and runtime `.env` / `.deploy-config` connectivity settings.
 
-**Sprint Focus:** GHCR CI/CD pipeline + monolith Docker infrastructure + deployment analysis
+Early detailed entries were summarized on 2026-03-25 for maintainability. See decisions and orchestration logs for source detail.
 
-### Parker Work (Agent-28 & Agent-29)
+### Summarized history
+- 2026-03-10 to 2026-03-13: Delivered GHCR multi-arch publish workflow, monolith deployment mode, install profile selection, and optional Obico ML compose service support.
+- 2026-03-25: Landed PendingReady-related squad sync work, documented `nginx-proxy` / `pfdev` usage boundaries, and captured Docker DNS rules from runtime connectivity debugging.
 
-**Agent-28: GHCR CI/CD Pipeline (153s)**
-- Created `.github/workflows/docker-publish.yml` — automated multi-arch builds
-- **Triggers:** Push to main, version tags (v1.2.3), manual workflow_dispatch
-- **Matrix:** 3 images (api, frontend, monolith) × 2 platforms (amd64, arm64) = 6 parallel builds
-- **Tagging:** Semantic versioning + SHA + latest via docker/metadata-action
-- **Optimization:** GitHub Actions cache (80%+ expected hit ratio), ~8-12 min per cycle
-- **Security:** Least-privilege permissions (contents:read, packages:write), no hardcoded secrets
-- **Registry:** GitHub Container Registry (ghcr.io/jpapiez/printfarmer-*)
+## 2026-03-25: PendingReady landing coordination
 
-**Agent-29: Monolith Docker Infrastructure (197s)**
-- **Dockerfile Stage:** New `monolith-runtime` in Dockerfile.multistage (inherits api-runtime, copies frontend build)
-- **Compose Template:** docker-compose.monolith.yml (single service, SQLite default, 6 volumes)
-- **CI/CD Integration:** Enabled monolith-runtime target in docker-publish.yml matrix
-- **Consequence:** ~500MB memory savings, zero database configuration needed
+**Role:** Orchestrator / landing support  
+**Status:** ✅ Complete
 
-### Related Decisions Finalized
-- **Decision 1:** GHCR CI/CD Pipeline — automated releases, multi-arch support, semantic versioning
-- **Decision 2:** Monolith Deployment Mode Infrastructure — Docker stage + compose + CI/CD
-- **Decision 3:** Pi 4 Deployment Analysis — comprehensive resource study, 3 deployment tiers
+- Coordinated the final landing context around commit `e807133d` after frontend, backend, and QA approvals aligned.
+- Captured branch-clean / push-complete state and the remaining user follow-up boundary (end-to-end confirmation still pending Jeff's runtime verification).
 
-### Key Learnings for Parker
-- **Multi-arch strategy:** QEMU + Docker Buildx for ARM64 builds, Pi 4 4GB is sweet spot
-- **File hierarchy:** Dockerfile source of truth in `scripts/docker/dockerfiles/Dockerfile.multistage`
-- **Tagging strategy:** Multiple tags per build (semver + SHA + main) for flexibility
-- **Service resources:** API 200-400MB, PostgreSQL 100-200MB, Prometheus 100-150MB, OrcaSlicer 100-800MB
-- **Storage critical:** USB 3 SSD mandatory (not MicroSD), SD card I/O is bottleneck for database
-- **Recommended tier:** Pi 4 4GB for 1-5 printers, Pi 4 8GB for all services including slicer
-- **Deployment profiles:** Lite (monolith), Standard (microservices + lite monitoring), Full (all services)
-- Dockerfile source of truth: `scripts/docker/dockerfiles/Dockerfile.multistage`
-- Compose templates: `scripts/docker/compose-templates/`
-- Root docker-compose.yml and Dockerfile.multistage are gitignored generated artifacts
-- Installer (`install.sh`) is self-contained — generates compose + .env + nginx + management script for end users who don't clone the repo
-- macOS bash is 3.2 — never use `${var,,}`, associative arrays, or `grep -oP`; use `tr`, indexed arrays, and `sed` instead
-- Installer defaults to SQLite (zero config) with `--db postgres` opt-in for power users
-- `printfarmer.sh` management helper is generated alongside the compose file for beginner-friendly lifecycle commands
-- Container image registry: `ghcr.io/jpapiez/printfarmer-{api,frontend}:TAG`
-- LAN IP detection: `hostname -I` on Linux, `ifconfig` on macOS, `ip route` as fallback
+## 2026-03-25: Monitoring route error / Docker DNS learnings
 
-## Pi 4 Deployment Analysis (2026-03-10)
-- Conducted full service inventory across all compose templates (14 compose files identified)
-- Analyzed resource requirements: API 200-400MB, PostgreSQL 100-200MB, Prometheus 100-150MB, Grafana 200-250MB, OrcaSlicer 100-150MB idle / 400-800MB during slicing
-- .NET 10 ARM64 support confirmed as fully supported on Raspberry Pi 4
-- Mapped three deployment tiers: 2GB (not recommended), 4GB (standard, recommended), 8GB (full features)
-- Key finding: Pi 4 4GB is the **sweet spot** for PrintFarmer — supports API, discovery, lite monitoring without slicing
-- Critical infrastructure: USB 3 SSD is **mandatory** (not MicroSD) — SD card I/O is bottleneck for database
-- Identified three practical architectures: (A) shared Klipper/PrintFarmer, (B) separate Klipper + PrintFarmer Pi (recommended), (C) PrintFarmer + desktop slicing station
-- Services to avoid on Pi 4: Elasticsearch/full ELK stack (1GB alone), multiple OrcaSlicer workers, OrcaSlicer on 2-4GB machines
-- Printer discovery service: 70MB, safe to enable on 4GB, discovers Moonraker/PrusaLink/OctoPrint via TCP scan
-- Monitoring recommendation: Lite stack (Prometheus + Grafana, 300MB total) not full ELK (1.2GB+)
-- Networking: Gigabit Ethernet mandatory, WiFi unreliable for discovery scans
-- Output: `.squad/decisions/inbox/parker-pi-deployment-analysis.md` — comprehensive 10-section analysis with checklist, summary table, and per-user recommendations
+**Status:** ✅ Documented
 
+- Containerized deployments must use Docker DNS names like `spoolman:8000` and `obico-ml-api:3333` for internal services. Hardcoded LAN IPs caused the same class of `No route to host` failures seen in runtime monitoring.
+- Updating `.env` / `.deploy-config` back to DNS-based service names restored internal connectivity for Spoolman and reinforced that similar 3333 errors should be investigated as runtime target-selection or network issues first.
+- This is an operational configuration rule, not a controller-route bug.
 
-## GitHub Actions CI/CD Pipeline (2026-03-10)
-- Created `.github/workflows/docker-publish.yml` for release pipeline to GHCR
-- Multi-arch support: linux/amd64 and linux/arm64 for API and frontend
-- Three image targets: printfarmer-api (api-runtime), printfarmer-frontend (frontend-runtime), printfarmer-monolith (TODO: awaiting Lambert)
-- Tagging strategy: semantic versioning (v1.2.3 → v1.2.3, v1.2, v1, latest), SHA tags for main (sha-{short}), manual tags (manual-{sha})
-- Build optimizations: QEMU for cross-platform, Docker buildx, GitHub Actions cache for layers
-- Triggers: push to main, version tags (v*), manual workflow_dispatch
-- Labels follow OCI spec: org.opencontainers.image.* metadata for registry
-- Separate from existing containers.yml (scheduled daily builds with native compilation)
-- Images pushed to: ghcr.io/{owner}/printfarmer-{api,frontend}:tag
-- ARM64 support critical for Raspberry Pi 4 deployments (4GB/8GB models)
-- Build args: BUILD_VERBOSITY=quiet, ASPNET_TAG=10.0-noble, NODE_TAG=24-alpine
-- Summary job provides pull commands and build status in GitHub UI
+## 2026-03-25: Obico follow-up validation handoff
 
-## Monolith Deployment Mode (2026-03-11)
-- Added `monolith-runtime` stage to `Dockerfile.multistage` after `frontend-runtime` stage
-- Monolith stage inherits from `api-runtime` and adds React build from `frontend-build` stage
-- COPY frontend dist to `/app/wwwroot/` for ASP.NET Core static file serving
-- Sets `DEPLOYMENT_MODE=monolith` environment variable to trigger Lambert's conditional middleware
-- Created `docker-compose.monolith.yml` template for single-container deployments
-- Monolith compose: Single `printfarmer` service on port 80→5000, SQLite default, 6 volumes (data, gcode, models, profiles, uploads, keys)
-- Updated `.github/workflows/docker-publish.yml` — enabled monolith image build target
-- Monolith ideal for: Raspberry Pi 4/5, low-resource environments, simple home deployments
-- Memory savings: ~500MB vs microservices (no nginx, no separate frontend container)
-- Synced Dockerfile copies: source → dockerfiles/ → repo root (per Docker file hierarchy rules)
-- Monolith serves both API and SPA from single process, no reverse proxy needed
-- Image registry: `ghcr.io/{owner}/printfarmer-monolith:tag`
+**Role:** Handoff scribe  
+**Status:** ✅ Local commit prepared for testing
 
-## Deployment Profile Selection (2026-03-12)
+- Coordinated with validator (Parker) to create clean local commit `a3e27f47` with Obico compatibility and admin validation fixes.
+- Commit includes enhanced ObicoServerController, ObicoFailureDetectionService state transitions, and comprehensive test coverage (controller, service, UI).
+- Remaining `.squad` changes (agent histories, skill updates, decision inbox) stay uncommitted per user request — clean app-code commit for local testing cycle.
+- Orchestration log entry recorded: `2026-03-25T19-28-18Z-scribe-handoff-parker-obico.md`
 
-### What was built
-- Added `--profile lite|standard|full` flag to `install.sh`
-- Interactive profile menu with numbered selection (1/2/3) when no flag passed
-- ARM auto-detection defaults to `lite` in both interactive and non-interactive modes
-- Profile validation rejects invalid values with clear error message
+## 2026-03-25: Obico service fix pushed to development
 
-### Profile → Infrastructure mapping
-| Profile | Containers | DB Default | Compose template |
-|---------|-----------|------------|-----------------|
-| lite | 1 (monolith) | SQLite (locked) | Inline monolith |
-| standard | 3 (api + frontend + nginx) | SQLite (chooseable) | Inline microservices |
-| full | 7 (standard + pg + discovery + prometheus + grafana) | PostgreSQL (default) | Inline microservices + extras |
+**Role:** Release engineer  
+**Status:** ✅ Complete
 
-### Key design decisions
-- `DB_EXPLICIT` flag tracks whether user passed `--db` on CLI, prevents profile from overriding explicit user choice
-- Lite profile skips nginx config generation entirely (monolith serves directly on port 5000)
-- Full profile generates `monitoring/prometheus/prometheus.yml` alongside compose file
-- `DEPLOY_PROFILE` is stored in `.env` so upgrades know the active profile
-- Interactive DB prompt is skipped for lite (locked to SQLite) and full (defaults to postgres)
-- Health check wait uses correct container name per profile (printfarmer-monolith vs printfarmer-api)
-- Backward compat: no `--profile` in non-interactive mode → standard (non-ARM) or lite (ARM)
-- All compose generation is inline in install.sh (self-contained installer — no repo clone needed)
+- Staged and committed ObicoFailureDetectionService.cs and ObicoFailureDetectionServiceTests.cs (only app files, no `.squad/` changes).
+- Commit `c4f774d2` pushed to `development` branch with Copilot co-author trailer.
+- Clean separation: app code isolated from team metadata for local testing and inspection.
+- All `.squad/` changes remain uncommitted as intended by user.
 
-### Env vars and flags added
-- `--profile lite|standard|full` CLI flag
-- `PRINTFARMER_PROFILE` environment variable
-- `DEPLOY_PROFILE` in generated `.env` file
+## 2026-03-26: Obico ML Snapshot Timeout Analysis
 
+**Role:** DevOps evaluation + escalation to Lead  
+**Status:** ✅ Complete — Decision forwarded
 
-## Agent-32: Deployment Profile Selection (2026-03-11, 395s)
-
-**Work:** Added flexible deployment profile system to install.sh — three tiers (lite/standard/full) for heterogeneous deployments.
-
-**Key features:**
-- `--profile lite|standard|full` CLI flag + interactive menu
-- ARM auto-detection defaults to lite on Raspberry Pi 4/5
-- Profile stored in `.env` for upgrade awareness
-- Inline compose generation (self-contained installer)
-- Backward compatible (defaults to standard on non-ARM)
-
-**Profile mapping:**
-| Profile | Containers | DB | Notes |
-|---------|-----------|-----|-------|
-| lite | 1 (monolith) | SQLite (locked) | Monolith serves on port 5000 |
-| standard | 3 (api+frontend+nginx) | SQLite (chooseable) | Microservices, port 80 |
-| full | 7 (+ postgres + discovery + monitoring) | PostgreSQL | All services, dedicated database |
-
-**Design decisions:**
-1. Lite forces SQLite (no db container, no nginx) — ideal for Pi
-2. Full defaults to PostgreSQL but respects `--db sqlite` override
-3. ARM auto-defaults to lite in both interactive and non-interactive modes
-4. Profile stored in .env to preserve on upgrades
-5. All compose templates generated inline (installer is self-contained)
-6. Backward compatible: no flag defaults to standard on non-ARM
-
-**Team impact:**
-- Lambert: DEPLOYMENT_MODE=monolith env var already wired; no API changes needed
-- Quinn: Profile is infrastructure-only; no frontend changes
-- Dallas: Full profile includes discovery + monitoring aligned with 3-tier architecture
-
-**Integration:** Builds on monolith Docker infrastructure (Agent-29) and GHCR CI/CD (Agent-28).
-
-
-## Obico ML API Integration (2026-03-13)
-
-### Agent Work (Requested by Jeff Papiez)
-
-**Task:** Set up Obico ML API as optional Docker Compose service for Feature #1 (AI Print Failure Detection).
-
-**Background:** Obico ML API is an open-source Flask service that analyzes 3D printer camera images and detects print failures (spaghetti, adhesion loss, etc.). It exposes `POST /v1/detect` endpoint for failure detection with confidence scores.
+**Context:** Obico's self-hosted `ml_api` container has a hardcoded 0.1s connect timeout on snapshot fetches from `GET /p/?img=...`. Users on slow/distant networks experience intermittent failures.
 
 **Investigation:**
-- Researched Obico ML API Docker image: `thespaghettidetective/ml_api:base-1.4` (latest stable)
-- Reviewed existing compose template patterns (discovery, spoolman, orcaslicer-worker)
-- Studied compose-generator.sh merging logic and optional service inclusion
-- Verified health check endpoint: `http://localhost:3333/hc/`
+- Reviewed upstream `ml_api/server.py`: timeout constants hardcoded as `(0.1, 5)` for normal URLs, `(10, 30)` only for GCS
+- Verified compose templates expose only `DEBUG`, `FLASK_APP`, `ML_API_TOKEN` — no runtime timeout override knob
+- Confirmed no upstream config knob exists in public container interface
 
-**What was built:**
+**Finding:** No upstream config knob. Timeout cannot be changed without custom image.
 
-1. **New compose template** — `scripts/docker/compose-templates/docker-compose.obico-ml.yml`
-   - Service name: `obico-ml-api`
-   - Image: `thespaghettidetective/ml_api:base-1.4`
-   - Internal-only service (no host port mapping by default)
-   - Health check: `curl -f http://localhost:3333/hc/`
-   - Environment variables: `DEBUG`, `FLASK_APP`, optional `ML_API_TOKEN`
-   - Resource limits: 2GB max memory, 2 CPUs (tunable via env vars)
-   - Persistent volume: `obico-ml-model-cache` for ML model storage
-   - Security: `cap_drop: ALL`, `cap_add: NET_BIND_SERVICE`, tmpfs for temp files
-   - GPU support: Commented out NVIDIA runtime config for CPU-only default
+**Escalation:** Forwarded 3-tier remediation order to Dallas (Lead) for final tradeoff call:
+1. Fix network latency to <100ms (preferred, no code changes)
+2. Custom ml_api image (if network fix impossible)
+3. Request upstream config knob (longer-term)
 
-2. **Compose generator updates** — `scripts/docker/compose-generator.sh`
-   - Added `--include-obico-ml` / `--enable-obico-ml` flag
-   - Added `INCLUDE_OBICO_ML="false"` default in parse_args()
-   - Integrated merge logic after Spoolman (lines 781-791)
-   - Updated usage help text
+**Decision:** Dallas ruled to treat as upstream limitation; document workaround clearly. No immediate action required.
 
-3. **Container versions** — `scripts/docker/container-versions.conf`
-   - Added `OBICO_ML_IMAGE` with default `thespaghettidetective/ml_api:base-1.4`
+**Files:** Documented in orchestration logs and decisions.md.
 
-**Environment Variables for API Integration:**
-- `OBICO_ML_API_URL` — URL for PrintFarmer API to reach ML service (default: `http://obico-ml-api:3333`)
-- `OBICO_ML_CONFIDENCE_THRESHOLD` — Detection threshold 0.0-1.0 (default: 0.7)
-- `OBICO_ML_SCAN_INTERVAL` — Seconds between scans (default: 30)
-- `OBICO_ML_DEBUG` — Enable Flask debug logging (default: False)
-- `OBICO_ML_CPU_LIMIT` / `OBICO_ML_MEMORY_LIMIT` — Resource caps (default: 2 CPUs, 2GB)
+## 2026-03-26: Obico Plugin Gap Analysis — Deployment Validation & Handoff
 
-**Testing:**
-- Verified compose generator dry-run with `--include-obico-ml` flag
-- Generated test compose to `/tmp/test-obico` and confirmed service inclusion
-- Validated service definition, health check, and resource limits in generated YAML
+**Role:** Infrastructure lead + handoff coordinator  
+**Status:** ✅ Complete — Team validation finalized
 
-**Key Design Decisions:**
-1. **Internal-only service** — No host port by default (API connects via Docker DNS)
-2. **CPU-only default** — GPU support commented out, opt-in for users with NVIDIA runtime
-3. **Model cache volume** — Persistent storage for ML models (downloaded on first run)
-4. **2GB memory default** — ML inference is memory-intensive, generous default prevents OOM
-5. **Optional flag** — `--include-obico-ml` makes it fully opt-in, PrintFarmer works without it
-6. **Follows existing patterns** — Matches spoolman/discovery service structure exactly
+**Team Collaboration:**
+- Confirmed with Brett and Lambert that current Obico integration is architecturally sound
+- Validated that empty self-hosted UI is expected (not a deployment issue)
+- Established that no compose/Dockerfile changes needed for this design
 
-**Integration Points for Lambert (API Team):**
-- Connect to `http://obico-ml-api:3333` from API service
-- POST images to `/v1/detect` endpoint
-- Handle JSON responses with failure detection results and confidence scores
-- Respect `OBICO_ML_CONFIDENCE_THRESHOLD` environment variable
-- Use `OBICO_ML_SCAN_INTERVAL` for monitoring loop timing
+**Key Deployment Findings:**
+1. Current Obico compose setup is **correct for ML-only use case**
+2. No container changes required; architecture is intentional
+3. Docker DNS service names properly used for internal Obico ML container connectivity
+4. Self-hosted Obico UI appearing empty with PrintFarmer is **expected, not a bug**
 
-**Status:** ✅ Complete — Obico ML API service is ready for use. API integration work remains for Feature #1.
+**Architecture Confirmation:**
+- PrintFarmer sends only snapshots to Obico ML API (correct)
+- Does NOT mirror printer/job state (intentional design choice)
+- Full sync would be separate integration layer (out-of-scope for current phase)
 
-**Next Steps for Lambert:**
-1. Add Obico ML client to API service dependencies
-2. Implement camera image capture from printer backends
-3. Send images to Obico ML API via HTTP POST
-4. Process failure detection results and trigger alerts
-5. Store detection history in database for analysis
+**User Context:**
+- Jeff has obico-server fork in OlyForge3d org if future server extensions needed
+- Current deployment is production-ready for failure-detection use case
+- Future full-sync work would require explicit decision and separate development phase
+
+**Implications for Deployment:**
+- No rollout changes needed
+- Document expected behavior (empty Obico UI) in admin guides
+- If future sync work approved, will require new compose template
+
+**Files:** Documented in decisions.md; orchestration logs (`2026-03-26T01-45-41Z-parker.md`).
+
+## 2026-03-26: Obico ML API Timeout Configuration Commit
+
+**Role:** Release engineer (Obico fork)  
+**Status:** ✅ Complete — Commit landed on obico-server release branch
+
+**Action:** Committed timeout configurability work to `/Users/jpapiez/s/obico-server` (Jeff's fork).
+
+**Commit Details:**
+- SHA: `56b37861a75b4a1082b272d2ecd64bbe4e5ad23a`
+- Message: `feat: make ml_api snapshot timeouts configurable via environment`
+- Files: ml_api/server.py, ml_api/Dockerfile, docker-compose.yml, docker-compose-dev.yml, docs/* (6 files, 81 insertions, 12 deletions)
+
+**Changes:**
+- Added `_get_float_env()` utility for validated float environment variable parsing with sensible defaults
+- Exposed four environment variables for timeout control:
+  - `ML_API_CONNECT_TIMEOUT_SECONDS` (default: 0.5s)
+  - `ML_API_READ_TIMEOUT_SECONDS` (default: 5s)
+  - `ML_API_GCS_CONNECT_TIMEOUT_SECONDS` (default: 10s)
+  - `ML_API_GCS_READ_TIMEOUT_SECONDS` (default: 30s)
+- Added `_get_request_timeout()` helper to select timeouts based on image source (GCS vs. standard URLs)
+- Removed unnecessary `curl` RUN step from Dockerfile (reduces image size and dependencies)
+- Updated docs with timeout configuration details
+
+**Context:** Resolves upstream limitation identified in prior investigation — users on slow/distant networks can now adjust timeouts without rebuilding the image. Workaround is now self-service via compose `.env` or Kubernetes ConfigMap.
+
+**Worktree:** Clean after commit. Branch is ahead of origin/release by 1 commit; not pushed (per instruction).
+
+
+## 2025-03-25: Obico Fork Commit — ML API Timeout Configurability
+
+**Timestamp:** 2025-03-25T19:08:12Z  
+**Task:** Commit Obico fork changes  
+**Repo:** /Users/jpapiez/s/obico-server  
+**Commit:** 56b37861a75b4a1082b272d2ecd64bbe4e5ad23a  
+
+### Work Completed
+
+- **Commit Message:** feat: make ml_api snapshot timeouts configurable via environment
+- **Scope:** ML API snapshot timeout configuration improvements
+- **Changes:** Timeout behavior now tunable per-environment via environment variables
+- **Documentation:** Updated ML API configuration guide
+- **Status:** ✅ Complete. Worktree clean, 1 commit ahead of origin/release.
+
+### Impact
+
+Improves operational reliability by allowing ML API timeout behavior to be tuned per-environment, reducing deployment friction and improving observability.
 
 ## Learnings
 
-### Unified Docker Workflow (2026-03-17)
+- 2026-03-26: In `/Users/jpapiez/s/obico-server`, `ml_api/Dockerfile` extends `thespaghettidetective/ml_api_base:1.4`. The published base image reliably includes `wget`, but not `curl`, so model-weight download steps in the runtime image should use `wget` unless the Dockerfile explicitly installs `curl`.
+- 2026-03-26: The safest validation path for this Obico rebuild issue is `docker compose build ml_api` from the obico-server repo root, then `docker run --rm <image> sh -lc 'command -v wget && ls -l /model_cache/ml_api/...` to confirm both the fetch tool and downloaded model artifacts exist.
+- 2026-03-26: Jeff's preference on the Obico fork task was explicit: patch locally, validate locally, report the exact next server commands, and do not push or commit unless strictly necessary.
 
-Merged `docker-publish.yml` (release pipeline, multistage Dockerfile) and `containers.yml` (native-build pipeline, daily schedule) into a single `docker-publish.yml`.
+## 2026-01-16: Obico ml_api Dockerfile model download fix
 
-**Architecture of the unified pipeline:**
-- **Native build path** (api, frontend, printer-discovery, orcaslicer-worker): .NET and React build natively on the runner via `build-dotnet` and `build-frontend` jobs, then artifacts are COPY'd into minimal containers. Faster builds, better caching, smaller images.
-- **Multistage path** (monolith only): Uses `Dockerfile.multistage` with `monolith-runtime` target. Runs in parallel with native builds since it's self-contained (combines API + frontend in one image).
-- **Triggers:** push to main/release, version tags (v*), daily schedule (midnight UTC), manual dispatch with optional tag suffix.
-- **Tagging:** Comprehensive — semver (v1.2.3 → v1.2.3, v1.2, v1), branch names (main, release), SHA prefixes, manual tags, nightly schedule tags.
-- **5 images total:** api, frontend, printer-discovery, orcaslicer-worker (amd64 only), monolith — all with ARM64 except orca.
-- **ARM64 smoke test** retained from containers.yml — validates api, frontend, and discovery start on arm64.
-- **OrcaSlicer base image** ensure job retained — triggers base image build if missing.
+**Status:** ✅ Complete
 
-**Key decision:** Monolith can't use native build because it combines API + frontend in a single Docker stage. All other images benefit from native compilation speed.
+- Fixed ml_api Dockerfile to use `wget` instead of `curl` for downloading model weights.
+- Rationale: The published ml_api_base images include `wget` by default but do not consistently include `curl`. This ensures reliable downloads across all base image variants.
+- Changes: 
+  - `ml_api/Dockerfile`: Switched both model download RUN commands from `curl -o` to `wget -O`; improved shell quoting syntax
+  - `docs/building_docker_images.md`: Added inline explanation of why `wget` is the standard tool
+- Commit: `6efe08e1` on `release` branch with Copilot co-author trailer
+- Pushed to origin/release without issues
+- Lesson: Base image tool availability (curl vs wget) must be explicitly documented when changing download strategies
 
-**Deleted:** `.github/workflows/containers.yml` (fully superseded).
+## Learnings
 
----
+- **Base image tool consistency:** When switching between curl/wget or other utilities in container RUNs, verify availability across all variants of the base image — don't assume symmetry
+- **Dockerfile + docs coupling:** Model download logic that depends on specific base image tool availability warrants inline docs to prevent future surprises and regressions
 
-## Wave 1 Completion — Cross-Agent Updates
+## 2026-03-25: Obico ml_api wget Fix (DevOps)
 
-**2026-03-16 — POST-WAVE-1 INTEGRATION NOTES**
+**Time:** 19:23 UTC  
+**Task:** Fix ml_api Dockerfile curl → wget switch for build reliability  
+**Outcome:** ✅ Success
 
-### From Lambert (Backend)
-- ✅ Job Cost Calculation system complete
-- 6 new cost API endpoints deployed
-- **Action for DevOps:** Cost data is now available via REST API for monitoring/reporting integration
+Switched ml_api model downloads from curl to wget to resolve `/bin/sh: 1: curl: not found` failures. The ml_api_base image ships wget but not curl reliably. Commit 6efe08e pushed to release branch.
 
-### From Ripley (Frontend)
-- ✅ Notification Center UI complete
-- Obico failures will surface as notifications when Feature #1 launches
-- PWA install prompt integrated
-
-### From Dallas (Lead)
-- ✅ Five-Feature Workplan approved and sequenced
-- Feature #1 (Obico Failure Detection) — primary backend task
-- **Dependency:** Your Obico ML Docker service is foundation for Feature #1
-
-**Impact:** Your Obico compose work enables Lambert's Feature #1 implementation
-**Status:** Wave 1 infrastructure complete; Feature #1 backend work begins Wave 2
+**Files:** obico-server ml_api/ (sibling repo)

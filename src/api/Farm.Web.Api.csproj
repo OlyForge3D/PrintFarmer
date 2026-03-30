@@ -126,7 +126,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\..\proto\slicer_jobs.proto" GrpcServices="Server" />
+    <!-- Protobuf files: slicer_jobs.proto is compiled offline to avoid protoc ARM64 segfault -->
+    <!-- Pre-generated stubs are in GeneratedProtos/ directory -->
   </ItemGroup>
 
   <!-- Copy backend plugin DLLs (runtime-loaded, not compile-time referenced)

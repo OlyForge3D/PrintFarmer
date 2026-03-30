@@ -27,6 +27,12 @@ public static class BackgroundServicesStartup
         services.Configure<Farm.Infrastructure.Settings.MaintenanceAlertSettings>(configuration.GetSection(Farm.Infrastructure.Settings.MaintenanceAlertSettings.SectionName));
         services.AddHostedService<Farm.Infrastructure.Services.Maintenance.MaintenanceAlertHostedService>();
 
+        // Catalog Module - Catalog Update Detection
+        // Periodically checks if any printer's model template has been updated in the catalog
+        // and notifies active users so they can apply the latest configuration defaults.
+        services.Configure<Farm.Infrastructure.Settings.CatalogUpdateSettings>(configuration.GetSection(Farm.Infrastructure.Settings.CatalogUpdateSettings.SectionName));
+        services.AddHostedService<Farm.Infrastructure.Services.Catalog.CatalogUpdateDetectionService>();
+
         // Orphaned Job Sync - Runs periodically (every 60s) to sync jobs stuck in "Printing" status
         // Catches missed state transitions from direct printer cancellations or WebSocket drops
         services.AddHostedService<Farm.Web.Api.Services.Startup.OrphanedJobSyncStartupService>();

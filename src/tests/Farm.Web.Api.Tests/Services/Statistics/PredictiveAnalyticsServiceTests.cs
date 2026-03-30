@@ -114,7 +114,7 @@ public class PredictiveAnalyticsServiceTests : IClassFixture<CustomWebApplicatio
         });
         await db.SaveChangesAsync();
 
-        var result = await service.ForecastMaintenanceAsync(null);
+        var result = await service.ForecastMaintenanceAsync(null, null);
 
         result.Should().NotBeNull();
         result.Should().Contain(f => f.PrinterId == printer.Id);
@@ -128,7 +128,7 @@ public class PredictiveAnalyticsServiceTests : IClassFixture<CustomWebApplicatio
         using var scope = _factory.Services.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<IPredictiveAnalyticsService>();
 
-        var result = await service.GetActiveAlertsAsync();
+        var result = await service.GetActiveAlertsAsync(null);
 
         result.Should().NotBeNull();
     }
@@ -160,7 +160,7 @@ public class PredictiveAnalyticsServiceTests : IClassFixture<CustomWebApplicatio
         }
         await db.SaveChangesAsync();
 
-        var result = await service.GetActiveAlertsAsync();
+        var result = await service.GetActiveAlertsAsync(null);
 
         result.Should().NotBeEmpty();
         result.Should().Contain(a => a.AlertType == "HighFailureRate");

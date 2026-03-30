@@ -116,8 +116,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuser; fi
 
 # Create necessary directories with proper ownership
-RUN mkdir -p /app/gcode /app/uploads /app/slicers /app/models /data && \
-    chown -R appuser:appuser /app /data
+RUN mkdir -p /app/gcode /app/uploads /app/slicers /app/models && \
+    chown -R appuser:appuser /app
 
 # Copy API binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
@@ -134,8 +134,8 @@ RUN cat > /app/entrypoint.sh << 'EOF'
 set -e
 # Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them
 # The appuser may not own these directories if they're bind mounts from the host
-mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys /data 2>/dev/null || true
-chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys /data 2>/dev/null || true
+mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
+chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
 # Drop to appuser and run application
 exec gosu appuser dotnet Farm.Web.Api.dll
 EOF

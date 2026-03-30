@@ -32,5 +32,11 @@ public record PrinterModelDto(
     // Speed capabilities
     int? MaxPrintSpeed = null,
 
+    // Default power consumption
+    decimal? DefaultWattage = null,
+
+    // Default machine hourly rate
+    decimal? DefaultHourlyRate = null,
+
     // Toolhead templates for multi-toolhead printers
     PrinterModelToolheadDto[]? Toolheads = null);

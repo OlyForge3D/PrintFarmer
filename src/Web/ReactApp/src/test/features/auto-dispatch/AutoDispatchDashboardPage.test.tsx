@@ -65,6 +65,18 @@ describe('AutoDispatchDashboardPage', () => {
     state: 'None',
   };
 
+  const mockPreClearedStatus = {
+    ...mockPrinterStatus,
+    state: 'None',
+    bedPreConfirmed: true,
+    readyGateChecks: [
+      { name: 'Printer Online', passed: true, message: 'Printer is online', checkedAt: '2025-01-15T10:00:00Z' },
+      { name: 'Not Printing', passed: true, message: 'Printer is idle', checkedAt: '2025-01-15T10:00:00Z' },
+      { name: 'Bed Clear Confirmed', passed: true, message: 'Bed pre-cleared for immediate dispatch', checkedAt: '2025-01-15T10:00:00Z' },
+      { name: 'Temperature OK', passed: true, message: 'Temperature in range', checkedAt: '2025-01-15T10:00:00Z' },
+    ],
+  };
+
   const mockGlobalStatus = {
     globalEnabled: true,
     printers: [mockPrinterStatus],
@@ -391,5 +403,152 @@ describe('AutoDispatchDashboardPage', () => {
     );
 
     expect(screen.getByText('Awaiting Bed Clear')).toBeInTheDocument();
+  });
+
+  it('shows pre-cleared readiness state without a failed bed-clear diagnostic', () => {
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: { globalEnabled: true, printers: [mockPreClearedStatus] },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    expect(screen.getByText('Bed pre-cleared — ready for dispatch')).toBeInTheDocument();
+    expect(screen.getByText('Bed Clear Confirmed')).toBeInTheDocument();
+    expect(screen.getAllByText('Ready').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('Pre-Clear Bed')).not.toBeInTheDocument();
+  });
+
+  it('sorts printers with the same state by queue depth before name', () => {
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: {
+        globalEnabled: true,
+        printers: [
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-alpha',
+            printerName: 'Alpha Printer',
+            queueDepth: 1,
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-zulu',
+            printerName: 'Zulu Printer',
+            queueDepth: 5,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    const printerHeadings = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
+    expect(printerHeadings.slice(0, 2)).toEqual(['Zulu Printer', 'Alpha Printer']);
+  });
+
+  it('filters to printers that have queued jobs regardless of current state', async () => {
+    const user = userEvent.setup();
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: {
+        globalEnabled: true,
+        printers: [
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-printing',
+            printerName: 'Printing Queue',
+            currentJobName: 'active-job.gcode',
+            state: 'None',
+            queueDepth: 2,
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-ready',
+            printerName: 'Ready Queue',
+            isReady: true,
+            state: 'Ready',
+            queueDepth: 1,
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-idle',
+            printerName: 'Idle Queue',
+            state: 'None',
+            queueDepth: 3,
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-empty',
+            printerName: 'No Queue',
+            state: 'None',
+            queueDepth: 0,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    await user.click(screen.getByRole('radio', { name: /queued jobs/i }));
+
+    expect(screen.getByText('Printing Queue')).toBeInTheDocument();
+    expect(screen.getByText('Ready Queue')).toBeInTheDocument();
+    expect(screen.getByText('Idle Queue')).toBeInTheDocument();
+    expect(screen.queryByText('No Queue')).not.toBeInTheDocument();
+  });
+
+  it('includes pre-cleared printers in the Ready filter instead of Idle', async () => {
+    const user = userEvent.setup();
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: {
+        globalEnabled: true,
+        printers: [
+          {
+            ...mockPreClearedStatus,
+            printerId: 'printer-precleared',
+            printerName: 'Pre-Cleared Ready',
+          },
+          {
+            ...mockPrinterStatus,
+            printerId: 'printer-idle',
+            printerName: 'Actually Idle',
+            state: 'None',
+            queueDepth: 0,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    await user.click(screen.getByRole('radio', { name: /ready/i }));
+    expect(screen.getByText('Pre-Cleared Ready')).toBeInTheDocument();
+    expect(screen.queryByText('Actually Idle')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: /idle/i }));
+    expect(screen.queryByText('Pre-Cleared Ready')).not.toBeInTheDocument();
+    expect(screen.getByText('Actually Idle')).toBeInTheDocument();
   });
 });

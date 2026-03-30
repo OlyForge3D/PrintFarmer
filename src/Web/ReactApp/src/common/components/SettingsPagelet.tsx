@@ -80,10 +80,10 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div className="flex items-center gap-3 py-1" key={prop.name}>
               {/* Label column - fixed width for alignment */}
               <label 
-                className="flex items-center shrink-0 w-48 text-sm font-medium text-pf-text-primary" 
+                className="flex items-center shrink-0 w-64 text-sm font-medium text-pf-text-primary" 
                 htmlFor={prop.name}
               >
-                <span className="truncate">{displayName}</span>
+                <span className="break-words">{displayName}</span>
                 {isRequired && <span className="text-pf-accent ml-1">*</span>}
                 {hasDescription && <InfoTooltip description={prop.display!.description!} />}
               </label>
@@ -251,6 +251,88 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Material Price Defaults UI */}
+        {metadata.className === 'CostTrackingSettings' && values['materialPriceDefaults'] && typeof values['materialPriceDefaults'] === 'object' && (
+          <div className="mt-4 pt-3 border-t border-pf-border">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h4 className="text-base font-semibold text-pf-text-primary">Material Price Defaults</h4>
+                <p className="text-xs text-pf-text-secondary mt-0.5">Default price per kilogram for each material type. Used when Spoolman pricing is unavailable.</p>
+              </div>
+              <button
+                type="button"
+                className="px-3 py-1.5 text-xs font-medium bg-pf-accent/90 hover:bg-pf-accent text-white rounded-sm transition-colors"
+                onClick={() => {
+                  const current = typeof values['materialPriceDefaults'] === 'object'
+                    && values['materialPriceDefaults'] !== null ? values['materialPriceDefaults'] : {};
+                  const existing = Object.keys(current as Record<string, unknown>);
+                  let newName = 'New Material';
+                  let counter = 1;
+                  while (existing.some(k => k.toLowerCase() === newName.toLowerCase())) {
+                    newName = `New Material ${++counter}`;
+                  }
+                  onChange('materialPriceDefaults', { ...(current as Record<string, unknown>), [newName]: 25 });
+                }}
+                aria-label="Add material price default"
+              >+ Add Material</button>
+            </div>
+            <div className="space-y-2">
+              {Object.entries(values['materialPriceDefaults'] as Record<string, unknown>).map(([material, price]) => (
+                <div key={material} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className="border border-pf-border rounded-sm px-2 py-1.5 w-40 text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
+                    value={material}
+                    aria-label="Material name"
+                    title="Material type name (e.g., PLA, PETG)"
+                    onChange={e => {
+                      const newName = e.target.value;
+                      const current = { ...(values['materialPriceDefaults'] as Record<string, unknown>) };
+                      // Rename: copy value to new key, delete old key
+                      const entries = Object.entries(current);
+                      const updated: Record<string, unknown> = {};
+                      for (const [k, v] of entries) {
+                        updated[k === material ? newName : k] = v;
+                      }
+                      onChange('materialPriceDefaults', updated);
+                    }}
+                  />
+                  <span className="text-sm text-pf-text-secondary">$</span>
+                  <input
+                    type="number"
+                    className="border border-pf-border rounded-sm px-2 py-1.5 w-28 text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
+                    value={typeof price === 'number' ? price : ''}
+                    min={0}
+                    max={500}
+                    step="any"
+                    aria-label={`Price per kg for ${material}`}
+                    title="Price per kilogram (USD)"
+                    onChange={e => {
+                      const current = typeof values['materialPriceDefaults'] === 'object'
+                        && values['materialPriceDefaults'] !== null ? values['materialPriceDefaults'] : {};
+                      onChange('materialPriceDefaults', {
+                        ...(current as Record<string, unknown>),
+                        [material]: e.target.value === '' ? '' : Number(e.target.value)
+                      });
+                    }}
+                  />
+                  <span className="text-xs text-pf-text-secondary">/kg</span>
+                  <button
+                    type="button"
+                    className="ml-1 px-2 py-1 text-xs bg-pf-error/90 hover:bg-pf-error text-white rounded-sm transition-colors"
+                    onClick={() => {
+                      const current = { ...(values['materialPriceDefaults'] as Record<string, unknown>) };
+                      delete current[material];
+                      onChange('materialPriceDefaults', current);
+                    }}
+                    aria-label={`Remove ${material}`}
+                  >×</button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

@@ -31,22 +31,27 @@ public class PredictiveAnalyticsController(IPredictiveAnalyticsService predictiv
     /// <summary>
     /// Forecasts printer maintenance needs.
     /// </summary>
+    /// <param name="days">Number of days to forecast ahead.</param>
+    /// <param name="printerId">Optional printer ID to scope the forecast to a single printer.</param>
+    /// <param name="ct">Cancellation token.</param>
     [HttpGet("maintenance-forecast")]
     [ProducesResponseType(typeof(List<MaintenanceForecastDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetMaintenanceForecastAsync([FromQuery] int? days, CancellationToken ct)
+    public async Task<IActionResult> GetMaintenanceForecastAsync([FromQuery] int? days, [FromQuery] Guid? printerId, CancellationToken ct)
     {
-        var forecast = await _predictiveService.ForecastMaintenanceAsync(days, ct);
+        var forecast = await _predictiveService.ForecastMaintenanceAsync(days, printerId, ct);
         return Ok(forecast);
     }
 
     /// <summary>
     /// Returns active predictive alerts.
     /// </summary>
+    /// <param name="printerId">Optional printer ID to scope alerts to a single printer.</param>
+    /// <param name="ct">Cancellation token.</param>
     [HttpGet("active-alerts")]
     [ProducesResponseType(typeof(List<PredictiveAlertDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetActiveAlertsAsync(CancellationToken ct)
+    public async Task<IActionResult> GetActiveAlertsAsync([FromQuery] Guid? printerId, CancellationToken ct)
     {
-        var alerts = await _predictiveService.GetActiveAlertsAsync(ct);
+        var alerts = await _predictiveService.GetActiveAlertsAsync(printerId, ct);
         return Ok(alerts);
     }
 }

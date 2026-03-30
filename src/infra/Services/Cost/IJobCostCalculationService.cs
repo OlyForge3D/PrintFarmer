@@ -30,4 +30,11 @@ public interface IJobCostCalculationService
         decimal? machineTimeCost = null,
         decimal? laborCost = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Recalculates costs for all completed jobs that are missing cost data.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The number of jobs that were successfully recalculated.</returns>
+    Task<int> RecalculateAllAsync(CancellationToken ct = default);
 }

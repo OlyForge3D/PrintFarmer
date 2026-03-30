@@ -711,12 +711,14 @@ npm run lint 2>&1 | head -20
 **Docker Deployment** ⚠️ **CRITICAL USAGE NOTES**:
 - **Location**: Deploy script is at `/home/pi/pfarm/scripts/deploy-docker.sh`
 - **Working Directory**: ALWAYS run from `/home/pi/pfarm` directory (repository root), NOT from `/src`
-- **Command**: `/home/pi/pfarm/scripts/deploy-docker.sh --non-interactive --tear-down`
+- **Deploy Command**: `/home/pi/pfarm/scripts/deploy-docker.sh --non-interactive`
   - `--non-interactive`: Run without prompts (suitable for automated deployments)
-  - `--tear-down`: Remove old containers and rebuild fresh
-- **Alternative**: `bash ./scripts/deploy-docker.sh --non-interactive --tear-down` (when in `/home/pi/pfarm`)
+  - This builds images and starts/restarts all services
+- **Tear-Down Command** (NUCLEAR — destroys everything): `/home/pi/pfarm/scripts/deploy-docker.sh --tear-down`
+  - `--tear-down`: Stops containers, removes local mapped paths, and ends. Does NOT rebuild or redeploy anything.
+  - Use only when you need a completely clean slate before a fresh deploy
 - **Timeout**: Set to 300+ seconds - deployment includes Docker build and container startup
-- **Purpose**: Rebuilds and deploys all services (API, React frontend, database, etc.)
+- **Purpose**: Deploy rebuilds and deploys all services (API, React frontend, database, etc.)
 - **Post-Deployment Validation**:
   ```bash
   docker compose --env-file .env ps          # Check running containers

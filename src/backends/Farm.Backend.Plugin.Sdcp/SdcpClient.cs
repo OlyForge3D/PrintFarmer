@@ -1133,6 +1133,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
+            ObicoEnabled: printer.ObicoEnabled,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description));
     }
 

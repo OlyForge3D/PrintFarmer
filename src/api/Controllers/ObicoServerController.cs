@@ -1,5 +1,8 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Net;
+using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.FailureDetection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +17,8 @@ namespace Farm.Web.Api.Controllers;
 [Authorize]
 public class ObicoServerController : ControllerBase
 {
+    private const string UpstreamHealthProbeSnapshotUrl = "http://printfarmer.local/obico-health-probe.jpg";
+
     private readonly AppDbContext _dbContext;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ObicoServerController> _logger;
@@ -268,8 +273,8 @@ public class ObicoServerController : ControllerBase
     }
 
     /// <summary>
-    /// Validates full Obico ML server connectivity by probing the prediction endpoint.
-    /// Tests /p/ (prediction/detect), accepting 400/405 as evidence the endpoint exists.
+    /// Validates full Obico ML server connectivity against the upstream GET contract first,
+    /// then falls back to the legacy multipart probe for backward compatibility.
     /// </summary>
     private async Task<ObicoServerHealthDto> ValidateServerConnectivityAsync(ObicoServer server, CancellationToken ct)
     {
@@ -288,29 +293,18 @@ public class ObicoServerController : ControllerBase
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", server.ApiKey);
             }
 
-            // Test /p/ prediction endpoint (core functionality)
-            try
+            (bool validated, string? upstreamError) = await TryValidateUpstreamPredictionEndpointAsync(httpClient, ct);
+            if (!validated)
             {
-                var request = new HttpRequestMessage(HttpMethod.Post, "p/");
-                request.Content = new StringContent(string.Empty);
-                HttpResponseMessage response = await httpClient.SendAsync(request, ct);
-
-                // 400 = endpoint exists but needs proper multipart form data (expected)
-                // 405 = endpoint exists but method not allowed (acceptable)
-                // 2xx = endpoint responds (ideal)
-                bool endpointReachable = response.IsSuccessStatusCode ||
-                    response.StatusCode == System.Net.HttpStatusCode.BadRequest ||
-                    response.StatusCode == System.Net.HttpStatusCode.MethodNotAllowed ||
-                    response.StatusCode == System.Net.HttpStatusCode.UnsupportedMediaType;
-
-                if (!endpointReachable)
+                string? legacyError = await TryValidateLegacyPredictionEndpointAsync(httpClient, ct);
+                if (!string.IsNullOrWhiteSpace(legacyError))
                 {
-                    errors.Add($"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}: {response.ReasonPhrase}");
+                    errors.Add(legacyError);
                 }
             }
-            catch (HttpRequestException ex)
+            else if (!string.IsNullOrWhiteSpace(upstreamError))
             {
-                errors.Add($"Cannot reach prediction endpoint /p/: {ex.Message}");
+                errors.Add(upstreamError);
             }
         }
         catch (UriFormatException)
@@ -340,6 +334,104 @@ public class ObicoServerController : ControllerBase
             LatencyMs = stopwatch.ElapsedMilliseconds,
             ErrorMessage = errors.Count > 0 ? string.Join("; ", errors) : null
         };
+    }
+
+    /// <summary>
+    /// Probes the upstream self-hosted contract (`GET /p/`) and validates the `detections` payload shape.
+    /// </summary>
+    private async Task<(bool validated, string? error)> TryValidateUpstreamPredictionEndpointAsync(HttpClient httpClient, CancellationToken ct)
+    {
+        try
+        {
+            string requestPath = $"p/?img={Uri.EscapeDataString(UpstreamHealthProbeSnapshotUrl)}";
+            HttpResponseMessage response = await httpClient.GetAsync(requestPath, ct);
+            string responseBody = await response.Content.ReadAsStringAsync(ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                if (ObicoSnapshotFallbackDetector.ShouldFallbackToLegacyUpload(response.StatusCode) ||
+                    ObicoSnapshotFallbackDetector.ShouldFallbackBecauseSnapshotWasUnreachable(response.StatusCode, responseBody))
+                {
+                    return (false, null);
+                }
+
+                return (true, $"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}: {response.ReasonPhrase}");
+            }
+
+            if (HasDetectionsArray(responseBody))
+            {
+                return (true, null);
+            }
+
+            return (false, null);
+        }
+        catch (HttpRequestException ex)
+        {
+            return (true, $"Cannot reach prediction endpoint /p/: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Preserves compatibility with older multipart upload contracts when the upstream GET contract is unavailable.
+    /// </summary>
+    private static async Task<string?> TryValidateLegacyPredictionEndpointAsync(HttpClient httpClient, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "p/")
+        {
+            Content = new StringContent(string.Empty)
+        };
+        HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+
+        bool endpointReachable = response.IsSuccessStatusCode ||
+            response.StatusCode == HttpStatusCode.BadRequest ||
+            response.StatusCode == HttpStatusCode.UnsupportedMediaType;
+
+        return endpointReachable
+            ? null
+            : $"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}: {response.ReasonPhrase}";
+    }
+
+    /// <summary>
+    /// Detects the upstream self-hosted response shape without depending on exact property casing.
+    /// </summary>
+    private static bool HasDetectionsArray(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(responseBody);
+            return TryGetPropertyIgnoreCase(document.RootElement, "detections", out JsonElement detectionsElement)
+                && detectionsElement.ValueKind == JsonValueKind.Array;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Finds a JSON property without requiring exact casing.
+    /// </summary>
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private static ObicoServerDto ToDto(ObicoServer server)

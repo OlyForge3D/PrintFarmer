@@ -3,6 +3,7 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ public class JobQueueControllerTests
     private readonly Mock<IJobDispatchService> _jobDispatchServiceMock;
     private readonly Mock<IBatchDispatchService> _batchDispatchServiceMock;
     private readonly Mock<IPrinterStatusCacheReader> _printerStatusCacheMock;
+    private readonly Mock<IPrintFarmerTelemetryService> _telemetryServiceMock;
     private readonly JobQueueController _controller;
 
     public JobQueueControllerTests()
@@ -31,6 +33,7 @@ public class JobQueueControllerTests
         _jobDispatchServiceMock = new Mock<IJobDispatchService>();
         _batchDispatchServiceMock = new Mock<IBatchDispatchService>();
         _printerStatusCacheMock = new Mock<IPrinterStatusCacheReader>();
+        _telemetryServiceMock = new Mock<IPrintFarmerTelemetryService>();
         _controller = new JobQueueController(
             _queueServiceMock.Object,
             _printJobManagementServiceMock.Object,
@@ -38,6 +41,7 @@ public class JobQueueControllerTests
             _jobDispatchServiceMock.Object,
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
+            _telemetryServiceMock.Object,
             _loggerMock.Object);
     }
 
@@ -52,6 +56,7 @@ public class JobQueueControllerTests
             _jobDispatchServiceMock.Object,
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
+            _telemetryServiceMock.Object,
             _loggerMock.Object);
 
         // Assert

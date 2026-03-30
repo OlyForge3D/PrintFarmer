@@ -83,12 +83,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           routing: ['react-router'],
-          three: ['three', '@react-three/fiber', '@react-three/drei', 'three-stdlib'],
-          viewers: [
-            // Heavy 3D viewer components (ensure paths resolved at build time)
-            'src/features/models3d/components/3d/ModelViewer3D.tsx',
-            'src/features/models3d/components/3d/GCodeViewer3D.tsx'
-          ]
+          three: ['three', '@react-three/fiber', '@react-three/drei', 'three-stdlib']
         }
       }
     }

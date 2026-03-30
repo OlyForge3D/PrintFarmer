@@ -70,3 +70,114 @@ Agent Scribe initialized and ready for work. Maintains orchestration log, sessio
 - ✅ Updated affected agents (Ash, Ripley, Dallas) with cross-team context
 
 **Outcome:** Camera Phase A documented and team notified. Ready for Phase A.1 (migrations).
+
+## 2026-03-24 Landing — Parker Decision (Nginx Service Naming)
+
+**Task:** Merge Parker's Nginx service naming decision into consolidated decisions.md  
+**Timestamp:** 2026-03-24T14-30-00Z
+
+**Documents Processed:**
+1. Input: `.squad/decisions/inbox/parker-nginx-service-naming.md` — Service naming clarification
+2. Output: `.squad/decisions.md` #21 — Docker Compose service naming decision record
+3. Cleanup: Deleted inbox file after merge
+
+**Actions Completed:**
+- ✅ Merged Parker's Nginx service naming clarification into decisions.md as decision #21
+- ✅ Updated decision status to DOCUMENTED (user education, no code changes)
+- ✅ Deleted inbox file: `.squad/decisions/inbox/parker-nginx-service-naming.md`
+- ✅ Documented context, implications, and user education requirements
+
+**Outcome:** Parker's documentation decision consolidated. Team now has centralized decision record for service naming conventions and local dev vs containerized workflows.
+
+**Key Takeaway:** This decision clarifies that `nginx-proxy` (not `nginx`) is the correct Docker Compose service name, and documents the distinction between `pf-dev.sh` (local dev, no containers) and `deploy-docker.sh` (Docker Compose orchestration). No code changes required — documentation and user education focus only.
+
+## 2026-03-25 Documentation — pf-dev Script Location Clarification
+
+**Task:** Correct earlier diagnosis of pf-dev script location  
+**Timestamp:** 2026-03-25
+
+**Correction Applied:**
+- Previous reference: `pf-dev.sh` (implied root directory)
+- Verified location: `scripts/pfdev` — the canonical local dev helper script
+- This is the unified interface for `bootstrap`, `start`, `stop`, `status`, `logs`, `test`, and `clean` commands
+
+**Outcome:** Team documentation and instructions now reflect correct script location for local development workflow.
+
+## 2026-03-25 PendingReady Landing — Orchestration & Documentation
+
+**Task:** Process Parker's PendingReady landing (commit e807133d); create orchestration logs, session log, update agent histories  
+**Timestamp:** 2026-03-25T17:08:57Z  
+
+**Status:** ✅ COMPLETE — All logs written, agent histories updated, inbox cleaned, git staged.
+
+**Documents Created:**
+1. `.squad/orchestration-log/2026-03-25T17-08-57Z-pendingready-landing.md` — Full commit orchestration record
+2. `.squad/log/2026-03-25T17-08-57Z-pendingready-landing.md` — Session summary
+3. Agent history updates:
+   - Ripley: Frontend fallback + cache fix landed
+   - Lambert: Backend state normalization landed
+   - Kane: Regression validation + approval landed
+   - Parker: Orchestration + landing coordination
+
+**Inbox Status Check:**
+- `.squad/decisions/inbox/` — Empty (no pending decision files)
+
+**Merge Action:**
+- ℹ️ No new decisions in inbox (icon-only shield decision already merged 2026-03-25T16:00:00Z)
+- `.squad/decisions/decisions.md` remains consolidated from prior session
+
+**Outcome:** 
+PendingReady fix fully documented. No pending squad state. Branch clean after push to origin. User directive honored: end-to-end confirmation pending per Jeff Papiez directive.
+
+---
+
+## 2026-03-25 Obico Contract Fix Documentation Sweep
+
+**Task:** Record the Obico self-hosted contract fix landing and consolidate squad records  
+**Timestamp:** 2026-03-25T18:50:21Z
+
+**Actions Completed:**
+1. Wrote orchestration logs for Kane, Dallas, C# rescue, and coordinator verification
+2. Wrote session log `2026-03-25T18-50-21Z-obico-contract-fix.md`
+3. Merged five Obico/runtime decision inbox entries into `.squad/decisions.md` with deduplication
+4. Archived lingering January decision entries out of active `decisions.md`
+5. Refreshed affected agent histories and summarized oversized history files into `## Core Context` form
+
+**Outcome:** Squad documentation now reflects the landed GET-first Obico contract fix, keeps runtime reachability work separate from the route bug, and trims oversized history/decision files back toward maintainable active records.
+
+
+## 2026-03-25 Obico Reachability & Diagnostics Documentation Session
+
+**Task:** Process Parker's Obico snapshot reachability + diagnostics landing (commit `1ae23837`); consolidate decision inbox, create session log, update identity/now.md  
+**Timestamp:** 2026-03-25T13:40:00Z  
+
+**Status:** ✅ COMPLETE — All logs written, decisions merged, inbox cleared, identity updated.
+
+**Documents Created:**
+1. `.squad/log/2026-03-25T13-40-00Z-obico-reachability-diagnostics.md` — Session summary (3 seams unified, pre-commit validation summary)
+2. `.squad/decisions.md` — New decision #25 (Obico Snapshot Reachability consolidated from 5 inbox entries)
+3. `.squad/identity/now.md` — Updated to reflect Obico completion status
+
+**Decisions Merged (5 inbox files):**
+- kane-snapshot-reachability.md → Regression gate specs
+- lambert-snapshot-reachability.md → Fallback implementation design
+- kane-spaghetti-modal-405.md → Rejected direction documentation
+- lambert-spaghetti-modal-405.md → Backend fix specs
+- ripley-spaghetti-modal-405.md → Frontend path analysis (no changes)
+
+**Deduplication & Consolidation:**
+- All 5 inbox decisions consolidated into single unified decision entry documenting the GET-first contract across runtime, admin validation, and frontend monitoring
+- Removed redundant problem statements and aligned solution descriptions around the canonical contract
+- Archived all 5 inbox files after merge
+
+**Key Outcomes:**
+- 3 failure seams now documented as unified under GET-first contract
+- Runtime service + admin validation + frontend monitoring all synchronized
+- 6 Obico-focused backend tests locked in pre-commit validation
+- Ready for deployment to staging/production
+
+**Learnings:**
+- Consolidating parallel decision streams around a canonical contract reduces cognitive load and prevents divergence
+- Three-seam alignment (service/admin/frontend) requires explicit cross-boundary decision documentation
+- Inbox files representing the same architectural problem should reference each other during merge to preserve decision lineage
+

@@ -52,29 +52,31 @@ export function SchedulingPage() {
   const columns = [
     {
       key: 'jobName',
-      label: 'Job Name',
+      header: 'Job Name',
       sortable: true,
+      render: (job: ScheduledJob) => job.jobName,
     },
     {
       key: 'printerName',
-      label: 'Printer',
+      header: 'Printer',
       sortable: true,
+      render: (job: ScheduledJob) => job.printerName,
     },
     {
       key: 'scheduledTime',
-      label: 'Scheduled Time',
+      header: 'Scheduled Time',
       sortable: true,
       render: (job: ScheduledJob) => new Date(job.scheduledTime).toLocaleString(),
     },
     {
       key: 'recurrence',
-      label: 'Recurrence',
+      header: 'Recurrence',
       sortable: true,
       render: (job: ScheduledJob) => job.recurrence || 'Once',
     },
     {
       key: 'status',
-      label: 'Status',
+      header: 'Status',
       sortable: true,
       render: (job: ScheduledJob) => (
         <Badge variant={getStatusBadgeVariant(job.status)}>
@@ -84,7 +86,7 @@ export function SchedulingPage() {
     },
     {
       key: 'actions',
-      label: 'Actions',
+      header: 'Actions',
       render: (job: ScheduledJob) => (
         <div className="flex gap-2">
           {job.status === 'active' && (
@@ -192,6 +194,7 @@ export function SchedulingPage() {
               <DataTable
                 columns={columns}
                 data={scheduledJobs}
+                getRowKey={(job: ScheduledJob) => job.id}
                 sortable
               />
             )}

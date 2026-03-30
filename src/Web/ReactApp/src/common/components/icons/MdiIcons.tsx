@@ -106,6 +106,7 @@ import {
   mdiEject,
   mdiClipboardListOutline,
   mdiShield,
+  mdiCloudDownload,
 } from '@mdi/js';
 
 interface IconProps {
@@ -3030,6 +3031,27 @@ export function ShieldIcon({ className = 'w-4 h-4', ariaLabel = 'Protected' }: O
       role="img"
     >
       <path fill="currentColor" d={mdiShield} />
+    </svg>
+  );
+}
+
+/**
+ * Cloud download icon for catalogue update operations
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <CloudDownloadIcon className="w-5 h-5" ariaLabel="Check for updates" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function CloudDownloadIcon({ className = 'w-4 h-4', ariaLabel = 'Cloud download' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiCloudDownload} />
     </svg>
   );
 }

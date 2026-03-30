@@ -567,6 +567,15 @@
   description: Proprietary hotend for Flashforge Adventurer 5X
   url: https://www.flashforge.com
 
+# Snapmaker Hotends
+- name: U1 Hotend
+  manufacturer: Snapmaker
+  maxTemp: 300
+  isHighFlow: false
+  maxFlowRate: 20
+  description: Stock all-metal hotend for Snapmaker U1, one per toolhead in 4-tool toolchanger
+  url: https://snapmaker.com/en/u1
+
 # Phrozen Hotends
 - name: Arco Hotend
   manufacturer: Phrozen

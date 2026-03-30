@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
-import { formatPrinterState } from '@/common/utils/printerStateDisplay';
+import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
 import { PrinterBackend, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
@@ -37,6 +37,7 @@ import {
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
+import { getStatusHeaderClassName, getStatusIndicatorColor } from '@/features/printers/utils/statusColors';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
@@ -65,6 +66,8 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
+import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
+import { toast } from 'sonner';
 
 // Animation styles
 // Use unique keyframe/class names to avoid collisions with other injected styles.
@@ -126,8 +129,20 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
   const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
+  const { data: autoDispatchStatus } = useAutoDispatchStatus(printerId ?? '');
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
+
+  const applyTemplateMutation = useMutation({
+    mutationFn: () => apiClient.applyModelTemplate(printerId!),
+    onSuccess: () => {
+      toast.success('Configuration updated successfully');
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+    },
+    onError: () => {
+      toast.error('Failed to apply configuration update');
+    },
+  });
 
   const [isClosing, setIsClosing] = useState(false);
   const closeTimeoutRef = useRef<number | null>(null);
@@ -266,11 +281,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
+  const sidebarShellClassName = layout === 'content'
+    ? `w-full max-w-sm overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
+    : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
 
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
     return (
-      <div className="w-96 h-full bg-pf-sidebar border-l border-pf-border shadow-lg z-30 flex items-center justify-center shrink-0">
+      <div className={`${sidebarShellClassName} z-30 flex items-center justify-center`}>
         <div className="text-pf-text-secondary">Loading...</div>
       </div>
     );
@@ -280,10 +298,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const isOnline = displayPrinter?.isOnline ?? false;
   const isEnabled = displayPrinter?.isEnabled ?? true;
   const rawState = displayPrinter?.state ?? 'unknown';
-  const state = formatPrinterState(rawState);
+  const statusLabel = getPrinterDisplayState({
+    printerState: rawState,
+    autoDispatchState: autoDispatchStatus?.state,
+    autoDispatchStatus,
+    isOnline,
+  });
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
   const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
+  const headerClassName = getStatusHeaderClassName({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
+  const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
 
   const support = getPrinterSupport(backendCapabilities);
 
@@ -586,36 +611,57 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   };
 
   return (
-    <div
-      className={
-        layout === 'content'
-          ? `w-full max-w-sm bg-pf-sidebar border border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
-          : `w-96 h-full bg-pf-sidebar border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`
-      }
-    >
+    <div className={`${sidebarShellClassName} z-30`}>
       {/* Header */}
-      <div className="flex justify-between items-start p-4 border-b border-pf-border shrink-0 gap-3">
+      <div className={`flex justify-between items-start px-4 pt-4 pb-3 border-b border-white/10 shrink-0 gap-3 ${headerClassName}`}>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-lg font-bold text-pf-text-primary truncate">{printer.name}</h2>
-            <div className={`shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-pf-success' : 'bg-pf-disabled'}`} title={isOnline ? 'Online' : 'Offline'} />
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <h2 className="text-2xl font-bebas uppercase tracking-wide leading-none text-pf-text-primary truncate">{printer.name}</h2>
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
+              <span className={`h-2 w-2 rounded-full ${statusIndicatorClassName}`} aria-hidden="true" />
+              <span className="text-pf-text-primary">{statusLabel}</span>
+            </div>
           </div>
           <p className="text-xs text-pf-text-secondary">{printer.manufacturerName} {printer.modelName}</p>
-          <p className="text-xs text-pf-text-secondary mt-1">{state}</p>
+          <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
         </div>
         <Button
           type="button"
           variant="subtle"
           size="sm"
           onClick={handleClose}
-          className="p-1! h-auto! shrink-0"
+          aria-label="Close sidebar"
+          className="p-1! h-auto! shrink-0 bg-black/20 hover:bg-black/30 border border-white/10"
           title="Close sidebar"
           iconCenter={<CloseIcon className="h-6 w-6" />}
         ></Button>
       </div>
 
+      {/* Catalog Update Banner */}
+      {printer.hasCatalogUpdate && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-blue-500/10 border-b border-blue-400/20">
+          <svg className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-blue-300">Configuration update available</p>
+            <p className="text-xs text-pf-text-secondary mt-0.5">
+              The <span className="text-pf-text-primary">{printer.modelName}</span> catalog template has been updated. Apply it to get the latest configuration defaults.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => applyTemplateMutation.mutate()}
+            disabled={applyTemplateMutation.isPending}
+            className="shrink-0 text-xs px-2.5 py-1 rounded-md bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/30 text-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {applyTemplateMutation.isPending ? 'Applying…' : 'Apply'}
+          </button>
+        </div>
+      )}
+
       {/* Scrollable Content */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-pf-sidebar">
         {/* Statistics */}
         <CollapsibleSection
           title="Statistics"
@@ -903,8 +949,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   value={(EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) >= 0 ? (EXTRUDE_DISTANCE_OPTIONS as readonly number[]).indexOf(extrudeStep) : 0}
                   onChange={(e) => setExtrudeStep(EXTRUDE_DISTANCE_OPTIONS[Number(e.target.value)])}
                   disabled={!canExtrudeNow}
-                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed [writing-mode:vertical-lr] [direction:rtl]"
                   aria-label="Extrude distance"
                 />
                 <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeStep}mm</span>
@@ -944,8 +989,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   value={(EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) >= 0 ? (EXTRUDE_SPEED_OPTIONS as readonly number[]).indexOf(extrudeSpeed) : 0}
                   onChange={(e) => setExtrudeSpeed(EXTRUDE_SPEED_OPTIONS[Number(e.target.value)])}
                   disabled={!canExtrudeNow}
-                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                  className="h-20 w-4 accent-pf-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed [writing-mode:vertical-lr] [direction:rtl]"
                   aria-label="Extrude speed"
                 />
                 <span className="text-[9px] font-bold text-pf-text-primary tabular-nums leading-none">{extrudeSpeed}mm/s</span>

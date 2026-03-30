@@ -5,7 +5,10 @@ import type {
   FullBackupExportDto, 
   ImportResponseDto, 
   ImportMode,
-  ImportRequest 
+  ImportRequest,
+  CatalogVersionDto,
+  CatalogUpdateCheckResult,
+  CatalogUpdateApplyResult,
 } from '@/types/adminData';
 
 /**
@@ -101,4 +104,30 @@ export function downloadAsJson(data: unknown, filename: string): void {
 export function generateExportFilename(type: 'catalog' | 'printers' | 'full'): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   return `printfarmer-${type}-${timestamp}.json`;
+}
+
+// --- Catalog Update API ---
+
+/**
+ * Get the currently applied catalog version
+ */
+export async function getCatalogVersion(): Promise<CatalogVersionDto | null> {
+  const response = await apiClient.get<CatalogVersionDto | null>('/admin/catalog/version');
+  return response.data;
+}
+
+/**
+ * Check whether a catalog update is available from the remote repository
+ */
+export async function checkCatalogUpdates(): Promise<CatalogUpdateCheckResult> {
+  const response = await apiClient.get<CatalogUpdateCheckResult>('/admin/catalog/updates/check');
+  return response.data;
+}
+
+/**
+ * Apply available catalog updates from the remote repository
+ */
+export async function applyCatalogUpdates(): Promise<CatalogUpdateApplyResult> {
+  const response = await apiClient.post<CatalogUpdateApplyResult>('/admin/catalog/updates/apply');
+  return response.data;
 }

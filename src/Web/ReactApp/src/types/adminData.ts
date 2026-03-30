@@ -56,3 +56,35 @@ export interface ExportHistoryItem {
   type: 'catalog' | 'printers' | 'full';
   filename: string;
 }
+
+// --- Catalog Update Types ---
+
+export interface CatalogVersionDto {
+  version: string | null;
+  appliedAt: string | null;
+  source: string | null;
+}
+
+export interface CatalogFileChange {
+  fileName: string;
+  category: string;
+  changeType: string;
+}
+
+export interface CatalogUpdateCheckResult {
+  updateAvailable: boolean;
+  currentVersion: string | null;
+  availableVersion: string | null;
+  changedFiles: CatalogFileChange[];
+  checkedAt: string;
+  error: string | null;
+}
+
+export interface CatalogUpdateApplyResult {
+  success: boolean;
+  previousVersion: string | null;
+  appliedVersion: string | null;
+  updatedCategories: string[];
+  appliedAt: string;
+  error: string | null;
+}

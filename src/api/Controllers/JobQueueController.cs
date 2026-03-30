@@ -8,6 +8,7 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,7 @@ public class JobQueueController(
     IJobDispatchService jobDispatchService,
     IBatchDispatchService batchDispatchService,
     IPrinterStatusCacheReader printerStatusCache,
+    IPrintFarmerTelemetryService telemetryService,
     ILogger<JobQueueController> logger) : ControllerBase
 {
     /// <summary>
@@ -169,10 +171,12 @@ public class JobQueueController(
         {
             string? userId = User.Identity?.Name ?? "anonymous";
             QueuedPrintJobDto result = await printJobManagementService.DispatchJobAsync(id.ToString(), userId, CancellationToken.None);
+            telemetryService.RecordPrinterOperation("dispatch", result.AssignedPrinterId ?? id.ToString(), true);
             return Ok(result);
         }
         catch (InvalidOperationException ex)
         {
+            telemetryService.RecordPrinterOperation("dispatch", id.ToString(), false);
             logger.LogWarning("Cannot dispatch job {Id}: {Message}", id, ex.Message);
             return BadRequest(new { error = ex.Message });
         }
@@ -200,10 +204,12 @@ public class JobQueueController(
         {
             string? userId = User.Identity?.Name ?? "anonymous";
             await printJobManagementService.CancelJobAsync(id.ToString(), userId, CancellationToken.None);
+            telemetryService.RecordPrinterOperation("cancel_job", id.ToString(), true);
             return NoContent();
         }
         catch (InvalidOperationException ex)
         {
+            telemetryService.RecordPrinterOperation("cancel_job", id.ToString(), false);
             logger.LogWarning("Cannot cancel job {Id}: {Message}", id, ex.Message);
             return BadRequest(new { error = ex.Message });
         }
@@ -231,10 +237,12 @@ public class JobQueueController(
         {
             string? userId = User.Identity?.Name ?? "anonymous";
             await printJobManagementService.AbortPrintAsync(id.ToString(), userId, CancellationToken.None);
+            telemetryService.RecordPrinterOperation("abort", id.ToString(), true);
             return NoContent();
         }
         catch (InvalidOperationException ex)
         {
+            telemetryService.RecordPrinterOperation("abort", id.ToString(), false);
             logger.LogWarning("Cannot abort print for job {Id}: {Message}", id, ex.Message);
             return BadRequest(new { error = ex.Message });
         }
@@ -261,10 +269,12 @@ public class JobQueueController(
         {
             string userId = User.Identity?.Name ?? "anonymous";
             QueuedPrintJobDto result = await printJobManagementService.RerunJobAsync(id.ToString(), userId, CancellationToken.None);
+            telemetryService.RecordPrinterOperation("rerun", result.AssignedPrinterId ?? id.ToString(), true);
             return Ok(result);
         }
         catch (InvalidOperationException ex)
         {
+            telemetryService.RecordPrinterOperation("rerun", id.ToString(), false);
             logger.LogWarning("Cannot rerun job {Id}: {Message}", id, ex.Message);
             return BadRequest(new { error = ex.Message });
         }

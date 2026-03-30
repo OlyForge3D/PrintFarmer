@@ -32,4 +32,7 @@ public record PrinterDetailsDto(
     string? Username = null,
     string? Password = null,
     bool ObicoEnabled = false,
-    string? ObicoServerName = null);
+    string? ObicoServerName = null,
+    decimal? Wattage = null,
+    decimal? MachineHourlyRate = null,
+    bool HasCatalogUpdate = false);

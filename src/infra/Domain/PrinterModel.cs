@@ -74,5 +74,24 @@ public class PrinterModel
 
     public string? BedTextureUrl { get; set; } // URL to bed texture image (from OrcaSlicer assets)
 
+    /// <summary>
+    /// Default power consumption in watts for this printer model.
+    /// Used as fallback when per-printer wattage is not set.
+    /// </summary>
+    public decimal? DefaultWattage { get; set; }
+
+    /// <summary>
+    /// Default machine hourly rate for this printer model.
+    /// Used as fallback when per-printer hourly rate is not set.
+    /// Cascade: printer.MachineHourlyRate → model.DefaultHourlyRate → settings.DefaultMachineHourlyRate.
+    /// </summary>
+    public decimal? DefaultHourlyRate { get; set; }
+
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Tracks when this printer model definition was last modified.
+    /// Used to detect when printers linked to this model need their configuration refreshed.
+    /// </summary>
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -1,7 +1,7 @@
 ---
 description: Code review following VS Code contribution standards — correctness, lifecycle, naming, layering, accessibility, and security
 name: Code Review (Gemini)
-tools: ['search', 'read/problems', 'read/terminalLastCommand', 'web/githubRepo']
+tools: ['search', 'read/problems', 'read/terminalLastCommand']
 model: Gemini 3 Pro (Preview) (copilot)
 ---
 

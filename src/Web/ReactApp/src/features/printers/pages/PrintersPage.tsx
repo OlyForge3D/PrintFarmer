@@ -24,6 +24,7 @@ import { Select } from '@/common/components/ui/Select';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
+import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
@@ -88,7 +89,11 @@ export function PrintersPage() {
   const deletePrinterMutation = useDeletePrinter();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const pendingPrinterIds = useMemo(
-    () => new Set(((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter(s => s.state === 'PendingReady').map(s => s.printerId)),
+    () => new Set(
+      ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[])
+        .filter((status) => requiresBedClearConfirmation(status))
+        .map((status) => status.printerId)
+    ),
     [allAutoDispatchStatuses]
   );
   const [searchParams] = useSearchParams();
@@ -343,7 +348,7 @@ export function PrintersPage() {
       title="Printers"
       subtitle="Monitor and manage your 3D printer farm"
       icon={PrinterIcon}
-      actions={<HelpButton onClick={startTour} />}
+      titleActions={<HelpButton onClick={startTour} />}
     >
       <div className={isCollapsedSidebarOpen ? 'min-w-0 lg:pr-96' : 'min-w-0'}>
         <div className="min-w-0">

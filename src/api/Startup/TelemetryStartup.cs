@@ -111,6 +111,7 @@ public static class TelemetryStartup
                        .AddRuntimeInstrumentation()
                        .AddMeter("PrintFarmer.Artifacts")
                        .AddMeter("PrintFarmer.Slicing")
+                       .AddMeter("PrintFarmer.FailureDetection")
                        .AddMeter("PrintFarmer.API");
 
                 // Add console exporter only if explicitly enabled (same as tracing)

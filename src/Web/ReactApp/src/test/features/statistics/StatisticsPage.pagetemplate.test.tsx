@@ -87,6 +87,7 @@ describe('StatisticsPage — page structure', () => {
     expect(screen.getByText('7 days')).toBeInTheDocument();
     expect(screen.getByText('30 days')).toBeInTheDocument();
     expect(screen.getByText('90 days')).toBeInTheDocument();
+    expect(screen.getByText('1 year')).toBeInTheDocument();
     expect(screen.getByText('All time')).toBeInTheDocument();
   });
 

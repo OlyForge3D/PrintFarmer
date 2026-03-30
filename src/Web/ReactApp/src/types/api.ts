@@ -121,6 +121,10 @@ export interface PrinterConnection {
 export interface PrinterMetadata {
   /** User notes/description */
   notes?: string;
+  /** Whether Obico AI failure detection is enabled for this printer. */
+  obicoEnabled?: boolean;
+  /** True when the printer's linked catalog model has been updated since the last template sync. */
+  hasCatalogUpdate?: boolean;
   /** Manufacturer ID (foreign key) */
   manufacturerId?: string;
   /** Manufacturer name (e.g., "Prusa", "Creality") */
@@ -189,6 +193,8 @@ export interface PrinterJobInfo {
   fileName?: string;
   /** Thumbnail URL for the current job */
   thumbnailUrl?: string;
+  /** Active spool identifier persisted in the PrintFarmer database */
+  currentSpoolId?: number;
   /** Active spool/filament information */
   spoolInfo?: PrinterSpoolInfo;
 }
@@ -607,6 +613,10 @@ export interface CreatePrinterDto {
   cameraSnapshotUrl?: string;
   backendPort?: number;
   frontendPort?: number;
+  /** Power consumption in watts. Overrides the model's default wattage. */
+  wattage?: number;
+  /** Per-printer machine hourly rate override for cost tracking. */
+  machineHourlyRate?: number;
 }
 
 // Test connection request/response for verifying printer connectivity
@@ -678,6 +688,11 @@ export interface UpdatePrinterDto {
   backendPort?: number;
   frontendPort?: number;
   isEnabled?: boolean;
+  // Cost tracking overrides
+  /** Power consumption in watts. Overrides the model's default wattage. */
+  wattage?: number;
+  /** Per-printer machine hourly rate override for cost tracking. */
+  machineHourlyRate?: number;
   // Toolheads - for updating individual toolhead settings
   toolheads?: UpdateToolheadDto[];
 }
@@ -1058,6 +1073,10 @@ export interface PrinterModelDto {
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+  /** Default power consumption in watts for this printer model. */
+  defaultWattage?: number;
+  /** Default machine hourly rate for cost calculations. */
+  defaultHourlyRate?: number;
 
   // Toolhead templates for multi-toolhead printers
   toolheads?: PrinterModelToolheadDto[];
@@ -1159,6 +1178,12 @@ export interface PrinterDetails {
   obicoServerName?: string | null;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** Power consumption in watts. Overrides the model's default wattage. */
+  wattage?: number;
+  /** Per-printer machine hourly rate override for cost tracking. */
+  machineHourlyRate?: number;
+  /** True when the printer's linked catalog model has been updated since the last template sync. */
+  hasCatalogUpdate?: boolean;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
 }
@@ -1421,6 +1446,8 @@ export interface UpdateModelRequest {
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+  defaultWattage?: number;
+  defaultHourlyRate?: number;
 
   // Toolhead templates
   toolheads?: PrinterModelToolheadDto[];
@@ -2950,6 +2977,39 @@ export interface MonitoringStatusDto {
   prometheus: MonitoringServiceStatus;
 }
 
+export interface FailureDetectionPrinterStatusDto {
+  printerId: string;
+  printerName: string;
+  state: string;
+  reason: string;
+  isPrinting: boolean;
+  jobName?: string;
+  fileName?: string;
+  detectionSource: string;
+  detectionTarget?: string;
+  snapshotUrl?: string;
+  lastAnalyzedAt?: string;
+  lastOutcome: string;
+  lastConfidence?: number;
+  lastAutoPaused?: boolean;
+  lastFailureDetectedAt?: string;
+}
+
+export interface FailureDetectionMonitorStatusDto {
+  monitoringEnabled: boolean;
+  confidenceThreshold: number;
+  scanIntervalSeconds: number;
+  autoPauseOnFailure: boolean;
+  configuredPrinterCount: number;
+  activelyMonitoredPrinterCount: number;
+  lastAnalyzedPrinterCount: number;
+  lastFailureCount: number;
+  lastScanStartedAt?: string;
+  lastScanCompletedAt?: string;
+  lastError?: string;
+  printers: FailureDetectionPrinterStatusDto[];
+}
+
 export interface MonitoringMetricsSummaryDto {
   requestsPerSecond: number;
   apiCallsLast24h: number;
@@ -2967,6 +3027,7 @@ export interface MonitoringMetricsSummaryDto {
   databaseOperationsLast24h: number;
   slicerJobsLast24h: number;
   slicerSuccessRatePercent: number;
+  failureDetectionConfiguredPrinters: number;
   timestamp: string;
 }
 
@@ -3029,6 +3090,10 @@ export interface AutoDispatchStatus {
   currentJobName?: string;
   lastActivity?: string;
   bedPreConfirmed?: boolean;
+  readyGateChecks?: ReadyGateCheck[];
+  attentionMessage?: string;
+  attentionReason?: string;
+  operatorAction?: string;
 }
 
 export interface AutoDispatchNextJob {
@@ -3246,33 +3311,71 @@ export interface MarkMultipleAsReadRequest {
 
 // ============ Cost Tracking Types ============
 
+/** Settings that control how print job costs are calculated. */
+export interface CostTrackingSettings {
+  enableAutomaticCostCalculation: boolean;
+  electricityRatePerKwh: number;
+  averagePrinterWattage: number;
+  defaultMachineHourlyRate: number;
+  laborMarkupPercent: number;
+  profitMarginTargetPercent: number;
+}
+
 export interface CostSummary {
-  totalMaterialCost: number;
-  totalEnergyCost: number;
-  totalMachineTimeCost: number;
-  totalLaborCost: number;
-  totalCost: number;
-  jobCount: number;
-  averageCostPerJob: number;
+  totalCostUsd: number;
+  averageCostPerJobUsd: number;
+  jobsWithCostData: number;
+  totalMaterialCostUsd: number;
+  totalEnergyCostUsd: number;
+  totalMachineTimeCostUsd: number;
+  totalLaborCostUsd: number;
+  mostExpensiveMaterial?: string;
+  mostExpensiveMaterialCost: number;
 }
 
 export interface CostByPrinter {
   printerId: string;
   printerName: string;
-  totalCost: number;
+  totalCostUsd: number;
+  averageCostPerJobUsd: number;
   jobCount: number;
+  materialCostUsd: number;
+  energyCostUsd: number;
+  machineTimeCostUsd: number;
+  laborCostUsd: number;
 }
 
 export interface CostByMaterial {
   materialType: string;
-  totalCost: number;
-  totalWeight: number;
+  totalCostUsd: number;
+  averageCostPerJobUsd: number;
   jobCount: number;
+  totalFilamentUsageGrams: number;
+}
+
+export interface CostByJob {
+  jobId: string;
+  jobName: string;
+  printerName?: string;
+  filamentName?: string;
+  materialType?: string;
+  filamentUsedGrams?: number;
+  totalCostUsd: number;
+  materialCostUsd: number;
+  energyCostUsd: number;
+  machineTimeCostUsd: number;
+  laborCostUsd: number;
+  printTimeSeconds?: number;
+  completedAt?: string;
 }
 
 export interface CostOverTime {
   date: string;
-  totalCost: number;
+  totalCostUsd: number;
+  materialCostUsd: number;
+  energyCostUsd: number;
+  machineTimeCostUsd: number;
+  laborCostUsd: number;
   jobCount: number;
 }
 
@@ -3297,6 +3400,9 @@ export interface AutoDispatchDetailedStatus {
   /** Auto-dispatch workflow state: "None", "PendingReady", or "Ready" */
   state: string;
   bedPreConfirmed?: boolean;
+  attentionMessage?: string;
+  attentionReason?: string;
+  operatorAction?: string;
 }
 
 export interface AutoDispatchGlobalStatus {
@@ -3394,16 +3500,30 @@ export interface ObicoServerHealthResponse {
  * Broadcast when Obico ML detects a potential print failure.
  */
 export interface FailureDetectionEvent {
+  /** Persisted incident identifier when available */
+  id?: string;
   /** Printer ID where failure was detected */
   printerId: string;
   /** Printer name for display */
   printerName: string;
   /** Job ID if available */
   jobId?: string;
-  /** Confidence percentage (0-100) */
+  /** Active job display name when available */
+  jobName?: string;
+  /** Active print file name when available */
+  fileName?: string;
+  /** Confidence score from 0.0 to 1.0 */
   confidence: number;
   /** Detection timestamp (ISO 8601) */
   detectedAt: string;
+  /** Snapshot URL used for the detection */
+  snapshotUrl?: string;
   /** Whether the print was automatically paused */
   autoPaused: boolean;
+}
+
+export interface TimezoneInfo {
+  id: string;
+  displayName: string;
+  offset: string;
 }

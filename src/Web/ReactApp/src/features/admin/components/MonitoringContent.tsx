@@ -9,7 +9,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Card, Spinner, Badge, Button } from '@/common/components/ui';
+import { Card, Spinner, Badge } from '@/common/components/ui';
 import { ChartIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import { MetricsSummaryWidgets } from '@/features/monitoring/components/MetricsSummaryWidgets';
@@ -18,14 +18,9 @@ import type { MonitoringStatusDto } from '@/types/api';
 
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
-const ADVANCED_PREFS_KEY = 'monitoring-advanced-visible';
-
 export function MonitoringContent() {
   const sessionRefreshRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const [sessionKey, setSessionKey] = useState(0);
-  const [showAdvanced, setShowAdvanced] = useState(() => {
-    try { return localStorage.getItem(ADVANCED_PREFS_KEY) === 'true'; } catch { return false; }
-  });
 
   const { data: status, isLoading, error } = useQuery({
     queryKey: ['monitoring-status'],
@@ -54,12 +49,6 @@ export function MonitoringContent() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleAdvanced = () => {
-    const next = !showAdvanced;
-    setShowAdvanced(next);
-    try { localStorage.setItem(ADVANCED_PREFS_KEY, String(next)); } catch { /* noop */ }
-  };
-
   if (isLoading) {
     return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
   }
@@ -70,56 +59,38 @@ export function MonitoringContent() {
 
   const anyAvailable = status?.grafana.available || status?.jaeger.available || status?.prometheus.available;
 
-  if (!anyAvailable) {
-    return (
-      <Card>
-        <Card.Body>
-          <div className="text-center py-8 text-pf-text-secondary">
-            <ChartIcon className="w-12 h-12 mx-auto mb-3 opacity-40" />
-            <p className="text-lg font-medium mb-1">Monitoring Not Configured</p>
-            <p className="text-sm">
-              Deploy the monitoring stack (Prometheus, Grafana, Jaeger) to enable observability features.
-            </p>
-          </div>
-        </Card.Body>
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {/* Service status + deep links */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <ServiceStatusBar status={status} />
-        <div className="flex gap-2 items-center">
-          <Button
-            variant={showAdvanced ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={toggleAdvanced}
-          >
-            {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
-          </Button>
-          <DeepLinks status={status} />
-        </div>
-      </div>
-
-      {/* Essential metrics — always shown when Prometheus available */}
-      {status?.prometheus.available && <MetricsSummaryWidgets />}
-
-      {/* Advanced: Grafana panels — opt-in */}
-      {showAdvanced && status?.grafana.available && (
-        <GrafanaEmbedPanels sessionKey={sessionKey} />
-      )}
-
-      {/* Info when Grafana not available but advanced requested */}
-      {showAdvanced && !status?.grafana.available && (
+      {!anyAvailable && (
         <Card>
           <Card.Body>
-            <p className="text-sm text-pf-text-secondary">
-              Grafana is not configured. Deploy the monitoring stack to enable detailed charts and dashboards.
-            </p>
+            <div className="text-center py-8 text-pf-text-secondary">
+              <ChartIcon className="w-12 h-12 mx-auto mb-3 opacity-40" />
+              <p className="text-lg font-medium mb-1">Monitoring Not Configured</p>
+              <p className="text-sm">
+                Deploy the monitoring stack (Prometheus, Grafana, Jaeger) to enable observability features.
+              </p>
+            </div>
           </Card.Body>
         </Card>
+      )}
+
+      {anyAvailable && (
+        <>
+          {/* Service status + deep links */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <ServiceStatusBar status={status} />
+            <DeepLinks status={status} />
+          </div>
+
+          {/* API metrics */}
+          {status?.prometheus.available && <MetricsSummaryWidgets />}
+
+          {/* Grafana panels */}
+          {status?.grafana.available && (
+            <GrafanaEmbedPanels sessionKey={sessionKey} />
+          )}
+        </>
       )}
     </div>
   );

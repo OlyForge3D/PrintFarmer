@@ -6,19 +6,22 @@ import {
   EditIcon,
   CameraIcon,
   ExternalLinkIcon,
-  ImageIcon,
-  VideoIcon,
   MoreVerticalIcon,
   TagIcon,
-  ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
+import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
+import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
+import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
+import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
+import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
+import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { useJobQueue } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
@@ -27,9 +30,10 @@ import {
   canOpenHistory,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
-import { getStatusHeaderStyle } from '@/features/printers/utils/statusColors';
+import { getStatusHeaderClassName } from '@/features/printers/utils/statusColors';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
+import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { TagDto } from '@/services/tagService';
 
 interface CompactPrinterCardProps {
@@ -48,7 +52,6 @@ export function CompactPrinterCard({
   // Merge with realtime SignalR updates
   const printer = printerProp; // printerProp already includes display data
   const [showCamera, setShowCamera] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -70,6 +73,11 @@ export function CompactPrinterCard({
 
   // Fetch printer tags
   const queryClient = useQueryClient();
+  const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
+  const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
+    printer.id,
+    !!printer.obicoEnabled
+  );
   const { data: printerTags = [] } = useQuery<TagDto[]>({
     queryKey: ['printer-tags', printer.id],
     queryFn: async () => {
@@ -110,6 +118,13 @@ export function CompactPrinterCard({
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
+  const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus);
+  const statusLabel = getPrinterDisplayState({
+    printerState: state,
+    autoDispatchState: autoDispatchStatus?.state,
+    autoDispatchStatus,
+    isOnline,
+  });
 
   // Queue label: "1 of 3" when printing with more jobs queued
   const printingIndex = activeQueueJobs.findIndex(j => {
@@ -131,19 +146,12 @@ export function CompactPrinterCard({
   const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
-  const headerStyle = getStatusHeaderStyle({ state, isOnline, isPrinting, isPaused, isShutdown });
-
-  const toCamelCase = (str: string): string => {
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  };
-
-  // Show Obico ML monitoring badge when printer has an Obico server assigned and is printing
-  const showObicoMonitoringBadge = !!printer.obicoServerId && isPrinting;
+  const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
   return (
     <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
       {/* Bed clear banner — overlay on top of card */}
-      {autoDispatchStatus && autoDispatchStatus.state === 'PendingReady' && (
+      {autoDispatchStatus && isPendingReady && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-black/75">
           <div className="w-[90%]">
             <BedClearBanner
@@ -155,22 +163,35 @@ export function CompactPrinterCard({
         </div>
       )}
       {/* Colored header — background tinted by printer state */}
-      <div style={headerStyle} className="px-3 pt-3 pb-2 rounded-t-xl">
-        {/* Top row: Name + Status Pill + ML Badge */}
+      <div className={`px-3 pt-3 pb-2 rounded-t-xl ${headerClassName}`}>
+          {/* Top row: Name + Status Pill + failure-detection status */}
         <div className="flex items-center gap-2">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
             {printer.name}
           </div>
           <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
             <span className="text-pf-text-primary font-medium">
-              {isOnline ? toCamelCase(state) : 'Offline'}
+              {statusLabel}
             </span>
           </div>
-          {showObicoMonitoringBadge && (
-            <div className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium shrink-0 bg-pf-accent-bg/20 border border-pf-accent/30 text-pf-accent">
-              <ShieldIcon className="h-3 w-3 mr-0.5" ariaLabel="ML Monitoring Active" />
-              <span>ML</span>
-            </div>
+          <FailureDetectionMonitoringBadge
+            enabled={!!printer.obicoEnabled}
+            status={failureDetectionStatus}
+            printerId={printer.id}
+            printerName={printer.name}
+            recentEvents={recentEvents}
+          />
+          {recentFailure && <FailureDetectionBadge event={recentFailure} />}
+          {printer.hasCatalogUpdate && (
+            <span
+              title="A catalog model update is available. Open printer details to apply."
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 border border-blue-400/40 text-blue-300 shrink-0 cursor-default"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Update
+            </span>
           )}
         </div>
         {/* Tags row */}
@@ -211,53 +232,27 @@ export function CompactPrinterCard({
             />
           </div>
 
+          {(isPrinting || isPaused) && (
+            <FailureDetectionMonitoringSummary
+              enabled={!!printer.obicoEnabled}
+              status={failureDetectionStatus}
+              recentEvents={recentEvents}
+              printerName={printer.name}
+              variant="compact"
+              className="mb-3"
+            />
+          )}
+
           {/* Camera view — centered, between progress bar and footer */}
           {showCamera && (
-            <div className="mt-2 w-full flex flex-col bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
-              {hasCameraUrls && cameraSnapshotUrl && cameraStreamUrl && (
-                <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1/50">
-                  <Button
-                    type="button"
-                    onClick={() => setCameraMode('snapshot')}
-                    title="Snapshot"
-                    aria-label="Snapshot"
-                    variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
-                    size="sm"
-                    className="flex-1"
-                    iconCenter={<ImageIcon className="h-4 w-4" />}
-                  />
-                  <Button
-                    type="button"
-                    onClick={() => setCameraMode('stream')}
-                    title="Stream"
-                    aria-label="Stream"
-                    variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
-                    size="sm"
-                    className="flex-1"
-                    iconCenter={<VideoIcon className="h-4 w-4" />}
-                  />
-                </div>
-              )}
-              <div className="w-full aspect-video bg-pf-bg-0 flex items-center justify-center overflow-hidden">
-                {hasCameraUrls ? (
-                  (cameraMode === 'snapshot' && cameraSnapshotUrl) || (!cameraStreamUrl && cameraSnapshotUrl) ? (
-                    <img src={cameraSnapshotUrl} alt="webcam snapshot" className="w-full h-full object-cover" />
-                  ) : (cameraMode === 'stream' && cameraStreamUrl) || (!cameraSnapshotUrl && cameraStreamUrl) ? (
-                    <img src={cameraStreamUrl} alt="webcam stream" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="text-center text-pf-text-secondary p-4">
-                      <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">Camera mode not available</p>
-                    </div>
-                  )
-                ) : (
-                  <div className="text-center text-pf-text-secondary p-4 w-full">
-                    <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No camera configured</p>
-                  </div>
-                )}
-              </div>
-            </div>
+            <PrinterCameraPreview
+              printerId={printer.id}
+              printerName={printer.name}
+              cameraStreamUrl={cameraStreamUrl}
+              cameraSnapshotUrl={cameraSnapshotUrl}
+              isPrinting={isPrinting}
+              className="mt-2"
+            />
           )}
 
         </div>
@@ -285,8 +280,8 @@ export function CompactPrinterCard({
             onClick={() => setShowCamera(!showCamera)}
             disabled={!hasCameraUrls || !isEnabled}
             className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-            aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera available' : 'No camera configured'}
+            aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
+            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
           <Button
@@ -366,10 +361,13 @@ export function CompactPrinterCard({
                 </span>
               )}
               <span
-                className="shrink-0 w-8 h-4 rounded-full border border-white/20"
-                style={{ backgroundColor: printer.spoolInfo.colorHex ?? '#888' }}
+                className="shrink-0 w-8 h-4 rounded-full border border-white/20 overflow-hidden"
                 title={printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Filament color'}
-              />
+              >
+                <svg className="h-full w-full" viewBox="0 0 32 16" aria-hidden="true" focusable="false">
+                  <rect width="32" height="16" fill={printer.spoolInfo.colorHex ?? '#888'} />
+                </svg>
+              </span>
             </>
           ) : (
             <span className="italic text-pf-text-tertiary">No spool loaded</span>

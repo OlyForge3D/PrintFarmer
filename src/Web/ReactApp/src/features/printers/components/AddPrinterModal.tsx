@@ -273,7 +273,7 @@ function AddPrinterModalContent({
       isOpen={isOpen}
       onClose={handleClose}
       title="Add New Printer"
-      width="max-w-2xl"
+      width="max-w-4xl"
       footer={modalFooter}
     >
       {/* Error Message */}
@@ -285,8 +285,8 @@ function AddPrinterModalContent({
 
       {/* Form */}
       <form id="add-printer-form" onSubmit={handleSubmit} className="space-y-4">
-            {/* Basic Info */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Basic Info Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Printer Name */}
               <FormField
                 label="Printer Name"
@@ -389,7 +389,7 @@ function AddPrinterModalContent({
 
             {/* Show backend/frontend port fields for Moonraker and FlashForge */}
             {(formData.backend === PrinterBackend.Moonraker || formData.backend === PrinterBackend.FlashForge) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <FormField label="Backend Port (API)">
                   <Input
                     type="number"
@@ -417,7 +417,7 @@ function AddPrinterModalContent({
 
             {/* Camera URLs (for OctoPrint) */}
             {formData.backend === PrinterBackend.OctoPrint && (
-              <>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <FormField label="Camera Stream URL">
                   <Input
                     type="url"
@@ -436,10 +436,11 @@ function AddPrinterModalContent({
                     aria-label="Camera snapshot URL"
                   />
                 </FormField>
-              </>
+              </div>
             )}
-            {/* Manufacturer & Model */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Manufacturer & Model Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Manufacturer */}
               <FormField label="Manufacturer">
                 <Select
@@ -502,6 +503,41 @@ function AddPrinterModalContent({
                 aria-label="Printer notes"
               />
             </FormField>
+
+            {/* Cost Settings */}
+            <div className="border-t pt-5 mt-5">
+              <h4 className="text-lg font-medium text-pf-text-primary mb-4">Cost Settings</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  label="Wattage (W)"
+                  helper="Power consumption in watts. Leave blank to use model default or global setting."
+                >
+                  <Input
+                    type="number"
+                    value={formData.wattage ?? ''}
+                    onChange={(e) => handleInputChange('wattage', e.target.value ? parseFloat(e.target.value) : undefined)}
+                    placeholder="e.g. 250"
+                    min={0}
+                    step={1}
+                    aria-label="Wattage"
+                  />
+                </FormField>
+                <FormField
+                  label="Machine Hourly Rate ($)"
+                  helper="Hourly operating cost. Leave blank to use the global default."
+                >
+                  <Input
+                    type="number"
+                    value={formData.machineHourlyRate ?? ''}
+                    onChange={(e) => handleInputChange('machineHourlyRate', e.target.value ? parseFloat(e.target.value) : undefined)}
+                    placeholder="e.g. 0.50"
+                    min={0}
+                    step={0.01}
+                    aria-label="Machine hourly rate"
+                  />
+                </FormField>
+              </div>
+            </div>
           </form>
     </Modal>
   );

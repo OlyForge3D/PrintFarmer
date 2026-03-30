@@ -27,6 +27,7 @@ import {
   HistoryListResponse,
   HistoryTotals,
   HotendModelDefinition,
+  JobStateHistoryDto,
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
@@ -93,8 +94,9 @@ import {
   ConnectionDiagnosticsResponse,
   PagedResponse,
   SystemCapabilities,
-  DispatchHistoryPageDto,
-  NotificationDto,
+    DispatchHistoryPageDto,
+    FailureDetectionEvent,
+    NotificationDto,
   NotificationPreferencesDto,
   UpdateNotificationPreferencesRequest,
   UnreadCountResponse,
@@ -103,13 +105,19 @@ import {
   ScheduleJobRequest,
   AutoDispatchGlobalStatus,
   AutoDispatchDetailedStatus,
+  AutoDispatchReadyResult,
+  AutoDispatchStatus,
   ObicoServer,
   CreateObicoServerRequest,
   UpdateObicoServerRequest,
   ObicoServerHealthResponse,
+  TimelineEventDto,
+  TimezoneInfo,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
+
+const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
 
 export class ApiClient {
   // Utility to generate a correlation ID (UUID v4)
@@ -178,6 +186,18 @@ export class ApiClient {
    */
   async saveAllSettings(settings: Record<string, unknown>): Promise<void> {
     await this.client.post("/settings", settings);
+  }
+
+  // ============ Cost Tracking Settings ============
+
+  /** Get cost tracking settings. */
+  async getCostTrackingSettings(): Promise<import("@/types/api").CostTrackingSettings> {
+    return this.getSettings<import("@/types/api").CostTrackingSettings>("CostTracking");
+  }
+
+  /** Update cost tracking settings. */
+  async updateCostTrackingSettings(settings: import("@/types/api").CostTrackingSettings): Promise<void> {
+    return this.saveSettings("CostTracking", settings);
   }
 
   // ========== Background Services API ==========
@@ -596,6 +616,10 @@ export class ApiClient {
   async refreshCameraUrls(id: string): Promise<Printer> {
     const response = await this.client.post<Printer>(`/printers/${id}/refresh-cameras`);
     return response.data;
+  }
+
+  async applyModelTemplate(id: string): Promise<void> {
+    await this.client.post(`/printers/${id}/apply-template`);
   }
 
   async deletePrinter(id: string): Promise<void> {
@@ -3342,7 +3366,7 @@ export class ApiClient {
     printerId?: string,
     filterStatus?: string,
     limit: number = 100
-  ): Promise<unknown[]> {
+  ): Promise<TimelineEventDto[]> {
     const params = new URLSearchParams();
     if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
     if (dateTo) params.append("dateTo", dateTo.toISOString());
@@ -3357,8 +3381,8 @@ export class ApiClient {
   /**
    * Get state history for a specific job (analytics)
    */
-  async getAnalyticsJobStateHistory(jobId: string): Promise<unknown> {
-    const response = await this.client.get(
+  async getAnalyticsJobStateHistory(jobId: string): Promise<JobStateHistoryDto> {
+    const response = await this.client.get<JobStateHistoryDto>(
       `/job-queue-analytics/jobs/${jobId}/state-history`
     );
     return response.data;
@@ -3534,6 +3558,26 @@ export class ApiClient {
     return response.data;
   }
 
+  async getFailureDetectionStatus(): Promise<import('@/types/api').FailureDetectionMonitorStatusDto> {
+    const response = await this.client.get('/failure-detection/status');
+    return response.data;
+  }
+
+  async getFailureDetectionHistory(
+    options?: {
+      printerId?: string;
+      take?: number;
+    }
+  ): Promise<FailureDetectionEvent[]> {
+    const response = await this.client.get('/failure-detection/history', {
+      params: {
+        printerId: options?.printerId,
+        take: options?.take,
+      },
+    });
+    return response.data;
+  }
+
   async getMonitoringMetricsSummary(): Promise<import('@/types/api').MonitoringMetricsSummaryDto> {
     const response = await this.client.get('/monitoring/metrics/summary');
     return response.data;
@@ -3566,8 +3610,17 @@ export class ApiClient {
   }
 
   // ============ Cost Tracking API methods ============
-  async getCostSummary(): Promise<import("@/types/api").CostSummary> {
-    const response = await this.client.get('/statistics/costs/summary');
+  async getCostSummary(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostSummary> {
+    const params: Record<string, string | number> = {};
+    if (startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    } else if (days !== undefined) {
+      params.days = days;
+    }
+    const response = await this.client.get('/statistics/costs/summary', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    });
     return response.data;
   }
 
@@ -3576,13 +3629,45 @@ export class ApiClient {
     return response.data;
   }
 
-  async getCostsByPrinter(): Promise<import("@/types/api").CostByPrinter[]> {
-    const response = await this.client.get('/statistics/costs/by-printer');
+  async getCostsByPrinter(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostByPrinter[]> {
+    const params: Record<string, string | number> = {};
+    if (startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    } else if (days !== undefined) {
+      params.days = days;
+    }
+    const response = await this.client.get('/statistics/costs/by-printer', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    });
     return response.data;
   }
 
-  async getCostsByMaterial(): Promise<import("@/types/api").CostByMaterial[]> {
-    const response = await this.client.get('/statistics/costs/by-material');
+  async getCostsByMaterial(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostByMaterial[]> {
+    const params: Record<string, string | number> = {};
+    if (startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    } else if (days !== undefined) {
+      params.days = days;
+    }
+    const response = await this.client.get('/statistics/costs/by-material', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    });
+    return response.data;
+  }
+
+  async getCostsByJob(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostByJob[]> {
+    const params: Record<string, string | number> = {};
+    if (startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    } else if (days !== undefined) {
+      params.days = days;
+    }
+    const response = await this.client.get('/statistics/costs/by-job', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    });
     return response.data;
   }
 
@@ -3632,33 +3717,39 @@ export class ApiClient {
 
   // ============ Auto-Dispatch API methods ============
   async getAutoDispatchStatus(): Promise<AutoDispatchGlobalStatus> {
-    const response = await this.client.get('/auto-print/status');
+    const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/status`);
     return response.data;
   }
 
   async getAutoDispatchPrinterStatus(printerId: string): Promise<AutoDispatchDetailedStatus> {
-    const response = await this.client.get(`/auto-print/${printerId}/status`);
+    const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/${printerId}/status`);
     return response.data;
   }
 
-  async markPrinterReady(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/ready`);
+  async confirmAutoDispatchReady(printerId: string): Promise<AutoDispatchReadyResult> {
+    const response = await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/ready`);
+    return response.data;
   }
 
   async skipAutoDispatchJob(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/skip`);
+    await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/skip`);
   }
 
   async cancelAutoDispatch(printerId: string): Promise<void> {
-    await this.client.post(`/auto-print/${printerId}/cancel`);
+    await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/cancel`);
   }
 
   async setAutoDispatchEnabled(printerId: string, enabled: boolean): Promise<void> {
-    await this.client.put(`/auto-print/${printerId}/enabled`, { enabled });
+    await this.client.put(`${AUTO_DISPATCH_API_BASE}/${printerId}/enabled`, { enabled });
   }
 
   async setAutoDispatchGlobalEnabled(enabled: boolean): Promise<void> {
-    await this.client.put('/auto-print/enabled', { enabled });
+    await this.client.put(`${AUTO_DISPATCH_API_BASE}/enabled`, { enabled });
+  }
+
+  async preClearAutoDispatchBed(printerId: string): Promise<AutoDispatchStatus> {
+    const response = await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/pre-clear`);
+    return response.data;
   }
 
   // ============ Job Scheduling API methods ============
@@ -3701,7 +3792,7 @@ export class ApiClient {
     return response.data || [];
   }
 
-  async getTimezones(): Promise<string[]> {
+  async getTimezones(): Promise<TimezoneInfo[]> {
     const response = await this.client.get('/job-scheduling/timezones');
     return response.data || [];
   }
