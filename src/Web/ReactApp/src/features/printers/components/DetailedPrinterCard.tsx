@@ -8,6 +8,7 @@ import type { Printer, TempTargets, MoveRequest, PrinterBackendCapabilitiesDto }
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
+import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
@@ -28,7 +29,7 @@ import {
   FilamentChangeIcon,
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
-import { usePrinters } from '@/common/hooks/useApi';
+import { usePrinters, usePrinterDetails } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
@@ -71,6 +72,15 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const { data: allPrinters = [] } = usePrinters();
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
+  
+  // Fetch printer details to check for multi-toolhead configuration
+  const { data: printerDetails } = usePrinterDetails(
+    initialPrinter.id,
+    {
+      enabled: spoolmanReady,
+      staleTime: 60000,
+    }
+  );
   const apiPrinter = useMemo(
     () => allPrinters.find(p => p.id === initialPrinter.id) ?? initialPrinter,
     [allPrinters, initialPrinter]
@@ -662,55 +672,72 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       </div>
 
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
-      {(spoolmanReady || printer.spoolInfo) && (
-      <div className="mb-2">
-        <div className="flex items-center justify-between mb-1">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>
-          <div className="flex items-center gap-0.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={spoolActionPending}
-              onClick={() => setShowSpoolPicker(true)}
-              className="p-0.5! h-auto!"
-              title="Change spool"
-              aria-label="Change spool"
-              iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
-            ></Button>
-            {printer.spoolInfo?.hasActiveSpool && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={spoolActionPending}
-                onClick={async () => {
-                  setSpoolActionPending(true);
-                  try {
-                    await apiClient.clearActiveSpool(printer.id);
-                    queryClient.setQueryData<Printer[]>(['printers'], (old) =>
-                      old?.map(p => p.id === printer.id
-                        ? { ...p, spoolInfo: { hasActiveSpool: false } }
-                        : p
-                      )
-                    );
-                  } catch (err) {
-                    console.error('Failed to eject spool:', err);
-                  } finally {
-                    setSpoolActionPending(false);
-                  }
+      {(spoolmanReady || printer.spoolInfo) && (() => {
+        const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
+        const sectionTitle = hasMultipleToolheads ? 'Spools' : 'Spool';
+
+        return (
+          <div className="mb-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">{sectionTitle}</div>
+              {!hasMultipleToolheads && (
+                <div className="flex items-center gap-0.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={spoolActionPending}
+                    onClick={() => setShowSpoolPicker(true)}
+                    className="p-0.5! h-auto!"
+                    title="Change spool"
+                    aria-label="Change spool"
+                    iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
+                  ></Button>
+                  {printer.spoolInfo?.hasActiveSpool && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={spoolActionPending}
+                      onClick={async () => {
+                        setSpoolActionPending(true);
+                        try {
+                          await apiClient.clearActiveSpool(printer.id);
+                          queryClient.setQueryData<Printer[]>(['printers'], (old) =>
+                            old?.map(p => p.id === printer.id
+                              ? { ...p, spoolInfo: { hasActiveSpool: false } }
+                              : p
+                            )
+                          );
+                        } catch (err) {
+                          console.error('Failed to eject spool:', err);
+                        } finally {
+                          setSpoolActionPending(false);
+                        }
+                      }}
+                      className="p-0.5! h-auto!"
+                      title="Eject spool"
+                      aria-label="Eject spool"
+                      iconCenter={<EjectIcon className="h-3.5 w-3.5" />}
+                    ></Button>
+                  )}
+                </div>
+              )}
+            </div>
+            {hasMultipleToolheads ? (
+              <ToolheadSpoolPicker
+                printerId={printer.id}
+                toolheads={printerDetails!.toolheads!}
+                onSpoolChange={() => {
+                  queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                 }}
-                className="p-0.5! h-auto!"
-                title="Eject spool"
-                aria-label="Eject spool"
-                iconCenter={<EjectIcon className="h-3.5 w-3.5" />}
-              ></Button>
+              />
+            ) : (
+              <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
             )}
           </div>
-        </div>
-        <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
-      </div>
-      )}
+        );
+      })()}
 
       {/* History Modal */}
       <PrinterHistoryModal

@@ -17,6 +17,7 @@ let autoDispatchStatusMock: AutoDispatchStatus | null = null;
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinters: () => ({ data: [], isLoading: false }),
+  usePrinterDetails: () => ({ data: undefined, isLoading: false }),
   useJobQueue: () => ({ data: [], isLoading: false }),
   useFailureDetectionHistory: () => ({ data: [], isLoading: false, isError: false }),
   usePrintSessionTimeline: () => ({ data: undefined, isLoading: false, isError: false }),
@@ -103,6 +104,10 @@ vi.mock('@/features/printers/components/PrinterFilesModal', () => ({
 
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: () => null,
+}));
+
+vi.mock('@/features/printers/components/ToolheadSpoolPicker', () => ({
+  ToolheadSpoolPicker: () => <div data-testid="toolhead-spool-picker" />,
 }));
 
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
