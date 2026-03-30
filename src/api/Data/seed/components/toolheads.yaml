@@ -291,7 +291,7 @@
   url: https://snapmaker.com/en/u1
   defaultHotend: U1 Hotend
   defaultExtruder: U1 Extruder
-  defaultNozzle: Snapmaker Brass Nozzle
+  defaultNozzle: Snapmaker U1 Stainless Steel Nozzle
 
 # Phrozen Toolheads
 - name: Arco Toolhead
