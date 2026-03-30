@@ -170,6 +170,16 @@ public interface ISpoolmanService
     Task<bool> ConsumeFilamentAsync(int spoolId, double usedWeightGrams, CancellationToken ct);
 
     /// <summary>
+    /// Records filament consumption on multiple Spoolman spools (one per toolhead/MMU-gate).
+    /// Each entry in <paramref name="consumptions"/> is debited independently.
+    /// Partial failures are logged but do not prevent other spools from being debited.
+    /// </summary>
+    /// <param name="consumptions">Pairs of (spoolId, grams) to consume.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Number of spools successfully debited.</returns>
+    Task<int> ConsumeMultipleFilamentsAsync(IEnumerable<(int spoolId, double grams)> consumptions, CancellationToken ct);
+
+    /// <summary>
     /// Gets material names that have at least one non-archived spool with remaining filament.
     /// Tries the native Spoolman endpoint first (/api/v1/spool/materials/available),
     /// falling back to client-side aggregation if the endpoint is not available.

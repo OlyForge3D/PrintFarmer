@@ -1333,6 +1333,27 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<int> ConsumeMultipleFilamentsAsync(IEnumerable<(int spoolId, double grams)> consumptions, CancellationToken ct)
+    {
+        int successCount = 0;
+        foreach ((int spoolId, double grams) in consumptions)
+        {
+            if (grams <= 0)
+            {
+                continue;
+            }
+
+            bool ok = await ConsumeFilamentAsync(spoolId, grams, ct);
+            if (ok)
+            {
+                successCount++;
+            }
+        }
+
+        return successCount;
+    }
+
     private static readonly JsonSerializerOptions ExternalJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,

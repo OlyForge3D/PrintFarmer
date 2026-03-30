@@ -44,6 +44,7 @@ public class JobCostCalculationService : IJobCostCalculationService
         PrintJob? job = await _db.PrintJobs
             .Include(j => j.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
+            .Include(j => j.ToolheadUsages)
             .FirstOrDefaultAsync(j => j.Id == jobId, ct);
 
         if (job == null)
@@ -52,7 +53,7 @@ public class JobCostCalculationService : IJobCostCalculationService
             return false;
         }
 
-        // Calculate material cost
+        // Calculate material cost (per-toolhead if usage records exist, single-spool otherwise)
         decimal? materialCost = await CalculateMaterialCostAsync(job, ct);
 
         // Calculate energy cost
@@ -104,6 +105,7 @@ public class JobCostCalculationService : IJobCostCalculationService
         PrintJob? job = await _db.PrintJobs
             .Include(j => j.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
+            .Include(j => j.ToolheadUsages)
             .FirstOrDefaultAsync(j => j.Id == jobId, ct);
 
         if (job == null)
@@ -152,6 +154,34 @@ public class JobCostCalculationService : IJobCostCalculationService
     /// </summary>
     private async Task<decimal?> CalculateMaterialCostAsync(PrintJob job, CancellationToken ct)
     {
+        // Multi-toolhead path: if per-toolhead usage records exist, calculate per-toolhead costs
+        if (job.ToolheadUsages is { Count: > 0 })
+        {
+            decimal totalMaterialCost = 0m;
+            bool anyCalculated = false;
+
+            foreach (PrintJobToolheadUsage usage in job.ToolheadUsages)
+            {
+                if (usage.FilamentUsageGrams is not > 0)
+                {
+                    continue;
+                }
+
+                decimal? perToolheadCost = await CalculateSingleSpoolCostAsync(
+                    usage.SpoolmanSpoolId, usage.FilamentUsageGrams.Value, job, ct);
+
+                if (perToolheadCost.HasValue)
+                {
+                    usage.MaterialCostUsd = perToolheadCost.Value;
+                    totalMaterialCost += perToolheadCost.Value;
+                    anyCalculated = true;
+                }
+            }
+
+            return anyCalculated ? totalMaterialCost : null;
+        }
+
+        // Single-spool path (existing behavior)
         // Usage cascade: actual → estimated
         double? filamentUsageGrams = job.ActualFilamentUsage is > 0
             ? job.ActualFilamentUsage
@@ -269,6 +299,90 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal cost = (decimal)(filamentUsageGrams.Value / spoolWeightGrams) * (decimal)effectivePrice.Value;
 
         return Math.Round(cost, 2);
+    }
+
+    /// <summary>
+    /// Calculates material cost for a single spool given its Spoolman ID and filament usage.
+    /// Uses the standard price cascade: spool price → filament price → material default → global default.
+    /// Used by the multi-toolhead path to calculate per-toolhead costs independently.
+    /// </summary>
+    private async Task<decimal?> CalculateSingleSpoolCostAsync(
+        int? spoolmanSpoolId, double usageGrams, PrintJob job, CancellationToken ct)
+    {
+        CostTrackingSettings? settings = _settingsService.Get<CostTrackingSettings>();
+        double? effectivePrice = null;
+        double spoolWeightGrams = 1000.0;
+        string? materialType = null;
+
+        if (spoolmanSpoolId.HasValue)
+        {
+            try
+            {
+                SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolmanSpoolId.Value, ct);
+                if (spool is not null)
+                {
+                    if (spool.Price is > 0)
+                    {
+                        effectivePrice = spool.Price;
+                    }
+
+                    if (spool.InitialWeightG is > 0)
+                    {
+                        spoolWeightGrams = spool.InitialWeightG.Value;
+                    }
+
+                    // Try filament product for price/weight fallback
+                    if (spool.FilamentId.HasValue)
+                    {
+                        SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(spool.FilamentId.Value, ct);
+                        if (filament is not null)
+                        {
+                            materialType = filament.Material;
+                            effectivePrice ??= filament.Price;
+                            if (spoolWeightGrams <= 0)
+                            {
+                                spoolWeightGrams = filament.Weight ?? 1000.0;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to look up spool {SpoolId} for per-toolhead cost.", spoolmanSpoolId.Value);
+            }
+        }
+
+        // Price cascade: material type default → global default
+        if ((!effectivePrice.HasValue || effectivePrice.Value <= 0) && settings is not null)
+        {
+            string? resolvedMaterial = materialType ?? job.RequiredMaterialType ?? job.FilamentName;
+            if (!string.IsNullOrEmpty(resolvedMaterial))
+            {
+                decimal matchedPrice = LookupMaterialPrice(resolvedMaterial, settings.MaterialPriceDefaults);
+                if (matchedPrice > 0)
+                {
+                    effectivePrice = (double)matchedPrice;
+                }
+            }
+        }
+
+        if ((!effectivePrice.HasValue || effectivePrice.Value <= 0) && settings?.DefaultFilamentPricePerKg > 0)
+        {
+            effectivePrice = (double)settings.DefaultFilamentPricePerKg;
+        }
+
+        if (!effectivePrice.HasValue || effectivePrice.Value <= 0)
+        {
+            return null;
+        }
+
+        if (spoolWeightGrams <= 0)
+        {
+            spoolWeightGrams = 1000.0;
+        }
+
+        return Math.Round((decimal)(usageGrams / spoolWeightGrams) * (decimal)effectivePrice.Value, 2);
     }
 
     /// <summary>
