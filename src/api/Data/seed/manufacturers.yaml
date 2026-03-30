@@ -25,6 +25,7 @@
 - name: Creality
 - name: Anycubic
 - name: Bambu Lab  # Popular ecosystem for hotend adaptations
+- name: Snapmaker
 
 # Component manufacturers (hotends, extruders, nozzles, toolheads)
 - name: Phaetus            # Dragon, Rapido series

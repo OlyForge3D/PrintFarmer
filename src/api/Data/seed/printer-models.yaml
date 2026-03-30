@@ -1761,3 +1761,52 @@
       slicerType: OrcaSlicer
     - slicerModelName: Original Prusa XL
       slicerType: PrusaSlicer
+
+# Snapmaker Multi-Toolhead Printers
+- name: Snapmaker U1
+  manufacturer: Snapmaker
+  buildVolume:
+    x: 270
+    y: 270
+    z: 270
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  hasCarbonFilter: false
+  hasHepaFilter: false
+  hasBowdenTube: false
+  hasPtfeLiner: false
+  hasLinearRails: true
+  hasLeadScrews: false
+  hasToolchanger: true
+  hasFilamentCutter: false
+  hasHeatedChamber: false
+  multiMaterial: true
+  supportsAutoLeveling: true
+  maxBedTemp: 110
+  maxPrintSpeed: 250
+  defaultWattage: 350
+  defaultHourlyRate: 0.6
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+    - PA
+  toolheads:
+    - name: T0
+      toolhead: U1 Toolhead
+    - name: T1
+      toolhead: U1 Toolhead
+    - name: T2
+      toolhead: U1 Toolhead
+    - name: T3
+      toolhead: U1 Toolhead
+  aliases:
+    - slicerModelName: Snapmaker U1
+      slicerType: OrcaSlicer
+    - slicerModelName: Snapmaker U1
+      slicerType: PrusaSlicer

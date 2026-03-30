@@ -550,6 +550,16 @@
   description: Proprietary brass nozzle for Flashforge printers
   url: https://www.flashforge.com
 
+# Snapmaker Nozzles
+- name: Snapmaker Brass Nozzle
+  manufacturer: Snapmaker
+  diameter: 0.4
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Proprietary
+  description: Stock brass nozzle for Snapmaker U1 toolheads
+  url: https://snapmaker.com/en/u1
+
 # Phrozen Nozzles
 - name: Phrozen Brass Nozzle
   manufacturer: Phrozen

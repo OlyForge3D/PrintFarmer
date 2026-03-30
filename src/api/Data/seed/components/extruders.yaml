@@ -424,6 +424,14 @@
   description: Proprietary extruder for Flashforge Adventurer 5X
   url: https://www.flashforge.com
 
+# Snapmaker Extruders
+- name: U1 Extruder
+  manufacturer: Snapmaker
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Stock direct drive extruder for Snapmaker U1, one per toolhead in 4-tool toolchanger
+  url: https://snapmaker.com/en/u1
+
 # Phrozen Extruders
 - name: Arco Extruder
   manufacturer: Phrozen
