@@ -3643,3 +3643,507 @@ Returns printer-level recent print sessions with chronological event lists per s
 ✅ Implemented. Endpoint returns merged timeline for printer's recent print sessions.
 
 ---
+
+## 14. User Directive: Consistent Date Range Filters (2026-03-26T15:20)
+
+**Author:** Jeff Papiez (via Copilot)  
+**Status:** CAPTURED — For team memory  
+**Urgency:** Medium
+
+### Directive
+
+Date range filters must be consistent across all statistics/analytics/cost pages. Use a standard set of options (7 days, 30 days, 90 days, 1 year, All Time) wherever date range filters appear.
+
+### Rationale
+
+User request — consistency improves discoverability and UX across the application.
+
+---
+
+## 15. User Directive: Quarterly Date Ranges & Custom Picker (2026-03-26T15:22)
+
+**Author:** Jeff Papiez (via Copilot)  
+**Status:** CAPTURED — For team memory  
+**Urgency:** Medium
+
+### Directive
+
+Date range filters should include quarterly options and support custom date ranges. Standard presets: 7 days, 30 days, 90 days (quarterly), 1 year, All Time, plus a custom date range picker.
+
+### Rationale
+
+User request — business reporting often uses quarterly periods. Custom ranges give flexibility for ad-hoc analysis.
+
+---
+
+## 16. User Directive: Expose CostTrackingSettings in Admin UI (2026-03-26T15:24)
+
+**Author:** Jeff Papiez (via Copilot)  
+**Status:** CAPTURED — For team memory  
+**Urgency:** High
+
+### Directive
+
+CostTrackingSettings (electricity rate, printer wattage, machine hourly rate, etc.) must be exposed in the admin Settings UI so users can configure them.
+
+### Rationale
+
+User request — these values drive all cost calculations and vary by location/setup. Currently only configurable via appsettings.json. Need UI accessibility.
+
+---
+
+## 17. Per-Printer Wattage with Catalog Defaults (2026-03-26T15:35a)
+
+**Author:** Jeff Papiez (via Copilot)  
+**Status:** CAPTURED — For team memory  
+**Urgency:** High
+
+### Decision
+
+Wattage should be configurable per-printer, with default values defined in the catalog (PrinterModel). Cascade: printer override → model default → global CostTrackingSettings fallback.
+
+### Rationale
+
+User request — different printers consume different power. Global average is too imprecise for accurate energy cost tracking.
+
+---
+
+## 18. User Directive: Job Scheduling UX — Add Job Picker (2026-03-26T15:35b)
+
+**Author:** Jeff Papiez (via Copilot)  
+**Status:** CAPTURED — For team memory  
+**Urgency:** High
+
+### Directive
+
+The ScheduleModal's raw Job ID text input must be replaced with a searchable job picker. Also add a "Schedule" action on jobs in the queue page so the modal opens pre-populated.
+
+### Rationale
+
+User request — current UX requires manually typing a 36-character GUID with no way to discover valid job IDs. Terrible usability.
+
+---
+
+## 19. User Directive: Expose MachineHourlyRate and Wattage on Printer Modals (2026-03-26T15:41a)
+
+**Author:** Jeff Papiez (via Copilot)  
+**Status:** CAPTURED — For team memory  
+**Urgency:** High
+
+### Directive
+
+The Edit Printer and Add Printer modals must expose MachineHourlyRate and Wattage fields so users can configure per-printer cost overrides from the UI.
+
+### Rationale
+
+User request — these fields exist on the Printer entity but aren't accessible through the frontend. Users need to set per-printer energy and machine cost overrides without touching the database directly.
+
+---
+
+## 20. XML Documentation Requirements (2026-03-26T15:45)
+
+**Author:** Jeff Papiez (via Copilot)  
+**Status:** CAPTURED — For team memory  
+**Urgency:** Medium
+
+### Directive
+
+When adding or updating public C# types, XML comments must be added/updated. All parameters for public functions must be documented in XML comments. Classes that implement interfaces should use `<inheritdoc/>` instead of duplicating documentation defined on the interface.
+
+### Rationale
+
+User directive — enforces consistent API documentation across the codebase. Prevents doc duplication drift between interfaces and implementations.
+
+---
+
+## 21. Custom Date Range API Contract (2026-07-14)
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-07-14  
+**Status:** IMPLEMENTED  
+**Urgency:** Medium
+
+### Context
+
+Statistics endpoints previously only supported `?days=N` for time filtering. Operators need arbitrary date ranges for reporting and cost analysis.
+
+### Decision
+
+All 9 statistics endpoints now accept optional `startDate` and `endDate` query parameters (ISO 8601 format). Priority order:
+
+1. `startDate`/`endDate` (custom range) — takes precedence
+2. `days` — calculated from UTC now (existing behavior)
+3. No params — endpoint default (all-time or 30 days depending on endpoint)
+
+### Constraints
+
+- `startDate` must be before `endDate` (400 if violated)
+- Max range: 730 days / 2 years (400 if exceeded)
+- Cost queries filter on `ActualEndTime`; non-cost queries filter on `QueuedAt`
+
+### Impact
+
+- **Frontend**: Can now build custom date range pickers for analytics dashboards
+- **API consumers**: Fully backward-compatible; existing `?days=N` calls unchanged
+- **Export endpoints**: Not yet updated (use `ReportRequest.Days` internally)
+
+---
+
+## 22. Per-Printer Wattage with Catalog Defaults (IMPLEMENTATION) (2026-03-26)
+
+**Author:** Lambert (Backend Dev)  
+**Date:** 2026-03-26  
+**Status:** IMPLEMENTED  
+**Urgency:** High
+
+### Decision
+
+Added per-printer wattage override (`Printer.Wattage`) and catalog-level default (`PrinterModel.DefaultWattage`) with a three-level cascade for energy cost calculation.
+
+### Cascade Rule
+
+```
+printer.Wattage ?? printer.Model?.DefaultWattage ?? settings.AveragePrinterWattage
+```
+
+### Changes Made
+
+#### Domain
+- `PrinterModel.DefaultWattage` (decimal?) — catalog default for model
+- `Printer.Wattage` (decimal?) — per-printer override
+
+#### DTOs
+- `UpdatePrinterDto`: Added `Wattage` and `MachineHourlyRate`
+- `CreatePrinterFromDiscoveryDto`: Added `Wattage` and `MachineHourlyRate`
+- `PrinterModelDto`: Added `DefaultWattage`
+- `PrinterModelSeedDto`: Added `DefaultWattage`
+
+#### Cost Calculation
+- `JobCostCalculationService.CalculateEnergyCost`: Uses cascade instead of flat settings value
+- Both `.Include(j => j.AssignedPrinter).ThenInclude(p => p.Model)` added to job queries
+
+#### Seed Data
+- `printer-models.yaml`: 37 models populated with `defaultWattage` (120W–500W based on known specs)
+
+#### Controller/Service
+- `PrintersController` update endpoint maps `Wattage` and `MachineHourlyRate` from DTO
+- `PrintersService.CreatePrinterFromDtoAsync` maps both fields on creation
+
+#### Tests
+- 4 new cascade tests (override, model default, full cascade, settings fallback)
+- Test helper creates isolated models to prevent seeded DefaultWattage from leaking
+
+#### Migrations
+- `AddWattageToEntities` for both PostgreSQL and SQL Server
+
+### Impact for Frontend
+
+`Wattage` and `MachineHourlyRate` are now available on the Add/Edit printer DTOs for frontend modals.
+
+---
+
+## 23. FailureDetectionStatusModal wide + 2-column layout (2025-07-22)
+
+**Author:** Newt (Designer — Industrial UI)  
+**Date:** 2025-07-22  
+**Status:** PROPOSED
+
+### Context
+
+The spaghetti detection details modal used `size="md"` (max-w-md = 448px). With 6+ content sections stacked vertically — status header, detail tiles, "why this is showing", operator next step, recent incidents, and print session timeline — the modal grew taller than the viewport on large screens, requiring excessive scrolling.
+
+### Decision
+
+1. **Width**: Switched from `size="md"` to `width="max-w-4xl"` (896px). This uses the Modal's `width` prop instead of the preset `size`, giving enough room for a 2-column layout without looking oversized.
+
+2. **Max height**: Tightened from the default `max-h-[90vh]` to `max-h-[85vh]` to add breathing room between the modal edge and the viewport edge.
+
+3. **2-column grid at `lg:` breakpoint**:
+   - **Left column** — Context and operator guidance: "Why this is showing", "Operator next step", snapshot link
+   - **Right column** — History: Recent incidents, Print session timeline
+   - Status header and detail tiles remain full-width above the grid (they're already compact)
+
+4. **Mobile/tablet**: Stays single-column stacked (Tailwind responsive `lg:grid-cols-2` only activates at ≥1024px).
+
+### Rationale
+
+- The context/guidance sections are short text blocks; the history sections are longer lists. Putting them side-by-side on wide screens cuts the vertical height roughly in half.
+- 896px (max-w-4xl) is the sweet spot: wide enough for 2 readable columns, narrow enough to not feel like a full-page takeover.
+- Snapshot link moved into the left column (from bottom of modal) so it's co-located with operator guidance rather than orphaned at the very end.
+
+### Impact
+
+- Single file changed: `FailureDetectionStatusModal.tsx`
+- No test changes needed (no tests asserted on modal size or layout structure)
+- All 1615 React tests pass
+- ESLint: 0 errors
+
+---
+
+## 24. FailureDetectionMonitoringSummary Redesign (2026-06-10)
+
+**Author:** Newt (Industrial UI Designer)  
+**Date:** 2026-06-10  
+**Status:** IMPLEMENTED
+
+### Context
+
+The `FailureDetectionMonitoringSummary` component was taking up excessive visual space on printer cards and looked out of place — it was styled as a standalone monitoring dashboard widget rather than a card section.
+
+### Decision
+
+Redesign the component with two distinct variants:
+
+#### Compact Variant (for CompactPrinterCard)
+- Single inline row: shield icon + headline text + badge + optional subline
+- No stat grid, no "Watching" box
+- ~40px height for healthy/standby states
+- Operator action text only shown when tone is critical/attention
+
+#### Detailed Variant (for DetailedPrinterCard)
+- Icon + headline + badge inline
+- Summary paragraph below
+- Operator action box only when tone is critical/attention
+- Still lighter than original — no stat grid or "Watching" box
+
+### Rationale
+
+1. **Card context vs dashboard context**: Cards show at-a-glance status. Operators need tone (color) + headline to know if action is needed. Detailed stats (source, last scan, camera target) belong in a drill-down modal.
+
+2. **Visual weight reduction**: Removed rounded-xl, heavy shadows, gradient backgrounds. Now uses simple rounded-lg with subtle border — matches other card sections.
+
+3. **Information hierarchy**: What operators need on card: "Is this printer OK?" Answer: green badge = OK, red/yellow badge = check it.
+
+### Impact
+
+- Component reduced from 422 lines to 247 lines (41%)
+- Visual footprint reduced by ~60-70% on compact cards
+- Detailed variant still provides context without dominating card
+
+#### Files Changed
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringSummary.tsx`
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringSummary.test.tsx`
+- `src/Web/ReactApp/src/test/features/printers/obico-ml-badge.test.tsx` (test assertions)
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringOverlay.test.tsx` (unrelated fix: QueryClientProvider wrapper)
+
+---
+
+## 25. Cost Tracking Settings UI — No Custom Section Needed (2026-07-08)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-07-08  
+**Status:** IMPLEMENTED
+
+### Context
+
+Task requested adding a "Cost Tracking" section to the admin Settings page with manual field definitions (toggle, number inputs with ranges, helper text, validation).
+
+### Finding
+
+The Settings page is **metadata-driven**. `CostTrackingSettings.cs` already has all required backend attributes:
+- `[AppSetting("CostTracking")]` — auto-discovered by `SettingsService`
+- `[SettingGroup("Operations")]` — appears under "Operations" in sidebar
+- `[SettingDisplay]` on each property — labels, descriptions, input types, min/max ranges
+- `IValidatableSetting` — server-side validation on save
+
+The `SettingsPagelet` component renders these dynamically. No per-section frontend code is needed.
+
+### What Was Done
+
+1. **Verified** CostTracking already renders in the Settings UI via the metadata system
+2. **Added** `CostTrackingSettings` TypeScript interface in `api.ts` for type-safe access from cost features
+3. **Added** `getCostTrackingSettings()` / `updateCostTrackingSettings()` convenience methods on apiClient
+4. **Added** 7 focused tests verifying CostTracking metadata renders correctly (toggle, numbers, values, onChange, validation errors, tooltips)
+
+### For Lambert (Backend)
+
+No backend changes needed — `CostTrackingSettings` is already fully wired. The attributes, validation, and persistence all work through the existing `UnifiedSettingsController` + `SettingsService` pipeline.
+
+#### Files Changed
+- `src/Web/ReactApp/src/types/api.ts` — added `CostTrackingSettings` interface
+- `src/Web/ReactApp/src/services/api.ts` — added typed convenience methods
+- `src/Web/ReactApp/src/test/components/CostTrackingSettingsPagelet.test.tsx` — new test file (7 tests)
+
+---
+
+## 26. Custom Date Range Picker for TimePeriodFilter (2026-03-27)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-27  
+**Status:** IMPLEMENTED
+
+### Context
+
+Lambert shipped backend `startDate`/`endDate` query param support on all statistics endpoints. Frontend only had preset buttons (7d/30d/90d/1yr/All Time).
+
+### Decision
+
+Introduced `TimePeriodFilterValue` discriminated union type:
+```typescript
+type TimePeriodFilterValue =
+  | { type: 'preset'; days: number | undefined }
+  | { type: 'custom'; startDate: string; endDate: string };
+```
+
+- Added "Custom" toggle button to `TimePeriodFilter`; when active, shows inline date inputs with min/max constraints
+- Pages manage `TimePeriodFilterValue` state and derive `days`/`startDate`/`endDate` for hooks
+- Updated all cost API methods and hooks to accept optional `startDate/endDate` alongside `days`
+- Updated `useStatistics` hooks with same pattern using shared `buildStatsParams()` helper
+- All three dashboard pages (Cost, Statistics, Analytics) updated
+
+### Trade-offs
+
+- **Breaking change** to `TimePeriodFilterProps` — accepted because only 3 consumers exist and all needed updating
+- Custom mode uses fully controlled inputs (no intermediate state) — clean but means invalid dates silently reject
+- `ExportMenu` still takes `days` only — acceptable since exports can use the preset-derived value
+
+#### Files Changed
+- `timePeriodOptions.ts`, `TimePeriodFilter.tsx`, `index.ts` (UI library)
+- `api.ts` (cost methods), `useApi.ts` (cost hooks + query keys)
+- `useStatistics.ts` (statistics hooks)
+- `CostDashboardPage.tsx`, `StatisticsPage.tsx`, `AnalyticsDashboardPage.tsx`
+- `TimePeriodFilter.test.tsx` (new), `CostDashboardPage.test.tsx` (updated)
+
+---
+
+## 27. Standardized Date Range Filters Across Statistics Pages (2026-03-27)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-27  
+**Status:** IMPLEMENTED
+
+### Context
+
+Three statistics pages had inconsistent date range filtering:
+- StatisticsPage: 7d/30d/90d/All time (missing 1 year)
+- AnalyticsDashboardPage: 7d/30d/90d/1yr/All time
+- CostDashboardPage: No filter at all (always all-time)
+
+Each page duplicated its own button group inline.
+
+### Decision
+
+1. Created shared `TimePeriodFilter` component in `@/common/components/ui/` with standard options: 7 days, 30 days, 90 days, 1 year, All time.
+2. All three pages now use this shared component.
+3. Cost API hooks (`useCostSummary`, `useCostsByPrinter`, `useCostsByMaterial`) now accept a `days` parameter, passed as query string to the backend.
+4. Default selection is 30 days on all pages.
+
+### Impact
+
+- Frontend: 3 pages updated, shared component created, 7 new tests added
+- API layer: `apiClient` cost methods now accept `days?` param; query keys changed from static arrays to functions
+- Backend: No changes needed — `days` query param was already supported
+
+---
+
+## 28. FailureDetectionMonitoringSummary hidden when printer is at rest (2026-03-27)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-27  
+**Status:** IMPLEMENTED
+
+### Context
+
+The `FailureDetectionMonitoringSummary` widget was rendered unconditionally on both compact and detailed printer cards. When a printer is idle/offline/standby, the widget showed "Standing by / Idle" — redundant with the header badge shield icon that already communicates failure-detection state at a glance.
+
+### Assessment: What does the summary show during printing vs at rest?
+
+**During active printing (unique value):**
+- Live scan results with last-scanned timestamp
+- Failure confidence percentage and detection time
+- Operator action directives ("Inspect print", "Check camera")
+- Snapshot links for visual review
+- Auto-pause status with contextual next steps
+
+**At rest (redundant with header badge):**
+- "Standing by" + "Idle" badge — duplicates header shield icon tooltip
+- "Off" / "Connecting" — no operational value, header already conveys this
+- "Setup needed" — header badge already surfaces misconfigured state
+
+### Decision
+
+Hide `FailureDetectionMonitoringSummary` when `isPrinting` and `isPaused` are both false. The header badge remains the sole failure-detection indicator at rest. The summary widget becomes a print-active operational panel only.
+
+### Impact
+
+- Cleaner cards when printers are at rest (reduced visual noise)
+- No loss of information — header badge + tooltip + click-to-modal path still available
+- Summary panel surfaces only when operators actually need it (active print monitoring)
+
+#### Files Changed
+- `CompactPrinterCard.tsx` — wrapped summary in `(isPrinting || isPaused)` guard
+- `DetailedPrinterCard.tsx` — same guard
+- `FailureDetectionMonitoringSummary.test.tsx` — added card-level visibility contract tests
+
+---
+
+## 29. Add Wattage + MachineHourlyRate to Printer Modals (2026-03-27)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-27  
+**Status:** IMPLEMENTED
+
+### Context
+
+Lambert added `Wattage` (nullable decimal) to `Printer` and `PrinterModel` entities and `MachineHourlyRate` was already on `Printer`. The Create/Update DTOs on both backend and TypeScript were updated, but the fields had no UI surface in the Add or Edit printer modals.
+
+### Decision
+
+Added a "Cost Settings" section to both `AddPrinterModal` and `EditPrinterModal` containing:
+
+- **Wattage (W)**: `number` input, min 0, step 1. Helper: "Power consumption in watts. Leave blank to use model default or global setting."
+- **Machine Hourly Rate ($)**: `number` input, min 0, step 0.01. Helper: "Hourly operating cost. Leave blank to use the global default."
+
+Empty values submit as `undefined`/`null` — the backend cost calculation cascade (`printer.Wattage → model.DefaultWattage → settings.AveragePrinterWattage`) handles fallback.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `src/infra/Dtos/PrinterDetailsDto.cs` | Added `Wattage` and `MachineHourlyRate` fields |
+| `src/api/Controllers/PrintersController.cs` | Map `p.Wattage` and `p.MachineHourlyRate` into details DTO |
+| `src/Web/ReactApp/src/types/api.ts` | Added `wattage?` and `machineHourlyRate?` to `PrinterDetails` |
+| `src/Web/ReactApp/src/features/printers/components/AddPrinterModal.tsx` | Cost Settings section |
+| `src/Web/ReactApp/src/features/printers/components/EditPrinterModal.tsx` | Cost Settings section + pre-population + change detection |
+| `src/Web/ReactApp/src/features/catalog/components/PrinterModelsCatalog.tsx` | Show `defaultWattage` badge in Features column |
+| `src/Web/ReactApp/src/features/printers/components/__tests__/PrinterCostFields.test.tsx` | 6 tests covering render, helper text, pre-population, and submit behavior |
+
+### Validation
+
+- ✅ 6/6 new cost field tests pass
+- ✅ 5/5 existing EditPrinterModal tests pass
+- ✅ 62/62 total printer test suite passes
+- ✅ ESLint: 0 errors
+- ✅ .NET build: 0 errors, 0 warnings
+- ✅ React production build: success
+
+---
+
+## 30. Job Scheduling UX — Job Picker (2026-03-27)
+
+**Author:** Ripley (Frontend Dev)  
+**Date:** 2026-03-27  
+**Status:** IMPLEMENTED
+
+### Context
+
+The `ScheduleModal` required users to manually type a 36-character GUID into a text input to schedule a job. No discovery or browsing mechanism existed.
+
+### Decision
+
+Replaced the raw text input with a `Select` dropdown that:
+- Fetches available jobs via `apiClient.getJobQueue()` with `useQuery`
+- Filters to only Queued/Assigned status (not Printing, Completed, etc.)
+- Shows `{jobName} — {printerName || 'Unassigned'}` per option
+- Supports pre-selection via the existing `jobId` prop
+- Shows an empty state message when no schedulable jobs exist
+
+Added a "Schedule" action button on each Queued/Assigned job row in `QueueJobsTable`, wired through `PrintQueueDashboardPage` to open the modal with that job pre-filled.
+
+#### Files Changed
+- `src/Web/ReactApp/src/features/scheduling/components/ScheduleModal.tsx`
+- `src/Web/ReactApp/src/features/queue/components/QueueJobsTable.tsx`
+- `src/Web/ReactApp/src/features/queue/pages/PrintQueueDashboardPage.tsx`
+- `src/Web/ReactApp/src/test/features/scheduling/ScheduleModal.test.tsx` (new)
+
+---
