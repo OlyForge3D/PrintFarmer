@@ -54,7 +54,10 @@ public record GcodeFileDto(
     int? TopSolidLayers = null,
     int? BottomSolidLayers = null,
     double? MaxVolumetricSpeed = null,
-    bool? IroningEnabled = null);
+    bool? IroningEnabled = null,
+    string? FilamentPerExtruderWeightG = null,
+    string? FilamentPerExtruderLengthMm = null,
+    int? ExtruderCount = null);
 
 /// <summary>
 /// Multipart metadata section for uploading a new G-code file.

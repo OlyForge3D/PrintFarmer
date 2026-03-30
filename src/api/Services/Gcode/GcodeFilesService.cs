@@ -1760,7 +1760,10 @@ namespace Farm.Web.Api.Services.Gcode
                 TopSolidLayers: file.TopSolidLayers,
                 BottomSolidLayers: file.BottomSolidLayers,
                 MaxVolumetricSpeed: file.MaxVolumetricSpeed,
-                IroningEnabled: file.IroningEnabled);
+                IroningEnabled: file.IroningEnabled,
+                FilamentPerExtruderWeightG: file.FilamentPerExtruderWeightG,
+                FilamentPerExtruderLengthMm: file.FilamentPerExtruderLengthMm,
+                ExtruderCount: file.ExtruderCount);
         }
 
         /// <summary>

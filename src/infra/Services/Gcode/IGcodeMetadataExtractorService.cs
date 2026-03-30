@@ -74,4 +74,21 @@ public class GcodeMetadataExtracted
     public double? MaxVolumetricSpeed { get; set; } // Maximum volumetric extrusion speed (mm³/s)
 
     public bool? IroningEnabled { get; set; } // Whether ironing is enabled for top surfaces
+
+    // --- Multi-extruder: Per-Extruder Filament Data ---
+
+    /// <summary>
+    /// Filament weight in grams per extruder (index = extruder number). Null for single-extruder files.
+    /// </summary>
+    public double[]? FilamentPerExtruderWeightG { get; set; }
+
+    /// <summary>
+    /// Filament length in mm per extruder (index = extruder number). Null for single-extruder files.
+    /// </summary>
+    public double[]? FilamentPerExtruderLengthMm { get; set; }
+
+    /// <summary>
+    /// Detected number of extruders in the gcode file. Null when not parsed.
+    /// </summary>
+    public int? ExtruderCount { get; set; }
 }

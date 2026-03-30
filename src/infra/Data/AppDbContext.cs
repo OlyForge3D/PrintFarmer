@@ -40,6 +40,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
 
+    // Per-toolhead filament usage (multi-tool/MMU jobs)
+    public DbSet<PrintJobToolheadUsage> PrintJobToolheadUsages => Set<PrintJobToolheadUsage>();
+
     // Print Projects (multi-file job tracking)
     public DbSet<PrintProject> PrintProjects => Set<PrintProject>();
 

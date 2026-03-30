@@ -93,6 +93,26 @@ public class GcodeFile : StoredFile
 
     public PrinterGroup? PrinterGroup { get; set; }
 
+    /// <summary>
+    /// JSON-serialized double array of filament weight in grams per extruder (index = extruder number).
+    /// Stored as a string for EF Core compatibility; parse as <c>double[]</c> in code.
+    /// Null for single-extruder files or when per-extruder data is unavailable.
+    /// </summary>
+    public string? FilamentPerExtruderWeightG { get; set; }
+
+    /// <summary>
+    /// JSON-serialized double array of filament length in mm per extruder (index = extruder number).
+    /// Stored as a string for EF Core compatibility; parse as <c>double[]</c> in code.
+    /// Null for single-extruder files or when per-extruder data is unavailable.
+    /// </summary>
+    public string? FilamentPerExtruderLengthMm { get; set; }
+
+    /// <summary>
+    /// Number of extruders detected in the gcode file.
+    /// Null when not parsed or for single-extruder files that don't declare extruder count.
+    /// </summary>
+    public int? ExtruderCount { get; set; }
+
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
 }

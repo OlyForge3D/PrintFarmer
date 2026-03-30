@@ -239,6 +239,13 @@ public class PrintJob
     // Phase 4.4: Job Retry History
 
     /// <summary>
+    /// Per-toolhead filament usage records for multi-tool/MMU jobs.
+    /// Each entry tracks which spool was loaded on a specific toolhead and how much was consumed.
+    /// Empty for single-extruder jobs that don't use per-toolhead tracking.
+    /// </summary>
+    public ICollection<PrintJobToolheadUsage> ToolheadUsages { get; set; } = new List<PrintJobToolheadUsage>();
+
+    /// <summary>
     /// Retry history where THIS job is the original failed job
     /// </summary>
     public ICollection<JobRetry> RetriesAsOriginal { get; } = new List<JobRetry>();

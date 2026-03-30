@@ -821,7 +821,11 @@ public class PrintersController(
             t.NozzleModel?.Name,
             t.SupportedMaterials,
             t.IsPrimary,
-            t.UpdatedAt)).ToArray();
+            t.UpdatedAt,
+            t.ToolheadType,
+            t.CurrentSpoolId,
+            t.CurrentMaterial,
+            t.CurrentFilamentColor)).ToArray();
 
         return new PrinterDetailsDto(
             p.Id,

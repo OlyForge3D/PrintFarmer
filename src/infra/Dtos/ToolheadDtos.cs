@@ -104,4 +104,8 @@ public record ToolheadDto(
     string? NozzleModelName,
     string[]? SupportedMaterials,
     bool IsPrimary,
-    DateTime? LastUpdated = null);
+    DateTime? LastUpdated = null,
+    ToolheadType ToolheadType = ToolheadType.Physical,
+    int? CurrentSpoolId = null,
+    string? CurrentMaterial = null,
+    string? CurrentFilamentColor = null);

@@ -73,6 +73,30 @@ public class Toolhead
     public bool IsPrimary { get; set; }
 
     /// <summary>
+    /// Classifies this toolhead as a physical tool dock or a virtual MMU/AMS gate.
+    /// Defaults to <see cref="ToolheadType.Physical"/> for traditional toolchanger printers.
+    /// </summary>
+    public ToolheadType ToolheadType { get; set; } = ToolheadType.Physical;
+
+    /// <summary>
+    /// Spoolman spool ID currently loaded on this toolhead or MMU gate.
+    /// Null when no spool is assigned or Spoolman integration is not configured.
+    /// </summary>
+    public int? CurrentSpoolId { get; set; }
+
+    /// <summary>
+    /// Denormalized material type currently loaded (e.g., "PLA", "PETG", "ABS").
+    /// Kept in sync with Spoolman spool data for quick display without an external API call.
+    /// </summary>
+    public string? CurrentMaterial { get; set; }
+
+    /// <summary>
+    /// Denormalized hex color of the filament currently loaded (e.g., "#FF0000").
+    /// Kept in sync with Spoolman spool data for quick display without an external API call.
+    /// </summary>
+    public string? CurrentFilamentColor { get; set; }
+
+    /// <summary>
     /// When this toolhead configuration was last updated.
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

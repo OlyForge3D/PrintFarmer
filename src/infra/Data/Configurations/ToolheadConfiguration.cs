@@ -22,6 +22,13 @@ public class ToolheadConfiguration : IEntityTypeConfiguration<Toolhead>
         builder.Property(t => t.IsPrimary).HasDefaultValue(false);
         builder.Property(t => t.UpdatedAt).IsRequired();
 
+        // Multi-toolhead filament tracking properties
+        builder.Property(t => t.ToolheadType)
+            .IsRequired()
+            .HasDefaultValue(ToolheadType.Physical);
+        builder.Property(t => t.CurrentMaterial).HasMaxLength(64);
+        builder.Property(t => t.CurrentFilamentColor).HasMaxLength(32);
+
         // JSON array properties
         builder.Property(t => t.SupportedMaterials)
             .HasConversion(
@@ -63,5 +70,6 @@ public class ToolheadConfiguration : IEntityTypeConfiguration<Toolhead>
         // Indexes
         builder.HasIndex(t => t.PrinterId);
         builder.HasIndex(t => t.Index);
+        builder.HasIndex(t => t.CurrentSpoolId);
     }
 }

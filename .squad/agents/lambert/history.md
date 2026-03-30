@@ -133,3 +133,31 @@ Published: `.squad/orchestration-log/20260326-031539-lambert.md`
 
 - 2026-03-26: Per-printer wattage cascade implemented: `printer.Wattage ?? printer.Model?.DefaultWattage ?? settings.AveragePrinterWattage`. Cost tests must create isolated PrinterModel entities to avoid seeded DefaultWattage values leaking into assertions. The `.Include(j => j.AssignedPrinter).ThenInclude(p => p.Model)` is required in `CalculateAndStoreCostsAsync` for the cascade to work.
 - 2026-03-26: When adding a field to a positional `record` like `PrinterModelDto`, every construction site across repos (EfCatalogRepository, CatalogService, CatalogCache) must be updated with a named parameter. Using `DefaultWattage: value` named syntax avoids positional breakage. Tests using named params (e.g., `Id:`, `Name:`) are unaffected by new defaulted params.
+
+## Session: Multi-Toolhead Filament Tracking — Phase 1 Domain Model (2026-07-15)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — Build succeeds with 0 errors, 0 warnings
+
+### Work Completed
+
+- **ToolheadType enum** (`src/infra/Domain/ToolheadType.cs`): `Physical = 0`, `MmuGate = 1` — unifies toolchanger and MMU/AMS printers under shared T-command addressing
+- **Toolhead entity** extended with `ToolheadType`, `CurrentSpoolId`, `CurrentMaterial`, `CurrentFilamentColor` for per-toolhead filament tracking
+- **ToolheadConfiguration** updated: `ToolheadType` required with default, `CurrentSpoolId` index, max lengths on string fields
+- **PrintJobToolheadUsage entity** (`src/infra/Domain/PrintJobToolheadUsage.cs`): per-toolhead filament usage records with spool ID, weight, color, material cost
+- **PrintJobToolheadUsageConfiguration** (`src/infra/Data/Configurations/PrintJobToolheadUsageConfiguration.cs`): FK cascade, unique composite index on (PrintJobId, ToolheadIndex)
+- **PrintJob entity** extended with `ToolheadUsages` navigation collection
+- **GcodeFile entity** extended with `FilamentPerExtruderWeightG`, `FilamentPerExtruderLengthMm`, `ExtruderCount`
+- **AppDbContext** `PrintJobToolheadUsages` DbSet added
+- **DTOs updated**: `ToolheadDto` (+4 fields), `GcodeFileDto` (+3 fields), new `PrintJobToolheadUsageDto`
+- **GcodeMetadataExtracted** extended with per-extruder weight/length arrays and ExtruderCount
+- **GcodeFilesService** mapping updated to pass through new GcodeFile fields
+- **PrintersController** mapping updated to pass through new Toolhead fields
+- **Test fix**: `GcodeMetadataPerExtruderFilamentTests` — fixed `BeOneOf` null/int? type ambiguity
+
+### Key Decisions
+
+- Per-extruder filament data stored as JSON strings (`string?`) in GcodeFile for EF compatibility, matching existing JSON array pattern (RequiredCapabilities, PreferredPrinterIds)
+- New DTO fields added with defaults at end of positional records to maintain backward compatibility at all existing call sites
+- `PrintJobToolheadUsage.MaterialCostUsd` is a placeholder for Phase 5 cost breakdown
+- No EF migrations created (separate step per project conventions)
