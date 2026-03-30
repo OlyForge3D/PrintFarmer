@@ -106,6 +106,8 @@ export interface JobDetails {
   // Multi-copy
   copies?: number;
   completedCopies?: number;
+  // Multi-toolhead filament tracking
+  toolheadUsages?: import('@/types/api').PrintJobToolheadUsage[];
 }
 
 

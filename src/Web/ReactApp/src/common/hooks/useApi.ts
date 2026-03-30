@@ -1852,3 +1852,33 @@ export function useTestObicoServerHealth() {
     onError: (err: ApiError) => toast.error(`Health test failed: ${err.message}`),
   });
 }
+
+// ============ Multi-Toolhead Filament Tracking Hooks ============
+
+export function useSetToolheadSpool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ printerId, toolheadIndex, spoolId }: { printerId: string; toolheadIndex: number; spoolId: number }) =>
+      apiClient.setToolheadSpool(printerId, toolheadIndex, spoolId),
+    onSuccess: (_data, { printerId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+      toast.success('Spool assigned to toolhead');
+    },
+    onError: (err: Error) => toast.error(`Failed to assign spool: ${err.message}`),
+  });
+}
+
+export function useClearToolheadSpool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ printerId, toolheadIndex }: { printerId: string; toolheadIndex: number }) =>
+      apiClient.clearToolheadSpool(printerId, toolheadIndex),
+    onSuccess: (_data, { printerId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+      toast.success('Spool cleared from toolhead');
+    },
+    onError: (err: Error) => toast.error(`Failed to clear spool: ${err.message}`),
+  });
+}

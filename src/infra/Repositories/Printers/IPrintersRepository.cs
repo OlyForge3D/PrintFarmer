@@ -146,4 +146,13 @@ public interface IPrintersRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns>True if a printer exists with the given ID.</returns>
     Task<bool> ExistsAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Finds a printer by ID with Toolheads collection included.
+    /// Used for toolhead management operations (spool assignment, MMU configuration).
+    /// </summary>
+    /// <param name="id">The printer's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The printer with Toolheads included if found, otherwise null.</returns>
+    Task<Printer?> FindByIdWithToolheadsAsync(Guid id, CancellationToken ct);
 }

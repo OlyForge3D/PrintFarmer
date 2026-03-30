@@ -3837,6 +3837,22 @@ export class ApiClient {
     const response = await this.client.get<ObicoServerHealthResponse>(`/obico-servers/${id}/health`);
     return response.data;
   }
+
+  // ============ Multi-Toolhead Filament Tracking API methods ============
+
+  /**
+   * Assign a spool to a specific toolhead
+   */
+  async setToolheadSpool(printerId: string, toolheadIndex: number, spoolId: number): Promise<void> {
+    await this.client.put(`/printers/${printerId}/toolheads/${toolheadIndex}/spool`, { spoolId });
+  }
+
+  /**
+   * Clear spool assignment from a specific toolhead
+   */
+  async clearToolheadSpool(printerId: string, toolheadIndex: number): Promise<void> {
+    await this.client.delete(`/printers/${printerId}/toolheads/${toolheadIndex}/spool`);
+  }
 }
 
 // Export singleton instance

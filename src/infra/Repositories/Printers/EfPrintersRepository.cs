@@ -318,4 +318,13 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
     {
         return await _db.Printers.AnyAsync(p => p.Id == id, ct);
     }
+
+    /// <inheritdoc/>
+    public async Task<Printer?> FindByIdWithToolheadsAsync(Guid id, CancellationToken ct)
+    {
+        return await _db.Printers
+            .Include(p => p.Toolheads)
+            .FirstOrDefaultAsync(p => p.Id == id, ct)
+            .ConfigureAwait(false);
+    }
 }

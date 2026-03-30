@@ -145,3 +145,4 @@ Published: `.squad/orchestration-log/20260326-031539-ripley.md`
 - Empty state handling ✅
 
 **Handed off to:** Kane for validation gate
+- **2026-03-27: Multi-toolhead filament tracking frontend (Phase 6b-6e):** Added `useSetToolheadSpool()` and `useClearToolheadSpool()` hooks to `useApi.ts`. Created `ToolheadSpoolPicker` component for assigning spools to individual toolheads (reuses existing `SpoolPickerModal`). Added `toolheadUsages` field to `JobDetails` type. Enhanced `JobDetailsSection` to display per-toolhead filament usage in job history with material, weight, cost breakdown and totals. Descoped multi-spool display in `CompactPrinterCard` to avoid N+1 queries — more appropriate in detail views. All changes compile and lint cleanly (0 TypeScript errors, 1 pre-existing ESLint warning).

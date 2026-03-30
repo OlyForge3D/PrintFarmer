@@ -161,3 +161,41 @@ Published: `.squad/orchestration-log/20260326-031539-lambert.md`
 - New DTO fields added with defaults at end of positional records to maintain backward compatibility at all existing call sites
 - `PrintJobToolheadUsage.MaterialCostUsd` is a placeholder for Phase 5 cost breakdown
 - No EF migrations created (separate step per project conventions)
+
+## Session: Multi-Toolhead Filament Tracking — Phase 6 API Endpoints (2026-07-15)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — Build succeeds with 0 errors, 0 warnings
+
+### Work Completed
+
+- **Toolhead Spool Assignment Endpoints**:
+  - `PUT /api/printers/{id}/toolheads/{toolheadIndex}/spool` — Assigns a Spoolman spool to a specific toolhead, fetches spool details to populate material and color
+  - `DELETE /api/printers/{id}/toolheads/{toolheadIndex}/spool` — Clears spool assignment from a toolhead
+  - Added `SetToolheadSpoolAsync` and `ClearToolheadSpoolAsync` service methods in `PrintersService`
+  - Added `FindByIdWithToolheadsAsync` repository method in `EfPrintersRepository`
+
+- **MMU Virtual Toolhead Auto-Creation (Phase 1b)**:
+  - Created `SyncMmuVirtualToolheads` helper method in `PrintersService`
+  - Auto-creates virtual Toolhead entries (T1..T(n-1)) for MMU/AMS printers when `MultiMaterial=true` with ≤1 physical toolhead
+  - Copies component references (hotend, nozzle, extruder) from primary physical toolhead to MMU gates
+  - Integrated into printer creation flow (`CreatePrinterFromDtoAsync`)
+  - Integrated into template application flow (`ApplyModelTemplateAsync`)
+  - Default 4 MMU gates (configurable via method parameter)
+
+### Key Implementation Details
+
+- Toolhead spool endpoints use the same request DTO (`SetActiveSpoolRequest`) as printer-level spool endpoint for consistency
+- Service methods fetch spool details from Spoolman to denormalize material and color info on the toolhead for quick display
+- MMU sync method checks for physical toolhead count (must be ≤1) to distinguish MMU printers from toolchanger printers
+- MMU sync method is idempotent — only creates gates if they don't already exist
+- No EF migrations needed — schema already supports all required fields
+
+### Validation
+
+- ✅ Solution builds with 0 errors, 0 warnings
+- Architecture follows existing SetActiveSpool pattern
+- API endpoints follow RESTful conventions
+- Service methods use existing repository patterns (UnitOfWork, FindByIdWithToolheadsAsync)
+- MMU sync integrates seamlessly into existing printer lifecycle hooks
+

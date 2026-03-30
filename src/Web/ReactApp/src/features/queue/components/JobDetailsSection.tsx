@@ -279,6 +279,9 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
   const materialType = jobDetails.requiredMaterialType || jobDetails.materialType;
   const nozzleDiameter = jobDetails.requiredNozzleDiameter || jobDetails.nozzleDiameter;
 
+  // Check if we have multi-toolhead usage data
+  const hasToolheadUsages = jobDetails.toolheadUsages && jobDetails.toolheadUsages.length > 0;
+
   return (
     <div className="space-y-1">
       <dl className="grid grid-cols-1 gap-3">
@@ -347,6 +350,70 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
             )}
           </dd>
         </div>
+
+        {/* Multi-Toolhead Filament Usage Section */}
+        {hasToolheadUsages && (
+          <div className="flex flex-col py-2 border-t border-pf-border mt-4">
+            <dt className="text-sm font-medium text-pf-text-secondary mb-2">Filament Usage by Toolhead</dt>
+            <dd className="space-y-2">
+              {jobDetails.toolheadUsages!.map((usage, idx) => {
+                const usageGrams = usage.filamentUsageGrams?.toFixed(1) ?? '—';
+                const costUsd = usage.materialCostUsd?.toFixed(2) ?? '—';
+                return (
+                  <div key={usage.id || idx} className="flex items-center gap-3 text-sm">
+                    <span className="font-mono text-pf-text-primary w-8">T{usage.toolheadIndex}</span>
+                    <div className="flex items-center gap-2 flex-1">
+                      {usage.filamentColor && (
+                        <span
+                          className="w-4 h-4 rounded-full border border-pf-border shrink-0"
+                          style={{ backgroundColor: usage.filamentColor }}
+                          title={usage.filamentColor}
+                        />
+                      )}
+                      <span className="text-pf-text-primary">
+                        {usage.filamentName || 'Unknown Material'}
+                      </span>
+                      {usage.spoolmanSpoolId && (
+                        <span className="text-xs text-pf-text-tertiary">
+                          (Spool #{usage.spoolmanSpoolId})
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-pf-text-secondary">
+                      <span className="font-medium">{usageGrams}g</span>
+                      {usage.materialCostUsd != null && (
+                        <span className="text-pf-text-tertiary">${costUsd}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {/* Total Row */}
+              {jobDetails.toolheadUsages!.length > 1 && (() => {
+                const totalGrams = jobDetails.toolheadUsages!.reduce(
+                  (sum, u) => sum + (u.filamentUsageGrams ?? 0),
+                  0
+                );
+                const totalCost = jobDetails.toolheadUsages!.reduce(
+                  (sum, u) => sum + (u.materialCostUsd ?? 0),
+                  0
+                );
+                return (
+                  <div className="flex items-center gap-3 text-sm pt-2 border-t border-pf-border/50">
+                    <span className="font-medium text-pf-text-primary w-8">Total</span>
+                    <div className="flex-1" />
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium text-pf-text-primary">{totalGrams.toFixed(1)}g</span>
+                      {totalCost > 0 && (
+                        <span className="font-medium text-pf-text-primary">${totalCost.toFixed(2)}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </dd>
+          </div>
+        )}
       </dl>
     </div>
   );

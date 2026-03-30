@@ -1542,6 +1542,12 @@ public class PrintersService(
             }
 
             _logger.LogInformation("[CreatePrinterFromDto] Created {NumExtruders} toolhead(s) from template for printer {PName}", numExtruders, p.Name);
+
+            // Auto-create MMU virtual toolheads if MultiMaterial is enabled
+            if (p.MultiMaterial)
+            {
+                SyncMmuVirtualToolheads(p, mmuGateCount: 4);
+            }
         }
 
         // Assign location if provided
@@ -1658,6 +1664,12 @@ public class PrintersService(
         {
             printer.MultiMaterial = modelTemplate.MultiMaterial;
             updated = true;
+
+            // Auto-create MMU virtual toolheads when MultiMaterial is enabled
+            if (modelTemplate.MultiMaterial)
+            {
+                SyncMmuVirtualToolheads(printer, mmuGateCount: 4);
+            }
         }
 
         if (forceOverwrite || (!printer.SupportsAutoLeveling && modelTemplate.SupportsAutoLeveling))
@@ -2566,6 +2578,174 @@ public class PrintersService(
             _logger.LogError(ex, "ListPrinterSpoolsAsync: Exception fetching spools for printer {PName} ({Id})", p.Name, id);
             return null;
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct)
+    {
+        // Load printer with toolheads collection
+        Printer? p = await _unitOfWork.Printers
+            .FindByIdWithToolheadsAsync(id, ct)
+            .ConfigureAwait(false);
+
+        if (p is null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        // Find the toolhead by index
+        Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+        if (toolhead is null)
+        {
+            return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
+        }
+
+        try
+        {
+            // Fetch spool details from Spoolman to populate material and color
+            SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+
+            // Assign spool ID and denormalized info
+            toolhead.CurrentSpoolId = spoolId;
+            toolhead.CurrentMaterial = spool?.Material ?? null;
+            toolhead.CurrentFilamentColor = spool?.ColorHex ?? null;
+            toolhead.UpdatedAt = DateTime.UtcNow;
+
+            await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "SetToolheadSpoolAsync: Assigned spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
+                spoolId, toolheadIndex, p.Name, id);
+
+            return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T{toolheadIndex}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "SetToolheadSpoolAsync: Exception assigning spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
+                spoolId, toolheadIndex, p.Name, id);
+            return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> ClearToolheadSpoolAsync(Guid id, int toolheadIndex, CancellationToken ct)
+    {
+        // Load printer with toolheads collection
+        Printer? p = await _unitOfWork.Printers
+            .FindByIdWithToolheadsAsync(id, ct)
+            .ConfigureAwait(false);
+
+        if (p is null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        // Find the toolhead by index
+        Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+        if (toolhead is null)
+        {
+            return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
+        }
+
+        try
+        {
+            // Clear spool assignment
+            toolhead.CurrentSpoolId = null;
+            toolhead.CurrentMaterial = null;
+            toolhead.CurrentFilamentColor = null;
+            toolhead.UpdatedAt = DateTime.UtcNow;
+
+            await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "ClearToolheadSpoolAsync: Cleared spool from toolhead T{Index} on printer {PName} ({Id})",
+                toolheadIndex, p.Name, id);
+
+            return new CommandResult(true, $"Spool cleared from toolhead T{toolheadIndex}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "ClearToolheadSpoolAsync: Exception clearing spool from toolhead T{Index} on printer {PName} ({Id})",
+                toolheadIndex, p.Name, id);
+            return new CommandResult(false, $"Failed to clear spool: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Synchronizes MMU virtual toolheads (gates) for multi-material printers.
+    /// When a printer is configured as MultiMaterial=true with a single physical toolhead,
+    /// auto-creates virtual Toolhead entries for MMU/AMS gates.
+    /// </summary>
+    /// <param name="printer">The printer entity with Toolheads collection loaded.</param>
+    /// <param name="mmuGateCount">Number of MMU gates to create (default 4 for Prusa MMU3/Bambu AMS).</param>
+    /// <remarks>
+    /// This method should be called:
+    /// - After printer creation when MultiMaterial=true
+    /// - After printer update when MultiMaterial changes from false to true
+    /// - When applying catalog model template with MultiMaterial=true
+    /// </remarks>
+    private void SyncMmuVirtualToolheads(Printer printer, int mmuGateCount = 4)
+    {
+        if (!printer.MultiMaterial)
+        {
+            return; // Not a multi-material printer
+        }
+
+        // Count physical toolheads (exclude virtual gates)
+        int physicalToolheadCount = printer.Toolheads.Count(t => t.ToolheadType == ToolheadType.Physical);
+
+        // Only auto-create MMU gates if there's 1 or fewer physical toolheads (indicating MMU/AMS)
+        if (physicalToolheadCount > 1)
+        {
+            return; // This is a toolchanger (multiple physical toolheads), not an MMU
+        }
+
+        // Check if MMU gates already exist
+        bool hasExistingGates = printer.Toolheads.Any(t => t.ToolheadType == ToolheadType.MmuGate);
+        if (hasExistingGates)
+        {
+            return; // MMU gates already configured
+        }
+
+        // Get the primary physical toolhead to copy component references from
+        Toolhead? primaryToolhead = printer.Toolheads.FirstOrDefault(t => t.ToolheadType == ToolheadType.Physical && t.IsPrimary)
+                                   ?? printer.Toolheads.FirstOrDefault(t => t.ToolheadType == ToolheadType.Physical);
+
+        _logger.LogInformation(
+            "SyncMmuVirtualToolheads: Auto-creating {GateCount} MMU gates for printer {PName} ({Id})",
+            mmuGateCount, printer.Name, printer.Id);
+
+        // Create virtual toolheads for MMU gates (T1..T(n-1), where T0 is the physical toolhead)
+        for (int i = 1; i < mmuGateCount; i++)
+        {
+            var gate = new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"Gate {i}",
+                Index = i,
+                ToolheadType = ToolheadType.MmuGate,
+                IsPrimary = false,
+
+                // Copy component references from primary physical toolhead (shared hotend/extruder)
+                HotendModelId = primaryToolhead?.HotendModelId,
+                ExtruderModelId = primaryToolhead?.ExtruderModelId,
+                ToolheadModelDefId = primaryToolhead?.ToolheadModelDefId,
+                NozzleModelId = primaryToolhead?.NozzleModelId,
+                SupportedMaterials = primaryToolhead?.SupportedMaterials,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            printer.Toolheads.Add(gate);
+        }
+
+        _logger.LogInformation(
+            "SyncMmuVirtualToolheads: Created {GateCount} MMU gates for printer {PName} ({Id})",
+            mmuGateCount, printer.Name, printer.Id);
     }
 
     /// <summary>

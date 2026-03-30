@@ -445,6 +445,27 @@ public interface IPrintersService
     Task<IReadOnlyList<SpoolmanSpoolDto>?> ListPrinterSpoolsAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Assigns a Spoolman spool to a specific toolhead (by index) on a printer.
+    /// Fetches spool details from Spoolman to populate material and color information.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.)</param>
+    /// <param name="spoolId">The Spoolman spool ID to assign</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct);
+
+    /// <summary>
+    /// Clears the spool assignment from a specific toolhead (by index) on a printer.
+    /// Removes the spool ID, material, and color information.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> ClearToolheadSpoolAsync(Guid id, int toolheadIndex, CancellationToken ct);
+
+    /// <summary>
     /// Starts printing a gcode file that exists on the printer's storage.
     /// </summary>
     /// <param name="id">The printer ID</param>

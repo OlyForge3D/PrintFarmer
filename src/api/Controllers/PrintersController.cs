@@ -2232,6 +2232,61 @@ public class PrintersController(
         return Ok(spools);
     }
 
+    /// <summary>
+    /// Assigns a Spoolman spool to a specific toolhead (by index) on a printer.
+    /// Fetches spool details from Spoolman to populate material and color information.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.).</param>
+    /// <param name="request">Request containing the spool ID to assign.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure with descriptive message.</returns>
+    /// <response code="200">Spool was assigned successfully.</response>
+    /// <response code="400">If the request failed (invalid spool ID, Spoolman not configured).</response>
+    /// <response code="404">If the printer or toolhead was not found.</response>
+    [HttpPut("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> SetToolheadSpoolAsync(
+        Guid id,
+        int toolheadIndex,
+        [FromBody] SetActiveSpoolRequest? request,
+        CancellationToken ct)
+    {
+        if (request?.SpoolId is not { } spoolId)
+        {
+            return BadRequest(new CommandResult(false, "SpoolId is required"));
+        }
+
+        CommandResult result = await _printersService.SetToolheadSpoolAsync(id, toolheadIndex, spoolId, ct);
+        _telemetryService.RecordPrinterOperation("set_toolhead_spool", id.ToString(), result.Success);
+        return MapCommandResult(result);
+    }
+
+    /// <summary>
+    /// Clears the spool assignment from a specific toolhead (by index) on a printer.
+    /// Removes the spool ID, material, and color information.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.).</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure with descriptive message.</returns>
+    /// <response code="200">Spool was cleared successfully.</response>
+    /// <response code="404">If the printer or toolhead was not found.</response>
+    [HttpDelete("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> ClearToolheadSpoolAsync(
+        Guid id,
+        int toolheadIndex,
+        CancellationToken ct)
+    {
+        CommandResult result = await _printersService.ClearToolheadSpoolAsync(id, toolheadIndex, ct);
+        _telemetryService.RecordPrinterOperation("clear_toolhead_spool", id.ToString(), result.Success);
+        return MapCommandResult(result);
+    }
+
     // Camera control endpoints
 
     /// <summary>
