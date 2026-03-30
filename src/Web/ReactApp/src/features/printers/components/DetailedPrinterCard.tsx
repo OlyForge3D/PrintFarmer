@@ -9,6 +9,7 @@ import { PrinterHistoryModal } from '@/features/printers/components/PrinterHisto
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
+import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
@@ -674,13 +675,23 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
       {(spoolmanReady || printer.spoolInfo) && (() => {
         const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
-        const sectionTitle = hasMultipleToolheads ? 'Spools' : 'Spool';
+        const hasMmuGates = !hasMultipleToolheads
+          && printer.mmuStatus?.gates
+          && printer.mmuStatus.gates.length > 0;
+        const hasMultipleSpoolSources = hasMultipleToolheads || hasMmuGates;
+        const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
+
+        const effectiveToolheads = hasMultipleToolheads
+          ? printerDetails!.toolheads!
+          : hasMmuGates
+            ? mmuGatesToToolheads(printer.mmuStatus!.gates)
+            : undefined;
 
         return (
           <div className="mb-2">
             <div className="flex items-center justify-between mb-1">
               <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">{sectionTitle}</div>
-              {!hasMultipleToolheads && (
+              {!hasMultipleSpoolSources && (
                 <div className="flex items-center gap-0.5">
                   <Button
                     type="button"
@@ -724,10 +735,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                 </div>
               )}
             </div>
-            {hasMultipleToolheads ? (
+            {hasMultipleSpoolSources && effectiveToolheads ? (
               <ToolheadSpoolPicker
                 printerId={printer.id}
-                toolheads={printerDetails!.toolheads!}
+                toolheads={effectiveToolheads}
                 onSpoolChange={() => {
                   queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                 }}

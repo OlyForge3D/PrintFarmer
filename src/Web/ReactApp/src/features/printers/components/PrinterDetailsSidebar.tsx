@@ -66,6 +66,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
+import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 import { toast } from 'sonner';
@@ -1191,9 +1192,23 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
         {/* Spool Section - Show when Spoolman is configured (all backends) */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
-          // Check if printer has multiple toolheads
+          // Physical multi-toolhead (e.g., Snapmaker U1): toolheads stored in config DB
           const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
-          const sectionTitle = hasMultipleToolheads ? 'Spools' : 'Spool';
+          // MMU multi-material (e.g., QidiBox, HappyHare, AFC): gates from live SignalR status
+          const hasMmuGates = !hasMultipleToolheads
+            && displayPrinter?.mmuStatus?.gates
+            && displayPrinter.mmuStatus.gates.length > 0;
+          const hasMultipleSpoolSources = hasMultipleToolheads || hasMmuGates;
+          const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
+
+          // For multi-spool mode, determine the toolheads to display.
+          // Prefer printerDetails.toolheads (includes virtual MmuGate entries after backend sync).
+          // Fall back to converting live mmuStatus.gates for MMU printers without synced toolheads.
+          const effectiveToolheads = hasMultipleToolheads
+            ? printerDetails!.toolheads!
+            : hasMmuGates
+              ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
+              : undefined;
           
           return (
             <CollapsibleSection
@@ -1202,7 +1217,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               onToggle={setIsSpoolExpanded}
               headerActions={
                 // Only show header actions for single-spool mode
-                !hasMultipleToolheads ? (
+                !hasMultipleSpoolSources ? (
                   <div className="flex items-center gap-0.5">
                     {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (
                       <Button
@@ -1249,13 +1264,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 ) : undefined
               }
             >
-              {hasMultipleToolheads ? (
-                // Multi-toolhead spool picker
+              {hasMultipleSpoolSources && effectiveToolheads ? (
+                // Multi-toolhead or MMU spool picker
                 <ToolheadSpoolPicker
                   printerId={printer.id}
-                  toolheads={printerDetails!.toolheads!}
+                  toolheads={effectiveToolheads}
                   onSpoolChange={() => {
-                    // Refresh printer details after spool change
                     queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                   }}
                 />

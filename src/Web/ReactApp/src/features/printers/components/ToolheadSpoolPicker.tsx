@@ -13,8 +13,10 @@ interface ToolheadSpoolPickerProps {
 /**
  * Multi-toolhead spool assignment interface.
  * Shows a list of toolheads with current spool assignments and allows changing/clearing them.
+ * Works with both physical toolheads (Snapmaker U1) and MMU gates (QidiBox, HappyHare, AFC).
  */
 export function ToolheadSpoolPicker({ printerId, toolheads, onSpoolChange }: ToolheadSpoolPickerProps) {
+  // Track by toolhead.index (the real API index), not array position
   const [selectedToolheadIndex, setSelectedToolheadIndex] = useState<number | null>(null);
   const setSpoolMutation = useSetToolheadSpool();
   const clearSpoolMutation = useClearToolheadSpool();
@@ -48,7 +50,9 @@ export function ToolheadSpoolPicker({ printerId, toolheads, onSpoolChange }: Too
     onSpoolChange?.();
   };
 
-  const activeToolhead = selectedToolheadIndex !== null ? toolheads[selectedToolheadIndex] : undefined;
+  const activeToolhead = selectedToolheadIndex !== null
+    ? toolheads.find(t => t.index === selectedToolheadIndex)
+    : undefined;
 
   return (
     <div className="space-y-3">
@@ -56,16 +60,16 @@ export function ToolheadSpoolPicker({ printerId, toolheads, onSpoolChange }: Too
         Assign spools to each toolhead for accurate filament tracking
       </div>
 
-      {toolheads.map((toolhead, index) => {
+      {toolheads.map((toolhead) => {
         const isMmuGate = String(toolhead.toolheadType) === 'MmuGate';
         const hasAssignment = toolhead.currentSpoolId != null;
 
         return (
-          <Card key={index}>
+          <Card key={toolhead.index}>
             <Card.Body className="flex items-center gap-4 py-3">
               {/* Toolhead Label & Type Badge */}
               <div className="flex items-center gap-2 min-w-[100px]">
-                <span className="font-mono text-pf-text-primary font-medium">T{index}</span>
+                <span className="font-mono text-pf-text-primary font-medium">T{toolhead.index}</span>
                 <Badge
                   variant={isMmuGate ? 'primary' : 'default'}
                   size="sm"
@@ -106,7 +110,7 @@ export function ToolheadSpoolPicker({ printerId, toolheads, onSpoolChange }: Too
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => handleOpenPicker(index)}
+                  onClick={() => handleOpenPicker(toolhead.index)}
                   disabled={setSpoolMutation.isPending || clearSpoolMutation.isPending}
                 >
                   {hasAssignment ? 'Change' : 'Assign'}
@@ -115,7 +119,7 @@ export function ToolheadSpoolPicker({ printerId, toolheads, onSpoolChange }: Too
                   <Button
                     variant="danger"
                     size="sm"
-                    onClick={() => handleClearSpool(index)}
+                    onClick={() => handleClearSpool(toolhead.index)}
                     disabled={setSpoolMutation.isPending || clearSpoolMutation.isPending}
                   >
                     Clear
