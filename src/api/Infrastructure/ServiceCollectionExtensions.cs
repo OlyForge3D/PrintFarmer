@@ -213,6 +213,14 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IDataExportService, DataExportService>();
         _ = services.AddScoped<IDataImportService, DataImportService>();
 
+        // Catalog update detection service
+        _ = services.AddScoped<ICatalogUpdateService, CatalogUpdateService>();
+        _ = services.AddHttpClient("CatalogUpdate", client =>
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("PrintFarmer/1.0");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+
         // Network URL rewriting (stateless, safe as Singleton)
         _ = services.AddSingleton<INetworkUrlRewriteService, NetworkUrlRewriteService>();
 

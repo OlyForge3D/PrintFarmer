@@ -1,0 +1,36 @@
+# PrintFarmer Catalog Manifest
+# This file tracks catalog version and file checksums for update detection.
+# The SHA256 hashes are used to determine which files have changed between versions.
+version: "2026.03.29.1"
+lastUpdated: "2026-03-29"
+files:
+  manufacturers:
+    path: "manufacturers.yaml"
+    sha256: "1d0000064e3341ca41abf5c91bfb70965e64c64f5e0f123118fed7d94f3a795a"
+  printer-models:
+    path: "printer-models.yaml"
+    sha256: "2e77b4fd948075c9c1366b615a14d7cfdb0541810bb3430414c8bd5e216081dc"
+  filament-types:
+    path: "filament-types.yaml"
+    sha256: "db3d6bef21b3859d3d9951fe96626c87511c529861ffe5484aca3b7aeb324c42"
+  hotends:
+    path: "components/hotends.yaml"
+    sha256: "96be78b18bc15e8ef27287b630aa6d9dfaef9f90f1949674444ce7ab6e2314d7"
+  extruders:
+    path: "components/extruders.yaml"
+    sha256: "ad34d5fccd36781607983a5bd75fb7551ba834fa59683e9835119b74f7d0dbbd"
+  toolheads:
+    path: "components/toolheads.yaml"
+    sha256: "a399046aebc0fc22e5c77ecb24767f5c068d455e251771c1c517c102c5f5e5ea"
+  nozzles:
+    path: "components/nozzles.yaml"
+    sha256: "4e108150d612de27df0d5ee13a79d0fd2a9920c37224395624014d350e621558"
+  maintenance-tasks:
+    path: "maintenance-tasks.yaml"
+    sha256: "197d1dd3eec37e7e70d5d477e1a1ce9ca76eb29a493f5b0b0545c832c6b6db92"
+  maintenance-components:
+    path: "maintenance-components.yaml"
+    sha256: "8bd18f308f4029fd4eef0c6d46a6c1512e6628cb6f6b44a0543967b2db51e217"
+  maintenance-plans:
+    path: "maintenance-plans.yaml"
+    sha256: "fe6bec09c378afc171b2b8c6c0e147368397f3dce5c3fd2b3b158803b30cba42"

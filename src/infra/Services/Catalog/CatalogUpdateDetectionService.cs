@@ -1,10 +1,9 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Background;
-using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
@@ -103,7 +102,6 @@ public class CatalogUpdateDetectionService(
     {
         using IServiceScope scope = _serviceProvider.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        INotificationService notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
         IPrintersService printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
         IUsersRepository usersRepository = scope.ServiceProvider.GetRequiredService<IUsersRepository>();
 
@@ -137,7 +135,7 @@ public class CatalogUpdateDetectionService(
         }
         else
         {
-            await NotifyUsersAsync(db, notificationService, usersRepository, outdated, ct);
+            await NotifyUsersAsync(db, usersRepository, outdated, ct);
         }
     }
 
@@ -187,7 +185,6 @@ public class CatalogUpdateDetectionService(
     /// </summary>
     private async Task NotifyUsersAsync(
         AppDbContext db,
-        INotificationService notificationService,
         IUsersRepository usersRepository,
         List<Printer> outdated,
         CancellationToken ct)
