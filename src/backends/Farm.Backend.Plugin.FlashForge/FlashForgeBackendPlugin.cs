@@ -1,5 +1,6 @@
 ﻿using Farm.Backend.Plugin.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -53,6 +54,10 @@ public class FlashForgeBackendPlugin : IExtendedBackendPlugin
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
             return new FlashForgeClient(logger, timeouts);
         });
+
+        // Register the FlashForgePollingService hosted service
+        // This service polls FlashForge printers for status updates every 10 seconds
+        services.AddSingleton<IHostedService, FlashForgePollingService>();
     }
 
     /// <inheritdoc />
