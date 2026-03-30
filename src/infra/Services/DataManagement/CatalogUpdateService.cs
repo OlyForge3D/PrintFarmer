@@ -14,7 +14,7 @@ namespace Farm.Infrastructure.Services.DataManagement;
 /// <inheritdoc/>
 public class CatalogUpdateService : ICatalogUpdateService
 {
-    private const string GitHubBaseUrl = "https://raw.githubusercontent.com/jpapiez/PrintFarmer/main/src/api/Data/seed/";
+    private const string DefaultGitHubBaseUrl = "https://raw.githubusercontent.com/OlyForge3D/PrintFarmer/main/src/api/Data/seed/";
     private const string ManifestFileName = "catalog-manifest.yaml";
 
     private static readonly Dictionary<string, string> FileCategoryNames = new(StringComparer.OrdinalIgnoreCase)
@@ -36,6 +36,7 @@ public class CatalogUpdateService : ICatalogUpdateService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CatalogUpdateService> _logger;
     private readonly string _seedDataPath;
+    private readonly string _gitHubBaseUrl;
     private readonly IDeserializer _yamlDeserializer;
 
     /// <summary>
@@ -58,6 +59,7 @@ public class CatalogUpdateService : ICatalogUpdateService
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _seedDataPath = configuration["SeedData:Path"] ?? Path.Combine(AppContext.BaseDirectory, "Data", "seed");
+        _gitHubBaseUrl = configuration["CatalogUpdate:GitHubBaseUrl"] ?? DefaultGitHubBaseUrl;
         _yamlDeserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
@@ -283,7 +285,7 @@ public class CatalogUpdateService : ICatalogUpdateService
         try
         {
             using HttpClient client = _httpClientFactory.CreateClient("CatalogUpdate");
-            string url = GitHubBaseUrl + ManifestFileName;
+            string url = _gitHubBaseUrl + ManifestFileName;
             _logger.LogInformation("[CatalogUpdate] Fetching remote manifest from {Url}", url);
 
             HttpResponseMessage response = await client.GetAsync(url, ct);
@@ -313,7 +315,7 @@ public class CatalogUpdateService : ICatalogUpdateService
         try
         {
             using HttpClient client = _httpClientFactory.CreateClient("CatalogUpdate");
-            string url = GitHubBaseUrl + relativePath;
+            string url = _gitHubBaseUrl + relativePath;
             _logger.LogInformation("[CatalogUpdate] Downloading {File} from {Url}", relativePath, url);
 
             HttpResponseMessage response = await client.GetAsync(url, ct);
