@@ -295,6 +295,7 @@ public class CatalogService(
 
         model.DefaultWattage = defaultWattage;
         model.DefaultHourlyRate = defaultHourlyRate;
+        model.UpdatedAt = DateTime.UtcNow;
 
         if (supportedFilamentTypeIds != null)
         {

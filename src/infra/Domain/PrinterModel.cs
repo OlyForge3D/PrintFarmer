@@ -88,4 +88,10 @@ public class PrinterModel
     public decimal? DefaultHourlyRate { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Tracks when this printer model definition was last modified.
+    /// Used to detect when printers linked to this model need their configuration refreshed.
+    /// </summary>
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

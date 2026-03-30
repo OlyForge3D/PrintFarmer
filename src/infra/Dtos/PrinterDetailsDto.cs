@@ -34,4 +34,5 @@ public record PrinterDetailsDto(
     bool ObicoEnabled = false,
     string? ObicoServerName = null,
     decimal? Wattage = null,
-    decimal? MachineHourlyRate = null);
+    decimal? MachineHourlyRate = null,
+    bool HasCatalogUpdate = false);

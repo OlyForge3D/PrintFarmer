@@ -851,7 +851,8 @@ public class PrintersController(
             p.ObicoEnabled,
             p.ObicoServer?.Name,
             p.Wattage,
-            p.MachineHourlyRate);
+            p.MachineHourlyRate,
+            p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue));
     }
 
     /// <summary>

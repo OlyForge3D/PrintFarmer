@@ -123,6 +123,8 @@ export interface PrinterMetadata {
   notes?: string;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** True when the printer's linked catalog model has been updated since the last template sync. */
+  hasCatalogUpdate?: boolean;
   /** Manufacturer ID (foreign key) */
   manufacturerId?: string;
   /** Manufacturer name (e.g., "Prusa", "Creality") */
@@ -1180,6 +1182,8 @@ export interface PrinterDetails {
   wattage?: number;
   /** Per-printer machine hourly rate override for cost tracking. */
   machineHourlyRate?: number;
+  /** True when the printer's linked catalog model has been updated since the last template sync. */
+  hasCatalogUpdate?: boolean;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
 }

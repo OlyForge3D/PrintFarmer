@@ -618,6 +618,10 @@ export class ApiClient {
     return response.data;
   }
 
+  async applyModelTemplate(id: string): Promise<void> {
+    await this.client.post(`/printers/${id}/apply-template`);
+  }
+
   async deletePrinter(id: string): Promise<void> {
     await this.client.delete(`/printers/${id}`);
   }

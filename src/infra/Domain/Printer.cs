@@ -208,6 +208,13 @@ public class Printer
     public DateTime LastCapabilityUpdate { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    /// When this printer last had the catalog model template applied to it.
+    /// Null means the template has never been applied.
+    /// Used to detect when a catalog update is available (Model.UpdatedAt > LastModelSyncAt).
+    /// </summary>
+    public DateTime? LastModelSyncAt { get; set; }
+
+    /// <summary>
     /// Power consumption in watts. Overrides the model's default wattage when set.
     /// </summary>
     public decimal? Wattage { get; set; }

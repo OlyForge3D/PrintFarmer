@@ -797,7 +797,8 @@ public class PrintersService(
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
-                    ObicoEnabled: p.ObicoEnabled));
+                    ObicoEnabled: p.ObicoEnabled,
+                    HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue)));
             }
             catch (Exception ex)
             {
@@ -842,7 +843,8 @@ public class PrintersService(
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
-                    ObicoEnabled: p.ObicoEnabled));
+                    ObicoEnabled: p.ObicoEnabled,
+                    HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue)));
             }
         }
 
@@ -1260,7 +1262,8 @@ public class PrintersService(
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
-            ObicoEnabled: p.ObicoEnabled);
+            ObicoEnabled: p.ObicoEnabled,
+            HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue));
     }
 
     /// <summary>
@@ -1700,6 +1703,7 @@ public class PrintersService(
         if (updated)
         {
             printer.LastCapabilityUpdate = DateTime.UtcNow;
+            printer.LastModelSyncAt = DateTime.UtcNow;
             _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", modelTemplate.Name, printer.Name);
         }
         else

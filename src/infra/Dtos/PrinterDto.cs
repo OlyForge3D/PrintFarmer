@@ -37,6 +37,7 @@ namespace Farm.Infrastructure;
 /// <param name="FrontendUrl">Calculated frontend URL (typically port 80 for web UI).</param>
 /// <param name="Location">Location information (farm location assignment).</param>
 /// <param name="ObicoEnabled">Whether Obico AI failure detection is enabled for the printer.</param>
+/// <param name="HasCatalogUpdate">True when the printer's linked catalog model has been updated since the last template sync.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -69,4 +70,5 @@ public record PrinterDto(
     string? BackendUrl = null,
     string? FrontendUrl = null,
     LocationSummaryDto? Location = null,
-    bool ObicoEnabled = false);
+    bool ObicoEnabled = false,
+    bool HasCatalogUpdate = false);
