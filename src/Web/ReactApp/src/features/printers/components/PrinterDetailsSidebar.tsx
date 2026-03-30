@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { usePrinter } from '@/common/hooks/useApi';
+import { usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
@@ -65,6 +65,7 @@ import {
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
+import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 import { toast } from 'sonner';
@@ -132,6 +133,16 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printerId ?? '');
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
+  
+  // Fetch printer details to check for multi-toolhead configuration
+  // Only fetch when printerId is available and Spoolman is configured (when spool section would be shown)
+  const { data: printerDetails } = usePrinterDetails(
+    printerId ?? '', 
+    { 
+      enabled: !!printerId && spoolmanReady,
+      staleTime: 60000, // Cache for 1 minute since toolhead config doesn't change frequently
+    }
+  );
 
   const applyTemplateMutation = useMutation({
     mutationFn: () => apiClient.applyModelTemplate(printerId!),
@@ -1179,60 +1190,82 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         )}
 
         {/* Spool Section - Show when Spoolman is configured (all backends) */}
-        {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (
-        <CollapsibleSection
-          title="Spool"
-          expanded={isSpoolExpanded}
-          onToggle={setIsSpoolExpanded}
-          headerActions={
-            <div className="flex items-center gap-0.5">
-              {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={spoolActionPending}
-                  onClick={async () => {
-                    setSpoolActionPending(true);
-                    try {
-                      await apiClient.clearActiveSpool(printer.id);
-                      // Optimistically update cached printers to clear spool info
-                      // SignalR will deliver the authoritative update on next status cycle
-                      queryClient.setQueryData<Printer[]>(['printers'], (old) =>
-                        old?.map(p => p.id === printer.id
-                          ? { ...p, spoolInfo: { hasActiveSpool: false } }
-                          : p
-                        )
-                      );
-                    } catch (err) {
-                      console.error('Failed to eject spool:', err);
-                    } finally {
-                      setSpoolActionPending(false);
-                    }
+        {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
+          // Check if printer has multiple toolheads
+          const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
+          const sectionTitle = hasMultipleToolheads ? 'Spools' : 'Spool';
+          
+          return (
+            <CollapsibleSection
+              title={sectionTitle}
+              expanded={isSpoolExpanded}
+              onToggle={setIsSpoolExpanded}
+              headerActions={
+                // Only show header actions for single-spool mode
+                !hasMultipleToolheads ? (
+                  <div className="flex items-center gap-0.5">
+                    {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={spoolActionPending}
+                        onClick={async () => {
+                          setSpoolActionPending(true);
+                          try {
+                            await apiClient.clearActiveSpool(printer.id);
+                            // Optimistically update cached printers to clear spool info
+                            // SignalR will deliver the authoritative update on next status cycle
+                            queryClient.setQueryData<Printer[]>(['printers'], (old) =>
+                              old?.map(p => p.id === printer.id
+                                ? { ...p, spoolInfo: { hasActiveSpool: false } }
+                                : p
+                              )
+                            );
+                          } catch (err) {
+                            console.error('Failed to eject spool:', err);
+                          } finally {
+                            setSpoolActionPending(false);
+                          }
+                        }}
+                        className="p-1! h-auto!"
+                        title="Eject spool"
+                        aria-label="Eject spool"
+                        iconCenter={<EjectIcon className="h-4 w-4" />}
+                      ></Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={spoolActionPending}
+                      onClick={() => setShowSpoolPicker(true)}
+                      className="p-1! h-auto!"
+                      title="Change spool"
+                      aria-label="Change spool"
+                      iconCenter={<FilamentChangeIcon className="h-4 w-4" />}
+                    ></Button>
+                  </div>
+                ) : undefined
+              }
+            >
+              {hasMultipleToolheads ? (
+                // Multi-toolhead spool picker
+                <ToolheadSpoolPicker
+                  printerId={printer.id}
+                  toolheads={printerDetails!.toolheads!}
+                  onSpoolChange={() => {
+                    // Refresh printer details after spool change
+                    queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                   }}
-                  className="p-1! h-auto!"
-                  title="Eject spool"
-                  aria-label="Eject spool"
-                  iconCenter={<EjectIcon className="h-4 w-4" />}
-                ></Button>
+                />
+              ) : (
+                // Single spool display
+                <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
               )}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={spoolActionPending}
-                onClick={() => setShowSpoolPicker(true)}
-                className="p-1! h-auto!"
-                title="Change spool"
-                aria-label="Change spool"
-                iconCenter={<FilamentChangeIcon className="h-4 w-4" />}
-              ></Button>
-            </div>
-          }
-        >
-          <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
-        </CollapsibleSection>
-        )}
+            </CollapsibleSection>
+          );
+        })()}
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
           <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
             {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}
