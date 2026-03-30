@@ -33,10 +33,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 # Determine the new version
+CURRENT="$(cat VERSION 2>/dev/null || echo "v0.0.0")"
 ARG="${1:-patch}"
 case "$ARG" in
   major|minor|patch)
-    CURRENT="$(cat VERSION 2>/dev/null || echo "v0.0.0")"
     TAG="$(bump_version "$CURRENT" "$ARG")"
     ;;
   v*)
@@ -53,12 +53,8 @@ esac
 RELEASE_REMOTE="release"
 FORBIDDEN_PATHS=(.squad/ .ai-team/ .ai-team-templates/ team-docs/ docs/proposals/ devnotes/)
 
-echo "🚀 Releasing ${TAG}"
+echo "🚀 Releasing ${TAG} (was ${CURRENT})"
 echo ""
-
-# Ensure we're at the repo root
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPO_ROOT"
 
 # Ensure we're on a clean working tree
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -101,7 +97,13 @@ if [[ "$STRIPPED" == "true" ]]; then
   git commit -m "chore: strip team state files from main for release"
 fi
 
-# 4. Tag (skip if tag already exists)
+# 4. Update VERSION file on main
+echo "📝 Updating VERSION to ${TAG}..."
+echo "$TAG" > VERSION
+git add VERSION
+git commit -m "chore: bump VERSION to ${TAG}"
+
+# 5. Tag (skip if tag already exists)
 if git rev-parse "$TAG" &>/dev/null 2>&1; then
   echo "⚠️  Tag ${TAG} already exists — skipping tag creation"
 else
@@ -109,19 +111,22 @@ else
   git tag "$TAG"
 fi
 
-# 5. Push to release remote (OlyForge3D)
+# 6. Push to release remote (OlyForge3D)
 echo "📤 Pushing main + tag to ${RELEASE_REMOTE}..."
 git push "$RELEASE_REMOTE" main
 git push "$RELEASE_REMOTE" "$TAG" 2>/dev/null || true
 
-# 6. Also push main to origin so both remotes stay in sync
+# 7. Also push main to origin so both remotes stay in sync
 echo "📤 Pushing main to origin..."
 git push origin main
 
-# 7. Return to original branch
-echo "↩️  Returning to ${ORIGINAL_BRANCH}..."
+# 8. Back-merge VERSION bump to development
+echo "🔀 Back-merging VERSION bump to ${ORIGINAL_BRANCH}..."
 git checkout "$ORIGINAL_BRANCH"
+git merge main --no-edit
+git push origin "$ORIGINAL_BRANCH"
 
 echo ""
 echo "✅ ${TAG} released to OlyForge3D/PrintFarmer!"
+echo "   ${CURRENT} → ${TAG}"
 echo "   https://github.com/OlyForge3D/PrintFarmer"
