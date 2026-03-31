@@ -207,13 +207,21 @@ public sealed class AutoDispatchBackgroundService(
             return;
         }
 
-        // Respect the per-printer auto-dispatch ready gate: if automatic dispatch is enabled,
-        // only dispatch when the operator has confirmed the bed is clear (Ready state)
-        // OR when they've pre-confirmed the bed is clear (BedPreConfirmed = true).
-        if (printer.AutoDispatchEnabled && printer.AutoDispatchState != AutoDispatchState.Ready && !printer.BedPreConfirmed)
+        // Per-printer auto-dispatch gate: skip printers that have auto-dispatch disabled
+        if (!printer.AutoDispatchEnabled)
         {
             logger.LogDebug(
-                "[AutoDispatch] Printer {PrinterId} has automatic dispatch enabled but state is {State} and bed not pre-confirmed — waiting for operator confirmation",
+                "[AutoDispatch] Printer {PrinterId} has per-printer auto-dispatch disabled — skipping",
+                printerId);
+            return;
+        }
+
+        // Ready-gate: only dispatch when the operator has confirmed the bed is clear (Ready state)
+        // OR when they've pre-confirmed the bed is clear (BedPreConfirmed = true).
+        if (printer.AutoDispatchState != AutoDispatchState.Ready && !printer.BedPreConfirmed)
+        {
+            logger.LogDebug(
+                "[AutoDispatch] Printer {PrinterId} state is {State} and bed not pre-confirmed — waiting for operator confirmation",
                 printerId, printer.AutoDispatchState);
             return;
         }
