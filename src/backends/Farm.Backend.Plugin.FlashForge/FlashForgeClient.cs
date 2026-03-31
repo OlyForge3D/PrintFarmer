@@ -151,8 +151,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             (double? progress, string? jobName) = ParseProgress(progressResponse);
 
             bool isOnline = true;
-            bool isPrinting = string.Equals(state, "Printing", StringComparison.OrdinalIgnoreCase) ||
-                              string.Equals(state, "BUILDING_FROM_SD", StringComparison.OrdinalIgnoreCase);
+            bool isPrinting = string.Equals(state, "Printing", StringComparison.OrdinalIgnoreCase);
 
             return new PrinterCompositeStatus(
                 IsOnline: isOnline,
@@ -498,6 +497,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             {
                 "READY" => "Idle",
                 "BUILDING_FROM_SD" => "Printing",
+                "BUILDING" => "Printing",
                 "PAUSED" => "Paused",
                 "BUILDING_COMPLETED" => "Complete",
                 _ => status

@@ -22,6 +22,7 @@ public static class PrinterStateNormalizer
 
         // Printing states
         ["printing"] = "Printing",
+        ["building"] = "Printing",
         ["busy"] = "Printing",
         ["preparing"] = "Printing",
         ["starting"] = "Printing",

@@ -105,6 +105,7 @@ public sealed class FlashForgeClientTests
     [Theory]
     [InlineData("READY", "Idle")]
     [InlineData("BUILDING_FROM_SD", "Printing")]
+    [InlineData("BUILDING", "Printing")]
     [InlineData("PAUSED", "Paused")]
     [InlineData("BUILDING_COMPLETED", "Complete")]
     public void ParseMachineStatus_KnownStates_MapsCorrectly(string rawStatus, string expected)
