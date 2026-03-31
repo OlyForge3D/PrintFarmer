@@ -2767,6 +2767,35 @@ public class PrintersService(
         return new CommandResult(true, $"Created {gates.Count} MMU gate(s) for printer \"{p.Name}\"");
     }
 
+    /// <inheritdoc />
+    public void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4)
+    {
+        if (!wasMultiMaterial && printer.MultiMaterial)
+        {
+            // MultiMaterial enabled → create MmuGate toolheads
+            SyncMmuVirtualToolheads(printer, mmuGateCount);
+        }
+        else if (wasMultiMaterial && !printer.MultiMaterial)
+        {
+            // MultiMaterial disabled → remove MmuGate toolheads
+            List<Toolhead> gatesToRemove = printer.Toolheads
+                .Where(t => t.ToolheadType == ToolheadType.MmuGate)
+                .ToList();
+
+            foreach (Toolhead gate in gatesToRemove)
+            {
+                printer.Toolheads.Remove(gate);
+            }
+
+            if (gatesToRemove.Count > 0)
+            {
+                _logger.LogInformation(
+                    "SyncMmuToolheadsOnEntity: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
+                    gatesToRemove.Count, printer.Name, printer.Id);
+            }
+        }
+    }
+
     /// <summary>
     /// Synchronizes MMU virtual toolheads by creating gates and adding them to the printer's
     /// navigation collection. Use for create/update flows where the Printer entity is already

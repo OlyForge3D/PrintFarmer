@@ -1487,7 +1487,15 @@ public class PrintersController(
         p.MaxBuildVolumeZ = dto.MaxBuildVolumeZ ?? p.MaxBuildVolumeZ;
         p.HasHeatedBed = dto.HasHeatedBed ?? p.HasHeatedBed;
         p.HasEnclosure = dto.HasEnclosure ?? p.HasEnclosure;
+
+        // Detect MultiMaterial toggle for MmuGate toolhead sync
+        bool wasMultiMaterial = p.MultiMaterial;
         p.MultiMaterial = dto.MultiMaterial ?? p.MultiMaterial;
+        if (wasMultiMaterial != p.MultiMaterial)
+        {
+            _printersService.SyncMmuToolheadsOnEntity(p, wasMultiMaterial);
+        }
+
         p.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? p.SupportsAutoLeveling;
 
         p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;

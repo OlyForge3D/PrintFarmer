@@ -477,6 +477,16 @@ public interface IPrintersService
     Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Synchronizes MMU virtual toolheads on an already-loaded Printer entity after
+    /// the MultiMaterial property changes. Creates MmuGate toolheads when toggled on,
+    /// removes them when toggled off. Does NOT save changes — caller must call SaveChangesAsync.
+    /// </summary>
+    /// <param name="printer">The loaded Printer entity (with Toolheads navigation populated)</param>
+    /// <param name="wasMultiMaterial">The previous value of MultiMaterial before the edit</param>
+    /// <param name="mmuGateCount">Number of MMU gate slots (default 4)</param>
+    void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4);
+
+    /// <summary>
     /// Starts printing a gcode file that exists on the printer's storage.
     /// </summary>
     /// <param name="id">The printer ID</param>

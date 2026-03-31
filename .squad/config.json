@@ -1,4 +1,8 @@
 {
   "version": 1,
-  "teamRoot": "."
+  "teamRoot": ".",
+  "defaultModel": "claude-opus-4.6",
+  "agentModelOverrides": {
+    "scribe": "claude-haiku-4.5"
+  }
 }

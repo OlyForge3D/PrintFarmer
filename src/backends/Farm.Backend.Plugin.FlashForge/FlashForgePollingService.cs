@@ -236,7 +236,9 @@ public sealed class FlashForgePollingService(
                         BedTemp: status.BedTemp,
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
-                        SpoolInfo: spoolInfo);
+                        SpoolInfo: spoolInfo,
+                        ExtruderTemperatures: status.ExtruderTemperatures,
+                        DetectedExtruderCount: status.DetectedExtruderCount);
 
                     _statusCacheWriter.UpdateStatus(update);
 

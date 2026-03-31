@@ -329,6 +329,25 @@ public interface ISupportsTemperatureControl
 }
 
 /// <summary>
+/// Capability interface for backend clients that support per-extruder temperature control
+/// on multi-material printers (e.g., FlashForge ADX5 with independent hotend addressing via T-index).
+/// </summary>
+public interface ISupportsMultiExtruderTemperatureControl
+{
+    /// <summary>
+    /// Sets the target temperature for a specific extruder by index.
+    /// Sends the appropriate gcode command (e.g., M104 S{temperature} T{extruderIndex}).
+    /// </summary>
+    /// <param name="baseUrl">The base URL (host:port) of the printer</param>
+    /// <param name="extruderIndex">Zero-based extruder index (T0, T1, etc.)</param>
+    /// <param name="temperature">Target temperature in Celsius</param>
+    /// <param name="credential">Optional credential for authentication</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if the command succeeded</returns>
+    Task<bool> SetExtruderTemperatureAsync(string baseUrl, int extruderIndex, double temperature, PrinterCredential? credential = null, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backend clients that support advanced printer information retrieval.
 /// Provides access to printer name, firmware version, and model information.
 /// </summary>
@@ -793,4 +812,10 @@ public class StandardPrinterInfo
     /// The printer model or hardware type (e.g., "Prusa i3 MK3S+", "Voron 2.4").
     /// </summary>
     public string Model { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The number of tool/extruder slots reported by the printer firmware (e.g., from M115 "Tool Count: N").
+    /// Null if the firmware does not report this field.
+    /// </summary>
+    public int? ToolCount { get; set; }
 }

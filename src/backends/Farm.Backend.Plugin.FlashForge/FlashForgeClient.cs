@@ -141,14 +141,18 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             // Handshake
             await SendCommandAsync(host, port, "~M601 S1", ct).ConfigureAwait(false);
 
-            // Get status, temps, progress in sequence (TCP serial protocol requires sequential commands)
+            // Get status, temps, progress, and device info in sequence (TCP serial protocol requires sequential commands)
             string statusResponse = await SendCommandAsync(host, port, "~M119", ct).ConfigureAwait(false);
             string tempResponse = await SendCommandAsync(host, port, "~M105", ct).ConfigureAwait(false);
             string progressResponse = await SendCommandAsync(host, port, "~M27", ct).ConfigureAwait(false);
+            string deviceInfoResponse = await SendCommandAsync(host, port, "~M115", ct).ConfigureAwait(false);
 
             string? state = ParseMachineStatus(statusResponse);
             var (extruders, bedTemp, bedTarget) = ParseExtruderTemperatures(tempResponse);
             (double? progress, string? jobName) = ParseProgress(progressResponse);
+
+            // Cross-reference M115 Tool Count with M105 extruder count (M105 is ground truth)
+            int extruderCount = DetectExtruderCount(deviceInfoResponse, tempResponse);
 
             // T0 remains the primary hotend temp for backward compatibility
             extruders.TryGetValue(0, out ExtruderTemperature? t0);
@@ -169,7 +173,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
                 HotendTarget: t0?.Target,
                 BedTarget: bedTarget,
                 ExtruderTemperatures: extruders.Count > 0 ? extruders : null,
-                DetectedExtruderCount: extruders.Count > 0 ? extruders.Count : null);
+                DetectedExtruderCount: extruderCount);
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
@@ -392,6 +396,26 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> SetExtruderTemperatureAsync(string baseUrl, int extruderIndex, double temperature, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        try
+        {
+            (string host, int port) = ParseHostPort(baseUrl);
+            await SendCommandAsync(host, port, "~M601 S1", ct).ConfigureAwait(false);
+
+            string response = await SendCommandAsync(host, port,
+                $"~M104 S{temperature.ToString("F0", CultureInfo.InvariantCulture)} T{extruderIndex}", ct).ConfigureAwait(false);
+
+            return response.Contains("ok", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "FlashForge set extruder {Index} temperature failed for {BaseUrl}", extruderIndex, baseUrl);
+            return false;
+        }
+    }
+
     #endregion
 
     #region Helpers
@@ -608,6 +632,12 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             info.Firmware = firmware.Groups[1].Value.Trim();
         }
 
+        Match toolCount = ToolCountRegex().Match(response);
+        if (toolCount.Success && int.TryParse(toolCount.Groups[1].Value, out int count))
+        {
+            info.ToolCount = count;
+        }
+
         return info;
     }
 
@@ -631,6 +661,34 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
 
     [GeneratedRegex(@"Firmware:\s*(.+)", RegexOptions.IgnoreCase)]
     private static partial Regex FirmwareRegex();
+
+    [GeneratedRegex(@"Tool Count:\s*(\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex ToolCountRegex();
+
+    /// <summary>
+    /// Determines the extruder count by taking the higher of M115 Tool Count and
+    /// the number of extruders detected from M105 temperature data.
+    /// Falls back to 1 if neither source provides data.
+    /// </summary>
+    internal static int DetectExtruderCount(string m115Response, string m105Response)
+    {
+        int m115Count = 0;
+        if (!string.IsNullOrWhiteSpace(m115Response))
+        {
+            StandardPrinterInfo info = ParseDeviceInfo(m115Response);
+            m115Count = info.ToolCount ?? 0;
+        }
+
+        int m105Count = 0;
+        if (!string.IsNullOrWhiteSpace(m105Response))
+        {
+            var (extruders, _, _) = ParseExtruderTemperatures(m105Response);
+            m105Count = extruders.Count;
+        }
+
+        int detected = Math.Max(m115Count, m105Count);
+        return detected >= 1 ? detected : 1;
+    }
 
     #endregion
 

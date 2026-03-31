@@ -704,4 +704,239 @@ public sealed class FlashForgeClientTests
     }
 
     #endregion
+
+    #region Phase 2 — ToolCount Parsing from M115
+
+    [Fact]
+    public void ParseDeviceInfo_ToolCountOne_ParsesCorrectly()
+    {
+        string response =
+            "CMD M115 Received.\n" +
+            "Machine Type: Adventurer 3\n" +
+            "Machine Name: A3\n" +
+            "Firmware: v1.2.4\n" +
+            "Tool Count: 1\n" +
+            "ok\n";
+
+        var info = FlashForgeClient.ParseDeviceInfo(response);
+
+        info.ToolCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void ParseDeviceInfo_ToolCountTwo_ParsesCorrectly()
+    {
+        string response =
+            "CMD M115 Received.\n" +
+            "Machine Type: Adventurer 5X\n" +
+            "Machine Name: ADX5\n" +
+            "Firmware: v2.7.9\n" +
+            "Tool Count: 2\n" +
+            "ok\n";
+
+        var info = FlashForgeClient.ParseDeviceInfo(response);
+
+        info.ToolCount.Should().Be(2);
+    }
+
+    [Fact]
+    public void ParseDeviceInfo_ToolCountFour_ParsesCorrectly()
+    {
+        string response =
+            "CMD M115 Received.\n" +
+            "Machine Type: Creator 4\n" +
+            "Tool Count: 4\n" +
+            "ok\n";
+
+        var info = FlashForgeClient.ParseDeviceInfo(response);
+
+        info.ToolCount.Should().Be(4);
+    }
+
+    [Fact]
+    public void ParseDeviceInfo_NoToolCountField_ReturnsNull()
+    {
+        string response =
+            "CMD M115 Received.\n" +
+            "Machine Type: Adventurer 3\n" +
+            "Machine Name: A3\n" +
+            "Firmware: v1.2.4\n" +
+            "ok\n";
+
+        var info = FlashForgeClient.ParseDeviceInfo(response);
+
+        info.ToolCount.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseDeviceInfo_MalformedToolCount_ReturnsNull()
+    {
+        string response =
+            "CMD M115 Received.\n" +
+            "Machine Type: Adventurer 3\n" +
+            "Tool Count: abc\n" +
+            "ok\n";
+
+        var info = FlashForgeClient.ParseDeviceInfo(response);
+
+        info.ToolCount.Should().BeNull("malformed Tool Count should not parse");
+    }
+
+    [Fact]
+    public void ParseDeviceInfo_FullResponseWithToolCount_AllFieldsPopulated()
+    {
+        string response =
+            "CMD M115 Received.\n" +
+            "Machine Type: Adventurer 5X\n" +
+            "Machine Name: ADX5\n" +
+            "Firmware: v2.7.9\n" +
+            "SN: SN12345678\n" +
+            "X: 220 Y: 220 Z: 220\n" +
+            "Tool Count: 2\n" +
+            "ok\n";
+
+        var info = FlashForgeClient.ParseDeviceInfo(response);
+
+        info.Model.Should().Be("Adventurer 5X");
+        info.Name.Should().Be("ADX5");
+        info.Firmware.Should().Be("v2.7.9");
+        info.ToolCount.Should().Be(2);
+    }
+
+    [Fact]
+    public void ParseDeviceInfo_BackwardCompat_ExistingFieldsStillWork()
+    {
+        // The existing Adventurer response test data includes "Tool Count: 1" —
+        // verify ToolCount is populated without breaking existing assertions.
+        string response =
+            "CMD M115 Received.\n" +
+            "Machine Type: Flashforge Adventurer 3\n" +
+            "Machine Name: MyPrinter\n" +
+            "Firmware: v1.2.4\n" +
+            "SN: SN12345678\n" +
+            "X: 150 Y: 150 Z: 150\n" +
+            "Tool Count: 1\n" +
+            "ok\n";
+
+        var info = FlashForgeClient.ParseDeviceInfo(response);
+
+        info.Model.Should().Be("Flashforge Adventurer 3");
+        info.Name.Should().Be("MyPrinter");
+        info.Firmware.Should().Be("v1.2.4");
+        info.ToolCount.Should().Be(1);
+    }
+
+    #endregion
+
+    #region Phase 2 — DetectExtruderCount
+
+    [Fact]
+    public void DetectExtruderCount_M115SaysOne_M105HasTwoExtruders_ReturnsTwo()
+    {
+        string m115 = "CMD M115 Received.\nMachine Type: ADX5\nTool Count: 1\nok\n";
+        string m105 = "CMD M105 Received.\nT0:219.6 /220.0 T1:0.0 /0.0 B:60.0 /60.0\nok\n";
+
+        int count = FlashForgeClient.DetectExtruderCount(m115, m105);
+
+        count.Should().Be(2, "M105 detected 2 extruders which is higher than M115's Tool Count of 1");
+    }
+
+    [Fact]
+    public void DetectExtruderCount_BothAgreeOnTwo_ReturnsTwo()
+    {
+        string m115 = "CMD M115 Received.\nTool Count: 2\nok\n";
+        string m105 = "CMD M105 Received.\nT0:200.0 /200.0 T1:180.0 /180.0 B:60.0 /60.0\nok\n";
+
+        int count = FlashForgeClient.DetectExtruderCount(m115, m105);
+
+        count.Should().Be(2);
+    }
+
+    [Fact]
+    public void DetectExtruderCount_M115SaysTwo_M105HasOnlyT0_ReturnsTwoFromM115()
+    {
+        string m115 = "CMD M115 Received.\nTool Count: 2\nok\n";
+        string m105 = "CMD M105 Received.\nT0:200.0 /200.0 B:60.0 /60.0\nok\n";
+
+        int count = FlashForgeClient.DetectExtruderCount(m115, m105);
+
+        count.Should().Be(2, "M115 Tool Count wins when M105 reports fewer extruders");
+    }
+
+    [Fact]
+    public void DetectExtruderCount_M115Missing_M105HasThreeExtruders_ReturnsThree()
+    {
+        string m115 = "CMD M115 Received.\nMachine Type: Custom\nok\n"; // no Tool Count
+        string m105 = "CMD M105 Received.\nT0:200.0 /200.0 T1:180.0 /180.0 T2:160.0 /160.0 B:60.0 /60.0\nok\n";
+
+        int count = FlashForgeClient.DetectExtruderCount(m115, m105);
+
+        count.Should().Be(3, "M105 is the only source when M115 has no Tool Count");
+    }
+
+    [Fact]
+    public void DetectExtruderCount_BothEmpty_ReturnsSafeDefault()
+    {
+        int count = FlashForgeClient.DetectExtruderCount("", "");
+
+        count.Should().Be(1, "safe default when neither M115 nor M105 provides data");
+    }
+
+    [Fact]
+    public void DetectExtruderCount_ADX5Realistic_ReturnsTwo()
+    {
+        // Realistic ADX5 scenario: firmware reports Tool Count: 1 but M105 shows T0+T1
+        string m115 =
+            "CMD M115 Received.\n" +
+            "Machine Type: Adventurer 5X\n" +
+            "Machine Name: ADX5\n" +
+            "Firmware: v2.7.9\n" +
+            "Tool Count: 1\n" +
+            "ok\n";
+        string m105 = "CMD M105 Received.\nT0:219.6 /220.0 T1:0.0 /0.0 B:60.0 /60.0\nok\n";
+
+        int count = FlashForgeClient.DetectExtruderCount(m115, m105);
+
+        count.Should().Be(2, "ADX5 reports Tool Count: 1 but actually has T0+T1");
+    }
+
+    [Fact]
+    public void DetectExtruderCount_NullResponses_ReturnsSafeDefault()
+    {
+        int count = FlashForgeClient.DetectExtruderCount(null!, null!);
+
+        count.Should().Be(1, "null inputs should degrade gracefully to safe default");
+    }
+
+    #endregion
+
+    #region Phase 5 — ISupportsMultiExtruderTemperatureControl
+
+    [Fact]
+    public void FlashForgeClient_ImplementsMultiExtruderTemperatureControl()
+    {
+        typeof(FlashForgeClient).Should().Implement<ISupportsMultiExtruderTemperatureControl>(
+            "FlashForge ADX5 supports per-extruder temperature addressing via T-index");
+    }
+
+    [Fact]
+    public void IFlashForgeClient_InheritsMultiExtruderTemperatureControl()
+    {
+        typeof(IFlashForgeClient).GetInterfaces()
+            .Should().Contain(typeof(ISupportsMultiExtruderTemperatureControl),
+                "IFlashForgeClient must declare multi-extruder temp capability for plugin discovery");
+    }
+
+    [Fact]
+    public void BackendPlugin_DeclaresMultiExtruderTemperatureCapability()
+    {
+        IBackendClientPlugin plugin = new FlashForgeBackendPlugin();
+
+        IEnumerable<Type> capabilities = plugin.GetCapabilities();
+
+        capabilities.Should().Contain(typeof(ISupportsMultiExtruderTemperatureControl),
+            "plugin capability discovery should find ISupportsMultiExtruderTemperatureControl via reflection");
+    }
+
+    #endregion
 }

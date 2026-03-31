@@ -17,6 +17,7 @@ public interface IFlashForgeClient : IBackendClient,
     ISupportsCompositeStatus,
     ISupportsPrinterInformation,
     ISupportsTemperatureControl,
+    ISupportsMultiExtruderTemperatureControl,
     ISupportsConnectionTest,
     IDisposable
 {

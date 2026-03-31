@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Annotations;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Infrastructure;
 
@@ -28,7 +29,9 @@ public record PrinterStatusDto(
     double? HotendTarget = null,
     double? BedTarget = null,
     PrinterSpoolInfoDto? SpoolInfo = null,
-    MmuStatusDto? MmuStatus = null)
+    MmuStatusDto? MmuStatus = null,
+    IReadOnlyDictionary<int, ExtruderTemperature>? ExtruderTemperatures = null,
+    int? DetectedExtruderCount = null)
 {
     /// <summary>
     /// Returns a copy with FileName derived from JobName (path stripped) and JobName preserved as-is.
