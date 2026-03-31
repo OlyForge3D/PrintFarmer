@@ -98,8 +98,8 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving printer queue");
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve printer queue" });
+            _logger.LogError(ex, "Error retrieving printer queue for {PrinterId}", printerId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve printer queue", details = ex.Message });
         }
     }
 

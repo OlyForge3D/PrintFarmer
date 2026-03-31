@@ -99,7 +99,12 @@ public class PrintJobManagementService(
     {
         try
         {
-            var printerIdGuid = Guid.Parse(printerId);
+            if (!Guid.TryParse(printerId, out Guid printerIdGuid))
+            {
+                _logger.LogWarning("Invalid printer ID format: {PrinterId}", printerId);
+                return [];
+            }
+
             List<PrintJob> jobs = await _repository.GetJobsByPrinterAsync(printerIdGuid, limit, cancellationToken);
             return jobs.Select(MapToQueuedPrintJobDto).ToList();
         }

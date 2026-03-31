@@ -472,18 +472,26 @@ public class AutoDispatchService(
 
     public async Task<AutoDispatchGlobalStatusDto> GetAllStatusAsync(CancellationToken ct = default)
     {
-        List<Printer> printers = await db.Printers.ToListAsync(ct);
+        List<Printer> printers = await db.Printers.AsNoTracking().ToListAsync(ct);
         Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printers.Select(p => p.Id), ct);
 
         bool globalEnabled = printers.Any(p => p.AutoDispatchEnabled);
         List<AutoDispatchStatusDto> statuses = [];
         foreach (Printer printer in printers)
         {
-            QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printer.Id, includeGcodeFile: false, ct);
-            statuses.Add(BuildStatusDto(
-                printer,
-                queuedJobs.QueueDepth,
-                currentJobs.GetValueOrDefault(printer.Id)));
+            try
+            {
+                QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printer.Id, includeGcodeFile: false, ct);
+                statuses.Add(BuildStatusDto(
+                    printer,
+                    queuedJobs.QueueDepth,
+                    currentJobs.GetValueOrDefault(printer.Id)));
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to build auto-dispatch status for printer {PrinterId} ({PrinterName})", printer.Id, printer.Name);
+                statuses.Add(BuildStatusDto(printer, queuedJobCount: 0, currentJobName: null));
+            }
         }
 
         return new AutoDispatchGlobalStatusDto

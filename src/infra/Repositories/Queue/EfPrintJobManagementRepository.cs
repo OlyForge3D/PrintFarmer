@@ -139,6 +139,9 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     public async Task<List<PrintJob>> GetJobsByPrinterAsync(Guid printerId, int limit = 50, CancellationToken ct = default)
     {
         return await _context.PrintJobs
+            .Include(pj => pj.GcodeFile)
+            .Include(pj => pj.AssignedPrinter)
+                .ThenInclude(p => p!.Model)
             .Where(pj => pj.AssignedPrinterId == printerId &&
                 (pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing))
             .OrderByDescending(pj => pj.Priority)
