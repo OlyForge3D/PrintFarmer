@@ -2373,6 +2373,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("IsExternalPrint")
+                        .HasColumnType("boolean");
+
                     b.Property<decimal?>("LaborCostUsd")
                         .HasColumnType("numeric");
 
