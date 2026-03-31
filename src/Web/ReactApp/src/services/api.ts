@@ -622,6 +622,11 @@ export class ApiClient {
     await this.client.post(`/printers/${id}/apply-template`);
   }
 
+  async applyAllModelTemplates(): Promise<{ updated: number; total: number }> {
+    const response = await this.client.post<{ updated: number; total: number }>('/printers/apply-templates');
+    return response.data;
+  }
+
   async deletePrinter(id: string): Promise<void> {
     await this.client.delete(`/printers/${id}`);
   }
