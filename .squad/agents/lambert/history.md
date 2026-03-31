@@ -222,3 +222,61 @@ Published: `.squad/orchestration-log/20260326-031539-lambert.md`
 - Skipped Roslyn-specific items: `spelling_exclusion_path`, `dotnet_public_api_analyzer`, RS* diagnostics, Roslyn path-scoped sections, xUnit workarounds
 - Kept all existing project-specific values even where they differ from Roslyn defaults (e.g., `csharp_indent_case_contents_when_block = false`, `csharp_prefer_braces = true:error`, `csharp_preserve_single_line_statements = false`)
 - All C# style rules from Roslyn (newlines, indentation, whitespace, var, expression bodies, pattern matching, spacing, braces) were already present
+
+## Session: FlashForge ADX5 Multi-Material Discovery (2026-01-11)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — TCP probe successful, seed data updated, scoping document written
+
+### Discovery: FlashForge ADX5 Protocol Behavior
+
+Probed the ADX5 printer at 10.0.0.22:8899 using FlashForge TCP protocol commands:
+
+**Key Findings:**
+- **~M115 Response:** Reports "Tool Count: 1" but this is UNRELIABLE — contradicted by temperature data
+- **~M105 Response:** Returns temps for T0 AND T1: `T0:219.6/220.0 T1:0.0/0.0 B:60.0/60.0`
+- **IDEX Hardware:** ADX5 has Independent Dual Extruder system (2 physical hotends)
+- **Virtual Toolheads:** Supports up to 4 virtual toolheads via duplication/mirror modes
+- **Protocol Quirk:** "Tool Count" field in M115 does not accurately reflect multi-material capability
+
+### Work Completed
+
+- **TCP Probe:** Successfully queried ADX5 using `~M601 S1` (handshake), `~M115` (device info), `~M105` (temperatures) via netcat
+- **Seed Data Update:** Modified `printer-models.yaml` for Flashforge AD5X:
+  - Changed `multiMaterial: false` → `true`
+  - Changed `hasToolchanger: false` → `true` (IDEX-style dual system)
+  - Updated toolheads from single "Primary" to T0/T1 entries (matching Prusa XL pattern)
+- **Scoping Document:** Created comprehensive analysis at `.squad/decisions/inbox/lambert-flashforge-mmu-scope.md`
+
+### Implementation Gaps Identified
+
+1. **Temperature Parsing:** Current `HotendTempRegex` only extracts T0, ignores T1-T3
+2. **Extruder Count Detection:** No parsing of "Tool Count" field + need fallback logic (count M105 temps)
+3. **Per-Extruder Filament Usage:** FlashForge protocol support UNKNOWN — requires investigation of ~M31 or other commands
+4. **Composite Status DTO:** Breaking change needed to support per-extruder temp arrays
+5. **Temperature Control:** Currently hardcoded to T0, needs per-extruder M104 commands
+6. **Auto-Create Toolheads:** Need discovery-time logic to auto-provision T0-T1 virtual `ToolheadType.MmuGate` entries
+
+### Recommended Approach
+
+**Phase 1 (4-6 hrs):** Multi-extruder temp parsing — update `ParseTemperatures()` to extract T0-T3, modify return signature
+**Phase 2 (2-3 hrs):** Extruder count detection with fallback (Tool Count field + M105 temp count verification)
+**Phase 3 (6-8 hrs):** Auto-create toolheads on printer discovery/connection
+**Phase 4 (BLOCKED):** Per-extruder filament usage — requires protocol research
+**Phase 5 (3-4 hrs):** Per-extruder temperature control API
+
+### Key Learnings
+
+- FlashForge protocol responses are inconsistent: "Tool Count: 1" doesn't match actual hardware (dual extruders)
+- Temperature responses ARE reliable: M105 reports all active extruders even when idle (T1: 0.0/0.0)
+- Detection strategy must use M105 temp count as ground truth, not M115 Tool Count field
+- Current `FlashForgeClient.cs` hardcoded assumptions (single T0) need to become dynamic per-extruder arrays
+- ADX5 is an IDEX printer (2 physical hotends) that can operate as 4 virtual toolheads — model as `ToolheadType.MmuGate` entries for consistency with Bambu AMS / Prusa MMU3 patterns
+
+### Files Modified
+
+- `src/api/Data/seed/printer-models.yaml` — ADX5 entry now marked as multi-material with T0/T1 toolheads
+
+### Files Created
+
+- `.squad/decisions/inbox/lambert-flashforge-mmu-scope.md` — Full scoping analysis with phase breakdown, blockers, and recommendations

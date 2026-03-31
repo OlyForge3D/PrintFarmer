@@ -147,8 +147,11 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             string progressResponse = await SendCommandAsync(host, port, "~M27", ct).ConfigureAwait(false);
 
             string? state = ParseMachineStatus(statusResponse);
-            (double? hotendTemp, double? hotendTarget, double? bedTemp, double? bedTarget) = ParseTemperatures(tempResponse);
+            var (extruders, bedTemp, bedTarget) = ParseExtruderTemperatures(tempResponse);
             (double? progress, string? jobName) = ParseProgress(progressResponse);
+
+            // T0 remains the primary hotend temp for backward compatibility
+            extruders.TryGetValue(0, out ExtruderTemperature? t0);
 
             bool isOnline = true;
             bool isPrinting = string.Equals(state, "Printing", StringComparison.OrdinalIgnoreCase);
@@ -161,10 +164,12 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
                 ThumbnailUrl: null,
                 CameraStreamUrl: null,
                 CameraSnapshotUrl: null,
-                HotendTemp: hotendTemp,
+                HotendTemp: t0?.Current,
                 BedTemp: bedTemp,
-                HotendTarget: hotendTarget,
-                BedTarget: bedTarget);
+                HotendTarget: t0?.Target,
+                BedTarget: bedTarget,
+                ExtruderTemperatures: extruders.Count > 0 ? extruders : null,
+                DetectedExtruderCount: extruders.Count > 0 ? extruders.Count : null);
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
@@ -508,27 +513,37 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
     }
 
     /// <summary>
-    /// Parses temperature values from ~M105 response.
-    /// Example: "CMD M105 Received.\nT0:205 /210 B:60 /65\nok\n"
+    /// Parses temperature values from ~M105 response (backward-compatible single-extruder view).
+    /// Delegates to <see cref="ParseExtruderTemperatures"/> and extracts T0 as the primary hotend.
     /// </summary>
     internal static (double? HotendTemp, double? HotendTarget, double? BedTemp, double? BedTarget) ParseTemperatures(string response)
     {
-        double? hotendTemp = null, hotendTarget = null, bedTemp = null, bedTarget = null;
+        var (extruders, bedTemp, bedTarget) = ParseExtruderTemperatures(response);
 
-        Match hotendMatch = HotendTempRegex().Match(response);
-        if (hotendMatch.Success)
+        extruders.TryGetValue(0, out ExtruderTemperature? t0);
+        return (t0?.Current, t0?.Target, bedTemp, bedTarget);
+    }
+
+    /// <summary>
+    /// Parses all extruder temperatures (T0, T1, T2, ...) and bed temperature from ~M105 response.
+    /// Uses multi-match to capture every Tn:current/target pair reported by the printer.
+    /// Example: "T0:219.6/220.0 T1:0.0/0.0 B:60.0/60.0" → { 0: (219.6, 220.0), 1: (0.0, 0.0) }
+    /// </summary>
+    internal static (Dictionary<int, ExtruderTemperature> Extruders, double? BedTemp, double? BedTarget) ParseExtruderTemperatures(string response)
+    {
+        var extruders = new Dictionary<int, ExtruderTemperature>();
+
+        foreach (Match match in ExtruderTempRegex().Matches(response))
         {
-            if (double.TryParse(hotendMatch.Groups[1].Value, CultureInfo.InvariantCulture, out double ht))
+            if (int.TryParse(match.Groups[1].Value, CultureInfo.InvariantCulture, out int index)
+                && double.TryParse(match.Groups[2].Value, CultureInfo.InvariantCulture, out double current)
+                && double.TryParse(match.Groups[3].Value, CultureInfo.InvariantCulture, out double target))
             {
-                hotendTemp = ht;
-            }
-
-            if (double.TryParse(hotendMatch.Groups[2].Value, CultureInfo.InvariantCulture, out double htTarget))
-            {
-                hotendTarget = htTarget;
+                extruders[index] = new ExtruderTemperature(current, target);
             }
         }
 
+        double? bedTemp = null, bedTarget = null;
         Match bedMatch = BedTempRegex().Match(response);
         if (bedMatch.Success)
         {
@@ -543,7 +558,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             }
         }
 
-        return (hotendTemp, hotendTarget, bedTemp, bedTarget);
+        return (extruders, bedTemp, bedTarget);
     }
 
     /// <summary>
@@ -599,8 +614,8 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
     [GeneratedRegex(@"MachineStatus:\s*(\S+)", RegexOptions.IgnoreCase)]
     private static partial Regex MachineStatusRegex();
 
-    [GeneratedRegex(@"T0:\s*([\d.]+)\s*/\s*([\d.]+)", RegexOptions.IgnoreCase)]
-    private static partial Regex HotendTempRegex();
+    [GeneratedRegex(@"T(\d+):\s*([\d.]+)\s*/\s*([\d.]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex ExtruderTempRegex();
 
     [GeneratedRegex(@"B:\s*([\d.]+)\s*/\s*([\d.]+)", RegexOptions.IgnoreCase)]
     private static partial Regex BedTempRegex();

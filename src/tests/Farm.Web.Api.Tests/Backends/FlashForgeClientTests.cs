@@ -405,6 +405,217 @@ public sealed class FlashForgeClientTests
 
     #endregion
 
+    #region Multi-Extruder Edge Cases & Regression Tests
+
+    [Fact]
+    public void ParseExtruderTemperatures_MalformedResponse_ReturnsEmptyExtruders()
+    {
+        string response = "CMD M105 Received.\ngarbage data here\nok\n";
+
+        var (extruders, bedTemp, bedTarget) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Should().BeEmpty();
+        bedTemp.Should().BeNull();
+        bedTarget.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_T1ActiveWhileT0Idle_ParsesBothCorrectly()
+    {
+        // Edge case: second extruder heating while first is cold (IDEX independent mode)
+        string response = "CMD M105 Received.\nT0:0.0 /0.0 T1:200.0 /200.0 B:60.0 /60.0\nok\n";
+
+        var (extruders, _, _) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Should().HaveCount(2);
+        extruders[0].Current.Should().Be(0.0);
+        extruders[0].Target.Should().Be(0.0);
+        extruders[1].Current.Should().Be(200.0);
+        extruders[1].Target.Should().Be(200.0);
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_HighTemperatures_ParsesCorrectly()
+    {
+        // Boundary: temperatures near max for all-metal hotends
+        string response = "CMD M105 Received.\nT0:499.9 /500.0 B:120.0 /120.0\nok\n";
+
+        var (extruders, bedTemp, bedTarget) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Should().HaveCount(1);
+        extruders[0].Current.Should().Be(499.9);
+        extruders[0].Target.Should().Be(500.0);
+        bedTemp.Should().Be(120.0);
+        bedTarget.Should().Be(120.0);
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_BedOnly_ReturnsEmptyExtrudersWithBed()
+    {
+        // Only bed temp reported — no extruder entries
+        string response = "CMD M105 Received.\nB:60.0 /60.0\nok\n";
+
+        var (extruders, bedTemp, bedTarget) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Should().BeEmpty();
+        bedTemp.Should().Be(60.0);
+        bedTarget.Should().Be(60.0);
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_DictionaryKeysMatchExtruderIndices()
+    {
+        string response = "CMD M105 Received.\nT0:200.0 /200.0 T1:180.0 /180.0 T2:160.0 /160.0\nok\n";
+
+        var (extruders, _, _) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Keys.Should().BeEquivalentTo(new[] { 0, 1, 2 });
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_DoesNotIncludeBedAsExtruder()
+    {
+        // "B:" must not be matched by the Tn regex
+        string response = "CMD M105 Received.\nT0:200.0 /200.0 B:60.0 /60.0\nok\n";
+
+        var (extruders, _, _) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Should().HaveCount(1);
+        extruders.Keys.Should().OnlyContain(k => k >= 0);
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_PartiallyMalformed_ParsesValidEntries()
+    {
+        // T0 valid, T1 missing target value — T0 should still parse
+        string response = "CMD M105 Received.\nT0:200.0 /200.0 T1:garbage B:60.0 /60.0\nok\n";
+
+        var (extruders, bedTemp, _) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Should().ContainKey(0);
+        extruders[0].Current.Should().Be(200.0);
+        bedTemp.Should().Be(60.0);
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_ZeroTemperatures_ParsedNotSkipped()
+    {
+        // Zero temps are valid — they mean the extruder exists but is cold
+        string response = "CMD M105 Received.\nT0:0.0 /0.0 T1:0.0 /0.0 B:0.0 /0.0\nok\n";
+
+        var (extruders, bedTemp, bedTarget) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Should().HaveCount(2);
+        extruders[0].Current.Should().Be(0.0);
+        extruders[1].Current.Should().Be(0.0);
+        bedTemp.Should().Be(0.0);
+        bedTarget.Should().Be(0.0);
+    }
+
+    #endregion
+
+    #region Extruder Count Detection
+
+    [Fact]
+    public void ParseExtruderTemperatures_SingleExtruder_CountIsOne()
+    {
+        string response = "CMD M105 Received.\nT0:200.0 /200.0 B:60.0 /60.0\nok\n";
+
+        var (extruders, _, _) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Count.Should().Be(1);
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_DualExtruder_CountIsTwo()
+    {
+        string response = "CMD M105 Received.\nT0:219.6 /220.0 T1:0.0 /0.0 B:60.0 /60.0\nok\n";
+
+        var (extruders, _, _) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Count.Should().Be(2, "ADX5 M105 reports T0 and T1");
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_QuadExtruder_CountIsFour()
+    {
+        string response = "CMD M105 Received.\nT0:200.0 /200.0 T1:180.0 /180.0 T2:0.0 /0.0 T3:0.0 /0.0 B:60.0 /60.0\nok\n";
+
+        var (extruders, _, _) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Count.Should().Be(4);
+    }
+
+    [Fact]
+    public void ParseExtruderTemperatures_NoExtruders_CountIsZero()
+    {
+        string response = "CMD M105 Received.\nB:60.0 /60.0\nok\n";
+
+        var (extruders, _, _) = FlashForgeClient.ParseExtruderTemperatures(response);
+
+        extruders.Count.Should().Be(0);
+    }
+
+    #endregion
+
+    #region Backward Compatibility — T0 still populates HotendTemp/HotendTarget
+
+    [Fact]
+    public void ParseTemperatures_DualExtruderResponse_StillReturnsPrimaryHotend()
+    {
+        // ADX5 dual-extruder response — existing ParseTemperatures must still return T0
+        string response = "CMD M105 Received.\nT0:219.6 /220.0 T1:0.0 /0.0 B:60.0 /60.0\nok\n";
+
+        var (hotendTemp, hotendTarget, bedTemp, bedTarget) = FlashForgeClient.ParseTemperatures(response);
+
+        hotendTemp.Should().Be(219.6);
+        hotendTarget.Should().Be(220.0);
+        bedTemp.Should().Be(60.0);
+        bedTarget.Should().Be(60.0);
+    }
+
+    [Fact]
+    public void ParseTemperatures_QuadExtruderResponse_StillReturnsPrimaryHotend()
+    {
+        string response = "CMD M105 Received.\nT0:200.0 /200.0 T1:180.0 /180.0 T2:0.0 /0.0 T3:0.0 /0.0 B:60.0 /60.0\nok\n";
+
+        var (hotendTemp, hotendTarget, bedTemp, bedTarget) = FlashForgeClient.ParseTemperatures(response);
+
+        hotendTemp.Should().Be(200.0);
+        hotendTarget.Should().Be(200.0);
+        bedTemp.Should().Be(60.0);
+        bedTarget.Should().Be(60.0);
+    }
+
+    [Fact]
+    public void ParseTemperatures_NoSpacesAroundSlash_StillParsesT0()
+    {
+        string response = "CMD M105 Received.\nT0:205.5/210.0 B:59.8/65.0\nok\n";
+
+        var (hotendTemp, hotendTarget, bedTemp, bedTarget) = FlashForgeClient.ParseTemperatures(response);
+
+        hotendTemp.Should().Be(205.5);
+        hotendTarget.Should().Be(210.0);
+        bedTemp.Should().Be(59.8);
+        bedTarget.Should().Be(65.0);
+    }
+
+    [Fact]
+    public void ParseTemperatures_T0Absent_ReturnsHotendNull()
+    {
+        // Only T1 present — ParseTemperatures should return null for HotendTemp since T0 missing
+        string response = "CMD M105 Received.\nT1:200.0 /200.0 B:60.0 /60.0\nok\n";
+
+        var (hotendTemp, hotendTarget, bedTemp, bedTarget) = FlashForgeClient.ParseTemperatures(response);
+
+        hotendTemp.Should().BeNull("T0 not present in response");
+        hotendTarget.Should().BeNull("T0 not present in response");
+        bedTemp.Should().Be(60.0);
+        bedTarget.Should().Be(60.0);
+    }
+
+    #endregion
+
     #region BackendPlugin Metadata
 
     [Fact]

@@ -124,3 +124,7 @@ Focused four-part gate instead of broad test reruns:
 - Risk: ✅ Minimal; all seams covered
 
 **Session outcome:** Print Session Timeline v1 validated and ready for merge.
+
+- 2026-07-17: FlashForge multi-extruder temperature parsing tests written and validated. Lambert's `ParseExtruderTemperatures` returns `(Dictionary<int, ExtruderTemperature> Extruders, double? BedTemp, double? BedTarget)` — NOT a flat list. The `ExtruderTemperature` record lives in `Farm.Infrastructure.Services.Printers.PrinterStatusRecords`. Dictionary key = extruder index (T0=0, T1=1, etc.). `ParseTemperatures()` backward-compat method delegates to `ParseExtruderTemperatures()` and extracts T0 for the primary hotend. Edge cases tested: malformed data, bed-only, T1-active-while-T0-idle, zero temps as valid entries, partially malformed (T0 valid, T1 garbage), T0-absent fallback. 66/66 tests passing. Key file: `src/tests/Farm.Web.Api.Tests/Backends/FlashForgeClientTests.cs`.
+- 2026-07-17: `PrinterCompositeStatus` now includes `ExtruderTemperatures` (IReadOnlyDictionary<int, ExtruderTemperature>?) and `DetectedExtruderCount` (int?). These are set by FlashForgeClient.GetCompositeStatusAsync from the ParseExtruderTemperatures result.
+- 2026-07-17: Stale obj/ cache with GeneratedRegex artifacts causes "partial method may not have multiple defining declarations" errors. Fix: `rm -rf ./backends/Farm.Backend.Plugin.FlashForge/obj` before rebuilding after regex changes.
