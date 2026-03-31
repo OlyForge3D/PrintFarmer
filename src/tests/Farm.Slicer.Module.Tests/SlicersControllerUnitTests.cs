@@ -8,96 +8,95 @@ using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
-namespace Farm.Slicer.Module.Tests
+namespace Farm.Slicer.Module.Tests;
+
+public class SlicersControllerUnitTests
 {
-    public class SlicersControllerUnitTests
+    [Fact]
+    public async Task RegisterAsync_CreatesService_And_Broadcasts()
     {
-        [Fact]
-        public async Task RegisterAsync_CreatesService_And_Broadcasts()
+        Guid newId = Guid.NewGuid();
+        string apiKey = "generated-key";
+        Mock<ISlicersService> mockService = new Mock<ISlicersService>();
+        _ = mockService.Setup(s => s.RegisterAsync(It.IsAny<RegisterSlicerDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((newId, apiKey));
+
+        SlicersController controller = new SlicersController(mockService.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        RegisterSlicerDto dto = new RegisterSlicerDto
         {
-            Guid newId = Guid.NewGuid();
-            string apiKey = "generated-key";
-            Mock<ISlicersService> mockService = new Mock<ISlicersService>();
-            _ = mockService.Setup(s => s.RegisterAsync(It.IsAny<RegisterSlicerDto>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((newId, apiKey));
+            Name = "unit-orca",
+            SlicerType = 1,
+            Version = "0.1",
+            Host = "http://local",
+            MaxConcurrentJobs = 2,
+            Tags = "t"
+        };
 
-            SlicersController controller = new SlicersController(mockService.Object);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+        IActionResult result = await controller.RegisterAsync(dto);
 
-            RegisterSlicerDto dto = new RegisterSlicerDto
-            {
-                Name = "unit-orca",
-                SlicerType = 1,
-                Version = "0.1",
-                Host = "http://local",
-                MaxConcurrentJobs = 2,
-                Tags = "t"
-            };
+        _ = result.Should().BeOfType<CreatedResult>();
 
-            IActionResult result = await controller.RegisterAsync(dto);
+        mockService.Verify(s => s.RegisterAsync(
+            It.Is<RegisterSlicerDto>(d => d.Name == "unit-orca"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
 
-            _ = result.Should().BeOfType<CreatedResult>();
+    [Fact]
+    public async Task ListAsync_ReturnsSeededServices()
+    {
+        Mock<ISlicersService> mockService = new Mock<ISlicersService>();
+        _ = mockService.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SlicerService> { new SlicerService { Id = Guid.NewGuid(), Name = "s1" } });
 
-            mockService.Verify(s => s.RegisterAsync(
-                It.Is<RegisterSlicerDto>(d => d.Name == "unit-orca"),
-                It.IsAny<CancellationToken>()), Times.Once);
-        }
+        SlicersController controller = new SlicersController(mockService.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
-        [Fact]
-        public async Task ListAsync_ReturnsSeededServices()
-        {
-            Mock<ISlicersService> mockService = new Mock<ISlicersService>();
-            _ = mockService.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<SlicerService> { new SlicerService { Id = Guid.NewGuid(), Name = "s1" } });
+        IActionResult res = await controller.ListAsync();
+        _ = res.Should().BeOfType<OkObjectResult>();
+        OkObjectResult? ok = res as OkObjectResult;
+        IReadOnlyList<SlicerService>? list = ok!.Value as IReadOnlyList<SlicerService>;
+        _ = list.Should().NotBeNull();
+        _ = list!.Count.Should().BeGreaterThanOrEqualTo(1);
+    }
 
-            SlicersController controller = new SlicersController(mockService.Object);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+    [Fact]
+    public async Task HeartbeatAsync_UpdatesAndBroadcasts()
+    {
+        Guid id = Guid.NewGuid();
+        Mock<ISlicersService> mockService = new Mock<ISlicersService>();
+        _ = mockService.Setup(s => s.HeartbeatAsync(id, It.IsAny<HeartbeatDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
-            IActionResult res = await controller.ListAsync();
-            _ = res.Should().BeOfType<OkObjectResult>();
-            OkObjectResult? ok = res as OkObjectResult;
-            IReadOnlyList<SlicerService>? list = ok!.Value as IReadOnlyList<SlicerService>;
-            _ = list.Should().NotBeNull();
-            _ = list!.Count.Should().BeGreaterThanOrEqualTo(1);
-        }
+        SlicersController controller = new SlicersController(mockService.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
-        [Fact]
-        public async Task HeartbeatAsync_UpdatesAndBroadcasts()
-        {
-            Guid id = Guid.NewGuid();
-            Mock<ISlicersService> mockService = new Mock<ISlicersService>();
-            _ = mockService.Setup(s => s.HeartbeatAsync(id, It.IsAny<HeartbeatDto>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
+        HeartbeatDto hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
+        IActionResult res = await controller.HeartbeatAsync(id, hb);
 
-            SlicersController controller = new SlicersController(mockService.Object);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+        _ = res.Should().BeOfType<NoContentResult>();
 
-            HeartbeatDto hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
-            IActionResult res = await controller.HeartbeatAsync(id, hb);
+        mockService.Verify(s => s.HeartbeatAsync(
+            id,
+            It.Is<HeartbeatDto>(h => h.Status == "Updated"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
 
-            _ = res.Should().BeOfType<NoContentResult>();
+    [Fact]
+    public async Task DeregisterAsync_RemovesAndBroadcasts()
+    {
+        Guid id = Guid.NewGuid();
+        Mock<ISlicersService> mockService = new Mock<ISlicersService>();
+        _ = mockService.Setup(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
-            mockService.Verify(s => s.HeartbeatAsync(
-                id,
-                It.Is<HeartbeatDto>(h => h.Status == "Updated"),
-                It.IsAny<CancellationToken>()), Times.Once);
-        }
+        SlicersController controller = new SlicersController(mockService.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
-        [Fact]
-        public async Task DeregisterAsync_RemovesAndBroadcasts()
-        {
-            Guid id = Guid.NewGuid();
-            Mock<ISlicersService> mockService = new Mock<ISlicersService>();
-            _ = mockService.Setup(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
+        IActionResult res = await controller.DeregisterAsync(id);
+        _ = res.Should().BeOfType<NoContentResult>();
 
-            SlicersController controller = new SlicersController(mockService.Object);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
-
-            IActionResult res = await controller.DeregisterAsync(id);
-            _ = res.Should().BeOfType<NoContentResult>();
-
-            mockService.Verify(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()), Times.Once);
-        }
+        mockService.Verify(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

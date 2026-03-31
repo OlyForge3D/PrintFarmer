@@ -2,28 +2,27 @@
 
 #nullable disable
 
-namespace Farm.Migrations.PostgreSQL.Migrations
+namespace Farm.Migrations.PostgreSQL.Migrations;
+
+/// <inheritdoc />
+public partial class AddObicoEnabledToPrinter : Migration
 {
     /// <inheritdoc />
-    public partial class AddObicoEnabledToPrinter : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.AddColumn<bool>(
-                name: "ObicoEnabled",
-                table: "Printers",
-                type: "boolean",
-                nullable: false,
-                defaultValue: false);
-        }
+        migrationBuilder.AddColumn<bool>(
+            name: "ObicoEnabled",
+            table: "Printers",
+            type: "boolean",
+            nullable: false,
+            defaultValue: false);
+    }
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropColumn(
-                name: "ObicoEnabled",
-                table: "Printers");
-        }
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropColumn(
+            name: "ObicoEnabled",
+            table: "Printers");
     }
 }

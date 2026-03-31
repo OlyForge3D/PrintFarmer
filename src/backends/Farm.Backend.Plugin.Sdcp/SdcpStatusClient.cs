@@ -7,174 +7,173 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Backend.Plugin.Sdcp
+namespace Farm.Backend.Plugin.Sdcp;
+
+/// <summary>
+/// Printer status client for SDCP backend (Simple Data Communication Protocol).
+/// Implements IPrinterStatusClient for SDCP-specific status retrieval.
+/// Implements IManagedSpoolProvider for PrintFarmer-managed spool tracking (no native Spoolman).
+/// </summary>
+public class SdcpStatusClient : IPrinterStatusClient, IManagedSpoolProvider
 {
-    /// <summary>
-    /// Printer status client for SDCP backend (Simple Data Communication Protocol).
-    /// Implements IPrinterStatusClient for SDCP-specific status retrieval.
-    /// Implements IManagedSpoolProvider for PrintFarmer-managed spool tracking (no native Spoolman).
-    /// </summary>
-    public class SdcpStatusClient : IPrinterStatusClient, IManagedSpoolProvider
+    private readonly ISdcpClient _client;
+    private readonly ICircuitBreakerService _circuitBreaker;
+    private readonly ManagedSpoolProviderHelper _spoolProvider;
+    private readonly ILogger<SdcpStatusClient> _logger;
+
+    public PrinterBackend SupportedBackend => PrinterBackend.SDCP;
+
+    public SdcpStatusClient(
+        ISdcpClient client,
+        ICircuitBreakerService circuitBreaker,
+        ManagedSpoolProviderHelper spoolProvider,
+        ILogger<SdcpStatusClient> logger)
     {
-        private readonly ISdcpClient _client;
-        private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly ManagedSpoolProviderHelper _spoolProvider;
-        private readonly ILogger<SdcpStatusClient> _logger;
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(circuitBreaker);
+        ArgumentNullException.ThrowIfNull(spoolProvider);
+        ArgumentNullException.ThrowIfNull(logger);
 
-        public PrinterBackend SupportedBackend => PrinterBackend.SDCP;
+        _client = client;
+        _circuitBreaker = circuitBreaker;
+        _spoolProvider = spoolProvider;
+        _logger = logger;
+    }
 
-        public SdcpStatusClient(
-            ISdcpClient client,
-            ICircuitBreakerService circuitBreaker,
-            ManagedSpoolProviderHelper spoolProvider,
-            ILogger<SdcpStatusClient> logger)
+    public async Task<PrinterStatusDto> GetPrinterStatusAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+
+        try
         {
-            ArgumentNullException.ThrowIfNull(client);
-            ArgumentNullException.ThrowIfNull(circuitBreaker);
-            ArgumentNullException.ThrowIfNull(spoolProvider);
-            ArgumentNullException.ThrowIfNull(logger);
+            CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{printer.Id}");
 
-            _client = client;
-            _circuitBreaker = circuitBreaker;
-            _spoolProvider = spoolProvider;
-            _logger = logger;
-        }
+            PrinterCompositeStatus status = await breaker.ExecuteAsync(
+                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
+                ct);
 
-        public async Task<PrinterStatusDto> GetPrinterStatusAsync(Printer printer, CancellationToken ct)
-        {
-            ArgumentNullException.ThrowIfNull(printer);
-
-            try
-            {
-                CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{printer.Id}");
-
-                PrinterCompositeStatus status = await breaker.ExecuteAsync(
-                    async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
-                    ct);
-
-                return new PrinterStatusDto(
-                    Id: printer.Id,
-                    IsOnline: status.IsOnline,
-                    State: status.State,
-                    Progress: status.Progress,
-                    JobName: status.JobName,
-                    ThumbnailUrl: status.ThumbnailUrl,
-                    CameraStreamUrl: status.CameraStreamUrl,
-                    CameraSnapshotUrl: status.CameraSnapshotUrl,
-                    X: status.X,
-                    Y: status.Y,
-                    Z: status.Z,
-                    HotendTemp: status.HotendTemp,
-                    BedTemp: status.BedTemp,
-                    HotendTarget: status.HotendTarget,
-                    BedTarget: status.BedTarget);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogWarning("[SDCP] Status timeout for printer {PrinterId}", printer.Id);
-                return CreateOfflineStatus(printer.Id);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("[SDCP] Error getting status for printer {PrinterId}: {Message}", printer.Id, ex.Message);
-                return CreateOfflineStatus(printer.Id);
-            }
-        }
-
-        public async Task<PrinterDto> GetPrinterDtoAsync(Printer printer, CancellationToken ct)
-        {
-            ArgumentNullException.ThrowIfNull(printer);
-
-            try
-            {
-                CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{printer.Id}");
-
-                PrinterCompositeStatus status = await breaker.ExecuteAsync(
-                    async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
-                    ct);
-
-                PrinterSpoolInfoDto? spoolInfo = await GetManagedSpoolInfoAsync(printer, ct);
-
-                PrinterDto dto = status == null
-                    ? throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}")
-                    : await _client.CreatePrinterDtoAsync(printer, status, ct);
-
-                return spoolInfo is not null ? dto with { SpoolInfo = spoolInfo } : dto;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("[SDCP] Error getting printer DTO for {PrinterId}: {Message}", printer.Id, ex.Message);
-                throw;
-            }
-        }
-
-        public Task<PrinterSpoolInfoDto?> GetManagedSpoolInfoAsync(Printer printer, CancellationToken ct)
-            => _spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
-
-        public async Task<string?> GetCameraStreamUrlAsync(Printer printer, CancellationToken ct)
-        {
-            ArgumentNullException.ThrowIfNull(printer);
-
-            try
-            {
-                return await _client.GetCameraUrlAsync(printer.BackendUrl, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("[SDCP] Error getting camera stream URL for {PrinterId}: {Message}", printer.Id, ex.Message);
-                return null;
-            }
-        }
-
-        public async Task<string?> GetCameraSnapshotUrlAsync(Printer printer, CancellationToken ct)
-        {
-            ArgumentNullException.ThrowIfNull(printer);
-
-            try
-            {
-                return await _client.GetCameraSnapshotUrlAsync(printer.BackendUrl, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("[SDCP] Error getting camera snapshot URL for {PrinterId}: {Message}", printer.Id, ex.Message);
-                return null;
-            }
-        }
-
-        public async Task<bool> IsCameraAvailableAsync(Printer printer, CancellationToken ct)
-        {
-            ArgumentNullException.ThrowIfNull(printer);
-
-            try
-            {
-                string? streamUrl = await GetCameraStreamUrlAsync(printer, ct);
-                return !string.IsNullOrEmpty(streamUrl);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("[SDCP] Error checking camera availability for {PrinterId}: {Message}", printer.Id, ex.Message);
-                return false;
-            }
-        }
-
-        private static PrinterStatusDto CreateOfflineStatus(Guid printerId)
-        {
             return new PrinterStatusDto(
-                Id: printerId,
-                IsOnline: false,
-                State: null,
-                Progress: null,
-                JobName: null,
-                ThumbnailUrl: null,
-                CameraStreamUrl: null,
-                CameraSnapshotUrl: null,
-                X: null,
-                Y: null,
-                Z: null,
-                HotendTemp: null,
-                BedTemp: null,
-                HotendTarget: null,
-                BedTarget: null);
+                Id: printer.Id,
+                IsOnline: status.IsOnline,
+                State: status.State,
+                Progress: status.Progress,
+                JobName: status.JobName,
+                ThumbnailUrl: status.ThumbnailUrl,
+                CameraStreamUrl: status.CameraStreamUrl,
+                CameraSnapshotUrl: status.CameraSnapshotUrl,
+                X: status.X,
+                Y: status.Y,
+                Z: status.Z,
+                HotendTemp: status.HotendTemp,
+                BedTemp: status.BedTemp,
+                HotendTarget: status.HotendTarget,
+                BedTarget: status.BedTarget);
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("[SDCP] Status timeout for printer {PrinterId}", printer.Id);
+            return CreateOfflineStatus(printer.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[SDCP] Error getting status for printer {PrinterId}: {Message}", printer.Id, ex.Message);
+            return CreateOfflineStatus(printer.Id);
+        }
+    }
+
+    public async Task<PrinterDto> GetPrinterDtoAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+
+        try
+        {
+            CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{printer.Id}");
+
+            PrinterCompositeStatus status = await breaker.ExecuteAsync(
+                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
+                ct);
+
+            PrinterSpoolInfoDto? spoolInfo = await GetManagedSpoolInfoAsync(printer, ct);
+
+            PrinterDto dto = status == null
+                ? throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}")
+                : await _client.CreatePrinterDtoAsync(printer, status, ct);
+
+            return spoolInfo is not null ? dto with { SpoolInfo = spoolInfo } : dto;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("[SDCP] Error getting printer DTO for {PrinterId}: {Message}", printer.Id, ex.Message);
+            throw;
+        }
+    }
+
+    public Task<PrinterSpoolInfoDto?> GetManagedSpoolInfoAsync(Printer printer, CancellationToken ct)
+        => _spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
+
+    public async Task<string?> GetCameraStreamUrlAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+
+        try
+        {
+            return await _client.GetCameraUrlAsync(printer.BackendUrl, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[SDCP] Error getting camera stream URL for {PrinterId}: {Message}", printer.Id, ex.Message);
+            return null;
+        }
+    }
+
+    public async Task<string?> GetCameraSnapshotUrlAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+
+        try
+        {
+            return await _client.GetCameraSnapshotUrlAsync(printer.BackendUrl, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[SDCP] Error getting camera snapshot URL for {PrinterId}: {Message}", printer.Id, ex.Message);
+            return null;
+        }
+    }
+
+    public async Task<bool> IsCameraAvailableAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+
+        try
+        {
+            string? streamUrl = await GetCameraStreamUrlAsync(printer, ct);
+            return !string.IsNullOrEmpty(streamUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[SDCP] Error checking camera availability for {PrinterId}: {Message}", printer.Id, ex.Message);
+            return false;
+        }
+    }
+
+    private static PrinterStatusDto CreateOfflineStatus(Guid printerId)
+    {
+        return new PrinterStatusDto(
+            Id: printerId,
+            IsOnline: false,
+            State: null,
+            Progress: null,
+            JobName: null,
+            ThumbnailUrl: null,
+            CameraStreamUrl: null,
+            CameraSnapshotUrl: null,
+            X: null,
+            Y: null,
+            Z: null,
+            HotendTemp: null,
+            BedTemp: null,
+            HotendTarget: null,
+            BedTarget: null);
     }
 }

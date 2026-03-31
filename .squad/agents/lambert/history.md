@@ -199,3 +199,26 @@ Published: `.squad/orchestration-log/20260326-031539-lambert.md`
 - Service methods use existing repository patterns (UnitOfWork, FindByIdWithToolheadsAsync)
 - MMU sync integrates seamlessly into existing printer lifecycle hooks
 
+
+## Session: Roslyn .editorconfig Merge (2026-07-15)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — `dotnet format --verify-no-changes` exits clean (0)
+
+### Work Completed
+
+- Merged Roslyn project `.editorconfig` conventions into `src/.editorconfig`
+- **Added**: `file_header_template` (MIT license) in `[*.{cs,vb}]` section
+- **Added**: `[*.sh]` section with `end_of_line = lf` and `indent_size = 2`
+- **Added**: `dotnet_diagnostic.IDE0060.severity = warning` (remove unused parameter)
+- **Removed**: 6 duplicate/dead pre-root diagnostic suppressions (IDE0290 dup, SA1402/SA1400 conflicts)
+- **Removed**: Duplicate SA1101, SA1600 from StyleCop section (consolidated into `[*.{cs,vb}]`)
+- **Removed**: Duplicate `csharp_style_namespace_declarations` in `[*.cs]` that was overriding `:warning` severity
+- **Removed**: Empty `[*.{cs,csx,cake,vb,vbx}]` section
+- **Fixed**: Moved pre-root diagnostics into `[*.{cs,vb}]` section (pre-root settings are dead code in editorconfig)
+
+### Key Decisions
+
+- Skipped Roslyn-specific items: `spelling_exclusion_path`, `dotnet_public_api_analyzer`, RS* diagnostics, Roslyn path-scoped sections, xUnit workarounds
+- Kept all existing project-specific values even where they differ from Roslyn defaults (e.g., `csharp_indent_case_contents_when_block = false`, `csharp_prefer_braces = true:error`, `csharp_preserve_single_line_statements = false`)
+- All C# style rules from Roslyn (newlines, indentation, whitespace, var, expression bodies, pattern matching, spacing, braces) were already present

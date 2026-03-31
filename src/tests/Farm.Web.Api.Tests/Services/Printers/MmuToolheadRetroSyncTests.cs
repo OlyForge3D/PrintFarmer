@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
@@ -284,16 +284,21 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SetToolheadSpoolAsync_StillFails_ForNonMmuPrinterMissingToolhead()
+    public async Task SetToolheadSpoolAsync_AutoPromotesMultiMaterial_ForNonMmuPrinterMissingToolhead()
     {
         Printer printer = await SeedSingleToolheadPrinter();
 
         CommandResult result = await _printersService.SetToolheadSpoolAsync(printer.Id, 1, spoolId: 999, CancellationToken.None);
 
-        result.Success.Should().BeFalse();
-        result.Message.Should().Contain("not found");
+        result.Success.Should().BeTrue("auto-promotion should create the needed gate");
 
-        int count = await _dbContext.Toolheads.CountAsync(t => t.PrinterId == printer.Id);
-        count.Should().Be(1);
+        // Printer should now be MultiMaterial with virtual gates created
+        Printer? reloaded = await _dbContext.Printers
+            .Include(p => p.Toolheads)
+            .FirstOrDefaultAsync(p => p.Id == printer.Id);
+
+        reloaded!.MultiMaterial.Should().BeTrue("printer should be promoted to MultiMaterial");
+        reloaded.Toolheads.Count.Should().BeGreaterThanOrEqualTo(4, "virtual MMU gates should be created");
+        reloaded.Toolheads.Should().Contain(t => t.Index == 1 && t.ToolheadType == ToolheadType.MmuGate);
     }
 }

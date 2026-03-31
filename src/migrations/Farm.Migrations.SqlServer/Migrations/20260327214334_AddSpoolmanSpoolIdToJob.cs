@@ -2,27 +2,26 @@
 
 #nullable disable
 
-namespace Farm.Migrations.SqlServer.Migrations
+namespace Farm.Migrations.SqlServer.Migrations;
+
+/// <inheritdoc />
+public partial class AddSpoolmanSpoolIdToJob : Migration
 {
     /// <inheritdoc />
-    public partial class AddSpoolmanSpoolIdToJob : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.AddColumn<int>(
-                name: "SpoolmanSpoolId",
-                table: "PrintJobs",
-                type: "int",
-                nullable: true);
-        }
+        migrationBuilder.AddColumn<int>(
+            name: "SpoolmanSpoolId",
+            table: "PrintJobs",
+            type: "int",
+            nullable: true);
+    }
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropColumn(
-                name: "SpoolmanSpoolId",
-                table: "PrintJobs");
-        }
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropColumn(
+            name: "SpoolmanSpoolId",
+            table: "PrintJobs");
     }
 }

@@ -6,175 +6,174 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Slicer.Module.Tests.Hubs
+namespace Farm.Slicer.Module.Tests.Hubs;
+
+public class SlicerHubTests
 {
-    public class SlicerHubTests
+    private readonly Mock<ILogger<SlicerHub>> _loggerMock;
+    private readonly Mock<IHubCallerClients> _clientsMock;
+    private readonly Mock<ISingleClientProxy> _callerMock;
+    private readonly Mock<HubCallerContext> _contextMock;
+    private readonly Mock<IGroupManager> _groupsMock;
+    private readonly SlicerHub _hub;
+
+    public SlicerHubTests()
     {
-        private readonly Mock<ILogger<SlicerHub>> _loggerMock;
-        private readonly Mock<IHubCallerClients> _clientsMock;
-        private readonly Mock<ISingleClientProxy> _callerMock;
-        private readonly Mock<HubCallerContext> _contextMock;
-        private readonly Mock<IGroupManager> _groupsMock;
-        private readonly SlicerHub _hub;
+        _loggerMock = new Mock<ILogger<SlicerHub>>();
+        _clientsMock = new Mock<IHubCallerClients>();
+        _callerMock = new Mock<ISingleClientProxy>();
+        _contextMock = new Mock<HubCallerContext>();
+        _groupsMock = new Mock<IGroupManager>();
 
-        public SlicerHubTests()
+        // Setup hub context
+        _contextMock.Setup(c => c.ConnectionId).Returns("test-connection-id");
+
+        // Setup clients
+        _clientsMock.Setup(c => c.Caller).Returns(_callerMock.Object);
+
+        _hub = new SlicerHub(_loggerMock.Object)
         {
-            _loggerMock = new Mock<ILogger<SlicerHub>>();
-            _clientsMock = new Mock<IHubCallerClients>();
-            _callerMock = new Mock<ISingleClientProxy>();
-            _contextMock = new Mock<HubCallerContext>();
-            _groupsMock = new Mock<IGroupManager>();
+            Clients = _clientsMock.Object,
+            Context = _contextMock.Object,
+            Groups = _groupsMock.Object
+        };
+    }
 
-            // Setup hub context
-            _contextMock.Setup(c => c.ConnectionId).Returns("test-connection-id");
+    [Fact]
+    public void Constructor_WithValidLogger_InitializesSuccessfully()
+    {
+        // Act
+        var hub = new SlicerHub(_loggerMock.Object);
 
-            // Setup clients
-            _clientsMock.Setup(c => c.Caller).Returns(_callerMock.Object);
+        // Assert
+        Assert.NotNull(hub);
+    }
 
-            _hub = new SlicerHub(_loggerMock.Object)
-            {
-                Clients = _clientsMock.Object,
-                Context = _contextMock.Object,
-                Groups = _groupsMock.Object
-            };
-        }
+    [Fact]
+    public void Constructor_WithNullLogger_ThrowsArgumentNullException()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new SlicerHub(null!));
+    }
 
-        [Fact]
-        public void Constructor_WithValidLogger_InitializesSuccessfully()
-        {
-            // Act
-            var hub = new SlicerHub(_loggerMock.Object);
+    [Fact]
+    public async Task OnConnectedAsync_LogsConnectionInfo()
+    {
+        // Act
+        await _hub.OnConnectedAsync();
 
-            // Assert
-            Assert.NotNull(hub);
-        }
+        // Assert - verify logging was called
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("connected") && v.ToString()!.Contains("SlicerHub")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
 
-        [Fact]
-        public void Constructor_WithNullLogger_ThrowsArgumentNullException()
-        {
-            // Act & Assert
-            Assert.Throws<ArgumentNullException>(() => new SlicerHub(null!));
-        }
+    [Fact]
+    public async Task OnDisconnectedAsync_WithNoException_LogsDisconnectionInfo()
+    {
+        // Act
+        await _hub.OnDisconnectedAsync(null);
 
-        [Fact]
-        public async Task OnConnectedAsync_LogsConnectionInfo()
-        {
-            // Act
-            await _hub.OnConnectedAsync();
+        // Assert
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("disconnected") && v.ToString()!.Contains("SlicerHub")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
 
-            // Assert - verify logging was called
-            _loggerMock.Verify(
-                x => x.Log(
-                    LogLevel.Information,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("connected") && v.ToString()!.Contains("SlicerHub")),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.Once);
-        }
+    [Fact]
+    public async Task OnDisconnectedAsync_WithException_LogsDisconnectionInfo()
+    {
+        // Arrange
+        var exception = new InvalidOperationException("Test exception");
 
-        [Fact]
-        public async Task OnDisconnectedAsync_WithNoException_LogsDisconnectionInfo()
-        {
-            // Act
-            await _hub.OnDisconnectedAsync(null);
+        // Act
+        await _hub.OnDisconnectedAsync(exception);
 
-            // Assert
-            _loggerMock.Verify(
-                x => x.Log(
-                    LogLevel.Information,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("disconnected") && v.ToString()!.Contains("SlicerHub")),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.Once);
-        }
+        // Assert
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("disconnected") && v.ToString()!.Contains("SlicerHub")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
 
-        [Fact]
-        public async Task OnDisconnectedAsync_WithException_LogsDisconnectionInfo()
-        {
-            // Arrange
-            var exception = new InvalidOperationException("Test exception");
+    [Fact]
+    public async Task JoinServiceGroupAsync_AddsToGroup()
+    {
+        // Act
+        await _hub.JoinServiceGroupAsync("svc-1");
 
-            // Act
-            await _hub.OnDisconnectedAsync(exception);
+        // Assert
+        _groupsMock.Verify(g => g.AddToGroupAsync(
+            "test-connection-id",
+            "slicer-svc-1",
+            default), Times.Once);
+    }
 
-            // Assert
-            _loggerMock.Verify(
-                x => x.Log(
-                    LogLevel.Information,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("disconnected") && v.ToString()!.Contains("SlicerHub")),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.Once);
-        }
+    [Fact]
+    public async Task LeaveServiceGroupAsync_RemovesFromGroup()
+    {
+        // Act
+        await _hub.LeaveServiceGroupAsync("svc-1");
 
-        [Fact]
-        public async Task JoinServiceGroupAsync_AddsToGroup()
-        {
-            // Act
-            await _hub.JoinServiceGroupAsync("svc-1");
+        // Assert
+        _groupsMock.Verify(g => g.RemoveFromGroupAsync(
+            "test-connection-id",
+            "slicer-svc-1",
+            default), Times.Once);
+    }
 
-            // Assert
-            _groupsMock.Verify(g => g.AddToGroupAsync(
-                "test-connection-id",
-                "slicer-svc-1",
-                default), Times.Once);
-        }
+    [Fact]
+    public async Task JoinProgressGroupAsync_AddsToSlicingProgressGroup()
+    {
+        // Act
+        await _hub.JoinProgressGroupAsync();
 
-        [Fact]
-        public async Task LeaveServiceGroupAsync_RemovesFromGroup()
-        {
-            // Act
-            await _hub.LeaveServiceGroupAsync("svc-1");
+        // Assert
+        _groupsMock.Verify(g => g.AddToGroupAsync(
+            "test-connection-id",
+            "slicing-progress",
+            default), Times.Once);
+    }
 
-            // Assert
-            _groupsMock.Verify(g => g.RemoveFromGroupAsync(
-                "test-connection-id",
-                "slicer-svc-1",
-                default), Times.Once);
-        }
+    [Fact]
+    public void SlicerHubEvents_SlicerRegistered_HasCorrectValue()
+    {
+        // Assert
+        Assert.Equal("SlicerRegistered", SlicerHubEvents.SlicerRegistered);
+    }
 
-        [Fact]
-        public async Task JoinProgressGroupAsync_AddsToSlicingProgressGroup()
-        {
-            // Act
-            await _hub.JoinProgressGroupAsync();
+    [Fact]
+    public void SlicerHubEvents_SlicerHeartbeat_HasCorrectValue()
+    {
+        // Assert
+        Assert.Equal("SlicerHeartbeat", SlicerHubEvents.SlicerHeartbeat);
+    }
 
-            // Assert
-            _groupsMock.Verify(g => g.AddToGroupAsync(
-                "test-connection-id",
-                "slicing-progress",
-                default), Times.Once);
-        }
+    [Fact]
+    public void SlicerHubEvents_SlicerDeregistered_HasCorrectValue()
+    {
+        // Assert
+        Assert.Equal("SlicerDeregistered", SlicerHubEvents.SlicerDeregistered);
+    }
 
-        [Fact]
-        public void SlicerHubEvents_SlicerRegistered_HasCorrectValue()
-        {
-            // Assert
-            Assert.Equal("SlicerRegistered", SlicerHubEvents.SlicerRegistered);
-        }
-
-        [Fact]
-        public void SlicerHubEvents_SlicerHeartbeat_HasCorrectValue()
-        {
-            // Assert
-            Assert.Equal("SlicerHeartbeat", SlicerHubEvents.SlicerHeartbeat);
-        }
-
-        [Fact]
-        public void SlicerHubEvents_SlicerDeregistered_HasCorrectValue()
-        {
-            // Assert
-            Assert.Equal("SlicerDeregistered", SlicerHubEvents.SlicerDeregistered);
-        }
-
-        [Fact]
-        public void SlicerHubEvents_SlicerApiKeyRotated_HasCorrectValue()
-        {
-            // Assert
-            Assert.Equal("SlicerApiKeyRotated", SlicerHubEvents.SlicerApiKeyRotated);
-        }
+    [Fact]
+    public void SlicerHubEvents_SlicerApiKeyRotated_HasCorrectValue()
+    {
+        // Assert
+        Assert.Equal("SlicerApiKeyRotated", SlicerHubEvents.SlicerApiKeyRotated);
     }
 }

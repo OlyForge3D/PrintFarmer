@@ -1712,15 +1712,18 @@ public class PrintersService(
             }
         }
 
+        // Always mark the sync as complete so HasCatalogUpdate clears,
+        // even when the printer already has all template values.
+        printer.LastModelSyncAt = DateTime.UtcNow;
+
         if (updated)
         {
             printer.LastCapabilityUpdate = DateTime.UtcNow;
-            printer.LastModelSyncAt = DateTime.UtcNow;
             _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", modelTemplate.Name, printer.Name);
         }
         else
         {
-            _logger.LogDebug("[ApplyModelTemplate] Printer '{PrinterName}' already has all values set - no changes needed", printer.Name);
+            _logger.LogDebug("[ApplyModelTemplate] Printer '{PrinterName}' already has all values set - synced without changes", printer.Name);
         }
 
         return updated;
@@ -2596,18 +2599,32 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
-        // Auto-create MMU gates for legacy printers that predate the multi-toolhead feature
-        if (toolhead is null && p.MultiMaterial)
+        // Auto-create MMU gates when the toolhead doesn't exist.
+        // If the printer reports MMU gates via SignalR but MultiMaterial isn't set yet,
+        // promote it and create the virtual gate rows so spool assignment works.
+        if (toolhead is null)
         {
-            List<Toolhead> gates = CreateMmuVirtualToolheads(p);
-            if (gates.Count > 0)
+            if (!p.MultiMaterial && toolheadIndex > 0)
             {
-                _unitOfWork.Printers.AddToolheads(gates);
-                await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
+                    p.Name, id, toolheadIndex);
+                p.MultiMaterial = true;
             }
 
-            toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
-                       ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+            if (p.MultiMaterial)
+            {
+                int gateCount = Math.Max(4, toolheadIndex + 1);
+                List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
+                if (gates.Count > 0)
+                {
+                    _unitOfWork.Printers.AddToolheads(gates);
+                    await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                }
+
+                toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
+                           ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+            }
         }
 
         if (toolhead is null)
@@ -2660,18 +2677,30 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
-        // Auto-create MMU gates for legacy printers that predate the multi-toolhead feature
-        if (toolhead is null && p.MultiMaterial)
+        // Auto-create MMU gates when the toolhead doesn't exist.
+        if (toolhead is null)
         {
-            List<Toolhead> gates = CreateMmuVirtualToolheads(p);
-            if (gates.Count > 0)
+            if (!p.MultiMaterial && toolheadIndex > 0)
             {
-                _unitOfWork.Printers.AddToolheads(gates);
-                await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "ClearToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
+                    p.Name, id, toolheadIndex);
+                p.MultiMaterial = true;
             }
 
-            toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
-                       ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+            if (p.MultiMaterial)
+            {
+                int gateCount = Math.Max(4, toolheadIndex + 1);
+                List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
+                if (gates.Count > 0)
+                {
+                    _unitOfWork.Printers.AddToolheads(gates);
+                    await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                }
+
+                toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
+                           ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+            }
         }
 
         if (toolhead is null)
