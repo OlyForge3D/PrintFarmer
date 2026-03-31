@@ -280,3 +280,40 @@ Probed the ADX5 printer at 10.0.0.22:8899 using FlashForge TCP protocol commands
 ### Files Created
 
 - `.squad/decisions/inbox/lambert-flashforge-mmu-scope.md` — Full scoping analysis with phase breakdown, blockers, and recommendations
+
+## Session: FlashForge Multi-Extruder Temperature Parsing — Phase 1 (2026-07-16)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — 59 FlashForge tests pass, 0 errors, 0 warnings
+
+### Work Completed
+
+- **Multi-match regex**: Replaced single-extruder `HotendTempRegex` (T0-only) with `ExtruderTempRegex` pattern `T(\d+):\s*([\d.]+)\s*/\s*([\d.]+)` that captures all Tn pairs
+- **`ParseExtruderTemperatures()`**: New public static method returning `(Dictionary<int, ExtruderTemperature> Extruders, double? BedTemp, double? BedTarget)` — handles 1-4 extruders, with/without bed, spaces around slash
+- **`ParseTemperatures()` preserved**: Delegates to `ParseExtruderTemperatures()` and extracts T0, maintaining backward compat for all callers
+- **`PrinterCompositeStatus` extended**: Added `ExtruderTemperatures` (`IReadOnlyDictionary<int, ExtruderTemperature>?`) and `DetectedExtruderCount` (`int?`) optional params — backward-compatible positional record extension
+- **`ExtruderTemperature` record**: New record `(double Current, double Target)` in PrinterStatusRecords.cs
+- **`GetCompositeStatusAsync()` updated**: Populates ExtruderTemperatures and DetectedExtruderCount from parsed M105 data
+- **Pre-existing TDD stubs cleaned**: Removed old `ParseExtruderTemperatures` stub (wrong return type) and duplicate `ExtruderTempRegex` that had been written as scaffolding by a prior session
+- **7 duplicate tests removed**: Tests I wrote duplicated pre-existing TDD stub tests already in the file with correct signatures
+
+### Key Decisions
+
+- ADX5 correction: NOT IDEX — has 1 physical hotend + 4-spool AMS/MMU. T1 in M105 reflects secondary sensor, not second hotend. Updated scope doc accordingly.
+- `ExtruderTemperatures` uses `Dictionary<int, ExtruderTemperature>` keyed by Tn index for O(1) lookup by extruder index
+- `DetectedExtruderCount` derived from `extruders.Count` — will be used in Phase 2/3 for auto-creating MmuGate toolheads
+- Bed temp regex unchanged — `B:` pattern doesn't collide with `T(\d+):` multi-match
+- No SignalR contract changes (future phase) — `FlashForgePollingService` still maps only T0
+
+### Validation
+
+- ✅ 59 FlashForge tests pass (new + pre-existing)
+- ✅ Build: 0 errors, 0 warnings
+- ✅ `dotnet format` clean
+- ✅ Backward compat: `ParseTemperatures()` unchanged return type, all existing callers work
+
+### Files Modified
+
+- `src/infra/Services/Printers/PrinterStatusRecords.cs` — Added `ExtruderTemperature` record, extended `PrinterCompositeStatus`
+- `src/backends/Farm.Backend.Plugin.FlashForge/FlashForgeClient.cs` — New `ParseExtruderTemperatures()`, refactored `ParseTemperatures()`, updated regex and composite status
+- `src/tests/Farm.Web.Api.Tests/Backends/FlashForgeClientTests.cs` — Cleaned duplicate tests, fixed region directives
