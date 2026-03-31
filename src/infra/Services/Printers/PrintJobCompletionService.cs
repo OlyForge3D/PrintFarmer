@@ -665,4 +665,56 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to calculate detailed cost breakdown for job {JobId}", jobId);
         }
     }
+
+    /// <inheritdoc />
+    public async Task<bool> EnsureExternalPrintJobExistsAsync(Guid printerId, string? fileName, CancellationToken ct = default)
+    {
+        bool hasActiveJob = await _db.PrintJobs
+            .AnyAsync(
+                j => j.AssignedPrinterId == printerId &&
+                     (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                ct);
+
+        if (hasActiveJob)
+        {
+            _logger.LogDebug(
+                "[PrintJobCompletionService] Active job already exists for printer {PrinterId}, skipping external print creation",
+                printerId);
+            return false;
+        }
+
+        string displayName = !string.IsNullOrWhiteSpace(fileName)
+            ? Path.GetFileName(fileName)
+            : "External Print";
+
+        DateTime now = DateTime.UtcNow;
+
+        var externalJob = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = displayName,
+            Status = PrintJobStatus.Printing,
+            AssignedPrinterId = printerId,
+            SourcePrinterId = printerId,
+            ActualStartTime = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+            QueuedAt = now,
+            IsExternalPrint = true,
+            ExternalJobId = $"ext-{printerId:N}-{now:yyyyMMddHHmmss}",
+        };
+
+        _db.PrintJobs.Add(externalJob);
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "[PrintJobCompletionService] Created external print job {JobId} for printer {PrinterId} (file: {FileName})",
+            externalJob.Id,
+            printerId,
+            displayName);
+
+        await BroadcastJobQueueUpdateAsync(printerId, ct);
+
+        return true;
+    }
 }

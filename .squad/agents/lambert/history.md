@@ -318,3 +318,46 @@ Probed the ADX5 printer at 10.0.0.22:8899 using FlashForge TCP protocol commands
 - `src/infra/Services/Printers/PrinterStatusRecords.cs` — Added `ExtruderTemperature` record, extended `PrinterCompositeStatus`
 - `src/backends/Farm.Backend.Plugin.FlashForge/FlashForgeClient.cs` — New `ParseExtruderTemperatures()`, refactored `ParseTemperatures()`, updated regex and composite status
 - `src/tests/Farm.Web.Api.Tests/Backends/FlashForgeClientTests.cs` — Cleaned duplicate tests, fixed region directives
+
+## Session: External Print Detection for FlashForge + OctoPrint (2026-07-16)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — 1806 tests pass, 0 errors, 0 warnings
+
+### Problem
+When OrcaSlicer sends "Upload and Print" directly to a FlashForge ADX5 printer (bypassing PrintFarmer), the UI shows a phantom "Printing" state indefinitely because no PrintJob record exists for the externally-started print. When the print finishes, `CheckAndSyncJobCompletionAsync` finds no job to complete → silent failure → stale state.
+
+### Solution: External Print Detection
+Added detection logic in polling services: when a printer transitions TO "Printing" from a non-printing state and no active PrintJob exists, a synthetic external print job is created.
+
+### Key Design Decisions
+- **`IsExternalPrint` flag on PrintJob** — Clean boolean marker, not conflated with `WasSeededFromHistory` (which is for imports)
+- **`EnsureExternalPrintJobExistsAsync` on IPrintJobCompletionService** — Single atomic check-and-create avoids TOCTOU races; both polling services already resolve this service
+- **`ExternalJobCreatedForCurrentPrint` on PrinterPollingState** — In-memory guard prevents duplicate external jobs across poll cycles; reset when printer leaves "printing" state
+- **No auto-dispatch** — External jobs set `Status=Printing` and `IsExternalPrint=true`, so auto-dispatch ignores them
+
+### Completion Flow
+External jobs are real `PrintJob` rows with `Status=Printing` and `AssignedPrinterId` set. When the printer finishes, the existing `CheckAndSyncJobCompletionAsync → MarkCurrentJobAsCompletedAsync` path finds and completes them automatically.
+
+### Scope
+- ✅ FlashForge polling service
+- ✅ OctoPrint polling service (HTTP fallback path)
+- ⚠️ OctoPrint WebSocket adapter does NOT have external print detection (pre-existing gap: WebSocket path also lacks job completion detection)
+- ⚠️ Moonraker, PrusaLink, SDCP have the same architectural gap but were out of scope
+
+### Files Modified
+- `src/infra/Domain/PrintJob.cs` — Added `IsExternalPrint` property
+- `src/infra/Services/Printers/IPrintJobCompletionService.cs` — Added `EnsureExternalPrintJobExistsAsync`
+- `src/infra/Services/Printers/PrintJobCompletionService.cs` — Implemented external print job creation
+- `src/backends/Farm.Backend.Plugin.FlashForge/FlashForgePollingService.cs` — External print detection + `DetectAndCreateExternalPrintJobAsync`
+- `src/backends/Farm.Backend.Plugin.OctoPrint/OctoPrintPollingService.cs` — Same pattern
+
+### Validation
+- ✅ 1806 tests pass, 0 failures
+- ✅ Build: 0 errors, 0 warnings
+- ✅ `dotnet format` clean
+
+## Learnings
+
+- 2026-07-16: OctoPrint WebSocket adapter (`OctoPrintWebSocketAdapter`) does NOT track state transitions — it only broadcasts via SignalR. Job completion detection only works via HTTP polling fallback. This is a pre-existing gap that should be addressed separately.
+- 2026-07-16: The `PrinterPollingState` inner class in each polling service is the right place for per-printer session state that shouldn't persist across service restarts. Used `ExternalJobCreatedForCurrentPrint` flag to prevent duplicate external job creation during a single print session.

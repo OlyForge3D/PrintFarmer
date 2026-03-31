@@ -75,6 +75,12 @@ public sealed class OctoPrintPollingService(
         /// API key the adapter was created with, used to detect credential changes.
         /// </summary>
         public string? CreatedWithApiKey { get; set; }
+
+        /// <summary>
+        /// Tracks whether an external print job has been created for the current printing session.
+        /// Reset when the printer leaves "Printing" state so the next external print is detected.
+        /// </summary>
+        public bool ExternalJobCreatedForCurrentPrint { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -366,6 +372,23 @@ public sealed class OctoPrintPollingService(
                             await CheckAndSyncJobCompletionAsync(printerId, previousState, statusData.State, ct);
                         }
 
+                        // External print detection: when printer transitions TO "printing" from a
+                        // non-printing state, check if a PrintFarmer job exists. If not, create a
+                        // synthetic job so the print lifecycle is tracked and completion works.
+                        if (stateChanged && PrintJobCompletionService.IsPrintingState(statusData.State)
+                                         && !PrintJobCompletionService.IsPrintingState(previousState)
+                                         && !state.ExternalJobCreatedForCurrentPrint)
+                        {
+                            await DetectAndCreateExternalPrintJobAsync(printerId, statusData.JobName, ct);
+                            state.ExternalJobCreatedForCurrentPrint = true;
+                        }
+
+                        // Reset external job tracking when printer leaves "printing" state
+                        if (stateChanged && !PrintJobCompletionService.IsPrintingState(statusData.State))
+                        {
+                            state.ExternalJobCreatedForCurrentPrint = false;
+                        }
+
                         // Resolve spool info from DB assignment
                         PrinterSpoolInfoDto? spoolInfo = null;
                         try
@@ -580,6 +603,32 @@ public sealed class OctoPrintPollingService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[OctoPrintPollingService] Failed to sync job completion for printer {PrinterId}", printerId);
+        }
+    }
+
+    /// <summary>
+    /// Detects externally-started prints (e.g., via OrcaSlicer "Upload and Print") and creates
+    /// a synthetic tracking job if no active PrintFarmer job exists for the printer.
+    /// </summary>
+    private async Task DetectAndCreateExternalPrintJobAsync(Guid printerId, string? fileName, CancellationToken ct)
+    {
+        try
+        {
+            using IServiceScope scope = _scopeFactory.CreateScope();
+            IPrintJobCompletionService completionService = scope.ServiceProvider.GetRequiredService<IPrintJobCompletionService>();
+
+            bool created = await completionService.EnsureExternalPrintJobExistsAsync(printerId, fileName, ct);
+            if (created)
+            {
+                _logger.LogInformation(
+                    "[OctoPrintPollingService] External print detected on printer {PrinterId}, created tracking job (file: {FileName})",
+                    printerId,
+                    fileName ?? "unknown");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[OctoPrintPollingService] Failed to create external print job for printer {PrinterId}", printerId);
         }
     }
 }

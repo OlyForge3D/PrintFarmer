@@ -39,4 +39,16 @@ public interface IPrintJobCompletionService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The number of jobs that were synchronized.</returns>
     Task<int> SyncOrphanedPrintingJobsAsync(Func<Guid, string?> printerStateLookup, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ensures a print job record exists for a printer that has transitioned to "Printing" state.
+    /// If no active job (Starting/Printing) exists for the printer, creates a synthetic external
+    /// print job to track the externally-started print (e.g., via OrcaSlicer "Upload and Print").
+    /// External jobs are passive tracking records — they do not trigger auto-dispatch.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer that started printing.</param>
+    /// <param name="fileName">The filename from the printer status, if available.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True if a new external print job was created; false if an active job already exists.</returns>
+    Task<bool> EnsureExternalPrintJobExistsAsync(Guid printerId, string? fileName, CancellationToken ct = default);
 }

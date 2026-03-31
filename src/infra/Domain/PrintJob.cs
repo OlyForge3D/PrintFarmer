@@ -134,6 +134,14 @@ public class PrintJob
     /// </summary>
     public bool WasSeededFromHistory { get; set; }
 
+    /// <summary>
+    /// Flag indicating this job was created automatically when the polling service
+    /// detected a print started externally (e.g., via OrcaSlicer "Upload and Print"
+    /// directly to the printer). External jobs are passive tracking records — they
+    /// do not trigger auto-dispatch or queue logic.
+    /// </summary>
+    public bool IsExternalPrint { get; set; }
+
     // Multi-copy support: track how many copies of this model to print
 
     /// <summary>
