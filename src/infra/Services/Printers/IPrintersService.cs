@@ -85,11 +85,12 @@ public interface IPrintersService
     /// Saves pending changes with automatic retry on concurrency conflicts.
     /// On <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>,
     /// reloads the entity's original values from the database (accepting the new RowVersion)
-    /// while preserving the caller's in-memory changes ("client wins"), then retries.
+    /// while preserving the caller's in-memory changes ("client wins"), then retries
+    /// with exponential backoff to avoid colliding with background services.
     /// </summary>
     /// <param name="ct">Cancellation token</param>
-    /// <param name="maxRetries">Maximum number of retry attempts (default 3)</param>
-    Task SaveChangesWithRetryAsync(CancellationToken ct, int maxRetries = 3);
+    /// <param name="maxRetries">Maximum number of retry attempts (default 5)</param>
+    Task SaveChangesWithRetryAsync(CancellationToken ct, int maxRetries = 5);
 
     /// <summary>
     /// Retrieves printers for export operations, optionally filtered by IDs.

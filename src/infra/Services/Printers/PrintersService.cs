@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -405,7 +406,7 @@ public class PrintersService(
     }
 
     /// <inheritdoc />
-    public async Task SaveChangesWithRetryAsync(CancellationToken ct, int maxRetries = 3)
+    public async Task SaveChangesWithRetryAsync(CancellationToken ct, int maxRetries = 5)
     {
         int attempt = 0;
         while (true)
@@ -434,6 +435,11 @@ public class PrintersService(
                     // while keeping the caller's in-memory changes ("client wins").
                     entry.OriginalValues.SetValues(databaseValues);
                 }
+
+                // Exponential backoff with jitter to avoid colliding with background
+                // services (AutoDispatch) that also write to the Printer row.
+                int delayMs = (int)(Math.Pow(2, attempt) * 50) + RandomNumberGenerator.GetInt32(0, 50);
+                await Task.Delay(delayMs, ct);
             }
         }
     }
