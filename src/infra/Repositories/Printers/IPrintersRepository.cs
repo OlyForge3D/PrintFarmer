@@ -155,4 +155,13 @@ public interface IPrintersRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The printer with Toolheads included if found, otherwise null.</returns>
     Task<Printer?> FindByIdWithToolheadsAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Adds toolhead entities directly to the database context.
+    /// Use this instead of <c>printer.Toolheads.Add()</c> when the printer was loaded from DB
+    /// and should NOT be marked as Modified (avoids RowVersion concurrency conflicts).
+    /// EF Core relationship fixup will automatically add these to the parent's navigation collection.
+    /// </summary>
+    /// <param name="toolheads">The toolhead entities to add (must have PrinterId set).</param>
+    void AddToolheads(IEnumerable<Toolhead> toolheads);
 }

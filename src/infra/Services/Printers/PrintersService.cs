@@ -2595,6 +2595,21 @@ public class PrintersService(
 
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+
+        // Auto-create MMU gates for legacy printers that predate the multi-toolhead feature
+        if (toolhead is null && p.MultiMaterial)
+        {
+            List<Toolhead> gates = CreateMmuVirtualToolheads(p);
+            if (gates.Count > 0)
+            {
+                _unitOfWork.Printers.AddToolheads(gates);
+                await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
+                       ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+        }
+
         if (toolhead is null)
         {
             return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
@@ -2644,6 +2659,21 @@ public class PrintersService(
 
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+
+        // Auto-create MMU gates for legacy printers that predate the multi-toolhead feature
+        if (toolhead is null && p.MultiMaterial)
+        {
+            List<Toolhead> gates = CreateMmuVirtualToolheads(p);
+            if (gates.Count > 0)
+            {
+                _unitOfWork.Printers.AddToolheads(gates);
+                await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
+                       ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+        }
+
         if (toolhead is null)
         {
             return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
@@ -2675,54 +2705,93 @@ public class PrintersService(
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct)
+    {
+        Printer? p = await _unitOfWork.Printers
+            .FindByIdWithToolheadsAsync(id, ct)
+            .ConfigureAwait(false);
+
+        if (p is null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        if (!p.MultiMaterial)
+        {
+            return new CommandResult(true, "Printer is not multi-material; no MMU gates needed");
+        }
+
+        int existingGates = p.Toolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate);
+        if (existingGates > 0)
+        {
+            return new CommandResult(true, $"Printer already has {existingGates} MMU gate(s)");
+        }
+
+        List<Toolhead> gates = CreateMmuVirtualToolheads(p);
+        if (gates.Count > 0)
+        {
+            _unitOfWork.Printers.AddToolheads(gates);
+            await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+
+        return new CommandResult(true, $"Created {gates.Count} MMU gate(s) for printer \"{p.Name}\"");
+    }
+
     /// <summary>
-    /// Synchronizes MMU virtual toolheads (gates) for multi-material printers.
-    /// When a printer is configured as MultiMaterial=true with a single physical toolhead,
-    /// auto-creates virtual Toolhead entries for MMU/AMS gates.
+    /// Synchronizes MMU virtual toolheads by creating gates and adding them to the printer's
+    /// navigation collection. Use for create/update flows where the Printer entity is already
+    /// being saved (Added or Modified state).
     /// </summary>
-    /// <param name="printer">The printer entity with Toolheads collection loaded.</param>
-    /// <param name="mmuGateCount">Number of MMU gates to create (default 4 for Prusa MMU3/Bambu AMS).</param>
-    /// <remarks>
-    /// This method should be called:
-    /// - After printer creation when MultiMaterial=true
-    /// - After printer update when MultiMaterial changes from false to true
-    /// - When applying catalog model template with MultiMaterial=true
-    /// </remarks>
     private void SyncMmuVirtualToolheads(Printer printer, int mmuGateCount = 4)
+    {
+        List<Toolhead> gates = CreateMmuVirtualToolheads(printer, mmuGateCount);
+        foreach (Toolhead gate in gates)
+        {
+            printer.Toolheads.Add(gate);
+        }
+    }
+
+    /// <summary>
+    /// Creates MMU virtual toolhead entities for a multi-material printer.
+    /// Returns the created gates WITHOUT adding them to the printer's navigation collection.
+    /// </summary>
+    /// <remarks>
+    /// When the Printer was loaded from DB (Unchanged state), adding children via the navigation
+    /// collection triggers a RowVersion concurrency check on the Printer UPDATE. To avoid this,
+    /// callers for existing printers should use the repository's AddToolheads method
+    /// to add gates directly to the DbContext instead.
+    /// </remarks>
+    private List<Toolhead> CreateMmuVirtualToolheads(Printer printer, int mmuGateCount = 4)
     {
         if (!printer.MultiMaterial)
         {
-            return; // Not a multi-material printer
+            return [];
         }
 
-        // Count physical toolheads (exclude virtual gates)
         int physicalToolheadCount = printer.Toolheads.Count(t => t.ToolheadType == ToolheadType.Physical);
-
-        // Only auto-create MMU gates if there's 1 or fewer physical toolheads (indicating MMU/AMS)
         if (physicalToolheadCount > 1)
         {
-            return; // This is a toolchanger (multiple physical toolheads), not an MMU
+            return [];
         }
 
-        // Check if MMU gates already exist
         bool hasExistingGates = printer.Toolheads.Any(t => t.ToolheadType == ToolheadType.MmuGate);
         if (hasExistingGates)
         {
-            return; // MMU gates already configured
+            return [];
         }
 
-        // Get the primary physical toolhead to copy component references from
         Toolhead? primaryToolhead = printer.Toolheads.FirstOrDefault(t => t.ToolheadType == ToolheadType.Physical && t.IsPrimary)
-                                   ?? printer.Toolheads.FirstOrDefault(t => t.ToolheadType == ToolheadType.Physical);
+                                    ?? printer.Toolheads.FirstOrDefault(t => t.ToolheadType == ToolheadType.Physical);
 
         _logger.LogInformation(
-            "SyncMmuVirtualToolheads: Auto-creating {GateCount} MMU gates for printer {PName} ({Id})",
+            "CreateMmuVirtualToolheads: Auto-creating {GateCount} MMU gates for printer {PName} ({Id})",
             mmuGateCount, printer.Name, printer.Id);
 
-        // Create virtual toolheads for MMU gates (T1..T(n-1), where T0 is the physical toolhead)
+        var gates = new List<Toolhead>();
         for (int i = 1; i < mmuGateCount; i++)
         {
-            var gate = new Toolhead
+            gates.Add(new Toolhead
             {
                 Id = Guid.NewGuid(),
                 PrinterId = printer.Id,
@@ -2730,22 +2799,20 @@ public class PrintersService(
                 Index = i,
                 ToolheadType = ToolheadType.MmuGate,
                 IsPrimary = false,
-
-                // Copy component references from primary physical toolhead (shared hotend/extruder)
                 HotendModelId = primaryToolhead?.HotendModelId,
                 ExtruderModelId = primaryToolhead?.ExtruderModelId,
                 ToolheadModelDefId = primaryToolhead?.ToolheadModelDefId,
                 NozzleModelId = primaryToolhead?.NozzleModelId,
                 SupportedMaterials = primaryToolhead?.SupportedMaterials,
                 UpdatedAt = DateTime.UtcNow
-            };
-
-            printer.Toolheads.Add(gate);
+            });
         }
 
         _logger.LogInformation(
-            "SyncMmuVirtualToolheads: Created {GateCount} MMU gates for printer {PName} ({Id})",
-            mmuGateCount, printer.Name, printer.Id);
+            "CreateMmuVirtualToolheads: Created {GateCount} MMU gates for printer {PName} ({Id})",
+            gates.Count, printer.Name, printer.Id);
+
+        return gates;
     }
 
     /// <summary>

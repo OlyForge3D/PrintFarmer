@@ -327,4 +327,10 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
             .FirstOrDefaultAsync(p => p.Id == id, ct)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc/>
+    public void AddToolheads(IEnumerable<Toolhead> toolheads)
+    {
+        _db.Set<Toolhead>().AddRange(toolheads);
+    }
 }

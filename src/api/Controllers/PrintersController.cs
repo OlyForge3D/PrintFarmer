@@ -2322,6 +2322,27 @@ public class PrintersController(
         return MapCommandResult(result);
     }
 
+    /// <summary>
+    /// Ensures MMU virtual toolhead records exist for a multi-material printer.
+    /// Creates missing MmuGate rows for legacy printers that predate the multi-toolhead feature.
+    /// Idempotent — safe to call repeatedly.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating what happened.</returns>
+    /// <response code="200">Sync completed (gates created or already present).</response>
+    /// <response code="404">If the printer was not found.</response>
+    [HttpPost("{id:guid}/toolheads/ensure-mmu")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> EnsureMmuToolheadsAsync(
+        Guid id,
+        CancellationToken ct)
+    {
+        CommandResult result = await _printersService.EnsureMmuToolheadsAsync(id, ct);
+        return MapCommandResult(result);
+    }
+
     // Camera control endpoints
 
     /// <summary>

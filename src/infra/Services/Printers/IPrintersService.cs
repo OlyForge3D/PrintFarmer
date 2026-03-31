@@ -466,6 +466,17 @@ public interface IPrintersService
     Task<CommandResult> ClearToolheadSpoolAsync(Guid id, int toolheadIndex, CancellationToken ct);
 
     /// <summary>
+    /// Ensures MMU virtual toolhead records exist for a multi-material printer.
+    /// For legacy printers created before multi-toolhead tracking, this creates
+    /// the missing MmuGate toolhead rows so spool assignment works.
+    /// Idempotent — no-op if gates already exist or printer is not MMU.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult indicating what happened</returns>
+    Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
     /// Starts printing a gcode file that exists on the printer's storage.
     /// </summary>
     /// <param name="id">The printer ID</param>
