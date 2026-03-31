@@ -2871,15 +2871,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
 
-                    b.Property<DateTime>("LastCapabilityUpdate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastHistorySeedUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastModelSyncAt")
-                        .HasColumnType("datetime2");
-
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
 
@@ -2921,9 +2912,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("ObicoEnabled")
                         .HasColumnType("bit");
 
-                    b.Property<Guid?>("ObicoServerId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("OriginalServerUrl")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
@@ -2963,8 +2951,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("ManufacturerId");
 
                     b.HasIndex("ModelId");
-
-                    b.HasIndex("ObicoServerId");
 
                     b.HasIndex("PrinterGroupId");
 
@@ -3282,6 +3268,35 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("ToolheadModelDefId");
 
                     b.ToTable("PrinterModelToolheads");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterServiceState", b =>
+                {
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("LastCapabilityUpdate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastHistorySeedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastModelSyncAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ObicoServerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("PrinterId");
+
+                    b.HasIndex("ObicoServerId");
+
+                    b.ToTable("PrinterServiceState", (string)null);
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterStatistics", b =>
@@ -4748,10 +4763,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Farm.Infrastructure.Domain.ObicoServer", "ObicoServer")
-                        .WithMany("Printers")
-                        .HasForeignKey("ObicoServerId");
-
                     b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
                         .WithMany("Printers")
                         .HasForeignKey("PrinterGroupId")
@@ -4762,8 +4773,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Manufacturer");
 
                     b.Navigation("Model");
-
-                    b.Navigation("ObicoServer");
 
                     b.Navigation("PrinterGroup");
                 });
@@ -4857,6 +4866,24 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("PrinterModel");
 
                     b.Navigation("ToolheadModelDef");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterServiceState", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.ObicoServer", "ObicoServer")
+                        .WithMany("PrinterServiceStates")
+                        .HasForeignKey("ObicoServerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithOne("ServiceState")
+                        .HasForeignKey("Farm.Infrastructure.Domain.PrinterServiceState", "PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ObicoServer");
+
+                    b.Navigation("Printer");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterStatistics", b =>
@@ -5147,7 +5174,7 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.ObicoServer", b =>
                 {
-                    b.Navigation("Printers");
+                    b.Navigation("PrinterServiceStates");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJob", b =>
@@ -5182,6 +5209,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("DispatchState");
 
                     b.Navigation("MaintenanceLogs");
+
+                    b.Navigation("ServiceState");
 
                     b.Navigation("Statistics");
 

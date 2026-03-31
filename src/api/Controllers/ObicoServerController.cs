@@ -223,7 +223,7 @@ public class ObicoServerController : ControllerBase
     public async Task<IActionResult> DeleteServerAsync(Guid id, CancellationToken ct)
     {
         ObicoServer? server = await _dbContext.ObicoServers
-            .Include(s => s.Printers)
+            .Include(s => s.PrinterServiceStates)
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 
         if (server == null)
@@ -232,10 +232,10 @@ public class ObicoServerController : ControllerBase
         }
 
         // Check if any printers are assigned to this server
-        if (server.Printers.Count > 0)
+        if (server.PrinterServiceStates.Count > 0)
         {
             return BadRequest(
-                $"Cannot delete Obico server '{server.Name}' because {server.Printers.Count} printer(s) are assigned to it. " +
+                $"Cannot delete Obico server '{server.Name}' because {server.PrinterServiceStates.Count} printer(s) are assigned to it. " +
                 "Please reassign or remove the printers first.");
         }
 

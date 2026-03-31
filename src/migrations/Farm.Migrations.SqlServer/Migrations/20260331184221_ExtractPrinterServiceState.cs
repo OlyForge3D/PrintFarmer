@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using System;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -10,7 +11,7 @@ public partial class ExtractPrinterServiceState : Migration
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        // 1. Create the new PrinterServiceState table
+        // Step 1: Create the new table FIRST (before dropping columns)
         migrationBuilder.CreateTable(
             name: "PrinterServiceState",
             columns: table => new
@@ -44,14 +45,14 @@ public partial class ExtractPrinterServiceState : Migration
             table: "PrinterServiceState",
             column: "ObicoServerId");
 
-        // 2. Copy data from Printers to PrinterServiceState for all existing rows
-        migrationBuilder.Sql(@"
-                INSERT INTO [PrinterServiceState] ([PrinterId], [LastHistorySeedUtc], [LastModelSyncAt], [LastCapabilityUpdate], [ObicoServerId])
-                SELECT [Id], [LastHistorySeedUtc], [LastModelSyncAt], [LastCapabilityUpdate], [ObicoServerId]
-                FROM [Printers];
-            ");
+        // Step 2: Copy existing data from Printers to PrinterServiceState
+        migrationBuilder.Sql("""
+            INSERT INTO [PrinterServiceState] ([PrinterId], [LastHistorySeedUtc], [LastModelSyncAt], [LastCapabilityUpdate], [ObicoServerId])
+            SELECT [Id], [LastHistorySeedUtc], [LastModelSyncAt], [LastCapabilityUpdate], [ObicoServerId]
+            FROM [Printers];
+            """);
 
-        // 3. Drop the columns from Printers table
+        // Step 3: Now safe to drop old columns and FK
         migrationBuilder.DropForeignKey(
             name: "FK_Printers_ObicoServers_ObicoServerId",
             table: "Printers");
@@ -61,15 +62,15 @@ public partial class ExtractPrinterServiceState : Migration
             table: "Printers");
 
         migrationBuilder.DropColumn(
+            name: "LastCapabilityUpdate",
+            table: "Printers");
+
+        migrationBuilder.DropColumn(
             name: "LastHistorySeedUtc",
             table: "Printers");
 
         migrationBuilder.DropColumn(
             name: "LastModelSyncAt",
-            table: "Printers");
-
-        migrationBuilder.DropColumn(
-            name: "LastCapabilityUpdate",
             table: "Printers");
 
         migrationBuilder.DropColumn(
@@ -80,7 +81,16 @@ public partial class ExtractPrinterServiceState : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        // 1. Add columns back to Printers table
+        migrationBuilder.DropTable(
+            name: "PrinterServiceState");
+
+        migrationBuilder.AddColumn<DateTime>(
+            name: "LastCapabilityUpdate",
+            table: "Printers",
+            type: "datetime2",
+            nullable: false,
+            defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
+
         migrationBuilder.AddColumn<DateTime>(
             name: "LastHistorySeedUtc",
             table: "Printers",
@@ -92,13 +102,6 @@ public partial class ExtractPrinterServiceState : Migration
             table: "Printers",
             type: "datetime2",
             nullable: true);
-
-        migrationBuilder.AddColumn<DateTime>(
-            name: "LastCapabilityUpdate",
-            table: "Printers",
-            type: "datetime2",
-            nullable: false,
-            defaultValueSql: "GETUTCDATE()");
 
         migrationBuilder.AddColumn<Guid>(
             name: "ObicoServerId",
@@ -116,22 +119,6 @@ public partial class ExtractPrinterServiceState : Migration
             table: "Printers",
             column: "ObicoServerId",
             principalTable: "ObicoServers",
-            principalColumn: "Id",
-            onDelete: ReferentialAction.SetNull);
-
-        // 2. Copy data back from PrinterServiceState to Printers
-        migrationBuilder.Sql(@"
-                UPDATE p
-                SET p.[LastHistorySeedUtc] = s.[LastHistorySeedUtc],
-                    p.[LastModelSyncAt] = s.[LastModelSyncAt],
-                    p.[LastCapabilityUpdate] = s.[LastCapabilityUpdate],
-                    p.[ObicoServerId] = s.[ObicoServerId]
-                FROM [Printers] p
-                INNER JOIN [PrinterServiceState] s ON p.[Id] = s.[PrinterId];
-            ");
-
-        // 3. Drop the PrinterServiceState table
-        migrationBuilder.DropTable(
-            name: "PrinterServiceState");
+            principalColumn: "Id");
     }
 }

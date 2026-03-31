@@ -88,7 +88,7 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
 
         List<ObicoServer> enabledServers = await db.ObicoServers
             .Where(s => s.IsEnabled)
-            .Include(s => s.Printers)
+            .Include(s => s.PrinterServiceStates)
             .OrderBy(s => s.Name)
             .ToListAsync(ct);
 
@@ -104,8 +104,8 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
         {
             // Find the server with the fewest assigned printers that still has capacity
             ObicoServer? bestServer = enabledServers
-                .Where(s => s.Printers.Count < s.MaxConcurrentAnalyses)
-                .OrderBy(s => s.Printers.Count)
+                .Where(s => s.PrinterServiceStates.Count < s.MaxConcurrentAnalyses)
+                .OrderBy(s => s.PrinterServiceStates.Count)
                 .FirstOrDefault();
 
             if (bestServer is null)
@@ -145,12 +145,12 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
         // Get enabled servers with their current printer assignment counts
         List<ObicoServer> servers = await db.ObicoServers
             .Where(s => s.IsEnabled)
-            .Include(s => s.Printers)
+            .Include(s => s.PrinterServiceStates)
             .ToListAsync(ct);
 
         return servers
-            .Where(s => s.Printers.Count < s.MaxConcurrentAnalyses)
-            .OrderBy(s => s.Printers.Count)
+            .Where(s => s.PrinterServiceStates.Count < s.MaxConcurrentAnalyses)
+            .OrderBy(s => s.PrinterServiceStates.Count)
             .FirstOrDefault();
     }
 }

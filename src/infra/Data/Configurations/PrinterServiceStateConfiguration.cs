@@ -22,7 +22,7 @@ public class PrinterServiceStateConfiguration : IEntityTypeConfiguration<Printer
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasOne(e => e.ObicoServer)
-            .WithMany()
+            .WithMany(o => o.PrinterServiceStates)
             .HasForeignKey(e => e.ObicoServerId)
             .OnDelete(DeleteBehavior.SetNull);
 

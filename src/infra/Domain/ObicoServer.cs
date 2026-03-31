@@ -60,7 +60,8 @@ public class ObicoServer
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Collection of printers assigned to this Obico server.
+    /// Collection of printer service states assigned to this Obico server.
+    /// The relationship is through PrinterServiceState, not Printer directly.
     /// </summary>
-    public ICollection<Printer> Printers { get; set; } = new List<Printer>();
+    public ICollection<PrinterServiceState> PrinterServiceStates { get; set; } = new List<PrinterServiceState>();
 }
