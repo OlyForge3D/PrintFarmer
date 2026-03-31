@@ -143,23 +143,21 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
     [Fact]
     public async Task CreatePrinter_MultiMaterialTrue_MmuGatesCopyPrimaryToolheadComponents()
     {
-        (Guid mfgId, Guid modelId) = await SeedCatalog("CopyComponents");
-
-        // Seed component models that the primary toolhead will reference
+        Guid mfgId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
         Guid hotendId = Guid.NewGuid();
         Guid extruderId = Guid.NewGuid();
 
+        // Seed manufacturer, component definitions, and model with toolhead template in one scope
         await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
         {
             AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
-            PrinterModel? model = await seedDb.PrinterModels.FindAsync(modelId);
-            model!.MultiMaterial = true;
 
-            // Seed hotend and extruder model definitions
+            seedDb.Manufacturers.Add(new Manufacturer { Id = mfgId, Name = "CopyComponents Mfg" });
             seedDb.HotendModelDefinitions.Add(new HotendModelDefinition { Id = hotendId, ManufacturerId = mfgId, Name = "Test Hotend" });
             seedDb.ExtruderModelDefinitions.Add(new ExtruderModelDefinition { Id = extruderId, ManufacturerId = mfgId, Name = "Test Extruder" });
 
-            // Add a toolhead template to the model so the physical toolhead gets components
+            var model = new PrinterModel { Id = modelId, ManufacturerId = mfgId, Name = "CopyComponents Model", MultiMaterial = true };
             model.Toolheads.Add(new PrinterModelToolhead
             {
                 Id = Guid.NewGuid(),
@@ -170,6 +168,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
                 HotendModelId = hotendId,
                 ExtruderModelId = extruderId
             });
+            seedDb.PrinterModels.Add(model);
 
             await seedDb.SaveChangesAsync();
         }
@@ -350,54 +349,55 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
     public async Task SyncMmuToolheadsOnEntity_ToggleOn_CreatesMmuGateToolheads()
     {
         // Seed a non-MMU printer
-        await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
-        AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        Guid mfgId = Guid.NewGuid();
-        Guid modelId = Guid.NewGuid();
-        seedDb.Manufacturers.Add(new Manufacturer { Id = mfgId, Name = "ToggleOn Mfg" });
-        seedDb.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = mfgId, Name = "ToggleOn Model" });
-
-        var printer = new Printer
+        Guid printerId;
+        await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
         {
-            Id = Guid.NewGuid(),
-            Name = "ToggleOn Printer",
-            ServerUrl = "http://192.168.1.97",
-            BackendPort = 7125,
-            Backend = (int)PrinterBackend.Moonraker,
-            MultiMaterial = false,
-            ManufacturerId = mfgId,
-            ModelId = modelId
-        };
+            AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        printer.Toolheads.Add(new Toolhead
-        {
-            Id = Guid.NewGuid(),
-            PrinterId = printer.Id,
-            Name = "Extruder",
-            Index = 0,
-            ToolheadType = ToolheadType.Physical,
-            IsPrimary = true,
-            UpdatedAt = DateTime.UtcNow
-        });
+            Guid mfgId = Guid.NewGuid();
+            Guid modelId = Guid.NewGuid();
+            seedDb.Manufacturers.Add(new Manufacturer { Id = mfgId, Name = "ToggleOn Mfg" });
+            seedDb.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = mfgId, Name = "ToggleOn Model" });
 
-        seedDb.Printers.Add(printer);
-        await seedDb.SaveChangesAsync();
+            var printer = new Printer
+            {
+                Id = Guid.NewGuid(),
+                Name = "ToggleOn Printer",
+                ServerUrl = "http://192.168.1.97",
+                BackendPort = 7125,
+                Backend = (int)PrinterBackend.Moonraker,
+                MultiMaterial = false,
+                ManufacturerId = mfgId,
+                ModelId = modelId
+            };
 
-        // Reload in test scope
-        Printer reloaded = await _dbContext.Printers
-            .Include(p => p.Toolheads)
-            .FirstAsync(p => p.Id == printer.Id);
+            printer.Toolheads.Add(new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = "Extruder",
+                Index = 0,
+                ToolheadType = ToolheadType.Physical,
+                IsPrimary = true,
+                UpdatedAt = DateTime.UtcNow
+            });
 
-        reloaded.Toolheads.Should().HaveCount(1, "only physical T0 before toggle");
+            seedDb.Printers.Add(printer);
+            await seedDb.SaveChangesAsync();
+            printerId = printer.Id;
+        }
 
-        // Toggle MultiMaterial on and sync
-        reloaded.MultiMaterial = true;
-        _printersService.SyncMmuToolheadsOnEntity(reloaded, wasMultiMaterial: false);
-        await _dbContext.SaveChangesAsync();
+        // Toggle MultiMaterial on via raw update to bypass RowVersion concurrency on tracked entity
+        await _dbContext.Printers
+            .Where(p => p.Id == printerId)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.MultiMaterial, true));
+
+        // EnsureMmuToolheadsAsync loads a fresh entity and uses AddToolheads to avoid RowVersion issues
+        CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printerId, CancellationToken.None);
+        result.Success.Should().BeTrue();
 
         List<Toolhead> afterToolheads = await _dbContext.Toolheads
-            .Where(t => t.PrinterId == printer.Id)
+            .Where(t => t.PrinterId == printerId)
             .OrderBy(t => t.Index)
             .ToListAsync();
 
