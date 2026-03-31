@@ -72,11 +72,13 @@ public sealed class AutoDispatchBackgroundService(
 
         List<Guid> printerIds = await db.Printers
             .AsNoTracking()
+            .Include(p => p.DispatchState)
             .Where(p =>
                 p.IsEnabled
                 && p.IsAvailable
                 && p.AutoDispatchEnabled
-                && (p.AutoDispatchState == AutoDispatchState.Ready || p.BedPreConfirmed)
+                && p.DispatchState != null
+                && (p.DispatchState.AutoDispatchState == AutoDispatchState.Ready || p.DispatchState.BedPreConfirmed)
                 && !db.PrintJobs.Any(j =>
                     j.AssignedPrinterId == p.Id
                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
@@ -188,7 +190,7 @@ public sealed class AutoDispatchBackgroundService(
         IDispatchScorer scorer = sp.GetRequiredService<IDispatchScorer>();
 
         // Verify printer is still online and idle
-        Printer? printer = await db.Printers.AsNoTracking().FirstOrDefaultAsync(p => p.Id == printerId, ct);
+        Printer? printer = await db.Printers.Include(p => p.DispatchState).AsNoTracking().FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null || !printer.IsEnabled)
         {
             logger.LogDebug("[AutoDispatch] Printer {PrinterId} not found or disabled — aborting", printerId);
@@ -218,11 +220,12 @@ public sealed class AutoDispatchBackgroundService(
 
         // Ready-gate: only dispatch when the operator has confirmed the bed is clear (Ready state)
         // OR when they've pre-confirmed the bed is clear (BedPreConfirmed = true).
-        if (printer.AutoDispatchState != AutoDispatchState.Ready && !printer.BedPreConfirmed)
+        if ((printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None) != AutoDispatchState.Ready
+            && !(printer.DispatchState?.BedPreConfirmed ?? false))
         {
             logger.LogDebug(
                 "[AutoDispatch] Printer {PrinterId} state is {State} and bed not pre-confirmed — waiting for operator confirmation",
-                printerId, printer.AutoDispatchState);
+                printerId, printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None);
             return;
         }
 
@@ -332,11 +335,17 @@ public sealed class AutoDispatchBackgroundService(
 
             if (printer.AutoDispatchEnabled)
             {
-                Printer? printerToUpdate = await db.Printers.FindAsync([printerId], ct);
+                Printer? printerToUpdate = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
                 if (printerToUpdate is not null)
                 {
-                    printerToUpdate.AutoDispatchState = AutoDispatchState.None;
-                    printerToUpdate.BedPreConfirmed = false; // Reset pre-clear flag after dispatch
+                    PrinterDispatchState ds = printerToUpdate.DispatchState
+                        ?? new PrinterDispatchState { PrinterId = printerToUpdate.Id };
+                    ds.AutoDispatchState = AutoDispatchState.None;
+                    ds.BedPreConfirmed = false; // Reset pre-clear flag after dispatch
+                    if (printerToUpdate.DispatchState is null)
+                    {
+                        printerToUpdate.DispatchState = ds;
+                    }
                 }
             }
 

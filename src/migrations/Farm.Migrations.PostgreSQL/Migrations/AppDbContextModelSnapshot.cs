@@ -2834,9 +2834,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("AutoDispatchEnabled")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("AutoDispatchState")
-                        .HasColumnType("integer");
-
                     b.Property<int>("Backend")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -2844,9 +2841,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<int>("BackendPort")
                         .HasColumnType("integer");
-
-                    b.Property<bool>("BedPreConfirmed")
-                        .HasColumnType("boolean");
 
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("text");
@@ -2976,6 +2970,27 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsUnique();
 
                     b.ToTable("Printers");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterDispatchState", b =>
+                {
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AutoDispatchState")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("BedPreConfirmed")
+                        .HasColumnType("boolean");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bytea");
+
+                    b.HasKey("PrinterId");
+
+                    b.ToTable("PrinterDispatchStates");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
@@ -4750,6 +4765,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("PrinterGroup");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterDispatchState", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithOne("DispatchState")
+                        .HasForeignKey("Farm.Infrastructure.Domain.PrinterDispatchState", "PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Printer");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.MaintenancePlan", "MaintenancePlan")
@@ -5149,6 +5175,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
                     b.Navigation("Cameras");
+
+                    b.Navigation("DispatchState");
 
                     b.Navigation("MaintenanceLogs");
 

@@ -688,7 +688,7 @@ public class DispatchScorerPrinterGroupTests : IAsyncLifetime
                 ModelId = model.Id,
                 ManufacturerId = manufacturer.Id,
                 AutoDispatchEnabled = true,
-                AutoDispatchState = AutoDispatchState.PendingReady
+                DispatchState = new PrinterDispatchState { AutoDispatchState = AutoDispatchState.PendingReady }
             };
             db.Printers.Add(printer);
 

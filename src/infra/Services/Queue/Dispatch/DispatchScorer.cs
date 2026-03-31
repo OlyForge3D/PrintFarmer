@@ -45,6 +45,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
+            .Include(p => p.DispatchState)
             .AsSplitQuery()
             .AsNoTracking()
             .Where(p => p.IsEnabled)
@@ -242,7 +243,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             issues.Add("disabled");
         }
 
-        if (printer.AutoDispatchState == AutoDispatchState.PendingReady)
+        if ((printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None) == AutoDispatchState.PendingReady)
         {
             issues.Add("waiting for bed clear confirmation");
         }

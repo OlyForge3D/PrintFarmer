@@ -286,19 +286,8 @@ public class Printer
     public bool AutoDispatchEnabled { get; set; }
 
     /// <summary>
-    /// Current auto-dispatch ready-gate workflow state.
-    /// None = feature disabled or no pending action.
-    /// PendingReady = job completed, waiting for operator "bed clear" confirmation.
-    /// Ready = operator confirmed, next queued job will be dispatched.
-    /// Dismissed = operator intentionally dismissed the current prompt until the
-    /// next queue/completion transition re-arms it.
+    /// Dispatch-related state (AutoDispatchState, BedPreConfirmed) stored in a separate
+    /// table to avoid RowVersion contention between user edits and background dispatch writes.
     /// </summary>
-    public AutoDispatchState AutoDispatchState { get; set; } = AutoDispatchState.None;
-
-    /// <summary>
-    /// Indicates the operator has pre-confirmed the bed is clear.
-    /// When true, the next queued job will dispatch immediately without waiting for PendingReady confirmation.
-    /// Automatically reset to false after the job is dispatched or when transitioning through PendingReady.
-    /// </summary>
-    public bool BedPreConfirmed { get; set; }
+    public PrinterDispatchState? DispatchState { get; set; }
 }

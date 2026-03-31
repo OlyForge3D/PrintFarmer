@@ -86,9 +86,9 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
 
         await service.TransitionToPendingReadyAsync(printer.Id);
 
-        Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
-        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.PendingReady);
-        persistedPrinter.BedPreConfirmed.Should().BeFalse();
+        Printer persistedPrinter = await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id);
+        persistedPrinter.DispatchState!.AutoDispatchState.Should().Be(AutoDispatchState.PendingReady);
+        persistedPrinter.DispatchState!.BedPreConfirmed.Should().BeFalse();
 
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
@@ -111,7 +111,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
     public async Task MarkReadyAsync_WhenPrinterIsPendingReadyWithQueuedJob_TransitionsToReadyAndNotifiesDispatchTrigger()
     {
         Printer printer = await CreatePrinterAsync();
-        printer.AutoDispatchState = AutoDispatchState.PendingReady;
+        printer.DispatchState = new PrinterDispatchState { PrinterId = printer.Id, AutoDispatchState = AutoDispatchState.PendingReady };
         await _db.SaveChangesAsync();
 
         PrintJob queuedJob = await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
@@ -132,8 +132,8 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
         result.FilamentCheck.Should().NotBeNull();
         result.FilamentCheck!.Sufficient.Should().BeTrue();
 
-        Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
-        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.Ready);
+        Printer persistedPrinter = await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id);
+        persistedPrinter.DispatchState!.AutoDispatchState.Should().Be(AutoDispatchState.Ready);
 
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
@@ -152,7 +152,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
     public async Task MarkReadyAsync_WhenPrinterIsBedPreConfirmedWithQueuedJob_TransitionsToReadyAndClearsPreConfirm()
     {
         Printer printer = await CreatePrinterAsync();
-        printer.BedPreConfirmed = true;
+        printer.DispatchState = new PrinterDispatchState { PrinterId = printer.Id, BedPreConfirmed = true };
         await _db.SaveChangesAsync();
 
         PrintJob queuedJob = await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
@@ -172,9 +172,9 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
         result.NextJob.Should().NotBeNull();
         result.NextJob!.Id.Should().Be(queuedJob.Id);
 
-        Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
-        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.Ready);
-        persistedPrinter.BedPreConfirmed.Should().BeFalse();
+        Printer persistedPrinter = await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id);
+        persistedPrinter.DispatchState!.AutoDispatchState.Should().Be(AutoDispatchState.Ready);
+        persistedPrinter.DispatchState!.BedPreConfirmed.Should().BeFalse();
 
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
@@ -193,7 +193,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
     public async Task SkipNextJobAsync_WhenQueuedJobsRemain_StaysPendingReadyAndCancelsOnlyNextJob()
     {
         Printer printer = await CreatePrinterAsync();
-        printer.AutoDispatchState = AutoDispatchState.PendingReady;
+        printer.DispatchState = new PrinterDispatchState { PrinterId = printer.Id, AutoDispatchState = AutoDispatchState.PendingReady };
         await _db.SaveChangesAsync();
 
         PrintJob firstJob = await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
@@ -219,8 +219,8 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
         persistedFirstJob.Status.Should().Be(PrintJobStatus.Cancelled);
         persistedSecondJob.Status.Should().Be(PrintJobStatus.Queued);
 
-        Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
-        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.PendingReady);
+        Printer persistedPrinter = await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id);
+        persistedPrinter.DispatchState!.AutoDispatchState.Should().Be(AutoDispatchState.PendingReady);
 
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
@@ -238,7 +238,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
     public async Task GetStatusAsync_WhenPrinterIsPendingReady_PopulatesAttentionDetails()
     {
         Printer printer = await CreatePrinterAsync();
-        printer.AutoDispatchState = AutoDispatchState.PendingReady;
+        printer.DispatchState = new PrinterDispatchState { PrinterId = printer.Id, AutoDispatchState = AutoDispatchState.PendingReady };
         await _db.SaveChangesAsync();
         await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
 
@@ -291,7 +291,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
 
         AutoDispatchStatusDto cancelledStatus = await service.CancelAutoAsync(printer.Id);
         AutoDispatchStatusDto refreshedStatus = await service.GetStatusAsync(printer.Id);
-        Printer persistedPrinter = await _db.Printers.SingleAsync(p => p.Id == printer.Id);
+        Printer persistedPrinter = await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id);
 
         cancelledStatus.State.Should().Be(nameof(AutoDispatchState.None));
         refreshedStatus.State.Should().Be(nameof(AutoDispatchState.None));
@@ -299,7 +299,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
             check.Name == "Bed Clear Confirmed"
             && check.Passed
             && check.Message == "No confirmation needed yet");
-        persistedPrinter.AutoDispatchState.Should().Be(AutoDispatchState.Dismissed);
+        persistedPrinter.DispatchState!.AutoDispatchState.Should().Be(AutoDispatchState.Dismissed);
     }
 
     [Fact]

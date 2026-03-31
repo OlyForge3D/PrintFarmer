@@ -174,9 +174,22 @@ public class AutoDispatchService(
 
     private sealed record QueuedJobSelection(PrintJob? NextJob, int QueueDepth);
 
+    /// <summary>
+    /// Returns the existing DispatchState or creates a new one lazily on first write.
+    /// </summary>
+    private static PrinterDispatchState EnsureDispatchState(Printer printer)
+    {
+        if (printer.DispatchState is null)
+        {
+            printer.DispatchState = new PrinterDispatchState { PrinterId = printer.Id };
+        }
+
+        return printer.DispatchState;
+    }
+
     public async Task TransitionToPendingReadyAsync(Guid printerId, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             logger.LogWarning(ReadyGateLogPrefix + " Printer {PrinterId} not found for PendingReady transition", printerId);
@@ -207,20 +220,22 @@ public class AutoDispatchService(
         if (queuedJobs.QueueDepth == 0)
         {
             logger.LogDebug(ReadyGateLogPrefix + " No queued jobs for printer {PrinterId}, staying in None state", printerId);
-            printer.AutoDispatchState = AutoDispatchState.None;
-            printer.BedPreConfirmed = false; // Reset pre-clear flag
+            PrinterDispatchState ds = EnsureDispatchState(printer);
+            ds.AutoDispatchState = AutoDispatchState.None;
+            ds.BedPreConfirmed = false; // Reset pre-clear flag
             await db.SaveChangesAsync(ct);
             return;
         }
 
         // If bed was pre-confirmed, skip PendingReady and go straight to Ready
-        if (printer.BedPreConfirmed)
+        if (printer.DispatchState?.BedPreConfirmed == true)
         {
             logger.LogInformation(
                 ReadyGateLogPrefix + " Printer {PrinterId} ({Name}) bed was pre-confirmed — skipping PendingReady, going straight to Ready",
                 printerId, printer.Name);
-            printer.AutoDispatchState = AutoDispatchState.Ready;
-            printer.BedPreConfirmed = false; // Reset the flag after using it
+            PrinterDispatchState ds = EnsureDispatchState(printer);
+            ds.AutoDispatchState = AutoDispatchState.Ready;
+            ds.BedPreConfirmed = false; // Reset the flag after using it
             await db.SaveChangesAsync(ct);
 
             var readyStatus = await BuildStatusDtoAsync(printer, ct);
@@ -233,7 +248,7 @@ public class AutoDispatchService(
             return;
         }
 
-        printer.AutoDispatchState = AutoDispatchState.PendingReady;
+        EnsureDispatchState(printer).AutoDispatchState = AutoDispatchState.PendingReady;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(ReadyGateLogPrefix + " Printer {PrinterId} ({Name}) transitioned to PendingReady", printerId, printer.Name);
@@ -247,7 +262,7 @@ public class AutoDispatchService(
 
     public async Task<AutoDispatchReadyResult> MarkReadyAsync(Guid printerId, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
@@ -267,11 +282,11 @@ public class AutoDispatchService(
         AutoDispatchState effectiveState = ResolveEffectiveState(printer, queuedJobs.QueueDepth, hasActiveJob);
         bool hasReadyConfirmation = effectiveState == AutoDispatchState.PendingReady
             || effectiveState == AutoDispatchState.Ready
-            || printer.BedPreConfirmed;
+            || (printer.DispatchState?.BedPreConfirmed ?? false);
 
         if (!hasReadyConfirmation)
         {
-            throw new InvalidOperationException($"Printer {printer.Name} is not in PendingReady state (current: {printer.AutoDispatchState})");
+            throw new InvalidOperationException($"Printer {printer.Name} is not in PendingReady state (current: {printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None})");
         }
 
         PrintJob? nextJob = queuedJobs.NextJob;
@@ -279,8 +294,9 @@ public class AutoDispatchService(
         if (nextJob is null)
         {
             // No more queued jobs — return to None
-            printer.AutoDispatchState = AutoDispatchState.None;
-            printer.BedPreConfirmed = false;
+            PrinterDispatchState dsEmpty = EnsureDispatchState(printer);
+            dsEmpty.AutoDispatchState = AutoDispatchState.None;
+            dsEmpty.BedPreConfirmed = false;
             await db.SaveChangesAsync(ct);
 
             var emptyStatus = await BuildStatusDtoAsync(printer, ct);
@@ -298,8 +314,9 @@ public class AutoDispatchService(
         FilamentCheckResult filamentCheck = await CheckFilamentAsync(printer, nextJob, ct);
 
         // Transition to Ready state
-        printer.AutoDispatchState = AutoDispatchState.Ready;
-        printer.BedPreConfirmed = false;
+        PrinterDispatchState dsReady = EnsureDispatchState(printer);
+        dsReady.AutoDispatchState = AutoDispatchState.Ready;
+        dsReady.BedPreConfirmed = false;
         await db.SaveChangesAsync(ct);
 
         var status = await BuildStatusDtoAsync(printer, ct);
@@ -329,7 +346,7 @@ public class AutoDispatchService(
 
     public async Task<AutoDispatchStatusDto> SkipNextJobAsync(Guid printerId, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
@@ -359,7 +376,7 @@ public class AutoDispatchService(
                 j => j.AssignedPrinterId == printerId
                         && j.Status == PrintJobStatus.Queued, ct);
 
-        printer.AutoDispatchState = hasMoreJobs ? AutoDispatchState.PendingReady : AutoDispatchState.None;
+        EnsureDispatchState(printer).AutoDispatchState = hasMoreJobs ? AutoDispatchState.PendingReady : AutoDispatchState.None;
         await db.SaveChangesAsync(ct);
 
         var status = await BuildStatusDtoAsync(printer, ct);
@@ -370,13 +387,13 @@ public class AutoDispatchService(
 
     public async Task<AutoDispatchStatusDto> CancelAutoAsync(Guid printerId, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
         }
 
-        printer.AutoDispatchState = AutoDispatchState.Dismissed;
+        EnsureDispatchState(printer).AutoDispatchState = AutoDispatchState.Dismissed;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(ReadyGateLogPrefix + " Auto-dispatch ready gate cancelled for printer {PrinterId} ({Name})", printerId, printer.Name);
@@ -389,7 +406,7 @@ public class AutoDispatchService(
 
     public async Task<AutoDispatchStatusDto> MarkPreClearAsync(Guid printerId, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
@@ -414,7 +431,7 @@ public class AutoDispatchService(
 
         QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
 
-        printer.BedPreConfirmed = true;
+        EnsureDispatchState(printer).BedPreConfirmed = true;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(ReadyGateLogPrefix + " Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
@@ -436,6 +453,7 @@ public class AutoDispatchService(
     public async Task<AutoDispatchStatusDto> GetStatusAsync(Guid printerId, CancellationToken ct = default)
     {
         Printer? printer = await db.Printers
+            .Include(p => p.DispatchState)
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == printerId, ct);
 
@@ -449,7 +467,7 @@ public class AutoDispatchService(
 
     public async Task<AutoDispatchStatusDto> SetEnabledAsync(Guid printerId, bool enabled, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
@@ -458,7 +476,7 @@ public class AutoDispatchService(
         printer.AutoDispatchEnabled = enabled;
         if (!enabled)
         {
-            printer.AutoDispatchState = AutoDispatchState.None;
+            EnsureDispatchState(printer).AutoDispatchState = AutoDispatchState.None;
         }
 
         await db.SaveChangesAsync(ct);
@@ -472,7 +490,7 @@ public class AutoDispatchService(
 
     public async Task<AutoDispatchGlobalStatusDto> GetAllStatusAsync(CancellationToken ct = default)
     {
-        List<Printer> printers = await db.Printers.AsNoTracking().ToListAsync(ct);
+        List<Printer> printers = await db.Printers.Include(p => p.DispatchState).AsNoTracking().ToListAsync(ct);
         Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printers.Select(p => p.Id), ct);
 
         bool globalEnabled = printers.Any(p => p.AutoDispatchEnabled);
@@ -503,13 +521,13 @@ public class AutoDispatchService(
 
     public async Task<List<AutoDispatchStatusDto>> SetAllEnabledAsync(bool enabled, CancellationToken ct = default)
     {
-        List<Printer> printers = await db.Printers.ToListAsync(ct);
+        List<Printer> printers = await db.Printers.Include(p => p.DispatchState).ToListAsync(ct);
         foreach (Printer printer in printers)
         {
             printer.AutoDispatchEnabled = enabled;
             if (!enabled)
             {
-                printer.AutoDispatchState = AutoDispatchState.None;
+                EnsureDispatchState(printer).AutoDispatchState = AutoDispatchState.None;
             }
         }
 
@@ -553,7 +571,7 @@ public class AutoDispatchService(
             QueueDepth = queuedJobCount,
             ReadyGateChecks = gateChecks,
             State = effectiveState.ToString(),
-            BedPreConfirmed = printer.BedPreConfirmed,
+            BedPreConfirmed = printer.DispatchState?.BedPreConfirmed ?? false,
             AttentionMessage = attentionMessage,
         };
     }
@@ -573,18 +591,21 @@ public class AutoDispatchService(
 
     private static AutoDispatchState ResolveEffectiveState(Printer printer, int queuedJobCount, bool hasActiveJob)
     {
-        if (printer.AutoDispatchState == AutoDispatchState.Dismissed)
+        AutoDispatchState storedState = printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None;
+        bool bedPreConfirmed = printer.DispatchState?.BedPreConfirmed ?? false;
+
+        if (storedState == AutoDispatchState.Dismissed)
         {
             return AutoDispatchState.None;
         }
 
-        if (printer.AutoDispatchState != AutoDispatchState.None)
+        if (storedState != AutoDispatchState.None)
         {
-            return printer.AutoDispatchState;
+            return storedState;
         }
 
         if (!printer.AutoDispatchEnabled
-            || printer.BedPreConfirmed
+            || bedPreConfirmed
             || queuedJobCount <= 0
             || hasActiveJob
             || !printer.IsAvailable
@@ -641,7 +662,7 @@ public class AutoDispatchService(
                 Message = effectiveState switch
                 {
                     AutoDispatchState.Ready => "Operator confirmed bed is clear",
-                    _ when printer.BedPreConfirmed => "Bed pre-cleared for immediate dispatch",
+                    _ when printer.DispatchState?.BedPreConfirmed is true => "Bed pre-cleared for immediate dispatch",
                     AutoDispatchState.PendingReady => "Waiting for operator to confirm bed is clear",
                     _ => "No confirmation needed yet",
                 },
@@ -688,7 +709,7 @@ public class AutoDispatchService(
             };
         }
 
-        if (queuedJobCount > 0 && (effectiveState == AutoDispatchState.Ready || printer.BedPreConfirmed))
+        if (queuedJobCount > 0 && (effectiveState == AutoDispatchState.Ready || (printer.DispatchState?.BedPreConfirmed ?? false)))
         {
             return "Bed is clear. The next queued job will start automatically.";
         }

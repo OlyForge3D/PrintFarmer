@@ -181,7 +181,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         printer.IsEnabled = true;
         printer.IsAvailable = true;
         printer.AutoDispatchEnabled = true;
-        printer.AutoDispatchState = AutoDispatchState.Ready;
+        printer.DispatchState = new PrinterDispatchState { PrinterId = printer.Id, AutoDispatchState = AutoDispatchState.Ready };
 
         _db.Printers.Add(printer);
         _db.SaveChanges();
@@ -292,7 +292,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter(name: "Startup Ready Printer");
         printer.AutoDispatchEnabled = true;
-        printer.AutoDispatchState = AutoDispatchState.Ready;
+        printer.DispatchState = new PrinterDispatchState { PrinterId = printer.Id, AutoDispatchState = AutoDispatchState.Ready };
         _db.SaveChanges();
 
         PrintJob job = SeedQueuedJob("startup-ready-job");
