@@ -115,7 +115,7 @@ public class CatalogUpdateDetectionService(
 
         // Identify printers whose model has been updated since last sync
         List<Printer> outdated = printers
-            .Where(p => p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue))
+            .Where(p => p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue))
             .ToList();
 
         if (outdated.Count == 0)

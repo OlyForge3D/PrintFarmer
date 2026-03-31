@@ -833,7 +833,7 @@ public class PrintersController(
             p.CurrentMaterial,
             p.CurrentSpoolId,
             p.IsAvailable,
-            p.LastCapabilityUpdate);
+            p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow);
 
         // Map toolheads to DTOs with hardware tracking fields
         ToolheadDto[]? toolheadDtos = p.Toolheads?.OrderBy(t => t.Index).Select(t => new ToolheadDto(
@@ -888,10 +888,10 @@ public class PrintersController(
             p.Username,
             p.Password,
             p.ObicoEnabled,
-            p.ObicoServer?.Name,
+            p.ServiceState?.ObicoServer?.Name,
             p.Wattage,
             p.MachineHourlyRate,
-            p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue));
+            p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
     }
 
     /// <summary>
@@ -1330,6 +1330,12 @@ public class PrintersController(
             return NotFound();
         }
 
+        // Capture decrypted credentials BEFORE any modifications to avoid phantom changes
+        // from PopulateCredential's decrypt → EncryptSensitiveFieldsOnTrackedEntities's re-encrypt cycle
+        string? originalApiKey = p.ApiKey;
+        string? originalPassword = p.Password;
+        string? originalUsername = p.Username;
+
         // resolve or create manufacturer/model
         Guid manufacturerId = dto.ManufacturerId ?? p.ManufacturerId;
         if (dto.ManufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
@@ -1373,8 +1379,8 @@ public class PrintersController(
             }
         }
 
-        // Only update Name if provided
-        if (!string.IsNullOrWhiteSpace(dto.Name))
+        // Only update Name if provided and different
+        if (!string.IsNullOrWhiteSpace(dto.Name) && dto.Name != p.Name)
         {
             p.Name = dto.Name;
         }
@@ -1392,13 +1398,38 @@ public class PrintersController(
         // Track if model changed for template application
         bool modelChanged = modelId != p.ModelId;
 
-        p.Notes = dto.Notes;
-        p.ManufacturerId = manufacturerId;
-        p.ModelId = modelId;
-        p.DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
-            : dto.DateAcquired;
-        if (dto.Backend.HasValue)
+        // Only update Notes if different
+        if (dto.Notes != p.Notes)
+        {
+            p.Notes = dto.Notes;
+        }
+
+        // Only update manufacturer/model if changed
+        if (manufacturerId != p.ManufacturerId)
+        {
+            p.ManufacturerId = manufacturerId;
+        }
+
+        if (modelId != p.ModelId)
+        {
+            p.ModelId = modelId;
+        }
+
+        // Only update DateAcquired if provided and different
+        if (dto.DateAcquired.HasValue)
+        {
+            DateTime normalizedDate = dto.DateAcquired.Value.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
+                : dto.DateAcquired.Value;
+
+            if (normalizedDate != p.DateAcquired)
+            {
+                p.DateAcquired = normalizedDate;
+            }
+        }
+
+        // Only update Backend if provided and different
+        if (dto.Backend.HasValue && (int)dto.Backend.Value != p.Backend)
         {
             p.Backend = (int)dto.Backend.Value;
         }
@@ -1409,43 +1440,43 @@ public class PrintersController(
             await _printersService.ApplyModelTemplateAsync(p, forceOverwrite: false, ct);
         }
 
-        if (dto.ApiKey != null)
+        // Update credentials only if provided and different from decrypted originals
+        if (!string.IsNullOrEmpty(dto.ApiKey) && dto.ApiKey != originalApiKey)
         {
             p.ApiKey = dto.ApiKey;
         }
 
-        // Update digest authentication credentials (primarily for PrusaLink)
-        if (dto.Username != null)
+        if (!string.IsNullOrEmpty(dto.Username) && dto.Username != originalUsername)
         {
             p.Username = dto.Username;
         }
 
-        if (dto.Password != null)
+        if (!string.IsNullOrEmpty(dto.Password) && dto.Password != originalPassword)
         {
             p.Password = dto.Password;
         }
 
-        // Update port settings
-        if (dto.BackendPort.HasValue)
+        // Update port settings only if provided and different
+        if (dto.BackendPort.HasValue && dto.BackendPort.Value != p.BackendPort)
         {
             p.BackendPort = dto.BackendPort.Value;
         }
 
-        if (dto.FrontendPort.HasValue)
+        if (dto.FrontendPort.HasValue && dto.FrontendPort.Value != p.FrontendPort)
         {
             p.FrontendPort = dto.FrontendPort.Value;
         }
 
-        // Update IsEnabled if provided
-        if (dto.IsEnabled.HasValue)
+        // Update IsEnabled only if provided and different
+        if (dto.IsEnabled.HasValue && dto.IsEnabled.Value != p.IsEnabled)
         {
             p.IsEnabled = dto.IsEnabled.Value;
         }
 
         // Update Obico monitoring opt-in (requires camera, auto-assigns server)
-        if (dto.ObicoEnabled.HasValue)
+        if (dto.ObicoEnabled.HasValue && dto.ObicoEnabled.Value != p.ObicoEnabled)
         {
-            if (dto.ObicoEnabled.Value && !p.ObicoEnabled)
+            if (dto.ObicoEnabled.Value)
             {
                 // Enabling: validate camera exists
                 bool hasCamera = p.Cameras != null && p.Cameras.Count != 0;
@@ -1473,7 +1504,7 @@ public class PrintersController(
                         p.Name);
                 }
             }
-            else if (!dto.ObicoEnabled.Value && p.ObicoEnabled)
+            else
             {
                 // Disabling: unassign server
                 p.ObicoEnabled = false;
@@ -1481,28 +1512,95 @@ public class PrintersController(
             }
         }
 
-        // Update hardware specs on the Printer entity (merged from legacy PrinterCapabilities)
-        p.MaxBuildVolumeX = dto.MaxBuildVolumeX ?? p.MaxBuildVolumeX;
-        p.MaxBuildVolumeY = dto.MaxBuildVolumeY ?? p.MaxBuildVolumeY;
-        p.MaxBuildVolumeZ = dto.MaxBuildVolumeZ ?? p.MaxBuildVolumeZ;
-        p.HasHeatedBed = dto.HasHeatedBed ?? p.HasHeatedBed;
-        p.HasEnclosure = dto.HasEnclosure ?? p.HasEnclosure;
+        // Track if any capability field changed to conditionally update LastCapabilityUpdate
+        bool capabilityChanged = false;
+
+        // Update hardware specs only if provided and different
+        // Use epsilon comparison for floating-point values
+        const double epsilon = 0.001;
+        if (dto.MaxBuildVolumeX.HasValue && (!p.MaxBuildVolumeX.HasValue || Math.Abs(dto.MaxBuildVolumeX.Value - p.MaxBuildVolumeX.Value) > epsilon))
+        {
+            p.MaxBuildVolumeX = dto.MaxBuildVolumeX.Value;
+            capabilityChanged = true;
+        }
+
+        if (dto.MaxBuildVolumeY.HasValue && (!p.MaxBuildVolumeY.HasValue || Math.Abs(dto.MaxBuildVolumeY.Value - p.MaxBuildVolumeY.Value) > epsilon))
+        {
+            p.MaxBuildVolumeY = dto.MaxBuildVolumeY.Value;
+            capabilityChanged = true;
+        }
+
+        if (dto.MaxBuildVolumeZ.HasValue && (!p.MaxBuildVolumeZ.HasValue || Math.Abs(dto.MaxBuildVolumeZ.Value - p.MaxBuildVolumeZ.Value) > epsilon))
+        {
+            p.MaxBuildVolumeZ = dto.MaxBuildVolumeZ.Value;
+            capabilityChanged = true;
+        }
+
+        if (dto.HasHeatedBed.HasValue && dto.HasHeatedBed.Value != p.HasHeatedBed)
+        {
+            p.HasHeatedBed = dto.HasHeatedBed.Value;
+            capabilityChanged = true;
+        }
+
+        if (dto.HasEnclosure.HasValue && dto.HasEnclosure.Value != p.HasEnclosure)
+        {
+            p.HasEnclosure = dto.HasEnclosure.Value;
+            capabilityChanged = true;
+        }
 
         // Detect MultiMaterial toggle for MmuGate toolhead sync
         bool wasMultiMaterial = p.MultiMaterial;
-        p.MultiMaterial = dto.MultiMaterial ?? p.MultiMaterial;
+        if (dto.MultiMaterial.HasValue && dto.MultiMaterial.Value != p.MultiMaterial)
+        {
+            p.MultiMaterial = dto.MultiMaterial.Value;
+            capabilityChanged = true;
+        }
+
         if (wasMultiMaterial != p.MultiMaterial)
         {
             _printersService.SyncMmuToolheadsOnEntity(p, wasMultiMaterial);
         }
 
-        p.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? p.SupportsAutoLeveling;
+        if (dto.SupportsAutoLeveling.HasValue && dto.SupportsAutoLeveling.Value != p.SupportsAutoLeveling)
+        {
+            p.SupportsAutoLeveling = dto.SupportsAutoLeveling.Value;
+            capabilityChanged = true;
+        }
 
-        p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;
-        p.MaxPrintSpeed = dto.MaxPrintSpeed ?? p.MaxPrintSpeed;
-        p.Wattage = dto.Wattage ?? p.Wattage;
-        p.MachineHourlyRate = dto.MachineHourlyRate ?? p.MachineHourlyRate;
-        p.LastCapabilityUpdate = DateTime.UtcNow;
+        if (dto.MaxBedTemp.HasValue && dto.MaxBedTemp.Value != p.MaxBedTemp)
+        {
+            p.MaxBedTemp = dto.MaxBedTemp.Value;
+            capabilityChanged = true;
+        }
+
+        if (dto.MaxPrintSpeed.HasValue && dto.MaxPrintSpeed.Value != p.MaxPrintSpeed)
+        {
+            p.MaxPrintSpeed = dto.MaxPrintSpeed.Value;
+            capabilityChanged = true;
+        }
+
+        if (dto.Wattage.HasValue && dto.Wattage.Value != p.Wattage)
+        {
+            p.Wattage = dto.Wattage.Value;
+            capabilityChanged = true;
+        }
+
+        if (dto.MachineHourlyRate.HasValue && dto.MachineHourlyRate.Value != p.MachineHourlyRate)
+        {
+            p.MachineHourlyRate = dto.MachineHourlyRate.Value;
+        }
+
+        // Only update LastCapabilityUpdate if capability fields actually changed
+        if (capabilityChanged)
+        {
+            // Ensure ServiceState exists before updating LastCapabilityUpdate
+            if (p.ServiceState == null)
+            {
+                p.ServiceState = new PrinterServiceState { PrinterId = p.Id };
+            }
+
+            p.ServiceState.LastCapabilityUpdate = DateTime.UtcNow;
+        }
 
         // Update toolheads if provided
         if (dto.Toolheads?.Length > 0 && p.Toolheads != null)
@@ -1512,26 +1610,61 @@ public class PrintersController(
                 Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Id == toolheadDto.Id);
                 if (toolhead != null)
                 {
-                    toolhead.Name = toolheadDto.Name ?? toolhead.Name;
-                    if (toolheadDto.Index.HasValue)
+                    bool toolheadChanged = false;
+
+                    if (toolheadDto.Name != null && toolheadDto.Name != toolhead.Name)
+                    {
+                        toolhead.Name = toolheadDto.Name;
+                        toolheadChanged = true;
+                    }
+
+                    if (toolheadDto.Index.HasValue && toolheadDto.Index.Value != toolhead.Index)
                     {
                         toolhead.Index = toolheadDto.Index.Value;
+                        toolheadChanged = true;
                     }
 
-                    // Nozzle diameter is derived from NozzleModel, update NozzleModelId instead
+                    // Component model references - only update if different
+                    if (toolheadDto.HotendModelId.HasValue && toolheadDto.HotendModelId != toolhead.HotendModelId)
+                    {
+                        toolhead.HotendModelId = toolheadDto.HotendModelId;
+                        toolheadChanged = true;
+                    }
 
-                    // Component model references
-                    toolhead.HotendModelId = toolheadDto.HotendModelId ?? toolhead.HotendModelId;
-                    toolhead.ExtruderModelId = toolheadDto.ExtruderModelId ?? toolhead.ExtruderModelId;
-                    toolhead.ToolheadModelDefId = toolheadDto.ToolheadModelDefId ?? toolhead.ToolheadModelDefId;
-                    toolhead.NozzleModelId = toolheadDto.NozzleModelId ?? toolhead.NozzleModelId;
-                    toolhead.SupportedMaterials = toolheadDto.SupportedMaterials ?? toolhead.SupportedMaterials;
-                    if (toolheadDto.IsPrimary.HasValue)
+                    if (toolheadDto.ExtruderModelId.HasValue && toolheadDto.ExtruderModelId != toolhead.ExtruderModelId)
+                    {
+                        toolhead.ExtruderModelId = toolheadDto.ExtruderModelId;
+                        toolheadChanged = true;
+                    }
+
+                    if (toolheadDto.ToolheadModelDefId.HasValue && toolheadDto.ToolheadModelDefId != toolhead.ToolheadModelDefId)
+                    {
+                        toolhead.ToolheadModelDefId = toolheadDto.ToolheadModelDefId;
+                        toolheadChanged = true;
+                    }
+
+                    if (toolheadDto.NozzleModelId.HasValue && toolheadDto.NozzleModelId != toolhead.NozzleModelId)
+                    {
+                        toolhead.NozzleModelId = toolheadDto.NozzleModelId;
+                        toolheadChanged = true;
+                    }
+
+                    if (toolheadDto.SupportedMaterials != null && toolheadDto.SupportedMaterials != toolhead.SupportedMaterials)
+                    {
+                        toolhead.SupportedMaterials = toolheadDto.SupportedMaterials;
+                        toolheadChanged = true;
+                    }
+
+                    if (toolheadDto.IsPrimary.HasValue && toolheadDto.IsPrimary.Value != toolhead.IsPrimary)
                     {
                         toolhead.IsPrimary = toolheadDto.IsPrimary.Value;
+                        toolheadChanged = true;
                     }
 
-                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    if (toolheadChanged)
+                    {
+                        toolhead.UpdatedAt = DateTime.UtcNow;
+                    }
                 }
             }
         }
@@ -1541,9 +1674,11 @@ public class PrintersController(
             Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
             if (primaryToolhead != null)
             {
-                // Nozzle diameter is derived from NozzleModel, can't update directly
-                primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
-                primaryToolhead.UpdatedAt = DateTime.UtcNow;
+                if (dto.SupportedMaterials != null && dto.SupportedMaterials != primaryToolhead.SupportedMaterials)
+                {
+                    primaryToolhead.SupportedMaterials = dto.SupportedMaterials;
+                    primaryToolhead.UpdatedAt = DateTime.UtcNow;
+                }
             }
         }
 
@@ -2902,7 +3037,9 @@ public class PrintersController(
         {
             _logger.LogInformation("[Config] Updating printer configuration for {Id}", id);
 
-            Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            // Use FindByIdAsync (with tracking) since this endpoint modifies and saves scalar fields.
+            // FindByIdWithIncludesAsync is now AsNoTracking (read-only optimized).
+            Printer? printer = await _printersService.FindByIdAsync(id, ct);
             if (printer == null)
             {
                 _logger.LogWarning("[Config] Printer {Id} not found for update", id);

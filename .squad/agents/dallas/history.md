@@ -310,3 +310,161 @@ Published: `.squad/orchestration-log/20260326-031539-dallas.md`
 - Format: ✅ dotnet format + ESLint clean
 
 **Next:** Merge to main and resolve CI dependencies if any.
+
+---
+
+## Session: Printer Entity Decomposition Analysis (2026-03-31)
+
+**Role:** Lead architect / analyst
+**Status:** ✅ DECISION PROPOSAL DOCUMENTED — ready for team review
+**Urgency:** High (concurrency conflicts in production)
+
+### Work Completed
+
+- Classified all 56 Printer entity properties into 5 buckets: Core Identity, Hardware Config, Connection Config, Operational Bookkeeping, Already Extracted
+- Identified 4 fields written by background services that share the Printer row's `RowVersion`: `LastHistorySeedUtc` (every 15 min), `LastModelSyncAt` (~hourly), `LastCapabilityUpdate` (~hourly + user edits), `ObicoServerId` (on rebalance)
+- Confirmed none of these 4 fields are directly exposed to the frontend (only `HasCatalogUpdate` computed bool uses `LastModelSyncAt`)
+- Proposed new entity `PrinterServiceState` (1:1 with Printer) to hold all background-service-written fields
+- Documented full migration impact: domain, EF config, repository, services, DTOs, tests
+
+### Decision Proposal
+
+- File: `.squad/decisions/inbox/dallas-printer-entity-refactor-analysis.md`
+- Recommendation: Single migration extracting all 4 fields into `PrinterServiceState`
+- Priority: `LastHistorySeedUtc` is highest (Jeff's explicit callout, worst offender at 15-min interval)
+
+### Key Findings
+
+- The Printer entity has 56 properties (including navigations and computed) — only 4 are written by background services
+- `PrinterDispatchState` extraction (already done) was the right pattern — `PrinterServiceState` follows the same approach
+- Hardware spec fields (MaxBuildVolume, HasHeatedBed, etc.) stay on Printer despite catalog sync writes because they're also user-editable and frontend-visible
+
+## Learnings
+
+- **Background service writes are the root cause of Printer concurrency conflicts.** The `RowVersion` token means ANY write to the Printer row (even to an unrelated field) creates contention with the PUT endpoint. Extracting background-written fields into separate 1:1 tables with their own `RowVersion` eliminates cross-concern contention entirely.
+- **"Never read by frontend" is the strongest signal for extraction.** Fields like `LastHistorySeedUtc` and `LastCapabilityUpdate` are pure internal bookkeeping — they have no business living on the same row as user-facing configuration.
+- **Dual-writer fields (BG + API) are the worst case.** `LastCapabilityUpdate` is written by both catalog sync (BG) and user edits (API). This creates the widest contention window. Extracting it into `PrinterServiceState` means the BG service and API write to different rows.
+- **The `PrinterDispatchState` pattern is the template.** Same approach: 1:1 table, own `RowVersion`, FK to Printer. `PrinterServiceState` follows this established pattern exactly.
+
+---
+
+## Session: PrinterServiceState Extraction Implementation (2026-03-31)
+
+**Role:** Lead implementer / architect
+**Status:** ✅ COMPLETE — All 446 tests passing, zero build warnings
+
+### Work Completed
+
+#### 1. Entity & EF Configuration
+- Created `PrinterServiceState` entity following `PrinterDispatchState` pattern
+  - 1:1 relationship with Printer using PrinterId as both PK and FK
+  - Separate `RowVersion` token for independent concurrency control
+  - Fields: `LastHistorySeedUtc`, `LastModelSyncAt`, `LastCapabilityUpdate`, `ObicoServerId`
+  - Navigation properties: `Printer` (back-reference) and `ObicoServer` (for failure detection)
+- Created `PrinterServiceStateConfiguration` with FK constraints and indexes
+- Updated `Printer` entity: removed 4 migrated fields, added `ServiceState` navigation
+- Added `DbSet<PrinterServiceState>` to AppDbContext
+
+#### 2. Repository Layer Updates
+- Modified `EfPrintJobManagementRepository.UpdatePrinterLastHistorySeedAsync` to write to PrinterServiceStates DbSet
+- Updated `EfPrintersRepository` methods to Include ServiceState:
+  - `GetAllWithIncludesAsync`
+  - `GetAllForTemplateUpdateAsync`
+  - `FindByIdForTemplateUpdateAsync`
+  - `FindByIdWithIncludesAsync`
+- Changed ObicoServer Include path: `p.ObicoServer` → `p.ServiceState.ThenInclude(s => s!.ObicoServer)`
+
+#### 3. Service Layer Updates
+- **PrintersService.cs**:
+  - Created `EnsureServiceState` helper method for safe on-demand creation
+  - Updated `ApplyModelTemplateAsync` to write LastModelSyncAt and LastCapabilityUpdate via ServiceState
+  - Updated `HasCatalogUpdate` calculations to check `p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)`
+- **CatalogUpdateDetectionService.cs**: Changed to check `ServiceState.LastModelSyncAt` for catalog drift
+- **ObicoServerAssignmentService.cs**: Updated 3 locations to write/read ObicoServerId through ServiceState
+- **PrintFailureMonitorService.cs**: Updated ResolveDetectionTarget to check `printer.ServiceState?.ObicoServerId`
+
+#### 4. API Layer Updates
+- **PrintJobManagementService.cs**:
+  - Changed isInitialSeed check: `!printer.ServiceState?.LastHistorySeedUtc.HasValue ?? true`
+  - Updated seedSinceUtc and latestJobTimestamp to use `printer.ServiceState?.LastHistorySeedUtc`
+  - Removed direct write to printer.LastHistorySeedUtc (repository method handles it)
+- **PrintersController.cs**:
+  - Changed DTO mapping: `p.ServiceState?.ObicoServer?.Name`
+  - Updated HasCatalogUpdate: `p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)`
+
+#### 5. EF Core Migrations (Data Preservation)
+- **PostgreSQL Migration** (`20260331172828_ExtractPrinterServiceState.cs`):
+  - Up(): CREATE TABLE → INSERT data from Printers → DROP FK & columns from Printers
+  - Down(): ADD columns → UPDATE from ServiceState → DROP TABLE
+  - Uses PostgreSQL quoted identifiers
+- **SQL Server Migration** (`20260331172836_ExtractPrinterServiceState.cs`):
+  - Same structure with SQL Server bracketed identifiers
+  - Preserves all historical timestamps during migration
+
+### Technical Decisions
+
+#### Null-Safe Navigation Pattern
+All ServiceState references use null-conditional operators:
+```csharp
+printer.ServiceState?.LastHistorySeedUtc
+printer.ServiceState?.ObicoServerId
+p.ServiceState != null && p.ServiceState.LastModelSyncAt
+```
+
+This handles cases where ServiceState isn't loaded or doesn't exist yet.
+
+#### EnsureServiceState Helper Pattern
+```csharp
+private static PrinterServiceState EnsureServiceState(Printer printer)
+{
+    if (printer.ServiceState is not null) return printer.ServiceState;
+    printer.ServiceState = new PrinterServiceState { PrinterId = printer.Id };
+    return printer.ServiceState;
+}
+```
+
+Used in PrintersService to safely write to ServiceState, creating on-demand if needed.
+
+#### Migration Data Preservation Strategy
+1. CREATE TABLE PrinterServiceState first (with all columns and constraints)
+2. INSERT all existing data from Printers to PrinterServiceState (preserves historical timestamps)
+3. DROP FK constraint and columns from Printers
+4. Down() method reverses exactly: ADD columns → UPDATE from ServiceState → DROP table
+
+### Test Results
+
+```
+Test Run Successful.
+Total tests: 446
+     Passed: 446
+ Total time: 1.4250 Minutes
+```
+
+All tests passing with zero failures!
+
+### Build Results
+
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+Time Elapsed 00:00:18.04
+```
+
+Clean build with zero warnings (StyleCop compliant).
+
+## Learnings
+
+- **Migration data preservation requires careful sequencing.** Creating the table first, then inserting data, then dropping columns ensures no data loss. The Down() method must reverse this exactly in reverse order.
+
+- **Null-safe navigation is critical when extracting optional state.** ServiceState may not be loaded (Include missing) or may not exist (new printers). Every reference must use `?.` or explicit null checks.
+
+- **EnsureServiceState pattern prevents boilerplate.** Rather than checking `if (printer.ServiceState is null)` everywhere, the helper encapsulates the create-on-demand logic.
+
+- **Repository layer must Include ServiceState explicitly.** EF Core won't auto-load navigation properties. All repository methods that return Printer must explicitly Include ServiceState if downstream code needs it.
+
+- **Foreign key path changes cascade through queries.** Changing `p.ObicoServer` to `p.ServiceState.ThenInclude(s => s!.ObicoServer)` affects every query that needs ObicoServer data.
+
+- **PrinterDispatchState extraction was the perfect template.** Following the exact pattern (1:1 entity, own RowVersion, FK, EF configuration) made this implementation straightforward and consistent.
+
+- **Background service writes are now isolated.** Each background service (history seed, catalog sync, capability update, Obico assignment) now writes to its own row with its own RowVersion token. User edits to Printer config via API won't conflict anymore.

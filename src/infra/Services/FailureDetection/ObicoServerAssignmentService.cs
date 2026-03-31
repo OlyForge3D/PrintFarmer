@@ -39,7 +39,13 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
             return null;
         }
 
-        printer.ObicoServerId = server.Id;
+        // Ensure ServiceState exists before assigning server
+        if (printer.ServiceState == null)
+        {
+            printer.ServiceState = new PrinterServiceState { PrinterId = printer.Id };
+        }
+
+        printer.ServiceState.ObicoServerId = server.Id;
         await db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
@@ -59,8 +65,12 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
             return;
         }
 
-        string? previousServer = printer.ObicoServerId?.ToString();
-        printer.ObicoServerId = null;
+        string? previousServer = printer.ServiceState?.ObicoServerId?.ToString();
+        if (printer.ServiceState != null)
+        {
+            printer.ServiceState.ObicoServerId = null;
+        }
+
         await db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
@@ -106,9 +116,14 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
                 continue;
             }
 
-            if (printer.ObicoServerId != bestServer.Id)
+            if (printer.ServiceState?.ObicoServerId != bestServer.Id)
             {
-                printer.ObicoServerId = bestServer.Id;
+                if (printer.ServiceState == null)
+                {
+                    printer.ServiceState = new PrinterServiceState { PrinterId = printer.Id };
+                }
+
+                printer.ServiceState.ObicoServerId = bestServer.Id;
                 reassigned++;
             }
         }

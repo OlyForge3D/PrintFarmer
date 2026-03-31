@@ -73,6 +73,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PrinterDispatchState> PrinterDispatchStates => Set<PrinterDispatchState>();
 
+    public DbSet<PrinterServiceState> PrinterServiceStates => Set<PrinterServiceState>();
+
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
 
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();

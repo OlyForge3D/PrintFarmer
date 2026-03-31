@@ -405,7 +405,11 @@ public class PrintersService(
         await _unitOfWork.SaveChangesAsync(ct);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Saves changes with automatic retry on concurrency conflicts (client-wins strategy).
+    /// On conflict, waits with exponential backoff, then reloads the current RowVersion
+    /// immediately before retrying to minimize the window for another conflict.
+    /// </summary>
     public async Task SaveChangesWithRetryAsync(CancellationToken ct, int maxRetries = 5)
     {
         int attempt = 0;
@@ -423,6 +427,13 @@ public class PrintersService(
                     "Concurrency conflict on save attempt {Attempt}/{MaxRetries}, refreshing entity values and retrying",
                     attempt, maxRetries);
 
+                // Delay FIRST to let the conflicting write complete, then reload
+                // the freshest possible RowVersion immediately before retrying.
+                // Previously the delay was AFTER the reload, creating a window where
+                // another writer could bump RowVersion between reload and save.
+                int delayMs = (int)(Math.Pow(2, attempt) * 50) + RandomNumberGenerator.GetInt32(0, 50);
+                await Task.Delay(delayMs, ct);
+
                 foreach (var entry in ex.Entries)
                 {
                     var databaseValues = await entry.GetDatabaseValuesAsync(ct);
@@ -435,11 +446,6 @@ public class PrintersService(
                     // while keeping the caller's in-memory changes ("client wins").
                     entry.OriginalValues.SetValues(databaseValues);
                 }
-
-                // Exponential backoff with jitter to avoid colliding with background
-                // services (AutoDispatch) that also write to the Printer row.
-                int delayMs = (int)(Math.Pow(2, attempt) * 50) + RandomNumberGenerator.GetInt32(0, 50);
-                await Task.Delay(delayMs, ct);
             }
         }
     }
@@ -838,7 +844,7 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
             }
             catch (Exception ex)
             {
@@ -884,7 +890,7 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
             }
         }
 
@@ -1145,7 +1151,7 @@ public class PrintersService(
                     CurrentMaterial = p.CurrentMaterial,
                     CurrentSpoolId = p.CurrentSpoolId,
                     IsAvailable = p.IsAvailable,
-                    LastUpdated = p.LastCapabilityUpdate
+                    LastUpdated = p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow
                 }
             };
         }).ToArray();
@@ -1236,7 +1242,7 @@ public class PrintersService(
             ["currentMaterial"] = p.CurrentMaterial,
             ["currentSpoolId"] = p.CurrentSpoolId,
             ["isAvailable"] = p.IsAvailable,
-            ["lastUpdated"] = p.LastCapabilityUpdate,
+            ["lastUpdated"] = p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
             ["maxBedTemp"] = p.MaxBedTemp,
 
             // All toolheads as array (supports multi-toolhead printers)
@@ -1303,7 +1309,7 @@ public class PrintersService(
             FrontendUrl: p.FrontendUrl,
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
-            HasCatalogUpdate: p.Model != null && p.Model.UpdatedAt > (p.LastModelSyncAt ?? DateTime.MinValue));
+            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
     }
 
     /// <summary>
@@ -1754,11 +1760,11 @@ public class PrintersService(
 
         // Always mark the sync as complete so HasCatalogUpdate clears,
         // even when the printer already has all template values.
-        printer.LastModelSyncAt = DateTime.UtcNow;
+        EnsureServiceState(printer).LastModelSyncAt = DateTime.UtcNow;
 
         if (updated)
         {
-            printer.LastCapabilityUpdate = DateTime.UtcNow;
+            EnsureServiceState(printer).LastCapabilityUpdate = DateTime.UtcNow;
             _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", modelTemplate.Name, printer.Name);
         }
         else
@@ -1767,6 +1773,20 @@ public class PrintersService(
         }
 
         return updated;
+    }
+
+    /// <summary>
+    /// Ensures the printer has a ServiceState entity, creating one if needed.
+    /// </summary>
+    private static PrinterServiceState EnsureServiceState(Printer printer)
+    {
+        if (printer.ServiceState is not null)
+        {
+            return printer.ServiceState;
+        }
+
+        printer.ServiceState = new PrinterServiceState { PrinterId = printer.Id };
+        return printer.ServiceState;
     }
 
     /// <summary>
@@ -2837,16 +2857,16 @@ public class PrintersService(
     }
 
     /// <summary>
-    /// Synchronizes MMU virtual toolheads by creating gates and adding them to the printer's
-    /// navigation collection. Use for create/update flows where the Printer entity is already
-    /// being saved (Added or Modified state).
+    /// Synchronizes MMU virtual toolheads by creating gates and adding them directly to the
+    /// DbContext via the repository (not the navigation collection) to avoid unnecessarily
+    /// marking the parent Printer as Modified.
     /// </summary>
     private void SyncMmuVirtualToolheads(Printer printer, int mmuGateCount = 4)
     {
         List<Toolhead> gates = CreateMmuVirtualToolheads(printer, mmuGateCount);
-        foreach (Toolhead gate in gates)
+        if (gates.Count > 0)
         {
-            printer.Toolheads.Add(gate);
+            _unitOfWork.Printers.AddToolheads(gates);
         }
     }
 

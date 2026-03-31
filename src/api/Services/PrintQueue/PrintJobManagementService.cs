@@ -1131,9 +1131,9 @@ public class PrintJobManagementService(
         int updated = 0;
         int skipped = 0;
 
-        bool isInitialSeed = !printer.LastHistorySeedUtc.HasValue;
-        DateTime? seedSinceUtc = printer.LastHistorySeedUtc;
-        DateTime latestJobTimestamp = printer.LastHistorySeedUtc ?? DateTime.MinValue;
+        bool isInitialSeed = !printer.ServiceState?.LastHistorySeedUtc.HasValue ?? true;
+        DateTime? seedSinceUtc = printer.ServiceState?.LastHistorySeedUtc;
+        DateTime latestJobTimestamp = printer.ServiceState?.LastHistorySeedUtc ?? DateTime.MinValue;
 
         // Get history from printer via PrintersService
         // Pass 'since' for incremental seeding - Moonraker will filter server-side,
@@ -1303,9 +1303,8 @@ public class PrintJobManagementService(
         }
 
         // Update the printer's last seed timestamp if we processed any jobs
-        if (latestJobTimestamp > (printer.LastHistorySeedUtc ?? DateTime.MinValue))
+        if (latestJobTimestamp > (printer.ServiceState?.LastHistorySeedUtc ?? DateTime.MinValue))
         {
-            printer.LastHistorySeedUtc = latestJobTimestamp;
             await _repository.UpdatePrinterLastHistorySeedAsync(printer.Id, latestJobTimestamp, cancellationToken);
             _logger.LogDebug(
                 "[HistorySeed] Updated LastHistorySeedUtc for printer {PrinterName} to {Timestamp}",

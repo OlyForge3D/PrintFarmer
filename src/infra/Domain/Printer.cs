@@ -205,15 +205,6 @@ public class Printer
     [ImportExport(ImportExportTargets.Import)]
     public bool IsAvailable { get; set; } = true; // Can accept new jobs
 
-    public DateTime LastCapabilityUpdate { get; set; } = DateTime.UtcNow;
-
-    /// <summary>
-    /// When this printer last had the catalog model template applied to it.
-    /// Null means the template has never been applied.
-    /// Used to detect when a catalog update is available (Model.UpdatedAt > LastModelSyncAt).
-    /// </summary>
-    public DateTime? LastModelSyncAt { get; set; }
-
     /// <summary>
     /// Power consumption in watts. Overrides the model's default wattage when set.
     /// </summary>
@@ -251,16 +242,6 @@ public class Printer
     public bool ObicoEnabled { get; set; }
 
     /// <summary>
-    /// Internal Obico ML server assignment (managed by ObicoServerAssignmentService, not user-facing).
-    /// </summary>
-    public Guid? ObicoServerId { get; set; }
-
-    /// <summary>
-    /// Navigation property to the assigned Obico ML server.
-    /// </summary>
-    public ObicoServer? ObicoServer { get; set; }
-
-    /// <summary>
     /// Tags assigned to this printer for categorization and filtering.
     /// Uses EF Core skip-navigation (many-to-many without explicit join entity).
     /// </summary>
@@ -269,13 +250,6 @@ public class Printer
     public bool InMaintenance { get; set; } = false;
 
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
-
-    /// <summary>
-    /// Timestamp of the most recent history job seeded from this printer.
-    /// Used for incremental seeding - only jobs newer than this are fetched on subsequent runs.
-    /// Null indicates no history has been seeded yet (triggers full initial seed).
-    /// </summary>
-    public DateTime? LastHistorySeedUtc { get; set; }
 
     // AutoDispatch Ready-Gate properties
 
@@ -290,4 +264,11 @@ public class Printer
     /// table to avoid RowVersion contention between user edits and background dispatch writes.
     /// </summary>
     public PrinterDispatchState? DispatchState { get; set; }
+
+    /// <summary>
+    /// Background-service-managed state (LastHistorySeedUtc, LastModelSyncAt, LastCapabilityUpdate, ObicoServerId)
+    /// stored in a separate table to avoid RowVersion contention when background services write timestamps
+    /// while users edit printer config.
+    /// </summary>
+    public PrinterServiceState? ServiceState { get; set; }
 }

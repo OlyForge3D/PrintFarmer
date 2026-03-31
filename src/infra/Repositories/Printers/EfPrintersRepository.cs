@@ -24,14 +24,24 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
 
     public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct)
     {
-        List<Printer> printers = await _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Location).AsSplitQuery().ToListAsync(ct);
+        List<Printer> printers = await _db.Printers
+            .AsNoTracking()
+            .Include(p => p.Manufacturer)
+            .Include(p => p.Model)
+            .Include(p => p.Location)
+            .Include(p => p.ServiceState)
+            .AsSplitQuery()
+            .ToListAsync(ct);
         printers.ForEach(PopulateCredential);
         return printers;
     }
 
     public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct)
     {
-        List<Printer> printers = await _db.Printers.Include(p => p.Toolheads).ToListAsync(ct);  // With tracking for updates
+        List<Printer> printers = await _db.Printers
+            .Include(p => p.Toolheads)
+            .Include(p => p.ServiceState)
+            .ToListAsync(ct);  // With tracking for updates
         foreach (Printer p in printers)
         {
             PopulateCredential(p);
@@ -42,7 +52,11 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
 
     public async Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct)
     {
-        Printer? printer = await _db.Printers.Include(p => p.Toolheads).Include(p => p.Cameras).FirstOrDefaultAsync(p => p.Id == id, ct);  // With tracking for updates
+        Printer? printer = await _db.Printers
+            .Include(p => p.Toolheads)
+            .Include(p => p.Cameras)
+            .Include(p => p.ServiceState)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);  // With tracking for updates
         if (printer != null)
         {
             PopulateCredential(printer);
@@ -64,15 +78,18 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
 
     public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct)
     {
+        // AsNoTracking: all callers are read-only (details DTO, config read, status check)
+        // No AsSplitQuery: single entity with few toolheads has no cartesian explosion risk,
+        // and a single query avoids 5+ network round-trips to the database
         Printer? printer = await _db.Printers
+            .AsNoTracking()
             .Include(p => p.Manufacturer)
             .Include(p => p.Model)
-            .Include(p => p.ObicoServer)
+            .Include(p => p.ServiceState).ThenInclude(s => s!.ObicoServer)
             .Include(p => p.Toolheads).ThenInclude(t => t.HotendModel)
             .Include(p => p.Toolheads).ThenInclude(t => t.ExtruderModel)
             .Include(p => p.Toolheads).ThenInclude(t => t.ToolheadModelDef)
             .Include(p => p.Toolheads).ThenInclude(t => t.NozzleModel)
-            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id, ct);
 
         if (printer != null)
@@ -239,6 +256,13 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
     private string? DecryptIfNeeded(string? value)
     {
         if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        // Skip decryption attempt for values that are clearly not encrypted.
+        // This avoids expensive CryptographicException throws for plaintext credentials.
+        if (!IsLikelyEncrypted(value))
         {
             return value;
         }

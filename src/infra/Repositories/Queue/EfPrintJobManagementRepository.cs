@@ -431,12 +431,11 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
 
     public async Task UpdatePrinterLastHistorySeedAsync(Guid printerId, DateTime lastSeedUtc, CancellationToken ct = default)
     {
-        Printer? printer = await _context.Printers.FindAsync([printerId], ct);
-        if (printer != null)
-        {
-            printer.LastHistorySeedUtc = lastSeedUtc;
-            _ = await _context.SaveChangesAsync(ct);
-        }
+        // Use ExecuteUpdateAsync on PrinterServiceState instead of Printer to avoid
+        // bumping Printer.RowVersion which could conflict with concurrent user edits.
+        await _context.PrinterServiceStates
+            .Where(s => s.PrinterId == printerId)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.LastHistorySeedUtc, lastSeedUtc), ct);
     }
 
     public async Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default)

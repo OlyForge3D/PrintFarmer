@@ -364,3 +364,52 @@ External jobs are real `PrintJob` rows with `Status=Printing` and `AssignedPrint
 - 2026-07-20: Fixed DbUpdateConcurrencyException on PUT /api/printers/{id}. Root cause: background polling services (AutoDispatch, status monitors) update printer rows frequently, changing the RowVersion concurrency token. User config edits then fail with stale token. Fix: added `SaveChangesWithRetryAsync` to `PrintersService` — catches `DbUpdateConcurrencyException`, reloads OriginalValues from DB (accepting new RowVersion), keeps user's current values ("client wins"), retries up to 3x. Controller's UpdateAsync now uses retry method. Key files: `infra/Services/Printers/PrintersService.cs`, `api/Controllers/PrintersController.cs`. 3 integration tests added.
 - 2026-07-21: Fixed two 500 errors on analytics/auto-dispatch endpoints. `GetJobsByPrinterAsync` was missing `.Include()` for GcodeFile/AssignedPrinter/Model — matched the pattern already used in `GetByIdWithRelationsAsync` and `GetFilteredJobsAsync`. Changed `Guid.Parse` to `Guid.TryParse` in `GetPrinterQueueAsync` to prevent FormatException on invalid IDs. Added `AsNoTracking()` to read-only `GetAllStatusAsync` printer query and wrapped per-printer status building in try/catch so one printer failure doesn't crash the entire status endpoint. Improved error response detail in `JobQueueAnalyticsController` to include `ex.Message` for diagnostic visibility.
 - 2026-07-31: Fixed PostgresException 42703 (`column p.IsExternalPrint does not exist`). Root cause: the `IsExternalPrint` property was added to `PrintJob` entity but no EF Core migration was generated — the model snapshot was out of sync. Generated `AddIsExternalPrint` migration for both PostgreSQL and SQL Server. Thorough audit confirmed this was the ONLY missing column across PrintJob and Printer entities. Build 0 warnings/0 errors, all 2256 tests pass (1810 API + 446 Slicer).
+
+## 2026-03-31: Dallas Completes Printer Entity Decomposition Analysis (APPROVED)
+
+**What:** Dallas completed comprehensive analysis of Printer entity properties; identified `PrinterServiceState` as extraction target for 4 background-service-written fields (`LastHistorySeedUtc`, `LastModelSyncAt`, `LastCapabilityUpdate`, `ObicoServerId`).
+
+**Approval:** ✅ Jeff approved extraction approach; awaiting Lambert implementation.
+
+**Your Next Task (Background):** 
+Implement `PrinterServiceState` entity + EF configuration, update 4 affected services (PrintJobManagementService, PrintersService, ObicoServerAssignmentService, PrintersController), generate migrations for both PostgreSQL and SQL Server, update test doubles.
+
+**Impact on Your Current Work:** This extraction reduces background service write contention with `PUT /api/printers/{id}` concurrency hazards, unblocking safer updates to printer configuration without race conditions.
+
+---
+
+## 2026-08-01: Refactored UpdateAsync to Only Set Changed Properties
+
+**Problem:** `PUT /api/printers/{id}` caused persistent DbUpdateConcurrencyException. Despite retry logic, background services (HistorySeeding, CatalogUpdate) frequently update printer rows and bump PostgreSQL `xmin` RowVersion. The endpoint blindly overwrites ALL properties from the DTO, even unchanged ones, causing EF to include all columns in the UPDATE statement. This makes ANY background write trigger a concurrency conflict.
+
+**Root Cause:** The UpdateAsync method loaded the full entity with tracking (`FindByIdForTemplateUpdateAsync`), then unconditionally set every property: `p.Name = dto.Name`, `p.Notes = dto.Notes`, etc., even when values didn't change. This caused EF to mark all properties as modified and generate a wide UPDATE statement.
+
+**Secondary Issue:** `PopulateCredential` decrypts ApiKey/Password/Username on the tracked entity, making EF think they changed. Then `EncryptSensitiveFieldsOnTrackedEntities` re-encrypts to a DIFFERENT value (Data Protection is non-deterministic), causing phantom modifications even when user didn't touch credentials.
+
+**Solution:** 
+1. **Conditional property assignment** — Only set properties if the DTO value is non-null AND different from the current entity value
+2. **Captured original credentials** — After `PopulateCredential` runs, capture decrypted values BEFORE applying DTO changes, then compare DTO against originals
+3. **Conditional LastCapabilityUpdate** — Only update `LastCapabilityUpdate` when capability fields (MaxBuildVolume*, MaxBedTemp, MaxPrintSpeed, HasEnclosure, HasHeatedBed, SupportsAutoLeveling, MultiMaterial, Wattage) actually changed
+4. **Floating-point epsilon comparison** — Use `Math.Abs(dto.Value - p.Value) > epsilon` for MaxBuildVolumeX/Y/Z to satisfy S1244 warning
+5. **Toolhead change detection** — Only set `toolhead.UpdatedAt` if a toolhead property actually changed
+
+**Key Changes:**
+- `src/api/Controllers/PrintersController.cs` UpdateAsync method (~line 1322-1680)
+  - Captured decrypted credentials: `originalApiKey`, `originalPassword`, `originalUsername`
+  - Changed all property assignments from unconditional (`p.X = dto.X`) to conditional (`if (dto.X != null && dto.X != p.X) p.X = dto.X`)
+  - Added `capabilityChanged` tracking flag, only update `LastCapabilityUpdate` when true
+  - Used epsilon comparison for floating-point MaxBuildVolume properties
+  - Toolhead updates: added `toolheadChanged` flag, only update `UpdatedAt` when true
+
+**Impact:** Dramatically reduces the UPDATE column set sent to PostgreSQL, minimizing `xmin` conflicts with background services. Combined with the existing retry logic, this should eliminate the vast majority of concurrency exceptions.
+
+**Testing:**
+- ✅ Build: 0 errors, 0 warnings
+- ✅ Tests: All 2256 tests pass (1810 API + 446 Slicer)
+- ✅ `dotnet format` clean
+
+**Files Modified:**
+- `src/api/Controllers/PrintersController.cs` — UpdateAsync method refactored for conditional property assignment
+
+**Key Learning:** When working with optimistic concurrency (RowVersion), minimize the UPDATE column set to reduce conflict probability. Only mark properties as modified when they actually change.
+

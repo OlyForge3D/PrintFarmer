@@ -473,8 +473,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
         Dictionary<Guid, ObicoServer> obicoServers,
         ObicoSettings currentSettings)
     {
-        if (printer.ObicoServerId.HasValue &&
-            obicoServers.TryGetValue(printer.ObicoServerId.Value, out ObicoServer? assignedServer))
+        if (printer.ServiceState?.ObicoServerId.HasValue == true &&
+            obicoServers.TryGetValue(printer.ServiceState.ObicoServerId.Value, out ObicoServer? assignedServer))
         {
             return (DetectionSourcePooled, assignedServer.Name, assignedServer.Url, assignedServer.ApiKey);
         }

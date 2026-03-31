@@ -4147,3 +4147,63 @@ Added a "Schedule" action button on each Queued/Assigned job row in `QueueJobsTa
 - `src/Web/ReactApp/src/test/features/scheduling/ScheduleModal.test.tsx` (new)
 
 ---
+
+## 2026-03-31: Printer Entity Decomposition — Extract PrinterServiceState (ANALYSIS COMPLETE)
+
+**Analyst:** Dallas (Lead)  
+**Status:** ✅ Analysis approved by Jeff; **awaiting implementation by Lambert**  
+**Impact:** Reduces background service write contention with user API updates  
+**Risk:** Low — internal bookkeeping only, no frontend contract changes
+
+### Problem
+
+The Printer entity is a "god row" — all configuration, operational bookkeeping, and relationships share one PostgreSQL row with a single `RowVersion` concurrency token. Background services that call `SaveChangesAsync` bump `xmin`, creating hazards for user-initiated `PUT /api/printers/{id}` updates.
+
+**Highest offender:** `LastHistorySeedUtc` — written every 15 minutes by HistorySeedingBackgroundService, never read by frontend, pure internal bookkeeping.
+
+### Solution: Extract PrinterServiceState
+
+New 1:1 table containing 4 background-service-written fields:
+
+| Field | Background Service | Frequency | Why Extract |
+|-------|-------------------|-----------|-----------|
+| `LastHistorySeedUtc` | HistorySeedingBackgroundService | Every 15 min | **HIGH priority** (Jeff flagged); never frontend-visible; pure bookkeeping |
+| `LastModelSyncAt` | CatalogUpdateDetectionService | ~Hourly | Written by BG service; frontend only reads computed `HasCatalogUpdate` bool |
+| `LastCapabilityUpdate` | Both CatalogUpdateDetectionService + API | Per catalog cycle + user edits | Dual-writer pattern is worst case for concurrency |
+| `ObicoServerId` | ObicoServerAssignmentService.RebalanceAsync | On server add/remove | Internal server assignment; not frontend-visible |
+
+### Migration Approach
+
+**Single migration** (Phase 1) — extract all 4 fields at once:
+1. Create new `PrinterServiceState` table (5 columns: PK, FK, 3 timestamps, ObicoServerId, RowVersion)
+2. Copy existing values from Printer table
+3. Drop extracted columns from Printer table
+4. Update both PostgreSQL and SQL Server migrations
+
+### Code Changes
+
+| Layer | Change |
+|-------|--------|
+| Domain | Add `PrinterServiceState.cs` entity; remove 4 properties from `Printer.cs`; add `PrinterServiceState?` navigation |
+| EF Config | New `PrinterServiceStateConfiguration.cs` with 1:1 relationship; update `PrinterConfiguration.cs` |
+| Repository | Add `.Include(p => p.ServiceState)` where background service updates are expected |
+| Services | `PrintJobManagementService`, `PrintersService`, `ObicoServerAssignmentService`, `PrintersController` update navigation to `printer.ServiceState.LastHistorySeedUtc` etc. |
+| DTOs | Compute `HasCatalogUpdate` via `ServiceState` JOIN instead of direct property |
+| Tests | Update test doubles and assertions for new navigation path |
+
+### Risk Assessment
+
+- ✅ **Low risk:** All extracted fields are internal bookkeeping. No frontend contract changes.
+- ✅ **Standard pattern:** Familiar EF Core migration pattern (copy values, drop columns).
+- ✅ **Backward compat:** `PrinterDispatchState` unaffected; new extraction independent.
+
+### Next Phase (Deferred)
+
+Not included in Phase 1, but consider for future:
+- Extract other high-contention background service writes if identified
+- Auto-create `PrinterServiceState` when Printer is created (like `PrinterDispatchState`)
+
+---
+
+**Assigned to:** Lambert (Backend Dev)  
+**Approval chain:** ✅ Dallas (analyst) → ✅ Jeff (decision) → 🕐 Lambert (implementation)
