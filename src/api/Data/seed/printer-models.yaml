@@ -78,7 +78,7 @@
   hasToolchanger: false
   hasFilamentCutter: false
   hasHeatedChamber: false
-  multiMaterial: false
+  multiMaterial: true
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
