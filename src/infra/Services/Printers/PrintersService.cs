@@ -404,6 +404,40 @@ public class PrintersService(
         await _unitOfWork.SaveChangesAsync(ct);
     }
 
+    /// <inheritdoc />
+    public async Task SaveChangesWithRetryAsync(CancellationToken ct, int maxRetries = 3)
+    {
+        int attempt = 0;
+        while (true)
+        {
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < maxRetries)
+            {
+                attempt++;
+                _logger.LogWarning(
+                    "Concurrency conflict on save attempt {Attempt}/{MaxRetries}, refreshing entity values and retrying",
+                    attempt, maxRetries);
+
+                foreach (var entry in ex.Entries)
+                {
+                    var databaseValues = await entry.GetDatabaseValuesAsync(ct);
+                    if (databaseValues is null)
+                    {
+                        throw; // Entity was deleted — cannot retry
+                    }
+
+                    // Accept the database's RowVersion (and any other original values)
+                    // while keeping the caller's in-memory changes ("client wins").
+                    entry.OriginalValues.SetValues(databaseValues);
+                }
+            }
+        }
+    }
+
     public async Task<PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);

@@ -1562,8 +1562,10 @@ public class PrintersController(
             modelName = mod?.Name;
         }
 
-        // Save all changes (printer + toolhead updates)
-        await _printersService.SaveChangesAsync(ct);
+        // Save all changes (printer + toolhead updates) with concurrency retry.
+        // Background polling services may update the same printer row (e.g. status, temps),
+        // which changes the RowVersion. The retry reloads the token and re-saves.
+        await _printersService.SaveChangesWithRetryAsync(ct);
 
         PrinterDto dtoResponse = new(
             Id: p.Id,
