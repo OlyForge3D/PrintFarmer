@@ -28,6 +28,7 @@ export interface HistoryJob {
   completedAt: string | null;
   durationSeconds: number;
   failureReason?: string;
+  toolheadUsages?: import('@/types/api').PrintJobToolheadUsage[];
 }
 
 /**

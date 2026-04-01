@@ -707,6 +707,7 @@ public class JobQueueService : IJobQueueService
                 tu.ToolheadIndex,
                 tu.SpoolmanSpoolId,
                 tu.FilamentUsageGrams,
+                tu.SlicerEstimateGrams,
                 tu.FilamentName,
                 tu.FilamentColor,
                 tu.MaterialCostUsd))

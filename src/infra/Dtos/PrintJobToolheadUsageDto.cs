@@ -10,6 +10,7 @@ public record PrintJobToolheadUsageDto(
     int ToolheadIndex,
     int? SpoolmanSpoolId = null,
     double? FilamentUsageGrams = null,
+    double? SlicerEstimateGrams = null,
     string? FilamentName = null,
     string? FilamentColor = null,
     decimal? MaterialCostUsd = null);

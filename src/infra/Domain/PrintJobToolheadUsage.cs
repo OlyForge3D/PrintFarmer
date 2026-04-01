@@ -35,6 +35,13 @@ public class PrintJobToolheadUsage
     public double? FilamentUsageGrams { get; set; }
 
     /// <summary>
+    /// Slicer's estimated filament usage for this toolhead in grams.
+    /// Captured at job dispatch time from the gcode file's per-extruder metadata.
+    /// Provides early visibility into expected consumption before job completion.
+    /// </summary>
+    public double? SlicerEstimateGrams { get; set; }
+
+    /// <summary>
     /// Display name of the filament loaded on this toolhead (e.g., "PLA Basic").
     /// Denormalized from Spoolman for display without an external API call.
     /// </summary>

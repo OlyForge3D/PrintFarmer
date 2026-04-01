@@ -72,6 +72,8 @@ export default function HistoryJobTable({
               <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Printer</th>
               <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Status</th>
               <th className="text-center px-4 py-3 font-medium text-pf-text-secondary">Progress</th>
+              <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Filament</th>
+              <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Cost</th>
               <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Duration</th>
               <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Completed</th>
               <th className="text-center px-4 py-3 font-medium text-pf-text-secondary">Actions</th>
@@ -126,6 +128,46 @@ export default function HistoryJobTable({
                       {job.completionPercentage}%
                     </span>
                   </div>
+                </td>
+                
+                {/* Filament Usage */}
+                <td className="px-4 py-3 text-right text-pf-text-primary tabular-nums">
+                  {job.toolheadUsages && job.toolheadUsages.length > 0 ? (
+                    (() => {
+                      const totalGrams = job.toolheadUsages.reduce(
+                        (sum, u) => sum + (u.filamentUsageGrams ?? 0),
+                        0
+                      );
+                      return (
+                        <span title={job.toolheadUsages.map(u => `T${u.toolheadIndex}: ${u.filamentUsageGrams?.toFixed(1) ?? '—'}g (${u.filamentName || 'Unknown'})`).join('\n')}>
+                          {totalGrams.toFixed(1)}g
+                        </span>
+                      );
+                    })()
+                  ) : (
+                    <span className="text-pf-text-muted">—</span>
+                  )}
+                </td>
+
+                {/* Cost */}
+                <td className="px-4 py-3 text-right text-pf-text-primary tabular-nums">
+                  {job.toolheadUsages && job.toolheadUsages.length > 0 ? (
+                    (() => {
+                      const totalCost = job.toolheadUsages.reduce(
+                        (sum, u) => sum + (u.materialCostUsd ?? 0),
+                        0
+                      );
+                      return totalCost > 0 ? (
+                        <span title={job.toolheadUsages.map(u => `T${u.toolheadIndex}: $${u.materialCostUsd?.toFixed(2) ?? '—'} (${u.filamentName || 'Unknown'})`).join('\n')}>
+                          ${totalCost.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-pf-text-muted">—</span>
+                      );
+                    })()
+                  ) : (
+                    <span className="text-pf-text-muted">—</span>
+                  )}
                 </td>
                 
                 {/* Duration */}

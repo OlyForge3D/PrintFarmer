@@ -518,4 +518,18 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .Where(pj => pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing)
             .MaxAsync(pj => (int?)pj.QueuePosition, ct) ?? -1;
     }
+
+    public async Task<List<Toolhead>> GetToolheadsForPrinterAsync(Guid printerId, CancellationToken ct = default)
+    {
+        return await _context.Toolheads
+            .Where(t => t.PrinterId == printerId)
+            .OrderBy(t => t.Index)
+            .ToListAsync(ct);
+    }
+
+    public Task AddToolheadUsageAsync(PrintJobToolheadUsage usage, CancellationToken ct = default)
+    {
+        _context.Set<PrintJobToolheadUsage>().Add(usage);
+        return Task.CompletedTask;
+    }
 }

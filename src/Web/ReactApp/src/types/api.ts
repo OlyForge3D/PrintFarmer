@@ -2284,6 +2284,7 @@ export interface QueueHistoryEntryDto {
   completedAtUtc?: string;
   actualPrintTimeSeconds: number;
   failureReason?: string;
+  toolheadUsages?: PrintJobToolheadUsage[];
 }
 
 export interface TimelineEventDto {

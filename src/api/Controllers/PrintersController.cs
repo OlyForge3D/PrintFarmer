@@ -26,7 +26,6 @@ using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 
 namespace Farm.Web.Api.Controllers;
@@ -50,7 +49,7 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
     Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
-    IOptions<ObicoSettings> obicoSettings,
+    ISettingsService settingsService,
     Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
     IPrintFarmerTelemetryService telemetryService,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
@@ -68,7 +67,7 @@ public class PrintersController(
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
     private readonly Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService _obicoServerAssignment = obicoServerAssignment;
-    private readonly ObicoSettings _obicoSettings = obicoSettings.Value;
+    private readonly ISettingsService _settingsService = settingsService;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService _printerSessionTimelineService = printerSessionTimelineService;
     private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
 
@@ -1491,7 +1490,8 @@ public class PrintersController(
                 ObicoServer? assigned = await _obicoServerAssignment.AssignServerAsync(p.Id, ct);
                 if (assigned is null)
                 {
-                    if (!_obicoSettings.Enabled || string.IsNullOrWhiteSpace(_obicoSettings.ObicoApiUrl))
+                    ObicoSettings currentObicoSettings = _settingsService.Get<ObicoSettings>();
+                    if (!currentObicoSettings.Enabled || string.IsNullOrWhiteSpace(currentObicoSettings.ObicoApiUrl))
                     {
                         return BadRequest(new
                         {

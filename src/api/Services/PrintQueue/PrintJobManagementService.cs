@@ -228,6 +228,7 @@ public class PrintJobManagementService(
                             tu.ToolheadIndex,
                             tu.SpoolmanSpoolId,
                             tu.FilamentUsageGrams,
+                            tu.SlicerEstimateGrams,
                             tu.FilamentName,
                             tu.FilamentColor,
                             tu.MaterialCostUsd))
@@ -683,10 +684,9 @@ public class PrintJobManagementService(
                         job.Status = PrintJobStatus.Printing;
                         job.ActualStartTime = DateTime.UtcNow;
 
-                        // TODO: Snapshot per-extruder slicer estimates into PrintJobToolheadUsage records
-                        // This requires access to AppDbContext.Toolheads and AppDbContext.Set<PrintJobToolheadUsage>()
-                        // Consider refactoring to call a service method that can access the full DbContext
-                        // See Phase 3 Task 3d implementation notes
+                        // Snapshot per-extruder slicer estimates into PrintJobToolheadUsage records
+                        await SnapshotSlicerEstimatesAsync(job, cancellationToken);
+
                         _logger.LogInformation("Print job {JobId} successfully uploaded and started on printer {PrinterId}", jobId, job.AssignedPrinterId);
                     }
                     else
@@ -1694,6 +1694,7 @@ public class PrintJobManagementService(
                     tu.ToolheadIndex,
                     tu.SpoolmanSpoolId,
                     tu.FilamentUsageGrams,
+                    tu.SlicerEstimateGrams,
                     tu.FilamentName,
                     tu.FilamentColor,
                     tu.MaterialCostUsd))
@@ -2533,5 +2534,84 @@ public class PrintJobManagementService(
         }
 
         return await GetJobCostBreakdownAsync(jobId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Snapshots slicer filament estimates from the gcode file into PrintJobToolheadUsage records.
+    /// Called at job dispatch time to capture per-toolhead estimates before the job starts.
+    /// </summary>
+    private async Task SnapshotSlicerEstimatesAsync(PrintJob job, CancellationToken cancellationToken)
+    {
+        if (job.GcodeFile?.FilamentPerExtruderWeightG is not { } perExtruderJson)
+        {
+            _logger.LogDebug(
+                "Job {JobId} has no per-extruder filament estimates in gcode file — skipping slicer estimate snapshot",
+                job.Id);
+            return;
+        }
+
+        double[]? perExtruderWeights;
+        try
+        {
+            perExtruderWeights = System.Text.Json.JsonSerializer.Deserialize<double[]>(perExtruderJson);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to parse FilamentPerExtruderWeightG for job {JobId}: {Json}",
+                job.Id,
+                perExtruderJson);
+            return;
+        }
+
+        if (perExtruderWeights is not { Length: > 0 })
+        {
+            _logger.LogDebug(
+                "Job {JobId} has empty per-extruder filament estimates — skipping snapshot",
+                job.Id);
+            return;
+        }
+
+        // Load printer toolheads
+        var toolheads = await _repository.GetToolheadsForPrinterAsync(job.AssignedPrinterId!.Value, cancellationToken);
+
+        _logger.LogInformation(
+            "Snapshotting slicer estimates for job {JobId}: {ExtruderCount} extruders, {ToolheadCount} toolheads configured",
+            job.Id,
+            perExtruderWeights.Length,
+            toolheads.Count);
+
+        // Create PrintJobToolheadUsage records for each extruder with an estimate
+        for (int i = 0; i < perExtruderWeights.Length; i++)
+        {
+            double estimateGrams = perExtruderWeights[i];
+            if (estimateGrams <= 0)
+            {
+                continue; // Skip extruders with zero or negative estimates
+            }
+
+            var toolhead = toolheads.FirstOrDefault(t => t.Index == i);
+            var usage = new PrintJobToolheadUsage
+            {
+                Id = Guid.NewGuid(),
+                PrintJobId = job.Id,
+                ToolheadIndex = i,
+                SlicerEstimateGrams = estimateGrams,
+                SpoolmanSpoolId = toolhead?.CurrentSpoolId,
+                FilamentName = toolhead?.CurrentMaterial,
+                FilamentColor = toolhead?.CurrentFilamentColor
+            };
+
+            await _repository.AddToolheadUsageAsync(usage, cancellationToken);
+
+            _logger.LogDebug(
+                "Created slicer estimate snapshot for job {JobId}, toolhead T{ToolheadIndex}: {EstimateGrams}g",
+                job.Id,
+                i,
+                estimateGrams);
+        }
+
+        await _repository.SaveChangesAsync(cancellationToken);
     }
 }

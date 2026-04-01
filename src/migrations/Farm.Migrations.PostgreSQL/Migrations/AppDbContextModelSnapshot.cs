@@ -2571,6 +2571,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("PrintJobId")
                         .HasColumnType("uuid");
 
+                    b.Property<double?>("SlicerEstimateGrams")
+                        .HasColumnType("double precision");
+
                     b.Property<int?>("SpoolmanSpoolId")
                         .HasColumnType("integer");
 

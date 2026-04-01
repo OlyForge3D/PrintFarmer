@@ -136,6 +136,65 @@ export default function HistoryJobCard({
         </div>
       )}
 
+      {/* Per-Toolhead Filament Usage and Cost */}
+      {job.toolheadUsages && job.toolheadUsages.length > 0 && (
+        <div className="mb-4">
+          <div className="text-xs text-pf-text-secondary mb-2">Filament Usage</div>
+          <div className="space-y-1.5">
+            {job.toolheadUsages.map((usage, idx) => {
+              const usageGrams = usage.filamentUsageGrams?.toFixed(1) ?? '—';
+              const costUsd = usage.materialCostUsd?.toFixed(2) ?? '—';
+              return (
+                <div key={usage.id || idx} className="flex items-center gap-2 text-xs">
+                  <span className="font-mono text-pf-text-primary w-6">T{usage.toolheadIndex}</span>
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    {usage.filamentColor && (
+                      <span
+                        className="w-3 h-3 rounded-full border border-pf-border shrink-0"
+                        style={{ backgroundColor: usage.filamentColor }}
+                        title={usage.filamentColor}
+                      />
+                    )}
+                    <span className="text-pf-text-primary truncate">
+                      {usage.filamentName || 'Unknown'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-pf-text-secondary shrink-0">
+                    <span className="font-medium tabular-nums">{usageGrams}g</span>
+                    {usage.materialCostUsd != null && (
+                      <span className="text-pf-text-tertiary tabular-nums">${costUsd}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {/* Total Row */}
+            {job.toolheadUsages.length > 1 && (() => {
+              const totalGrams = job.toolheadUsages.reduce(
+                (sum, u) => sum + (u.filamentUsageGrams ?? 0),
+                0
+              );
+              const totalCost = job.toolheadUsages.reduce(
+                (sum, u) => sum + (u.materialCostUsd ?? 0),
+                0
+              );
+              return (
+                <div className="flex items-center gap-2 text-xs pt-1.5 border-t border-pf-border/50">
+                  <span className="font-medium text-pf-text-primary w-6">Total</span>
+                  <div className="flex-1" />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-medium text-pf-text-primary tabular-nums">{totalGrams.toFixed(1)}g</span>
+                    {totalCost > 0 && (
+                      <span className="font-medium text-pf-text-primary tabular-nums">${totalCost.toFixed(2)}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex gap-2 pt-3 border-t border-pf-border">
         {(job.status === "completed" || job.status === "cancelled") && (

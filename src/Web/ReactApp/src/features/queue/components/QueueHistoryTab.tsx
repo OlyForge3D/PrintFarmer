@@ -104,6 +104,7 @@ export default function QueueHistoryTab({
         completedAtUtc?: string;
         actualPrintTimeSeconds?: number;
         failureReason?: string;
+        toolheadUsages?: import('@/types/api').PrintJobToolheadUsage[];
       }
       
       const entries = (response?.entries || []) as HistoryEntryResponse[];
@@ -117,6 +118,7 @@ export default function QueueHistoryTab({
         completedAt: job.completedAtUtc || null,
         durationSeconds: job.actualPrintTimeSeconds || 0,
         failureReason: job.failureReason,
+        toolheadUsages: job.toolheadUsages,
       }));
       
       setJobs(historyJobs);

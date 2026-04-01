@@ -233,6 +233,16 @@ public interface IPrintJobManagementRepository
     /// Get the maximum queue position across all queued/printing jobs.
     /// </summary>
     Task<int> GetMaxQueuePositionAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Get toolheads configured for a printer (for slicer estimate snapshotting).
+    /// </summary>
+    Task<List<Toolhead>> GetToolheadsForPrinterAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Add a toolhead usage record without saving (caller must call SaveChangesAsync).
+    /// </summary>
+    Task AddToolheadUsageAsync(PrintJobToolheadUsage usage, CancellationToken ct = default);
 }
 
 /// <summary>

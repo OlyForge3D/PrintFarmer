@@ -368,6 +368,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     .OrderBy(t => t.Index)
                     .ToListAsync(ct);
 
+                // Build consumption list for batch operation
+                var consumptions = new List<(int spoolId, double grams)>();
+
                 foreach (var (toolIndex, grams) in perExtruderUsage)
                 {
                     var toolhead = toolheads.FirstOrDefault(t => t.Index == toolIndex);
@@ -383,15 +386,20 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     };
                     _db.Set<PrintJobToolheadUsage>().Add(usage);
 
-                    // Consume from this toolhead's spool in Spoolman
+                    // Add to batch consumption list if spool is assigned
                     if (toolhead?.CurrentSpoolId.HasValue == true && grams > 0)
                     {
-                        await _spoolmanService.ConsumeFilamentAsync(
-                            toolhead.CurrentSpoolId.Value, grams, ct);
-                        _logger.LogInformation(
-                            "[PrintJobCompletionService] Recorded {UsedGrams:F1}g on spool {SpoolId} (T{ToolIndex}) for job {JobId}",
-                            grams, toolhead.CurrentSpoolId.Value, toolIndex, job.Id);
+                        consumptions.Add((toolhead.CurrentSpoolId.Value, grams));
                     }
+                }
+
+                // Batch-consume all spools in a single operation
+                if (consumptions.Count > 0)
+                {
+                    int successCount = await _spoolmanService.ConsumeMultipleFilamentsAsync(consumptions, ct);
+                    _logger.LogInformation(
+                        "[PrintJobCompletionService] Batch-consumed filament from {SuccessCount}/{TotalCount} spools for multi-toolhead job {JobId}",
+                        successCount, consumptions.Count, job.Id);
                 }
             }
             else

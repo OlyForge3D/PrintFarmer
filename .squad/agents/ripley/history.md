@@ -165,3 +165,15 @@ Extended HistoryJobCard and HistoryJobTable to display per-toolhead filament usa
 - Type-safe: TypeScript optional chaining, proper imports
 
 **Integration point:** Backend must populate `toolheadUsages` on QueueHistoryEntryDto when returning history via `/job-queue-analytics/history`
+
+## Learnings — Tailwind v4 Configuration (PFarm1-rdp)
+
+**Issue**: VS Code Tailwind IntelliSense was showing stale v3 plugin-based rewrite hints despite Tailwind v4 being installed.
+
+**Discovery**: The project had a stale `postcss.config.js` file that was confusing the extension. Tailwind v4 uses **CSS-first configuration** — all settings live in CSS `@theme` blocks, not in a PostCSS plugin config.
+
+**Resolution**: Removed the stale `postcss.config.js`. Vite + `@tailwindcss/postcss` handles everything automatically without needing an explicit config file.
+
+**Key Insight**: When upgrading to Tailwind v4, delete any `postcss.config.js`, `tailwind.config.js`, or `.tailwindrc` files. The CSS file is the single source of truth for configuration.
+
+**Impact**: The Tailwind IntelliSense extension now correctly understands the CSS-first setup and won't suggest outdated rewrites. Custom `@theme` color tokens work as expected.

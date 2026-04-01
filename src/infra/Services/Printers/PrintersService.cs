@@ -95,6 +95,12 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
 
     /// <summary>
+    /// Maximum supported toolhead index to prevent runaway gate creation.
+    /// Most MMU printers support 4-8 toolheads; 16 is a generous upper bound.
+    /// </summary>
+    private const int MaxToolheadIndex = 16;
+
+    /// <summary>
     /// Gets the appropriate backend client for a printer based on its backend type.
     /// Returns the generic IBackendClient which should be cast to capability interfaces as needed.
     /// </summary>
@@ -2659,6 +2665,15 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
+        // Bounds check: reject toolhead indices outside safe range
+        if (toolheadIndex < 0 || toolheadIndex > MaxToolheadIndex)
+        {
+            _logger.LogWarning(
+                "SetToolheadSpoolAsync: Toolhead index {Index} out of bounds [0, {Max}] for printer {PName} ({Id})",
+                toolheadIndex, MaxToolheadIndex, p.Name, id);
+            return new CommandResult(false, $"Toolhead index {toolheadIndex} is out of bounds (max: {MaxToolheadIndex})");
+        }
+
         // Auto-create MMU gates when the toolhead doesn't exist.
         // If the printer reports MMU gates via SignalR but MultiMaterial isn't set yet,
         // promote it and create the virtual gate rows so spool assignment works.
@@ -2736,6 +2751,15 @@ public class PrintersService(
 
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+
+        // Bounds check: reject toolhead indices outside safe range
+        if (toolheadIndex < 0 || toolheadIndex > MaxToolheadIndex)
+        {
+            _logger.LogWarning(
+                "ClearToolheadSpoolAsync: Toolhead index {Index} out of bounds [0, {Max}] for printer {PName} ({Id})",
+                toolheadIndex, MaxToolheadIndex, p.Name, id);
+            return new CommandResult(false, $"Toolhead index {toolheadIndex} is out of bounds (max: {MaxToolheadIndex})");
+        }
 
         // Auto-create MMU gates when the toolhead doesn't exist.
         if (toolhead is null)
