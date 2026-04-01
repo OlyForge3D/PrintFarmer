@@ -247,6 +247,12 @@ public class JobQueuePrintJobDto
 
     public Guid? ProjectFileId { get; set; }
 
+    /// <summary>
+    /// Per-toolhead filament usage records for multi-tool/MMU jobs.
+    /// Empty for single-extruder jobs.
+    /// </summary>
+    public List<PrintJobToolheadUsageDto> ToolheadUsages { get; set; } = [];
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }

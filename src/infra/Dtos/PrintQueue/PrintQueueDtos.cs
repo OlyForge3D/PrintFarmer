@@ -158,6 +158,12 @@ public class QueuedPrintJobDto
     /// URL to the G-code file thumbnail image (if available)
     /// </summary>
     public string? ThumbnailUrl { get; set; }
+
+    /// <summary>
+    /// Per-toolhead filament usage records for multi-tool/MMU jobs.
+    /// Empty for single-extruder jobs.
+    /// </summary>
+    public List<PrintJobToolheadUsageDto> ToolheadUsages { get; set; } = [];
 }
 
 /// <summary>
@@ -404,6 +410,32 @@ public class QueueHistoryEntryDto
     public int ActualPrintTimeSeconds { get; set; }
 
     public string? FailureReason { get; set; }
+
+    /// <summary>
+    /// Per-toolhead filament usage records for multi-tool/MMU jobs.
+    /// Empty for single-extruder jobs.
+    /// </summary>
+    public List<PrintJobToolheadUsageDto> ToolheadUsages { get; set; } = [];
+
+    /// <summary>
+    /// Filament name from Spoolman (denormalized for display, single-extruder).
+    /// </summary>
+    public string? FilamentName { get; set; }
+
+    /// <summary>
+    /// Filament color hex from Spoolman (denormalized for display, single-extruder).
+    /// </summary>
+    public string? FilamentColor { get; set; }
+
+    /// <summary>
+    /// Actual filament consumed in grams.
+    /// </summary>
+    public double? ActualFilamentUsageGrams { get; set; }
+
+    /// <summary>
+    /// Actual cost of the print job (calculated on completion).
+    /// </summary>
+    public decimal? ActualCost { get; set; }
 }
 
 // ============= REQUEST DTOs (Phase 3) =============

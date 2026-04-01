@@ -215,7 +215,23 @@ public class PrintJobManagementService(
                     StartedAtUtc = pj.ActualStartTime ?? pj.CreatedAt,
                     CompletedAtUtc = pj.ActualEndTime,
                     ActualPrintTimeSeconds = (int?)pj.ActualPrintTime?.TotalSeconds ?? 0,
-                    FailureReason = pj.FailureReason
+                    FailureReason = pj.FailureReason,
+                    FilamentName = pj.FilamentName,
+                    FilamentColor = pj.FilamentColor,
+                    ActualFilamentUsageGrams = pj.ActualFilamentUsage,
+                    ActualCost = pj.ActualCost,
+                    ToolheadUsages = pj.ToolheadUsages
+                        .OrderBy(tu => tu.ToolheadIndex)
+                        .Select(tu => new PrintJobToolheadUsageDto(
+                            tu.Id,
+                            tu.PrintJobId,
+                            tu.ToolheadIndex,
+                            tu.SpoolmanSpoolId,
+                            tu.FilamentUsageGrams,
+                            tu.FilamentName,
+                            tu.FilamentColor,
+                            tu.MaterialCostUsd))
+                        .ToList()
                 })
                 .ToList();
 
@@ -1669,7 +1685,19 @@ public class PrintJobManagementService(
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt,
-            WasSeededFromHistory = job.WasSeededFromHistory
+            WasSeededFromHistory = job.WasSeededFromHistory,
+            ToolheadUsages = job.ToolheadUsages
+                .OrderBy(tu => tu.ToolheadIndex)
+                .Select(tu => new PrintJobToolheadUsageDto(
+                    tu.Id,
+                    tu.PrintJobId,
+                    tu.ToolheadIndex,
+                    tu.SpoolmanSpoolId,
+                    tu.FilamentUsageGrams,
+                    tu.FilamentName,
+                    tu.FilamentColor,
+                    tu.MaterialCostUsd))
+                .ToList()
         };
     }
 
