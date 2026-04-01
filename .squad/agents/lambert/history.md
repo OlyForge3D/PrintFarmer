@@ -272,6 +272,47 @@ Probed the ADX5 printer at 10.0.0.22:8899 using FlashForge TCP protocol commands
 - Temperature responses ARE reliable: M105 reports all active extruders even when idle (T1: 0.0/0.0)
 - Detection strategy must use M105 temp count as ground truth, not M115 Tool Count field
 - Current `FlashForgeClient.cs` hardcoded assumptions (single T0) need to become dynamic per-extruder arrays
+
+## Session: Multi-Toolhead Filament Batch Consumption + Toolhead Index Bounds (2026-01-12)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — Build succeeds, all tests pass (2,256 total)
+
+### Work Completed
+
+**BEAD 1: Wire up ConsumeMultipleFilamentsAsync batch call**
+- Located multi-toolhead consumption path in `PrintJobCompletionService.cs` at lines 386-395
+- Replaced individual `ConsumeFilamentAsync` loop with batch collection + single `ConsumeMultipleFilamentsAsync` call
+- Refactored to build consumption list first, then perform single batch operation after loop
+- Added logging of successful batch operations (e.g., "Batch-consumed filament from 3/4 spools")
+
+**BEAD 2: Add toolhead index bounds validation**
+- Added `MaxToolheadIndex = 16` constant to `PrintersService.cs` (generous upper bound for MMU printers)
+- Added bounds checking in `SetToolheadSpoolAsync` before auto-creation logic
+- Added bounds checking in `ClearToolheadSpoolAsync` before auto-creation logic
+- Out-of-bounds indices now return `CommandResult(false)` with clear error message
+- Log warning messages include printer name, ID, and requested index for diagnostics
+
+### Key Implementation Details
+
+- **Batch consumption**: Preserves per-toolhead usage records but debits all spools in one operation instead of N sequential calls
+- **Bounds validation**: Prevents runaway gate creation from invalid backend data (e.g., toolheadIndex=999)
+- **Single-toolhead prints**: Unchanged — still use individual `ConsumeFilamentAsync` call in else branch
+- **Error handling**: Out-of-bounds requests fail fast before auto-creation, preventing database bloat
+- **Logging**: Both success (batch count) and rejection (out-of-bounds warning) cases logged for observability
+
+### Validation
+
+- ✅ Solution builds with 0 errors, 0 warnings
+- ✅ All 2,256 tests pass (1,810 API tests + 446 slicer module tests)
+- ✅ `dotnet format` exits clean
+- Architecture follows existing service patterns
+- Backward compatible — single-toolhead path unchanged
+
+### Key Files Modified
+
+- `src/infra/Services/Printers/PrintJobCompletionService.cs` — batch consumption wiring (lines 359-395)
+- `src/infra/Services/Printers/PrintersService.cs` — bounds validation constant + checks (lines 95-101, 2666-2695, 2752-2780)
 - ADX5 is an IDEX printer (2 physical hotends) that can operate as 4 virtual toolheads — model as `ToolheadType.MmuGate` entries for consistency with Bambu AMS / Prusa MMU3 patterns
 
 ### Files Modified
@@ -413,3 +454,25 @@ Implement `PrinterServiceState` entity + EF configuration, update 4 affected ser
 
 **Key Learning:** When working with optimistic concurrency (RowVersion), minimize the UPDATE column set to reduce conflict probability. Only mark properties as modified when they actually change.
 
+
+## 2026-04-01: Multi-Toolhead Batch Consumption + Bounds Validation (PFarm1-uykq, PFarm1-r56j)
+
+**Role:** Backend Dev  
+**Status:** ✅ Complete  
+**Tests:** 2256 passing
+
+### PFarm1-uykq: Batch Filament Consumption Wiring
+Wired `ConsumeMultipleFilamentsAsync` into job completion lifecycle. Replaced N sequential `ConsumeFilamentAsync` calls with single batch call after building (spoolId, grams) tuples.
+
+**Performance:** Reduces HTTP roundtrips from N to 1 for multi-toolhead prints.
+
+### PFarm1-r56j: Toolhead Index Bounds Validation
+Added `MaxToolheadIndex = 16` constant in `PrintersService.cs`. Bounds checking in `SetToolheadSpoolAsync` and `ClearToolheadSpoolAsync` prevents runaway MmuGate auto-creation from invalid backend data.
+
+**Safety:** Out-of-bounds requests (< 0 or > 16) return `CommandResult(false)` with error; issue logged instead of crashing.
+
+**Rationale:** 16 is reasonable upper bound for all known printer types (Prusa MMU3, AMS, IDEX, FlashForge ADX5, etc.).
+
+**Key files:**
+- `src/infra/Services/Printers/PrintJobCompletionService.cs` (batch consumption)
+- `src/infra/Services/Printers/PrintersService.cs` (bounds validation)

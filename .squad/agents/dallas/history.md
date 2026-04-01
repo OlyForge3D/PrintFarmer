@@ -468,3 +468,75 @@ Clean build with zero warnings (StyleCop compliant).
 - **PrinterDispatchState extraction was the perfect template.** Following the exact pattern (1:1 entity, own RowVersion, FK, EF configuration) made this implementation straightforward and consistent.
 
 - **Background service writes are now isolated.** Each background service (history seed, catalog sync, capability update, Obico assignment) now writes to its own row with its own RowVersion token. User edits to Printer config via API won't conflict anymore.
+
+---
+
+## Session: Obico Settings Consistency Audit (2026-03-26)
+
+**Role:** Lead/Architect  
+**Bead:** PFarm1-07s  
+**Status:** COMPLETE — Migration validated
+
+### Work Completed
+
+**Audit Phase:**
+- Identified ALL ObicoSettings consumers across codebase
+- Found ONE remaining IOptions<ObicoSettings> consumer: PrintersController
+- Confirmed failure detection services already migrated to ISettingsService (PFarm1-07r)
+
+**Implementation Phase:**
+- Migrated PrintersController from IOptions<ObicoSettings> to ISettingsService
+- Updated constructor DI: removed IOptions<ObicoSettings>, added ISettingsService
+- Updated usage site (line 1494): changed `_obicoSettings.Enabled` to `_settingsService.Get<ObicoSettings>().Enabled`
+- Removed unused `Microsoft.Extensions.Options` import
+
+**Validation:**
+- API project builds cleanly (0 errors, 0 warnings)
+- Test project builds cleanly
+- Format check passes (no new violations)
+- Full solution build has unrelated race condition errors (pre-existing)
+
+### Architecture Finding
+
+**ObicoSettings now uses ISettingsService exclusively for runtime configuration:**
+- ✅ PrintFailureMonitorService → ISettingsService (via GetCurrentSettings helper)
+- ✅ ObicoFailureDetectionService → ISettingsService
+- ✅ PrintersController → ISettingsService (migrated today)
+
+**IOptions<ObicoSettings> binding still exists in ServiceCollectionExtensions** for initial config load, but no runtime consumers remain. This is correct: ISettingsService reads persisted settings (database), while options binding provides bootstrap defaults.
+
+### Key Files Modified
+- `src/api/Controllers/PrintersController.cs` — Migrated to ISettingsService pattern
+
+## Learnings
+
+- **Settings service consistency prevents stale reads.** Failure detection was reading persisted settings while PrintersController was reading appsettings.json values. This creates skew when users modify settings via UI (database) but code reads config files (stale).
+
+- **ISettingsService.Get<T>() is the runtime pattern.** Options binding is for initial bootstrap only. All runtime consumers should read from ISettingsService to respect user modifications.
+
+- **Single usage audit is tractable with grep.** `grep -r "IOptions<ObicoSettings>"` found the single consumer immediately. No need to over-engineer the search.
+
+- **Migration pattern is consistent: DI replacement + call-site update.** Replace IOptions<T> parameter → ISettingsService parameter. Replace `_settings.Value` → `_settingsService.Get<T>()`. No architectural changes needed.
+
+## 2026-04-01: ObicoSettings Runtime Consistency Audit (PFarm1-07s)
+
+**Role:** Lead / Backend Architect  
+**Status:** ✅ Complete  
+**Build:** Passes (0 errors, 0 warnings)
+
+Audited all ObicoSettings consumers and enforced standardized injection pattern.
+
+**Work completed:**
+1. Identified inconsistency: some code reading from `IOptions<ObicoSettings>` (static config file), others from `ISettingsService` (persisted database)
+2. Migrated PrintersController from `IOptions<ObicoSettings>` to `ISettingsService`
+3. Validated consistency across all failure-detection code paths
+
+**Final state (validated 2026-04-01):**
+- ✅ PrintFailureMonitorService → ISettingsService
+- ✅ ObicoFailureDetectionService → ISettingsService
+- ✅ PrintersController → ISettingsService
+- ✅ Options binding in ServiceCollectionExtensions (bootstrap only, correct)
+
+**Pattern established:** All runtime settings now flow through single ISettingsService abstraction. User modifications via Settings UI immediately visible to all consumers.
+
+**Impact:** Runtime consistency; no stale config file values during execution; foundation for future settings work.

@@ -129,3 +129,24 @@ Focused four-part gate instead of broad test reruns:
 - 2026-07-17: `PrinterCompositeStatus` now includes `ExtruderTemperatures` (IReadOnlyDictionary<int, ExtruderTemperature>?) and `DetectedExtruderCount` (int?). These are set by FlashForgeClient.GetCompositeStatusAsync from the ParseExtruderTemperatures result.
 - 2026-07-17: Stale obj/ cache with GeneratedRegex artifacts causes "partial method may not have multiple defining declarations" errors. Fix: `rm -rf ./backends/Farm.Backend.Plugin.FlashForge/obj` before rebuilding after regex changes.
 - 2026-07-17: MMU Phases 2, 3, 5 test suite written and validated. Phase 2 (Extruder Count Detection): added ToolCount to StandardPrinterInfo, ToolCountRegex/DetectExtruderCount to FlashForgeClient, 16 unit tests. Phase 3 (MmuGate Auto-Creation): 7 integration tests using CustomWebApplicationFactory.CreateWithIsolatedDatabase(), covering CreatePrinter with MultiMaterial=true (gate count, non-primary, component copy), MultiMaterial=false, idempotency, toggle-off, and toggle-on. Phase 5 (Per-Extruder Temperature): added ISupportsMultiExtruderTemperatureControl interface and SetExtruderTemperatureAsync, 3 capability tests. Key learnings: Printer entity has RowVersion concurrency token — adding toolheads to a tracked Printer's navigation collection triggers concurrency check. For existing (Unchanged) printers, use EnsureMmuToolheadsAsync (which uses AddToolheads repo method) instead of SyncMmuToolheadsOnEntity. PrinterModel entities should be seeded in one scope with .Add() rather than loaded via FindAsync and modified across scopes. All 2252 tests passing (1806 API + 446 slicer).
+- 2026-04-01: Multi-toolhead cost calculation test coverage complete. The multi-toolhead path in `JobCostCalculationService.CalculateMaterialCostAsync()` (lines 158-182) iterates through `PrintJobToolheadUsage` records and calls `CalculateSingleSpoolCostAsync()` for each toolhead with non-zero usage. Per-toolhead costs are stored in `PrintJobToolheadUsage.MaterialCostUsd` and summed into `PrintJob.MaterialCostUsd`. Added 11 comprehensive tests in `src/tests/Farm.Web.Api.Tests/Services/Cost/JobCostCalculationMultiToolheadTests.cs` covering: single toolhead calculation, multi-toolhead aggregation (3 toolheads), missing spool data fallback to global default ($30/kg), partial consumption (only non-zero usage contributes), null filament usage skipped, all-zero usage returns null, energy/machine/labor costs integrated correctly, empty toolhead usages falls back to single-spool path, boundary case (exactly 1 toolhead uses multi-toolhead path), small usage rounding ($0.01, $0.04), and negative usage (skipped, null result). Key insight: Per-toolhead costs round independently before aggregation — e.g., T0 ($1.25) + T1 ($1.88) + T2 ($2.50) = $5.63, not $5.62 if calculated as aggregate first. Test pattern: CustomWebApplicationFactory + isolated printer/job setup + FluentAssertions. Zero test failures. Key file: `src/tests/Farm.Web.Api.Tests/Services/Cost/JobCostCalculationMultiToolheadTests.cs`.
+
+## 2026-04-01: Multi-Toolhead Cost Calculation Regression Suite (PFarm1-kk0v)
+
+**Role:** QA / Regression Specialist  
+**Status:** ✅ Complete  
+**Tests:** 1821 passing (11 new multi-toolhead cost tests)
+
+Delivered comprehensive regression test suite for multi-toolhead job cost calculation seam.
+
+**Test coverage:**
+- Multi-toolhead cost aggregation with varying material prices
+- Per-toolhead pricing: cost-per-extruder calculation accuracy
+- Edge cases: 0-cost materials, missing pricing, default fallback
+- Bounds: max 16 toolhead validation within cost calculation
+- Monetary precision: decimal rounding maintained across multi-toolhead scenarios
+- Per-material breakdown: individual toolhead costs sum correctly to job total
+
+**Design:** Focused integration test file (`JobCostCalculationMultiToolheadTests.cs`) operating against real EF Core DbContext. All tests passing with 0 flakiness.
+
+**Impact:** Financial accuracy locked in for multi-toolhead scenarios; regression gate prevents cost calculation regressions in future multi-material work.

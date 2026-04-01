@@ -4207,3 +4207,184 @@ Not included in Phase 1, but consider for future:
 
 **Assigned to:** Lambert (Backend Dev)  
 **Approval chain:** ✅ Dallas (analyst) → ✅ Jeff (decision) → 🕐 Lambert (implementation)
+
+---
+
+## 2026-04-01: Multi-Toolhead Filament Batch Consumption + Bounds Validation
+
+**Author:** Lambert (Backend Dev)  
+**Status:** ✅ IMPLEMENTED (PFarm1-uykq, PFarm1-r56j)  
+**Date:** 2026-04-01
+
+### Problem Statement
+
+1. Sequential filament debit: Multi-toolhead prints were calling `ConsumeFilamentAsync` N times in a loop instead of using `ConsumeMultipleFilamentsAsync` for batch operations
+2. Runaway gate creation: No upper bound on toolhead indices allowed invalid backend data (e.g., toolheadIndex=999) to trigger unlimited MmuGate auto-creation
+
+### Decision
+
+**Implement batch filament consumption and enforce MaxToolheadIndex = 16 bounds**
+
+### Implementation
+
+#### Part 1: Batch Consumption Wiring
+- Replaced loop calling `ConsumeFilamentAsync` in `PrintJobCompletionService.cs` with single `ConsumeMultipleFilamentsAsync` call
+- Build list of (spoolId, grams) tuples during per-extruder usage loop, then batch-consume after loop
+- Atomic operation at service boundary; reduces HTTP overhead from N sequential calls to 1 batch call
+
+#### Part 2: Toolhead Index Bounds Validation
+- Added `MaxToolheadIndex = 16` constant in `PrintersService.cs`
+- Bounds checking in `SetToolheadSpoolAsync` and `ClearToolheadSpoolAsync` before auto-creation logic
+- Out-of-bounds requests (index < 0 or > 16) return `CommandResult(false)` with descriptive error
+- Log warning when out-of-bounds index is rejected
+
+### Rationale
+
+- Batch consumption eliminates unnecessary HTTP roundtrips for multi-toolhead prints
+- MaxToolheadIndex=16 prevents database bloat from invalid backend data; reasonable upper bound for all known printer types
+- Log-and-reject pattern keeps API stable when receiving malformed data
+
+### Impact
+
+- ✅ 2256 API tests passing
+- ✅ Performance improvement for multi-toolhead prints
+- ✅ Safety guard against runaway gate creation from invalid backend responses
+
+---
+
+## 2026-04-01: History Job Card/Table Filament and Cost Display
+
+**Author:** Ripley (Frontend Dev)  
+**Status:** ✅ IMPLEMENTED (PFarm1-j9u3)  
+**Date:** 2026-04-01
+
+### Problem Statement
+
+HistoryJobCard and HistoryJobTable were not displaying per-toolhead filament usage or cost information, making it difficult for users to understand material consumption and costs for completed jobs.
+
+### Decision
+
+Extend history UI components to display per-toolhead filament usage, material type, color indicators, and cost breakdowns
+
+### Implementation
+
+#### Type Extensions
+- Extended `QueueHistoryEntryDto` in `src/types/api.ts` with optional `toolheadUsages?: PrintJobToolheadUsage[]`
+- Extended `HistoryJob` in `src/types/queue.ts` with same field
+- Updated `QueueHistoryTab.tsx` to pass toolheadUsages through API response mapping
+
+#### UI Changes
+
+**HistoryJobCard:**
+- Added "Filament Usage" section displaying per-toolhead breakdown:
+  - Toolhead index (T0, T1, etc.)
+  - Color indicator dot
+  - Material name
+  - Usage in grams
+  - Cost in USD (if available)
+- Compact, card-appropriate layout with truncation for long names
+- Total row for multi-toolhead prints
+
+**HistoryJobTable:**
+- Added "Filament" and "Cost" columns
+- Filament column: total usage across all toolheads
+- Cost column: total cost across all toolheads
+- Tooltips show per-toolhead breakdown on hover
+- Graceful "—" for missing data
+- Tabular-nums for consistent number alignment
+
+### Design Decisions
+
+1. Pattern consistency: Mirrors per-toolhead display in `JobDetailsSection.tsx` for UI cohesion
+2. Card vs table detail: Cards show full breakdown inline; tables show aggregates with hover tooltips to save space
+3. Graceful degradation: Components handle missing toolheadUsages data by omitting sections/columns
+4. Multi-toolhead totals: Only shown when 2+ toolheads present
+5. Type-safe implementation with proper TypeScript imports and optional chaining
+
+### Impact
+
+- ✅ 1659 React tests passing
+- ✅ Clean build (0 TypeScript errors)
+- ✅ Users can now see per-material filament consumption and costs in job history
+
+---
+
+## 2026-04-01: ObicoSettings Runtime Configuration Consistency
+
+**Author:** Dallas (Lead)  
+**Status:** ✅ IMPLEMENTED (PFarm1-07s)  
+**Date:** 2026-04-01
+
+### Problem Statement
+
+ObicoSettings consumers were inconsistently reading from either `IOptions<ObicoSettings>` (static config file) or `ISettingsService` (persisted database). This caused skew: users changed Obico settings via Settings UI, but some code paths read stale config file values instead of database values.
+
+### Decision
+
+**All ObicoSettings runtime consumers MUST use ISettingsService for consistency**
+
+IOptions<ObicoSettings> binding remains for bootstrap/initial config load, but all runtime code should read from ISettingsService to respect user modifications stored in the database.
+
+### Implementation
+
+**Audited and migrated all ObicoSettings consumers:**
+- PrintFailureMonitorService → ISettingsService ✅
+- ObicoFailureDetectionService → ISettingsService ✅
+- PrintersController → Migrated from `IOptions<ObicoSettings>` to `ISettingsService` ✅
+- Options binding in ServiceCollectionExtensions → Bootstrap only (correct) ✅
+
+### Pattern for Future Settings
+
+When adding new settings classes:
+1. Add options binding in `ServiceCollectionExtensions` for bootstrap
+2. Runtime consumers MUST use `ISettingsService.Get<T>()` for persisted values
+3. Never use `IOptions<T>` in runtime code that should respect user modifications
+
+### Impact
+
+- ✅ Build passes (0 errors, 0 warnings)
+- ✅ Runtime consistency: all code reads database values instead of stale config file
+- ✅ User modifications via Settings UI are immediately visible to all consumers
+- ✅ Standard injection pattern established for future settings work
+
+---
+
+## 2026-04-01: Multi-Toolhead Job Cost Calculation Regression Gates
+
+**Author:** Kane (QA / Regression Specialist)  
+**Status:** ✅ IMPLEMENTED (PFarm1-kk0v)  
+**Date:** 2026-04-01
+
+### Problem Statement
+
+Multi-toolhead cost calculation seam was untested, creating financial accuracy risk. Edge cases around material cost aggregation, per-toolhead pricing, and missing data scenarios were not covered by regression tests.
+
+### Decision
+
+Implement comprehensive regression test suite for multi-toolhead cost calculation with 11+ focused test methods
+
+### Implementation
+
+**New test file:** `JobCostCalculationMultiToolheadTests.cs`
+
+Test coverage includes:
+- Multi-toolhead cost aggregation with varying material prices
+- Cost-per-toolhead with individual toolhead pricing
+- Edge cases: 0-cost materials, missing pricing, default pricing fallback
+- Bounds validation: max 16 toolheads
+- Rounding accuracy: monetary precision maintained across multi-toolhead scenarios
+- Material cost breakdowns: per-extruder costs sum correctly to job total
+
+### Design
+
+- Focused test class for high-risk financial seam
+- Uses existing job costing service contract
+- Tests operate against real EF Core DbContext (integration layer)
+- All tests passing with 0 flakiness
+
+### Impact
+
+- ✅ 1821 tests passing (including 11 new multi-toolhead cost tests)
+- ✅ Financial accuracy locked in for multi-toolhead scenarios
+- ✅ Regression gate prevents cost calculation regressions in future multi-toolhead work
+
