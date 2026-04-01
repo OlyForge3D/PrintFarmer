@@ -108,3 +108,7 @@ tools/installer/dist/
 .squad/decisions/inbox/
 .squad/sessions/
 .squad-workstream
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+.beads-credential-key
