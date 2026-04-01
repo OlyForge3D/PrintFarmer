@@ -362,7 +362,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 double totalGrams = perExtruderUsage.Values.Sum();
                 job.ActualFilamentUsage = totalGrams;
 
-                // Get toolhead spool assignments for this printer
+                // Load any existing snapshot rows created at dispatch time
+                var existingUsages = await _db.Set<PrintJobToolheadUsage>()
+                    .Where(u => u.PrintJobId == job.Id)
+                    .ToListAsync(ct);
+                var existingByIndex = existingUsages.ToDictionary(u => u.ToolheadIndex);
+
+                // Get toolhead spool assignments for this printer (fallback only)
                 var toolheads = await _db.Toolheads
                     .Where(t => t.PrinterId == printerId)
                     .OrderBy(t => t.Index)
@@ -373,23 +379,33 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
                 foreach (var (toolIndex, grams) in perExtruderUsage)
                 {
-                    var toolhead = toolheads.FirstOrDefault(t => t.Index == toolIndex);
-                    var usage = new PrintJobToolheadUsage
+                    if (existingByIndex.TryGetValue(toolIndex, out var existing))
                     {
-                        Id = Guid.NewGuid(),
-                        PrintJobId = job.Id,
-                        ToolheadIndex = toolIndex,
-                        SpoolmanSpoolId = toolhead?.CurrentSpoolId,
-                        FilamentUsageGrams = grams,
-                        FilamentName = toolhead?.CurrentMaterial,
-                        FilamentColor = toolhead?.CurrentFilamentColor
-                    };
-                    _db.Set<PrintJobToolheadUsage>().Add(usage);
+                        // Update the dispatch snapshot row — preserve snapshotted SpoolmanSpoolId
+                        existing.FilamentUsageGrams = grams;
+                    }
+                    else
+                    {
+                        // No snapshot row — create a new one using live toolhead data
+                        var toolhead = toolheads.FirstOrDefault(t => t.Index == toolIndex);
+                        var usage = new PrintJobToolheadUsage
+                        {
+                            Id = Guid.NewGuid(),
+                            PrintJobId = job.Id,
+                            ToolheadIndex = toolIndex,
+                            SpoolmanSpoolId = toolhead?.CurrentSpoolId,
+                            FilamentUsageGrams = grams,
+                            FilamentName = toolhead?.CurrentMaterial,
+                            FilamentColor = toolhead?.CurrentFilamentColor
+                        };
+                        _db.Set<PrintJobToolheadUsage>().Add(usage);
+                        existing = usage;
+                    }
 
-                    // Add to batch consumption list if spool is assigned
-                    if (toolhead?.CurrentSpoolId.HasValue == true && grams > 0)
+                    // Add to batch consumption list using the record's spool (snapshotted or live)
+                    if (existing.SpoolmanSpoolId.HasValue && grams > 0)
                     {
-                        consumptions.Add((toolhead.CurrentSpoolId.Value, grams));
+                        consumptions.Add((existing.SpoolmanSpoolId.Value, grams));
                     }
                 }
 
@@ -419,23 +435,34 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 {
                     job.ActualFilamentUsage = usageGrams;
 
-                    // Also create a single toolhead usage record for consistency
-                    var primaryToolhead = await _db.Toolheads
-                        .FirstOrDefaultAsync(t => t.PrinterId == printerId && t.IsPrimary, ct);
+                    // Upsert single toolhead usage record (snapshot may already exist)
+                    var existingSingle = await _db.Set<PrintJobToolheadUsage>()
+                        .FirstOrDefaultAsync(u => u.PrintJobId == job.Id && u.ToolheadIndex == 0, ct);
 
-                    if (primaryToolhead is not null)
+                    if (existingSingle is not null)
                     {
-                        var usage = new PrintJobToolheadUsage
+                        // Update the dispatch snapshot row — preserve snapshotted SpoolmanSpoolId
+                        existingSingle.FilamentUsageGrams = usageGrams;
+                    }
+                    else
+                    {
+                        var primaryToolhead = await _db.Toolheads
+                            .FirstOrDefaultAsync(t => t.PrinterId == printerId && t.IsPrimary, ct);
+
+                        if (primaryToolhead is not null)
                         {
-                            Id = Guid.NewGuid(),
-                            PrintJobId = job.Id,
-                            ToolheadIndex = 0,
-                            SpoolmanSpoolId = printer.CurrentSpoolId ?? primaryToolhead.CurrentSpoolId,
-                            FilamentUsageGrams = usageGrams,
-                            FilamentName = primaryToolhead.CurrentMaterial,
-                            FilamentColor = primaryToolhead.CurrentFilamentColor
-                        };
-                        _db.Set<PrintJobToolheadUsage>().Add(usage);
+                            var usage = new PrintJobToolheadUsage
+                            {
+                                Id = Guid.NewGuid(),
+                                PrintJobId = job.Id,
+                                ToolheadIndex = 0,
+                                SpoolmanSpoolId = printer.CurrentSpoolId ?? primaryToolhead.CurrentSpoolId,
+                                FilamentUsageGrams = usageGrams,
+                                FilamentName = primaryToolhead.CurrentMaterial,
+                                FilamentColor = primaryToolhead.CurrentFilamentColor
+                            };
+                            _db.Set<PrintJobToolheadUsage>().Add(usage);
+                        }
                     }
                 }
 

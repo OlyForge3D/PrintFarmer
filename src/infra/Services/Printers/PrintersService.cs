@@ -2662,9 +2662,6 @@ public class PrintersService(
             return new CommandResult(false, $"Printer {id} not found");
         }
 
-        // Find the toolhead by index
-        Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
-
         // Bounds check: reject toolhead indices outside safe range
         if (toolheadIndex < 0 || toolheadIndex > MaxToolheadIndex)
         {
@@ -2673,6 +2670,9 @@ public class PrintersService(
                 toolheadIndex, MaxToolheadIndex, p.Name, id);
             return new CommandResult(false, $"Toolhead index {toolheadIndex} is out of bounds (max: {MaxToolheadIndex})");
         }
+
+        // Find the toolhead by index
+        Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
         // Auto-create MMU gates when the toolhead doesn't exist.
         // If the printer reports MMU gates via SignalR but MultiMaterial isn't set yet,
@@ -2749,9 +2749,6 @@ public class PrintersService(
             return new CommandResult(false, $"Printer {id} not found");
         }
 
-        // Find the toolhead by index
-        Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
-
         // Bounds check: reject toolhead indices outside safe range
         if (toolheadIndex < 0 || toolheadIndex > MaxToolheadIndex)
         {
@@ -2760,6 +2757,9 @@ public class PrintersService(
                 toolheadIndex, MaxToolheadIndex, p.Name, id);
             return new CommandResult(false, $"Toolhead index {toolheadIndex} is out of bounds (max: {MaxToolheadIndex})");
         }
+
+        // Find the toolhead by index
+        Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
         // Auto-create MMU gates when the toolhead doesn't exist.
         if (toolhead is null)
