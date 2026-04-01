@@ -104,3 +104,36 @@
 4. Parker lands clean commit after Kane re-approval and validation
 
 ---
+
+## Triple-Model Pre-Commit Code Review Gate (2026-04-01)
+
+**Decision:** All commits must pass a triple-model code review gate before landing.
+
+**Owner(s):** Jeff Papiez (directive), Squad Coordinator (enforcement)
+
+**Status:** ✅ Implemented — agents created, ceremony defined
+
+**Protocol:**
+- Three dedicated Code Reviewer agents review every commit in parallel:
+  - **Bishop** → GPT-5.4
+  - **Hicks** → Gemini 3 Pro Preview
+  - **Vasquez** → Claude Opus 4.6
+- Each reviewer independently analyzes the diff for bugs, security issues, logic errors, correctness
+- Each outputs APPROVE or REQUEST_CHANGES with severity-ranked issues
+- 🔴 Critical issues from ANY reviewer → commit blocked until resolved
+- 🟡 Warnings should be addressed; may proceed with justification
+- 🔵 Info items are advisory
+- Top issues consolidated and fixed before commit proceeds
+
+**Rationale:** Multi-model diversity catches more issues than a single model. Different architectures (GPT, Gemini, Claude) have complementary strengths — pattern recognition, logical reasoning, and contextual understanding.
+
+**Affected Files:**
+- `.squad/agents/bishop/charter.md` — GPT-5.4 reviewer
+- `.squad/agents/hicks/charter.md` — Gemini 3 Pro reviewer
+- `.squad/agents/vasquez/charter.md` — Claude Opus 4.6 reviewer
+- `.squad/ceremonies.md` — Code Review Gate ceremony added
+- `.squad/routing.md` — Code review routing updated
+- `.squad/team.md` — Three new members added
+- `.squad/casting/registry.json` — Three new registry entries
+
+---

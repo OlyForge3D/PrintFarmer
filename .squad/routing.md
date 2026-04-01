@@ -9,7 +9,7 @@ How to decide who handles what.
 | Architecture, design, scope | Dallas | System design, technical decisions, cross-domain concerns |
 | React, TypeScript, UI, frontend | Ripley | Components, pages, styling, frontend state, SignalR client |
 | C#, .NET, API, database, backend | Lambert | Controllers, EF Core, migrations, backend plugins, SignalR hubs |
-| Code review | Dallas | Review PRs, check quality, approve/reject changes |
+| Code review (pre-commit gate) | Bishop + Hicks + Vasquez | Triple-model review: GPT-5.4, Gemini 3 Pro, Opus 4.6 — all three review in parallel |
 | Testing, QA, coverage | Kane | Write tests, find edge cases, run test suites, coverage analysis |
 | Documentation, API docs, user guides, README | Ash | API reference, user docs, changelogs, migration guides, config docs |
 | Research, competitive analysis, features | Brett | Market research, competitor analysis, feature recommendations, trends |
