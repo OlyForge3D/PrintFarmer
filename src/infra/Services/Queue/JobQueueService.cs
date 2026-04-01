@@ -209,7 +209,8 @@ public class JobQueueService : IJobQueueService
             CreatedAt = j.CreatedAt,
             UpdatedAt = j.UpdatedAt,
             GcodeFileName = j.GcodeFile?.Name ?? string.Empty,
-            AssignedPrinterName = j.AssignedPrinter?.Name ?? string.Empty
+            AssignedPrinterName = j.AssignedPrinter?.Name ?? string.Empty,
+            ToolheadUsages = MapToolheadUsages(j)
         }).ToList();
 
         List<JobQueuePrintJobDto> queued = dtos.Where(d => d.Status.HasValue && (d.Status.Value == Farm.Infrastructure.PrintJobStatus.Queued || d.Status.Value == Farm.Infrastructure.PrintJobStatus.Assigned)).ToList();
@@ -372,7 +373,8 @@ public class JobQueueService : IJobQueueService
             RemainingCopies = job.RemainingCopies,
             ProjectFileId = job.ProjectFileId,
             CreatedAt = job.CreatedAt,
-            UpdatedAt = job.UpdatedAt
+            UpdatedAt = job.UpdatedAt,
+            ToolheadUsages = MapToolheadUsages(job)
         };
     }
 
@@ -422,7 +424,8 @@ public class JobQueueService : IJobQueueService
                 RemainingCopies = job.RemainingCopies,
                 ProjectFileId = job.ProjectFileId,
                 CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
+                UpdatedAt = job.UpdatedAt,
+                ToolheadUsages = MapToolheadUsages(job)
             };
     }
 
@@ -498,7 +501,8 @@ public class JobQueueService : IJobQueueService
             RemainingCopies = job.RemainingCopies,
             ProjectFileId = job.ProjectFileId,
             CreatedAt = job.CreatedAt,
-            UpdatedAt = job.UpdatedAt
+            UpdatedAt = job.UpdatedAt,
+            ToolheadUsages = MapToolheadUsages(job)
         };
     }
 
@@ -630,7 +634,8 @@ public class JobQueueService : IJobQueueService
             RemainingCopies = job.RemainingCopies,
             ProjectFileId = job.ProjectFileId,
             CreatedAt = job.CreatedAt,
-            UpdatedAt = job.UpdatedAt
+            UpdatedAt = job.UpdatedAt,
+            ToolheadUsages = MapToolheadUsages(job!)
         };
     }
 
@@ -692,4 +697,18 @@ public class JobQueueService : IJobQueueService
 
         return totalMinutes > 0 ? DateTime.UtcNow.AddMinutes(totalMinutes) : null;
     }
+
+    private static List<PrintJobToolheadUsageDto> MapToolheadUsages(PrintJob job) =>
+        (job.ToolheadUsages ?? [])
+            .OrderBy(tu => tu.ToolheadIndex)
+            .Select(tu => new PrintJobToolheadUsageDto(
+                tu.Id,
+                tu.PrintJobId,
+                tu.ToolheadIndex,
+                tu.SpoolmanSpoolId,
+                tu.FilamentUsageGrams,
+                tu.FilamentName,
+                tu.FilamentColor,
+                tu.MaterialCostUsd))
+            .ToList();
 }

@@ -24,6 +24,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
+            .Include(pj => pj.ToolheadUsages)
             .FirstOrDefaultAsync(pj => pj.Id == id, ct);
     }
 
@@ -33,6 +34,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
+            .Include(pj => pj.ToolheadUsages)
             .FirstOrDefaultAsync(pj => pj.Id == id, ct);
     }
 
@@ -88,6 +90,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
+            .Include(pj => pj.ToolheadUsages)
             .AsQueryable();
 
         // Apply status filter or default to active jobs
@@ -235,7 +238,8 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         IQueryable<PrintJob> query = _context.PrintJobs
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
-                .ThenInclude(p => p!.Model);
+                .ThenInclude(p => p!.Model)
+            .Include(pj => pj.ToolheadUsages);
 
         // Filter by statuses - default to completed/failed/cancelled if not specified
         if (statuses != null && statuses.Count > 0)

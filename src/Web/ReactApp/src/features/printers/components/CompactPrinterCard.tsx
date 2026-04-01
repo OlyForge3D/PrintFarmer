@@ -17,7 +17,8 @@ import { FailureDetectionBadge } from '@/features/printers/components/FailureDet
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
-import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
+import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type MmuGate } from '@/types/api';
+import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
@@ -37,7 +38,7 @@ import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/u
 import type { TagDto } from '@/services/tagService';
 
 interface CompactPrinterCardProps {
-  printer: Printer;
+  printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onExpand: () => void;
   onEdit?: (printer: Printer) => void;
@@ -305,24 +306,62 @@ export function CompactPrinterCard({
       {/* Bottom row: filament info + ellipsis menu */}
       <div className="flex items-center px-3 pb-3 border-t border-white/5 pt-2" ref={menuRef}>
         <div className="flex items-center gap-2 flex-1 min-w-0 text-xs text-pf-text-secondary">
-          {printer.spoolInfo?.hasActiveSpool ? (
-            <>
-              {(() => {
-                const color = printer.spoolInfo.colorHex ?? '#888';
-                const remaining = printer.spoolInfo.remainingWeightG;
-                const initial = printer.spoolInfo.initialWeightG;
-                const percent = (remaining != null && initial != null && initial > 0)
-                  ? Math.max(0, Math.min(100, (remaining / initial) * 100))
-                  : null;
-                const r = 8;
-                const circumference = 2 * Math.PI * r;
-                const offset = percent != null ? circumference * (1 - percent / 100) : circumference;
-                const ringTooltip = [
-                  printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Unknown',
-                  printer.spoolInfo.vendor,
-                  percent != null ? `${Math.round(percent)}% remaining` : null,
-                ].filter(Boolean).join(' · ');
-                return (
+          {(() => {
+            const mmuGates = (printer as PrinterDisplay).mmuStatus?.gates;
+            const hasMultiSpool = mmuGates && mmuGates.length > 0;
+
+            if (hasMultiSpool) {
+              const loadedGates = mmuGates.filter((g: MmuGate) => g.status === 1);
+              return (
+                <>
+                  <div className="flex items-center gap-1 shrink-0" aria-label={`${loadedGates.length} of ${mmuGates.length} gates loaded`}>
+                    {mmuGates.map((gate: MmuGate) => {
+                      const isLoaded = gate.status === 1;
+                      const color = gate.color ?? '#888';
+                      const tooltip = isLoaded
+                        ? `T${gate.index}: ${gate.filamentName ?? gate.material ?? 'Unknown'}`
+                        : `T${gate.index}: Empty`;
+                      return (
+                        <span
+                          key={gate.index}
+                          className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0"
+                          title={tooltip}
+                          aria-label={tooltip}
+                          style={{
+                            backgroundColor: isLoaded ? color : 'transparent',
+                            borderStyle: isLoaded ? 'solid' : 'dashed',
+                            opacity: isLoaded ? 1 : 0.4,
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                  <span className="truncate">
+                    {loadedGates.length > 0
+                      ? [...new Set(loadedGates.map((g: MmuGate) => g.material).filter(Boolean))].join(', ') || 'Multi-material'
+                      : 'No spools loaded'}
+                  </span>
+                </>
+              );
+            }
+
+            if (printer.spoolInfo?.hasActiveSpool) {
+              const color = printer.spoolInfo.colorHex ?? '#888';
+              const remaining = printer.spoolInfo.remainingWeightG;
+              const initial = printer.spoolInfo.initialWeightG;
+              const percent = (remaining != null && initial != null && initial > 0)
+                ? Math.max(0, Math.min(100, (remaining / initial) * 100))
+                : null;
+              const r = 8;
+              const circumference = 2 * Math.PI * r;
+              const offset = percent != null ? circumference * (1 - percent / 100) : circumference;
+              const ringTooltip = [
+                printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Unknown',
+                printer.spoolInfo.vendor,
+                percent != null ? `${Math.round(percent)}% remaining` : null,
+              ].filter(Boolean).join(' · ');
+              return (
+                <>
                   <svg
                     width="20"
                     height="20"
@@ -345,33 +384,33 @@ export function CompactPrinterCard({
                       transform="rotate(-90 10 10)"
                     />
                   </svg>
-                );
-              })()}
-              <span className="truncate">
-                {printer.spoolInfo.material ?? 'Unknown'}
-              </span>
-              {printer.spoolInfo.remainingWeightG != null && (
-                <span
-                  className="shrink-0 text-pf-text-tertiary cursor-default"
-                  title={`${printer.spoolInfo.remainingWeightG >= 1000 ? `${(printer.spoolInfo.remainingWeightG / 1000).toFixed(2)}kg` : `${Math.round(printer.spoolInfo.remainingWeightG)}g`} remaining${printer.spoolInfo.initialWeightG ? ` of ${printer.spoolInfo.initialWeightG >= 1000 ? `${(printer.spoolInfo.initialWeightG / 1000).toFixed(1)}kg` : `${Math.round(printer.spoolInfo.initialWeightG)}g`}` : ''}`}
-                >
-                  {printer.spoolInfo.remainingWeightG >= 1000
-                    ? `${(printer.spoolInfo.remainingWeightG / 1000).toFixed(1)}kg`
-                    : `${Math.round(printer.spoolInfo.remainingWeightG)}g`}
-                </span>
-              )}
-              <span
-                className="shrink-0 w-8 h-4 rounded-full border border-white/20 overflow-hidden"
-                title={printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Filament color'}
-              >
-                <svg className="h-full w-full" viewBox="0 0 32 16" aria-hidden="true" focusable="false">
-                  <rect width="32" height="16" fill={printer.spoolInfo.colorHex ?? '#888'} />
-                </svg>
-              </span>
-            </>
-          ) : (
-            <span className="italic text-pf-text-tertiary">No spool loaded</span>
-          )}
+                  <span className="truncate">
+                    {printer.spoolInfo.material ?? 'Unknown'}
+                  </span>
+                  {printer.spoolInfo.remainingWeightG != null && (
+                    <span
+                      className="shrink-0 text-pf-text-tertiary cursor-default"
+                      title={`${printer.spoolInfo.remainingWeightG >= 1000 ? `${(printer.spoolInfo.remainingWeightG / 1000).toFixed(2)}kg` : `${Math.round(printer.spoolInfo.remainingWeightG)}g`} remaining${printer.spoolInfo.initialWeightG ? ` of ${printer.spoolInfo.initialWeightG >= 1000 ? `${(printer.spoolInfo.initialWeightG / 1000).toFixed(1)}kg` : `${Math.round(printer.spoolInfo.initialWeightG)}g`}` : ''}`}
+                    >
+                      {printer.spoolInfo.remainingWeightG >= 1000
+                        ? `${(printer.spoolInfo.remainingWeightG / 1000).toFixed(1)}kg`
+                        : `${Math.round(printer.spoolInfo.remainingWeightG)}g`}
+                    </span>
+                  )}
+                  <span
+                    className="shrink-0 w-8 h-4 rounded-full border border-white/20 overflow-hidden"
+                    title={printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Filament color'}
+                  >
+                    <svg className="h-full w-full" viewBox="0 0 32 16" aria-hidden="true" focusable="false">
+                      <rect width="32" height="16" fill={printer.spoolInfo.colorHex ?? '#888'} />
+                    </svg>
+                  </span>
+                </>
+              );
+            }
+
+            return <span className="italic text-pf-text-tertiary">No spool loaded</span>;
+          })()}
         </div>
         <div className="relative shrink-0 ml-2">
           <Button
