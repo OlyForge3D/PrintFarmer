@@ -55,6 +55,29 @@ Treat Obico self-hosted compatibility as a two-layer backend regression seam:
 - 2026-03-27: The smallest coherent regression gate for session-timeline v1 is four pieces: `PrinterSessionTimelineServiceTests` for event composition and session ordering, `PrinterSessionTimelineControllerTests` for endpoint reachability/404 behavior, `PrintSessionTimeline.test.tsx` for chronological mixed-row rendering, and the existing incident-history tests because failure events still enter the timeline through `FailureDetectionIncident`.
 - 2026-07-15: Per-extruder gcode filament parsing tests written as TDD stubs in `GcodeMetadataPerExtruderFilamentTests.cs`. The existing `GcodeMetadataExtractorService` regex patterns (`FilamentLengthConfigPattern`, `FilamentWeightConfigPattern`) only capture the first numeric value from comma-separated lists — `([\d.]+)` instead of `([\d.,\s]+)`. Lambert needs to update these patterns plus add `FilamentPerExtruderWeightG`, `FilamentPerExtruderLengthMm`, and `ExtruderCount` to `GcodeMetadataExtracted`. All 46 compile errors are from those three missing properties — expected TDD behavior.
 - 2026-07-15: The `filament used [g]` and `filament used [mm]` comment patterns are handled by two regex paths each: `FilamentWeightPattern`/`FilamentWeightConfigPattern` and `FilamentLengthPattern`/`FilamentLengthConfigPattern`. The "config" variants match the `; filament used [g] = X` format from slicer config blocks. The non-config variants match `; filament_g = X`. Both paths need multi-value support.
+- 2026-04-01: Multi-toolhead completion regression tests written for two P1 bugs. Bug #1 (duplicate rows): The unique composite index on `(PrintJobId, ToolheadIndex)` in `PrintJobToolheadUsageConfiguration.cs` is the schema-level guard; completion code in `FetchAndRecordFilamentUsageAsync` (PrintJobCompletionService.cs:360-410) must load existing rows by index and UPDATE them instead of inserting. Bug #2 (wrong spool): Snapshot rows created by `SnapshotSlicerEstimatesAsync` (PrintJobManagementService.cs:2543-2616) capture SpoolmanSpoolId at dispatch time; completion must preserve that value and NOT overwrite with live toolhead CurrentSpoolId. Key test file: `src/tests/Farm.Web.Api.Tests/Services/ToolheadUsageCompletionRegressionTests.cs`. 5 tests: update-not-duplicate, unique-index-guard, snapshotted-spool-preserved, legacy-fallback, partial-snapshot-hybrid.
+
+## 2026-04-01: Multi-Toolhead Filament Tracking P1 Regression Tests
+
+**Role:** QA / Regression Specialist  
+**Status:** ✅ Complete — 5/5 tests passing
+
+Wrote regression tests for two P1 bugs identified by code review gate in the multi-toolhead filament tracking completion path:
+
+**Bug #1 — Duplicate PrintJobToolheadUsage records:**
+- `CompletionWithExistingSnapshots_UpdatesRowsInsteadOfCreatingDuplicates`: Pre-populates dispatch snapshot rows, simulates completion, asserts row count stays at 2 and both SlicerEstimateGrams AND FilamentUsageGrams are populated on the same row.
+- `UniqueCompositeIndex_PreventsRawDuplicateInsertion`: Proves the schema guard — raw duplicate insert throws DbUpdateException.
+
+**Bug #2 — Wrong spool debited:**
+- `CompletionUsesSnapshotSpoolId_EvenWhenLiveToolheadSpoolChanged`: Snapshots spool 100/200, swaps toolheads to 999/888 mid-print, verifies completion uses snapshotted 100/200 for debits.
+
+**Fallback tests:**
+- `CompletionWithNoSnapshots_CreatesNewRowsFromLiveToolheadData`: Legacy jobs with no dispatch snapshot get new rows from live toolhead data.
+- `CompletionWithPartialSnapshots_UpdatesExistingAndCreatesForMissing`: Mixed scenario — T0 has snapshot, T1 doesn't; proves T0 uses snapshotted spool while T1 falls back to live.
+
+**Key file:** `src/tests/Farm.Web.Api.Tests/Services/ToolheadUsageCompletionRegressionTests.cs`
+
+**Validation:** Build 0 errors/0 warnings, 5/5 tests PASS (9.6s).
 
 ## 2026-03-26: Failure Detection Incident History Test Coverage & QA Gate → APPROVED
 
