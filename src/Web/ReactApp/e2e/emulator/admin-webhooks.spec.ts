@@ -115,10 +115,12 @@ test.describe('Admin Webhooks — Emulator', () => {
       await firstCheckbox.check();
     }
 
-    // Save
-    const saveButton = page.getByRole('button', { name: /save|create|add|submit/i }).first();
+    // Save — scope to modal dialog to avoid hitting the "Add Webhook" button behind it
+    const modal = page.locator('[role="dialog"]');
+    const saveButton = modal.getByRole('button', { name: /save|create|submit/i }).first();
     if (await saveButton.isVisible().catch(() => false)) {
-      await saveButton.click();
+      await saveButton.scrollIntoViewIfNeeded();
+      await saveButton.click({ force: true });
       await page.waitForTimeout(1_000);
 
       // Webhook should appear in the list

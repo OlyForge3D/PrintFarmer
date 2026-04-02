@@ -61,8 +61,14 @@ test.describe('Locations — Emulator', () => {
       await createButton.click();
       await page.waitForTimeout(500);
 
-      // Should show a form with name input
-      const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[placeholder*="location" i]').first();
+      // Should show a form with name input (placeholder varies by feature)
+      const nameInput = page.locator(
+        'input[name="name"], ' +
+        'input[placeholder*="name" i], ' +
+        'input[placeholder*="location" i], ' +
+        'input[placeholder*="warehouse" i], ' +
+        '[role="dialog"] input[type="text"]'
+      ).first();
       const hasName = await nameInput.isVisible().catch(() => false);
       expect(hasName).toBeTruthy();
     }
@@ -78,11 +84,19 @@ test.describe('Locations — Emulator', () => {
       await createButton.click();
       await page.waitForTimeout(500);
 
-      const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[placeholder*="location" i]').first();
+      const nameInput = page.locator(
+        'input[name="name"], ' +
+        'input[placeholder*="name" i], ' +
+        'input[placeholder*="location" i], ' +
+        'input[placeholder*="warehouse" i], ' +
+        '[role="dialog"] input[type="text"]'
+      ).first();
       if (await nameInput.isVisible().catch(() => false)) {
         await nameInput.fill('E2E Test Location');
 
-        const saveButton = page.getByRole('button', { name: /save|create|add|submit/i }).first();
+        // Scope save button to modal dialog to avoid hitting "Add" button behind it
+        const modal = page.locator('[role="dialog"]');
+        const saveButton = modal.getByRole('button', { name: /save|create|submit/i }).first();
         if (await saveButton.isVisible().catch(() => false)) {
           await saveButton.click();
           await page.waitForTimeout(1_000);

@@ -57,7 +57,13 @@ test.describe('Printer Groups — Emulator', () => {
     await page.waitForTimeout(500);
 
     // Modal should open with name input
-    const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[placeholder*="group" i]').first();
+    const nameInput = page.locator(
+      'input[name="name"], ' +
+      'input[placeholder*="name" i], ' +
+      'input[placeholder*="group" i], ' +
+      'input[placeholder*="fleet" i], ' +
+      '[role="dialog"] input[type="text"]'
+    ).first();
     const hasNameInput = await nameInput.isVisible().catch(() => false);
     expect(hasNameInput).toBeTruthy();
 
@@ -73,12 +79,19 @@ test.describe('Printer Groups — Emulator', () => {
     await page.waitForTimeout(500);
 
     // Fill group name
-    const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[placeholder*="group" i]').first();
+    const nameInput = page.locator(
+      'input[name="name"], ' +
+      'input[placeholder*="name" i], ' +
+      'input[placeholder*="group" i], ' +
+      'input[placeholder*="fleet" i], ' +
+      '[role="dialog"] input[type="text"]'
+    ).first();
     if (await nameInput.isVisible().catch(() => false)) {
       await nameInput.fill('E2E Test Group');
 
-      // Submit
-      const saveButton = page.getByRole('button', { name: /save|create|add|submit/i }).first();
+      // Submit — scope to modal dialog to avoid hitting "Create" button behind it
+      const modal = page.locator('[role="dialog"]');
+      const saveButton = modal.getByRole('button', { name: /save|create|submit/i }).first();
       if (await saveButton.isVisible().catch(() => false)) {
         await saveButton.click();
         await page.waitForTimeout(1_000);
