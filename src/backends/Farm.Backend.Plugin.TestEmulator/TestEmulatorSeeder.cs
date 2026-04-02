@@ -30,16 +30,15 @@ public sealed class TestEmulatorSeeder(
         using IServiceScope scope = scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
+        // Load all printers once outside the loop to avoid N×GetAllAsync calls
+        List<Printer> allPrinters = await unitOfWork.Printers.GetAllAsync(cancellationToken);
+
         foreach (EmulatedPrinterConfig config in settings.Printers)
         {
-            // Check if a printer with this server URL already exists
-            string serverUrl = $"http://testemulator-{Guid.Empty}";
             Guid printerId;
 
-            // First try to find by a matching server URL pattern
-            Printer? existing = null;
-            List<Printer> existingTestPrinters = await unitOfWork.Printers.GetAllAsync(cancellationToken);
-            existing = existingTestPrinters.FirstOrDefault(p =>
+            // Find an existing emulator printer by name + server URL prefix
+            Printer? existing = allPrinters.FirstOrDefault(p =>
                 p.Name == config.Name && p.ServerUrl.StartsWith("http://testemulator-", StringComparison.OrdinalIgnoreCase));
 
             if (existing is not null)

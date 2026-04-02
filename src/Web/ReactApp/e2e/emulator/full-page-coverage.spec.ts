@@ -8,6 +8,8 @@ import { test, expect, getPrinterCards } from '../fixtures/emulator-setup';
  */
 
 test.describe('Full Page Coverage — Emulator', () => {
+  // Emulator tests share mutable printer state — run serially to avoid interference
+  test.describe.configure({ mode: 'serial' });
   /** Collect console errors for the duration of each test. */
   let consoleErrors: string[] = [];
 

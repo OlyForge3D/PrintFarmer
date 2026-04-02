@@ -49,6 +49,7 @@ public sealed class TestEmulatorStateManager
     {
         if (_states.TryGetValue(printerId, out var state) && state.State == EmulatorPrinterState.Printing)
         {
+            state.PausedAt = DateTime.UtcNow;
             state.State = EmulatorPrinterState.Paused;
         }
     }

@@ -540,3 +540,52 @@ Audited all ObicoSettings consumers and enforced standardized injection pattern.
 **Pattern established:** All runtime settings now flow through single ISettingsService abstraction. User modifications via Settings UI immediately visible to all consumers.
 
 **Impact:** Runtime consistency; no stale config file values during execution; foundation for future settings work.
+
+---
+
+## Session: Backend Emulator Feasibility Analysis (2026-04-01)
+
+**Role:** Lead feasibility analysis  
+**Status:** Analysis complete; recommendation documented
+
+### Work Completed
+- Analyzed backend plugin architecture (`IBackendClientPlugin`, `IExtendedBackendPlugin`)
+- Reviewed capability interface system (27 `ISupports*` interfaces identified)
+- Examined Moonraker/PrusaLink implementations as reference backends
+- Mapped frontend API surface (~180 methods in ApiClient)
+- Analyzed SignalR real-time event flow (PrinterUpdated, DiscoveryProgress, JobQueueUpdate)
+- Investigated Spoolman integration requirements
+- Assessed Playwright test configuration and existing E2E setup
+
+### Key Findings
+
+**Backend Plugin Surface:**
+- Core interfaces: `IBackendClientPlugin` (metadata, registration), `IExtendedBackendPlugin` (status client, additional services)
+- 27 capability interfaces covering: file operations, job control, cameras, movement, temperature, history, spoolman, composite status
+- Moonraker: WebSocket subscription service for real-time updates
+- PrusaLink/OctoPrint/SDCP: HTTP polling services (5-10s intervals)
+- Discovery probes: HTTP-based network scanning per backend type
+
+**Frontend Requirements:**
+- ~180 API methods consumed by React UI
+- Critical data flows: printer status, job progress, temperatures, camera URLs, file lists, history
+- SignalR events: `printerupdated`, `discoveryprogress`, `discoveryprinterf`, `jobqueueupdate`, `failuredetectionevent`
+- Spoolman integration: spool lists, active spool tracking, filament metadata
+
+**Test Infrastructure:**
+- Playwright configured with 8 viewport/browser combinations
+- Existing visual regression tests for homepage/printers page
+- `CustomWebApplicationFactory` for API integration tests (in-memory SQLite)
+
+### Learnings
+1. **Plugin architecture is well-abstracted** — backend emulators can implement `IBackendClientPlugin` like any real backend
+2. **Capability system is explicit** — each `ISupports*` interface documents what a backend can do
+3. **SignalR is central to UI responsiveness** — emulators must publish status updates via PrinterHub
+4. **Discovery is backend-specific** — each backend has its own `INetworkDiscoveryProbe` implementation
+5. **Frontend is data-shape agnostic** — API DTOs abstract backend differences (good for emulation)
+6. **Spoolman is loosely coupled** — only Moonraker backend implements `ISupportsSpoolman`
+
+### Decision Document
+- Created: `.squad/decisions/inbox/dallas-emulator-feasibility.md`
+- Recommendation: **Option D (Hybrid)** — Fake backend plugins + mock API for discovery/spoolman
+- Rationale: Maximizes reuse of real backend infrastructure while allowing test-specific overrides

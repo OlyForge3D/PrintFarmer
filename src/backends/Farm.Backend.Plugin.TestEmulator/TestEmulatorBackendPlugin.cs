@@ -35,11 +35,12 @@ public class TestEmulatorBackendPlugin : IExtendedBackendPlugin
 
     public void RegisterAdditionalServices(IServiceCollection services)
     {
-        // Resolve configuration to check if emulator is enabled.
-        // At DI registration time we don't have a built provider yet, so we read
-        // from the IConfiguration singleton that was already added to services.
-        using ServiceProvider tempProvider = services.BuildServiceProvider();
-        IConfiguration? config = tempProvider.GetService<IConfiguration>();
+        // Read configuration without building a temporary ServiceProvider.
+        // Find the IConfiguration singleton already registered by the host.
+        IConfiguration? config = services
+            .FirstOrDefault(sd => sd.ServiceType == typeof(IConfiguration))
+            ?.ImplementationInstance as IConfiguration;
+
         bool enabled = config?.GetValue<bool>("TestEmulator:Enabled") ?? false;
 
         // Always register settings binding so IOptions<TestEmulatorSettings> resolves
@@ -67,12 +68,9 @@ public class TestEmulatorBackendPlugin : IExtendedBackendPlugin
             services.AddSingleton<TestDiscoveryOverride>();
         }
 
-        bool mockSpoolman = config?.GetValue<bool>("TestEmulator:MockSpoolman") ?? false;
-        if (mockSpoolman)
-        {
-            // TestSpoolmanDataProvider is a static class — no DI registration needed.
-            // Controllers/services access its data directly via static properties.
-        }
+        // NOTE: TestSpoolmanDataProvider and TestDiscoveryOverride are registered but not yet
+        // wired into the actual discovery/Spoolman pipelines. These are scaffolding for future
+        // integration. See TODO comments in each class for the planned wiring approach.
     }
 
     public IEnumerable<string> GetConfigurationSections() => [TestEmulatorSettings.SectionName];
