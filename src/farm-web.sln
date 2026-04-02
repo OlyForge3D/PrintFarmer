@@ -75,6 +75,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Plugin.Core", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Slicer.Integration", "slicer\Farm.Slicer.Integration\Farm.Slicer.Integration.csproj", "{5F27049A-D020-47FE-9F57-661B67DAAAA0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Backend.Plugin.TestEmulator", "backends\Farm.Backend.Plugin.TestEmulator\Farm.Backend.Plugin.TestEmulator.csproj", "{6FF6FBD2-D2AB-4A65-A870-7905500007DC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "infra", "infra", "{30258541-D0D8-F3FD-D559-E63D6BF074C2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -421,6 +425,18 @@ Global
 		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|x64.Build.0 = Release|Any CPU
 		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|x86.ActiveCfg = Release|Any CPU
 		{5F27049A-D020-47FE-9F57-661B67DAAAA0}.Release|x86.Build.0 = Release|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Debug|x64.Build.0 = Debug|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Debug|x86.Build.0 = Debug|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Release|x64.ActiveCfg = Release|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Release|x64.Build.0 = Release|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Release|x86.ActiveCfg = Release|Any CPU
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -446,5 +462,6 @@ Global
 		{943F47FD-5BA8-4676-8270-9AD6F04A680B} = {19CDB172-2F96-3C8E-CBBA-98A8BA357849}
 		{96A8212A-850B-4FAD-A2E5-DF49F7D18663} = {E34191D6-EE5B-7B1D-025F-EDB47609777D}
 		{5F27049A-D020-47FE-9F57-661B67DAAAA0} = {E34191D6-EE5B-7B1D-025F-EDB47609777D}
+		{6FF6FBD2-D2AB-4A65-A870-7905500007DC} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 	EndGlobalSection
 EndGlobal
