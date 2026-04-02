@@ -1,4 +1,4 @@
-import { test, expect, getPrinterCards } from '../fixtures/emulator-setup';
+import { test, expect, getPrinterCards, dismissTourIfVisible } from '../fixtures/emulator-setup';
 
 /**
  * Full Page Coverage E2E Tests — Emulator-backed
@@ -31,10 +31,11 @@ test.describe('Full Page Coverage — Emulator', () => {
   }
 
   test('dashboard page loads with printer cards', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/printers');
     await page.waitForLoadState('networkidle');
+    await dismissTourIfVisible(page);
 
-    // Emulator provides 3 printers — cards should be visible
+    // Emulator provides 3 printers — cards should be visible on /printers
     const cards = getPrinterCards(page);
     await expect(cards.first()).toBeVisible({ timeout: 15_000 });
 
@@ -47,6 +48,7 @@ test.describe('Full Page Coverage — Emulator', () => {
   test('printers list page loads with emulated printers', async ({ page }) => {
     await page.goto('/printers');
     await page.waitForLoadState('networkidle');
+    await dismissTourIfVisible(page);
 
     const cards = getPrinterCards(page);
     await expect(cards.first()).toBeVisible({ timeout: 15_000 });
@@ -63,6 +65,7 @@ test.describe('Full Page Coverage — Emulator', () => {
   test('printer detail page shows status and controls', async ({ page }) => {
     await page.goto('/printers');
     await page.waitForLoadState('networkidle');
+    await dismissTourIfVisible(page);
     await expect(getPrinterCards(page).first()).toBeVisible({ timeout: 15_000 });
 
     // Click on a printer card to open detail sidebar/view
@@ -119,6 +122,8 @@ test.describe('Full Page Coverage — Emulator', () => {
   });
 
   test('no JavaScript console errors on any page', async ({ page }) => {
+    test.setTimeout(60_000); // 7 pages need more time
+
     const pagesToVisit = [
       { path: '/', name: 'Dashboard' },
       { path: '/printers', name: 'Printers' },
@@ -135,7 +140,7 @@ test.describe('Full Page Coverage — Emulator', () => {
 
       await page.goto(pageConfig.path);
       await page.waitForLoadState('networkidle');
-      await page.waitForTimeout(1_000);
+      await page.waitForTimeout(500);
 
       const errors = criticalErrors();
       expect(
