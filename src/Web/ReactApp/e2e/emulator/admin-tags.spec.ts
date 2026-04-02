@@ -48,11 +48,14 @@ test.describe('Admin Tags — Emulator', () => {
   });
 
   test('can open create tag form', async ({ page }) => {
-    await page.waitForTimeout(1_000);
+    // Wait for the page to finish loading (spinner may be visible initially)
+    await page.locator('[class*="spinner"], [class*="animate-spin"]').first()
+      .waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(500);
 
     // Look for a create/add tag button
     const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
-    const hasCreate = await createButton.isVisible().catch(() => false);
+    const hasCreate = await createButton.isVisible({ timeout: 5_000 }).catch(() => false);
 
     if (hasCreate) {
       await createButton.click();

@@ -36,10 +36,25 @@ public class TestEmulatorBackendPlugin : IExtendedBackendPlugin
     public void RegisterAdditionalServices(IServiceCollection services)
     {
         // Read configuration without building a temporary ServiceProvider.
-        // Find the IConfiguration singleton already registered by the host.
-        IConfiguration? config = services
-            .FirstOrDefault(sd => sd.ServiceType == typeof(IConfiguration))
-            ?.ImplementationInstance as IConfiguration;
+        // In .NET 10 minimal hosting, IConfiguration may be registered as a factory
+        // rather than an ImplementationInstance. Try ImplementationInstance first,
+        // then fall back to building a temporary provider.
+        IConfiguration? config = null;
+        foreach (ServiceDescriptor sd in services)
+        {
+            if (sd.ServiceType == typeof(IConfiguration) && sd.ImplementationInstance is IConfiguration c)
+            {
+                config = c;
+                break;
+            }
+        }
+
+        // Fallback: build a minimal provider to resolve IConfiguration
+        if (config is null)
+        {
+            using ServiceProvider tempProvider = services.BuildServiceProvider();
+            config = tempProvider.GetService<IConfiguration>();
+        }
 
         bool enabled = config?.GetValue<bool>("TestEmulator:Enabled") ?? false;
 
@@ -55,8 +70,11 @@ public class TestEmulatorBackendPlugin : IExtendedBackendPlugin
 
         if (!enabled)
         {
+            // TestEmulator is disabled — skip seeder/polling registration
             return;
         }
+
+        // TestEmulator is enabled — register seeder and polling service
 
         // Register the seeder and polling service only when enabled
         services.AddSingleton<IHostedService, TestEmulatorSeeder>();

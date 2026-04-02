@@ -199,8 +199,8 @@ test.describe('Catalog & Settings — Emulator', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
-    // Find a text input and verify it's editable
-    const textInput = page.locator('input[type="text"], input[type="number"], input:not([type])').first();
+    // Find a text input (exclude number inputs which need numeric values)
+    const textInput = page.locator('input[type="text"], input:not([type])').first();
     if (await textInput.isVisible().catch(() => false)) {
       const currentValue = await textInput.inputValue();
       await textInput.fill('test-value');
@@ -208,6 +208,15 @@ test.describe('Catalog & Settings — Emulator', () => {
 
       // Restore original value
       await textInput.fill(currentValue);
+    } else {
+      // Try a number input with a numeric value
+      const numberInput = page.locator('input[type="number"]').first();
+      if (await numberInput.isVisible().catch(() => false)) {
+        const currentValue = await numberInput.inputValue();
+        await numberInput.fill('42');
+        await expect(numberInput).toHaveValue('42');
+        await numberInput.fill(currentValue);
+      }
     }
 
     expect(criticalErrors()).toHaveLength(0);

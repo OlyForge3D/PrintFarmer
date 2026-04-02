@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures/emulator-setup';
+import { test, expect, dismissTourIfVisible } from '../fixtures/emulator-setup';
 
 /**
  * Print Queue E2E Tests — Emulator-backed
@@ -21,6 +21,7 @@ test.describe('Print Queue — Emulator', () => {
     page.on('pageerror', (error) => consoleErrors.push(error.message));
     await page.goto('/printQueue');
     await page.waitForLoadState('networkidle');
+    await dismissTourIfVisible(page);
   });
 
   function criticalErrors(): string[] {

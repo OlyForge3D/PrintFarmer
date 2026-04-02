@@ -93,5 +93,11 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
+    env: {
+      // Force API calls through the Vite proxy so tests work regardless
+      // of the developer's .env VITE_API_BASE_URL (which may point at a
+      // LAN IP unreachable from the Playwright browser).
+      VITE_API_BASE_URL: '',
+    },
   },
 });

@@ -1,4 +1,4 @@
-import { test, expect, getPrinterCards } from '../fixtures/emulator-setup';
+import { test, expect, getPrinterCards, dismissTourIfVisible } from '../fixtures/emulator-setup';
 
 /**
  * Printer Status E2E Tests — Emulator-backed
@@ -16,14 +16,16 @@ test.describe('Printer Status — Emulator', () => {
   // Emulator tests share mutable printer state — run serially to avoid interference
   test.describe.configure({ mode: 'serial' });
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/printers');
     await page.waitForLoadState('networkidle');
+    await dismissTourIfVisible(page);
   });
 
   test('dashboard shows emulated printers with correct names', async ({ page }) => {
     const cards = getPrinterCards(page);
 
-    // The emulator creates 3 printers — at least those should appear
+    // The emulator creates 3 printers — wait for at least 1 to render
+    await expect(cards.first()).toBeVisible({ timeout: 15_000 });
     await expect(cards).toHaveCount(3, { timeout: 15_000 });
 
     const text = await page.locator('body').textContent();
