@@ -143,6 +143,7 @@
       <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.OctoPrint\bin\$(Configuration)\$(TargetFramework)\*.dll" />
       <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.Sdcp\bin\$(Configuration)\$(TargetFramework)\*.dll" />
       <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.FlashForge\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BackendPluginDll Include="$(MSBuildThisFileDirectory)..\backends\Farm.Backend.Plugin.TestEmulator\bin\$(Configuration)\$(TargetFramework)\*.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_BackendPluginDll)" DestinationFolder="$(_BackendPluginsOutputDir)" SkipUnchangedFiles="true" />
   </Target>

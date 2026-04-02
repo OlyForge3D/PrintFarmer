@@ -14,6 +14,8 @@ import { test, expect, getPrinterCards } from '../fixtures/emulator-setup';
  */
 
 test.describe('Job Lifecycle — Emulator', () => {
+  // Emulator tests share mutable printer state — run serially to avoid interference
+  test.describe.configure({ mode: 'serial' });
   test.beforeEach(async ({ page }) => {
     await page.goto('/printers');
     await page.waitForLoadState('networkidle');
@@ -114,11 +116,12 @@ test.describe('Job Lifecycle — Emulator', () => {
       // Pause/Resume may be in a dropdown menu — check for menu trigger
       const menuButton = betaCard.locator('button[aria-label*="More"], button[aria-label*="menu"]').first();
       const hasMenu = await menuButton.isVisible().catch(() => false);
+      // At least one control path (inline or menu) must exist for pause/resume
+      expect(hasMenu, 'Neither inline Pause button nor overflow menu found').toBeTruthy();
       if (hasMenu) {
         await menuButton.click();
         const pauseMenuItem = page.locator('button, [role="menuitem"]').filter({ hasText: /Pause/i }).first();
-        const hasPauseItem = await pauseMenuItem.isVisible().catch(() => false);
-        expect(hasPauseItem).toBeTruthy();
+        await expect(pauseMenuItem).toBeVisible({ timeout: 5_000 });
       }
     }
   });
@@ -157,11 +160,12 @@ test.describe('Job Lifecycle — Emulator', () => {
       // Cancel may be behind the overflow menu
       const menuButton = betaCard.locator('button[aria-label*="More"], button[aria-label*="menu"]').first();
       const hasMenu = await menuButton.isVisible().catch(() => false);
+      // At least one control path (inline or menu) must exist for cancel
+      expect(hasCancel || hasMenu, 'Neither inline Cancel button nor overflow menu found').toBeTruthy();
       if (hasMenu) {
         await menuButton.click();
         const cancelItem = page.locator('button, [role="menuitem"]').filter({ hasText: /Cancel|Stop/i }).first();
-        const hasCancelItem = await cancelItem.isVisible().catch(() => false);
-        expect(hasCancelItem).toBeTruthy();
+        await expect(cancelItem).toBeVisible({ timeout: 5_000 });
       }
     }
   });

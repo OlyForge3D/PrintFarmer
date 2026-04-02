@@ -13,6 +13,8 @@ import { test, expect, getPrinterCards } from '../fixtures/emulator-setup';
  */
 
 test.describe('Printer Status — Emulator', () => {
+  // Emulator tests share mutable printer state — run serially to avoid interference
+  test.describe.configure({ mode: 'serial' });
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');

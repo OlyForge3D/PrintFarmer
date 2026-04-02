@@ -11,6 +11,8 @@ import { test, expect } from '../fixtures/emulator-setup';
  */
 
 test.describe('Printer Discovery — Emulator', () => {
+  // Emulator tests share mutable printer state — run serially to avoid interference
+  test.describe.configure({ mode: 'serial' });
   test.beforeEach(async ({ page }) => {
     await page.goto('/printers');
     await page.waitForLoadState('networkidle');
