@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -29,6 +30,17 @@ public sealed class TestEmulatorSeeder(
 
         using IServiceScope scope = scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        ICatalogRepository catalog = scope.ServiceProvider.GetRequiredService<ICatalogRepository>();
+
+        // Resolve default "Unknown" manufacturer and model (seeded by DatabaseInitializer)
+        Guid? unknownMfgId = await catalog.GetUnknownManufacturerIdAsync(cancellationToken);
+        Guid? unknownModelId = await catalog.GetUnknownModelIdAsync(cancellationToken);
+
+        if (!unknownMfgId.HasValue || !unknownModelId.HasValue)
+        {
+            logger.LogError("TestEmulatorSeeder: Unknown manufacturer/model not found — database may not be seeded yet");
+            return;
+        }
 
         // Load all printers once outside the loop to avoid N×GetAllAsync calls
         List<Printer> allPrinters = await unitOfWork.Printers.GetAllAsync(cancellationToken);
@@ -57,6 +69,8 @@ public sealed class TestEmulatorSeeder(
                     BackendPort = 80,
                     Backend = BackendTypeId,
                     IsEnabled = true,
+                    ManufacturerId = unknownMfgId.Value,
+                    ModelId = unknownModelId.Value,
                 };
 
                 await unitOfWork.Printers.AddAsync(printer, cancellationToken);
