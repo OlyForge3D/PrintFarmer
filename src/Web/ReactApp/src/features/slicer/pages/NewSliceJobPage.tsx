@@ -775,7 +775,28 @@ export const NewSliceJobPage: React.FC = () => {
         padding="p-2"
       >
         <div className="flex flex-col items-center justify-center py-16 text-center" data-testid="onboarding-banner">
-          <LayersIcon className="w-16 h-16 text-pf-text-tertiary mb-6" />
+          <div className="relative mb-8">
+            <svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              {/* Printer base */}
+              <rect x="20" y="60" width="80" height="40" rx="4" className="fill-pf-bg-2 stroke-pf-border" strokeWidth="2" />
+              {/* Build plate */}
+              <rect x="30" y="70" width="60" height="4" rx="1" className="fill-pf-accent/30" />
+              {/* Vertical rails */}
+              <rect x="28" y="20" width="4" height="50" rx="2" className="fill-pf-border" />
+              <rect x="88" y="20" width="4" height="50" rx="2" className="fill-pf-border" />
+              {/* Crossbar / gantry */}
+              <rect x="28" y="20" width="64" height="4" rx="2" className="fill-pf-border" />
+              {/* Hotend */}
+              <rect x="54" y="24" width="12" height="16" rx="2" className="fill-pf-accent" />
+              <rect x="58" y="40" width="4" height="6" rx="1" className="fill-pf-accent" />
+              {/* Slice layers (animated feel) */}
+              <rect x="38" y="74" width="44" height="2" rx="1" className="fill-pf-accent/60" />
+              <rect x="40" y="78" width="40" height="2" rx="1" className="fill-pf-accent/40" />
+              <rect x="42" y="82" width="36" height="2" rx="1" className="fill-pf-accent/20" />
+              {/* Status light */}
+              <circle cx="90" cy="90" r="4" className="fill-pf-success" />
+            </svg>
+          </div>
           <h2 className="text-xl font-semibold text-pf-text-primary mb-2">
             Get started with slicing
           </h2>
