@@ -80,6 +80,9 @@ const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
 );
 const LazyOrcaSlicerPage = lazy(() => import('@/features/slicer/pages/OrcaSlicerPage'));
+const LazySliceJobsPage = lazy(() =>
+  import('@/features/slicer/pages/SliceJobsPage').then(mod => ({ default: mod.SliceJobsPage }))
+);
 
 function RouteLoader() {
   return (
@@ -239,6 +242,7 @@ function AuthenticatedAppRoutes() {
           <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
         </Route>
         <Route path="jobs/new" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
+        <Route path="slice-jobs" element={<FeatureGate feature="slicing"><RouteSuspense><LazySliceJobsPage /></RouteSuspense></FeatureGate>} />
         <Route
           path="slicer"
           element={
