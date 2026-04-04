@@ -388,6 +388,12 @@ public class SliceJobController(
             return NotFound();
         }
 
+        string currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        if (!Guid.TryParse(currentUserId, out Guid userId) || job.UserId != userId)
+        {
+            return Forbid();
+        }
+
         if (job.Status is not SliceJobStatus.Failed)
         {
             return BadRequest(new { error = $"Only failed jobs can be retried. Current status: {job.Status}" });
