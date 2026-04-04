@@ -106,6 +106,33 @@ public class SliceJobController(
     }
 
     /// <summary>
+    /// Gets the current user's slice jobs.
+    /// </summary>
+    /// <param name="limit">Maximum number of jobs to return (default 100).</param>
+    /// <param name="offset">Number of jobs to skip (default 0).</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("my-jobs")]
+    public async Task<IActionResult> GetMyJobsAsync(
+        [FromQuery] int limit = 100,
+        [FromQuery] int offset = 0,
+        CancellationToken ct = default)
+    {
+        string userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        if (!Guid.TryParse(userId, out Guid userGuid))
+        {
+            return BadRequest("Invalid user ID.");
+        }
+
+        IReadOnlyList<SliceJob> jobs = await _jobRepository.GetByUserIdAsync(userGuid, limit, offset, ct);
+        return Ok(jobs.Select(MapToStatusResponse).ToList());
+    }
+
+    /// <summary>
     /// Lists slice jobs with pagination and optional filtering.
     /// </summary>
     /// <param name="page">Page number (1-based, default 1).</param>
