@@ -589,3 +589,28 @@ Audited all ObicoSettings consumers and enforced standardized injection pattern.
 - Created: `.squad/decisions/inbox/dallas-emulator-feasibility.md`
 - Recommendation: **Option D (Hybrid)** — Fake backend plugins + mock API for discovery/spoolman
 - Rationale: Maximizes reuse of real backend infrastructure while allowing test-specific overrides
+
+---
+
+## Session: OrcaSlicer Feature Assessment & Work Plan (2025-07-16)
+
+**Role:** Lead — feature assessment, priority assignment
+**Status:** Work plan delivered to `.squad/decisions/inbox/dallas-orcaslicer-priorities.md`
+
+### Work Completed
+- Deep scan of slicer backend: `src/slicer/` (5 projects), `src/orcaslicer-worker/`, 40+ API endpoints across 8 controllers
+- Deep scan of slicer frontend: 5 pages (NewSliceJobPage, OrcaSlicerPage, SlicerProfilesPage, WorkerManagementPage, ImportOfficialProfilesPage), 15+ components, 6 service files
+- Assessed test coverage: 69 test files in Farm.Slicer.Module.Tests
+- Produced 5-item prioritized work plan with assignments
+
+### Key Finding
+The slicer subsystem is **far more complete than assumed.** The core pipeline (submit→queue→dispatch→slice→artifacts) is fully implemented and tested on both backend and frontend. The gap is UX around the flow — no job dashboard, no live progress display, no slice-to-print bridge.
+
+## Learnings
+1. **Slicer backend is production-ready** — SlicerOrchestrator, JobDispatcherService, WorkerLifecycle, ProfilesService, ArtifactsService all fully implemented with metrics, circuit breakers, and retry policies
+2. **Frontend end-to-end job submission works** — NewSliceJobPage has complete flow: engine→printer→profiles→model→submit with incremental profile loading
+3. **SignalR progress infrastructure is built but not consumed** — SlicerProgressHub exists with job subscriptions but frontend only uses SlicerHub for worker events
+4. **Two separate UI approaches exist** — NewSliceJobPage (form-based, complete) and OrcaSlicerPage (3D workspace, toolbar actions are placeholders). NewSliceJobPage is the functional path.
+5. **Profile system is sophisticated** — 3123-line ProfilesService with hierarchical profiles, deduplication, cloning, compatibility validation. Worker caches profiles in SQLite.
+6. **The biggest user-facing gap is job visibility** — Users can submit but can't see a queue, can't track progress in real-time, can't bridge to printing
+7. **`feature/orcaslicer-full-ui-parity` branch has no unique commits** — all slicer work already landed on development

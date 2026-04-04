@@ -116,6 +116,14 @@ const navigation: NavigationElement[] = [
     requiresSlicingCapability: true
   },
   {
+    name: 'Slice Jobs',
+    href: '/slice-jobs',
+    icon: LayersIcon,
+    requiredPermission: { resource: 'models', action: 'read' },
+    requiresSlicer: true,
+    requiresSlicingCapability: true
+  },
+  {
     name: 'Print Queue',
     href: '/printQueue',
     icon: HistoryIcon,
