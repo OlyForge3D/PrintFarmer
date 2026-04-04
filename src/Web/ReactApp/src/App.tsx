@@ -83,6 +83,9 @@ const LazyOrcaSlicerPage = lazy(() => import('@/features/slicer/pages/OrcaSlicer
 const LazySliceJobsPage = lazy(() =>
   import('@/features/slicer/pages/SliceJobsPage').then(mod => ({ default: mod.SliceJobsPage }))
 );
+const LazyImportOfficialProfilesPage = lazy(() =>
+  import('@/features/slicer/pages/ImportOfficialProfilesPage').then(mod => ({ default: mod.ImportOfficialProfilesPage }))
+);
 
 function RouteLoader() {
   return (
@@ -243,6 +246,7 @@ function AuthenticatedAppRoutes() {
         </Route>
         <Route path="jobs/new" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="slice-jobs" element={<FeatureGate feature="slicing"><RouteSuspense><LazySliceJobsPage /></RouteSuspense></FeatureGate>} />
+        <Route path="slicer/import-official" element={<FeatureGate feature="slicing"><RouteSuspense><LazyImportOfficialProfilesPage /></RouteSuspense></FeatureGate>} />
         <Route
           path="slicer"
           element={

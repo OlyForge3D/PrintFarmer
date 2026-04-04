@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense, useMemo, useCallback } from 'react';
-import { useSearchParams } from 'react-router';
+import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
 import { 
@@ -16,7 +16,12 @@ import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
-import { SlicerSettingsPanel, DEFAULT_BASIC_SETTINGS, type BasicSlicerSettings } from '@/features/slicer/components/settings';
+import {
+  SlicerSettingsPanel,
+  DEFAULT_BASIC_SETTINGS,
+  type BasicSlicerSettings,
+  type AdvancedSlicerSettings,
+} from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
@@ -39,8 +44,17 @@ const ModelViewer3D = React.lazy(() =>
 export const NewSliceJobPage: React.FC = () => {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const modelIdFromUrl = searchParams.get('modelId') || '';
+
+  // Check if ANY machine profiles exist in the system (for onboarding detection)
+  const { data: profilesSummary, isLoading: isProfilesSummaryLoading } = useQuery({
+    queryKey: ['slicerProfilesExtended'],
+    queryFn: () => slicerProfilesService.listExtended(),
+    staleTime: 300_000,
+  });
+  const hasAnyMachineProfiles = (profilesSummary?.machineProfiles?.length ?? 0) > 0;
 
   // === Main Sidebar Controls ===
   const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
@@ -58,6 +72,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<BasicSlicerSettings>(DEFAULT_BASIC_SETTINGS);
+  const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
 
   // Callback for settings panel changes
   const handleSlicerSettingsChange = useCallback((newSettings: BasicSlicerSettings) => {
@@ -486,6 +501,25 @@ export const NewSliceJobPage: React.FC = () => {
     return filamentProfilesData ?? [];
   }, [filamentProfilesData]);
 
+  // Selected process profile from Orca profile query
+  const selectedProcessProfile = useMemo(() => {
+    if (!selectedProcessPresetId || !selectedProcessPresetId.startsWith('system:')) {
+      return null;
+    }
+
+    const processName = selectedProcessPresetId.slice('system:'.length);
+    return (processProfilesData ?? []).find((p: OrcaProcessProfile) => p.name === processName) ?? null;
+  }, [processProfilesData, selectedProcessPresetId]);
+
+  const selectedCustomProcessProfile = useMemo(() => {
+    if (!selectedProcessPresetId || !selectedProcessPresetId.startsWith('custom:')) {
+      return null;
+    }
+
+    const customId = selectedProcessPresetId.slice('custom:'.length);
+    return customProcessProfiles.find((p) => p.id === customId) ?? null;
+  }, [customProcessProfiles, selectedProcessPresetId]);
+
   // Fetch models for picker
   const { data: models = [], error: modelsError } = useQuery<ModelListItem[], Error>({
     queryKey: ['modelsListBasic'],
@@ -618,6 +652,32 @@ export const NewSliceJobPage: React.FC = () => {
     return allFilamentProfiles.find((p: OrcaFilamentProfile) => p.name === selectedFilamentProfileId);
   }, [allFilamentProfiles, selectedFilamentProfileId]);
 
+  // Hydrate dynamic advanced settings from selected Orca process profile.
+  useEffect(() => {
+    queueMicrotask(() => {
+      const rawSettings = selectedProcessProfile?.settings;
+      if (rawSettings && typeof rawSettings === 'object') {
+        setAdvancedProcessSettings({ ...rawSettings });
+        return;
+      }
+
+      const customRawJson = selectedCustomProcessProfile?.rawJson;
+      if (customRawJson) {
+        try {
+          const parsed = JSON.parse(customRawJson);
+          if (parsed && typeof parsed === 'object') {
+            setAdvancedProcessSettings(parsed as Record<string, unknown>);
+            return;
+          }
+        } catch {
+          // Ignore parse error and fall back to empty settings.
+        }
+      }
+
+      setAdvancedProcessSettings({});
+    });
+  }, [selectedCustomProcessProfile, selectedProcessProfile]);
+
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
     onSuccess: (res) => {
@@ -652,7 +712,7 @@ export const NewSliceJobPage: React.FC = () => {
       }
     }
 
-    if (useProfile && !selectedProfileId) {
+    if (useProfile && !selectedProfileId && !selectedProcessPresetId) {
       setError('Select a profile or switch to raw JSON mode');
       return;
     }
@@ -674,8 +734,19 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileUrl: modelFileUrl,
       modelFileName: modelFileName,
       slicerEngine: slicerInfo.engine,
-      slicerProfileJson: useProfile ? '{}' : rawProfileJson,
-      slicerProfileId: useProfile ? selectedProfileId : undefined,
+      slicerProfileJson: useProfile
+        ? JSON.stringify({
+            ...slicerSettings,
+            ...advancedProcessSettings,
+          })
+        : rawProfileJson,
+      slicerProfileId: useProfile
+        ? (
+          selectedProcessPresetId.startsWith('custom:')
+            ? selectedProcessPresetId.slice('custom:'.length)
+            : (selectedProfileId || undefined)
+        )
+        : undefined,
       requiredCapabilitiesJson: capabilities,
       priority
     };
@@ -692,6 +763,45 @@ export const NewSliceJobPage: React.FC = () => {
     }
     return 'stl';
   };
+
+  // Show onboarding banner when no machine profiles exist and loading is complete
+  if (!isProfilesSummaryLoading && !hasAnyMachineProfiles) {
+    return (
+      <PageTemplate
+        title="New Slice Job"
+        subtitle="OrcaSlicer-style distributed slicing"
+        icon={LayersIcon}
+        showHeader={false}
+        padding="p-2"
+      >
+        <div className="flex flex-col items-center justify-center py-16 text-center" data-testid="onboarding-banner">
+          <LayersIcon className="w-16 h-16 text-pf-text-tertiary mb-6" />
+          <h2 className="text-xl font-semibold text-pf-text-primary mb-2">
+            Get started with slicing
+          </h2>
+          <p className="text-sm text-pf-text-secondary mb-6 max-w-md">
+            Import printer profiles to configure your first slice job. Profiles define machine settings, filament parameters, and print quality presets.
+          </p>
+          <div className="flex gap-3">
+            <Button
+              variant="primary"
+              onClick={() => navigate('/slicer/import-official')}
+              data-testid="import-profiles-button"
+            >
+              Import Official Profiles
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => navigate('/admin/slicer-profiles')}
+              data-testid="browse-profiles-button"
+            >
+              Browse Profiles
+            </Button>
+          </div>
+        </div>
+      </PageTemplate>
+    );
+  }
 
   return (
     <PageTemplate
@@ -920,7 +1030,7 @@ export const NewSliceJobPage: React.FC = () => {
                 {customProcessProfiles.length > 0 && (
                   <optgroup label="★ My Profiles">
                     {customProcessProfiles.map(profile => (
-                      <option key={`custom-${profile.id}`} value={profile.name}>
+                      <option key={`custom-${profile.id}`} value={`custom:${profile.id}`}>
                         ★ {profile.name}
                       </option>
                     ))}
@@ -930,7 +1040,7 @@ export const NewSliceJobPage: React.FC = () => {
                 {processProfilesByQuality.map(([quality, profiles]) => (
                   <optgroup key={quality} label={quality.charAt(0).toUpperCase() + quality.slice(1)}>
                     {profiles.map(profile => (
-                      <option key={profile.name} value={profile.name}>
+                      <option key={profile.name} value={`system:${profile.name}`}>
                         {profile.name} ({profile.layerHeight}mm)
                       </option>
                     ))}
@@ -950,9 +1060,11 @@ export const NewSliceJobPage: React.FC = () => {
           {/* ORCASLICER-STYLE SETTINGS PANEL */}
           <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
             <SlicerSettingsPanel
-              settings={slicerSettings}
-              onChange={handleSlicerSettingsChange}
+              settings={slicerSettings as BasicSlicerSettings | AdvancedSlicerSettings}
+              onChange={handleSlicerSettingsChange as (settings: BasicSlicerSettings | AdvancedSlicerSettings) => void}
               initialViewMode="basic"
+              advancedSettings={advancedProcessSettings}
+              onAdvancedSettingsChange={setAdvancedProcessSettings}
             />
           </div>
 
@@ -1274,14 +1386,17 @@ function SliceJobProgressPanel({
       {/* Progress bar */}
       <div className="space-y-1">
         <div className="flex items-center gap-2">
-          <div className="flex-1 h-2 bg-pf-bg-2 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-300 ${
-                isFailed ? 'bg-pf-error' : isCompleted ? 'bg-pf-success' : 'bg-pf-accent'
-              }`}
-              style={{ width: `${Math.min(isCompleted ? 100 : percent, 100)}%` }}
-            />
-          </div>
+          <progress
+            value={Math.min(isCompleted ? 100 : percent, 100)}
+            max={100}
+            className={`flex-1 h-2 rounded-full overflow-hidden [&::-webkit-progress-bar]:bg-pf-bg-2 [&::-webkit-progress-value]:rounded-full [&::-moz-progress-bar]:rounded-full ${
+              isFailed
+                ? '[&::-webkit-progress-value]:bg-pf-error [&::-moz-progress-bar]:bg-pf-error'
+                : isCompleted
+                  ? '[&::-webkit-progress-value]:bg-pf-success [&::-moz-progress-bar]:bg-pf-success'
+                  : '[&::-webkit-progress-value]:bg-pf-accent [&::-moz-progress-bar]:bg-pf-accent'
+            }`}
+          />
           <span className="text-xs font-mono text-pf-text-secondary whitespace-nowrap">
             {isCompleted ? '100' : percent}%
           </span>
@@ -1327,7 +1442,7 @@ function SliceJobProgressPanel({
       {isFailed && (
         <div className="space-y-2 pt-1">
           {progress.error && (
-            <p className="text-xs text-pf-error bg-pf-error/10 rounded px-2 py-1 break-words">
+            <p className="text-xs text-pf-error bg-pf-error/10 rounded px-2 py-1 wrap-break-word">
               {progress.error}
             </p>
           )}
