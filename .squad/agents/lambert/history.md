@@ -18,6 +18,7 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 ## Learnings
 
+- 2025-07-14: **Slicer backend audit completed.** The slicer subsystem is far more mature than expected: ~107 API endpoints across 13 controllers, separate SlicerDbContext with 10 tables, two SignalR hubs (`/hubs/slicer-registry` + `/hubs/slicers`), plugin-based integration loaded at runtime via `SlicerIntegrationExtensions`, and ~416 dedicated tests. The OrcaSlicer worker is fully functional — invokes the binary via CLI, runs a 7-stage pipeline, and reports progress via HTTP polling. Key architecture: slicer module can run embedded in main API or as standalone `Farm.Slicer.Host` (port 5246). Cross-domain references are soft (Guid-only, no FK). Only 1 migration per provider (InitialV1). Main gaps for frontend: no slicer settings CRUD endpoint, no job pagination/filtering, no manual retry endpoint, and profile editing limited to custom profiles only. Full audit in `.squad/decisions/inbox/lambert-orcaslicer-backend-audit.md`.
 - 2026-04-01: **Slicer estimate snapshot at dispatch** — Added SlicerEstimateGrams to PrintJobToolheadUsage entity (nullable double). At job dispatch (DispatchJobAsync in PrintJobManagementService), new SnapshotSlicerEstimatesAsync method parses GcodeFile.FilamentPerExtruderWeightG JSON array and creates PrintJobToolheadUsage records with slicer estimates. Repository gained GetToolheadsForPrinterAsync and AddToolheadUsageAsync methods. Migrations created for both PostgreSQL and SQL Server. This enables frontend to show per-toolhead filament estimates for in-progress jobs before actual consumption data is available at completion. Pattern: parse JSON string with System.Text.Json.JsonSerializer.Deserialize<double[]>, iterate per-extruder weights, create usage records with toolhead spool/material/color denormalized from Toolhead entity, skip zero estimates.
 - 2026-07-16: FlashForge MMU Phases 2, 3, 5 implemented. ADX5 firmware reports `Tool Count: 1` via M115 but exposes T0+T1 in M105 — `DetectExtruderCount` cross-references both and takes the MAX. `PrinterStatusDto` extended with optional `ExtruderTemperatures` and `DetectedExtruderCount` (null defaults for backward compat). `SyncMmuToolheadsOnEntity` creates/removes MmuGate virtual toolheads on MultiMaterial toggle — operates on already-loaded entity, caller saves. Pre-existing test file `MmuGateAutoCreationTests.cs` used wrong type names (`HotendModel` vs `HotendModelDefinition`) and wrong DbSet names — domain uses `*Definition` suffix consistently.
 - 2026-03-27: The smallest operator-relevant printer session timeline is a printer-scoped read model, not new persistence: anchor sessions on `PrintJob`, compose nested events from `QueuedAt`/`DispatchedAt`/`ActualStartTime`/`ActualEndTime` plus `JobStateHistory` and `FailureDetectionIncident`, and attach orphan incidents by printer + session window when `JobId` is missing.
@@ -479,3 +480,21 @@ Added `MaxToolheadIndex = 16` constant in `PrintersService.cs`. Bounds checking 
 **Key files:**
 - `src/infra/Services/Printers/PrintJobCompletionService.cs` (batch consumption)
 - `src/infra/Services/Printers/PrintersService.cs` (bounds validation)
+
+---
+
+## 2025-07-19 — Slicer API Gaps + E2E Pipeline Smoke Test
+
+Closed 3 critical API gaps and added E2E tests for the slicer module.
+
+**A1 — Job Retry** (`POST /api/slice/{id}/retry`): `RetryJobAsync` on `ISliceJobRepository`/`EfSliceJobRepository`. Resets Failed jobs to Queued, clears worker/error/progress, increments RetryCount. Returns 400 if not Failed, 404 if missing.
+
+**A2 — Pagination** (`GET /api/slice`): `CountAsync`+`GetPagedAsync` on repository. Controller accepts page/pageSize/status/sortBy/sortDir, returns `PagedResult<SliceJobStatusResponse>`. Breaking: response is now paged wrapper, not raw array.
+
+**A3 — Settings CRUD** (`GET/PUT /api/admin/slicer/settings`): `SlicerAdminController` injects `SlicerDbContext`. GET auto-creates singleton (Id=1). PUT updates Enabled/PerEngineJson/JitterPercent. Requires `farm_admin` role.
+
+**E2E Tests**: `SlicePipelineE2ETests.cs` — full pipeline flow (submit→claim→progress→artifact→complete→verify) and retry flow (submit→claim→fail→retry→verify requeued).
+
+**Build fix**: Excluded `OrcaProfilesServiceProcessParsingTests.cs` (missing `Farm.OrcaSlicer.Worker` project reference). Updated 2 `StubSliceJobRepository` classes with new interface methods (CountAsync, GetPagedAsync, RetryJobAsync).
+
+**Key files**: ISliceJobRepository, EfSliceJobRepository, SliceJobController, SlicerAdminController, SlicerAdminDtos, SlicePipelineE2ETests.cs.

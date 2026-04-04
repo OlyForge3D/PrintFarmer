@@ -118,6 +118,10 @@ public class JobDispatcherServiceTests
             bool exists = Jobs.Exists(j => j.CorrelationId == correlationId && string.Equals(j.Checksum, checksum, StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(exists);
         }
+
+        public Task<int> CountAsync(string? status = null, CancellationToken ct = default) => Task.FromResult(Jobs.Count(j => status is null || j.Status == status));
+        public Task<IReadOnlyList<SliceJob>> GetPagedAsync(int page, int pageSize, string? status = null, string? sortBy = null, string? sortDir = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs.Where(j => status is null || j.Status == status).Skip((page - 1) * pageSize).Take(pageSize).ToList());
+        public Task RetryJobAsync(Guid jobId, CancellationToken ct = default) { SliceJob? j = Jobs.Find(x => x.Id == jobId); if (j is not null) { j.Status = SliceJobStatus.Queued; j.RetryCount += 1; } return Task.CompletedTask; }
     }
 
     private class StubWorkerRepository : IWorkerRepository

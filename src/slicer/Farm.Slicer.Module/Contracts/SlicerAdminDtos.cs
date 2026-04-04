@@ -53,3 +53,29 @@ public class DryRunResult
         }
     }
 }
+
+/// <summary>
+/// Response DTO for slicer settings.
+/// </summary>
+public class SlicerSettingsDto
+{
+    public bool Enabled { get; set; }
+
+    public double JitterPercent { get; set; }
+
+    public string? PerEngineJson { get; set; }
+
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Request DTO for updating slicer settings.
+/// </summary>
+public class UpdateSlicerSettingsRequest
+{
+    public bool Enabled { get; set; } = true;
+
+    public double JitterPercent { get; set; } = 15.0;
+
+    public string? PerEngineJson { get; set; }
+}
