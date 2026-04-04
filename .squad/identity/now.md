@@ -1,22 +1,15 @@
----
-updated_at: 2026-07-14T00:00:00Z
-focus_area: OrcaSlicer full UI parity — Assessment & Sprint Kickoff
-active_issues: []
----
+# Current Focus: OrcaSlicer Sprint
 
-# What We're Focused On
+**Branch:** `feature/orcaslicer-full-ui-parity`
+**Status:** Wave 1 + Wave 2 complete, P3 frontend + P5 remaining
 
-**Current Cycle:** OrcaSlicer full UI parity — Sprint Kickoff
+## Completed (5 commits ahead of development)
+- P1: Slice Jobs Dashboard (SliceJobsPage.tsx) — Ripley
+- P4: Job retry, pagination, settings CRUD, E2E tests — Lambert
+- Profile parsing improvements + tests — Lambert
+- P2: Real-time SignalR job progress hooks — Ripley
+- P3 backend: Send-to-printer bridge endpoint — Lambert
 
-The team is spinning up on OrcaSlicer/slicer feature work. Substantial infrastructure already exists (worker, profile services, UI pages, import wizard), but the feature needs completion for full user-facing value.
-
-**Active Agents:**
-- Dallas — Assessing overall OrcaSlicer feature state, producing prioritized work plan
-- Ripley — Auditing slicer frontend (pages, components, user flows, gaps)
-- Lambert — Auditing slicer backend (API endpoints, worker status, database schema, gaps)
-
-**Branch:** `feature/orcaslicer-full-ui-parity` (currently identical to `development`)
-
-**Previous Cycle (Completed):** Obico snapshot reachability & diagnostics — shipped and regression-fixed.
-
-**Status:** Assessment phase in progress. Concrete implementation tasks will follow once audits complete.
+## Remaining
+- P3 frontend: "Send to Printer" button + printer selector on completed jobs — Ripley
+- P5: First-slice onboarding polish (empty states, guided import) — Ripley

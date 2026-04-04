@@ -184,3 +184,26 @@ Extended HistoryJobCard and HistoryJobTable to display per-toolhead filament usa
 - `ImportOfficialProfilesPage` is complete but not wired into `App.tsx` routes — dead code.
 - Feature gating is double-layered: `FeatureGate feature="slicing"` + `SlicerGate` (runtime worker check). Both must pass for slicer routes to render.
 - **2026-01-12: Slice Jobs Page v1 — Built `/slice-jobs` dashboard**: Created `SliceJobsPage.tsx` with TanStack Query adaptive polling (5s active / 30s idle), status filter dropdown with counts, table+card dual view via `useViewModePreference`, inline row-expand for job details, cancel/download actions, and empty state with CTA. Route added at `/slice-jobs` with `FeatureGate feature="slicing"` (no `SlicerGate` — history viewing doesn't need live workers). Nav link placed in Operations section after "Slice". All data flows through existing `sliceJobService` methods. TypeScript and ESLint both pass clean.
+
+## Learnings
+
+- When ESLint flags `react-hooks/set-state-in-effect`, the fix is to lift form state into a child component that mounts/unmounts with the modal's `isOpen` prop. The child resets state naturally via React's mount lifecycle. This avoids `useEffect` for state reset entirely — cleaner and lint-safe. Pattern: `<Modal isOpen={isOpen}>{isOpen && <FormContent />}</Modal>`.
+- `Checkbox` component at `@/common/components/ui/Checkbox` has a `label` prop that renders its own `<label>` wrapper. Never use raw `<input type="checkbox">` — ESLint custom rule `local/pf-no-raw-html-controls` catches it.
+- `sliceJobService` uses `apiClient.request<T>({ url, method, data })` pattern (AxiosRequestConfig) — returns `response.data` directly. Match this for new service methods.
+- `SendToPrinterModal` (P3 slicer feature) uses `sendToPrinter(jobId, printerId, startPrint)` → `POST /api/slice/{id}/send-to-printer`. Modal filters `usePrintersFast()` to online-only printers. 8 tests cover the full flow.
+
+## 2026-01-12: P5 — Onboarding Polish for NewSliceJobPage
+
+**Role:** Frontend Dev  
+**Status:** ✅ Complete
+
+- Added onboarding empty state to `NewSliceJobPage.tsx`: when `listExtended()` returns zero machine profiles, shows a welcoming banner with "Get started with slicing" message and two CTAs (Import Official Profiles → `/slicer/import-official`, Browse Profiles → `/admin/slicer-profiles`)
+- Wired `ImportOfficialProfilesPage` into `App.tsx` at `/slicer/import-official` with `FeatureGate feature="slicing"` and lazy loading — page existed but had no route
+- Created 4 focused tests in `src/test/features/slicer/pages/NewSliceJobPageOnboarding.test.tsx`: banner presence when no profiles, form presence when profiles exist, and navigation for both buttons
+- TypeScript compiles clean (0 errors), all 4 tests pass
+- Skipped SliceJobsPage banner (item 3) per instructions to avoid merge conflicts with concurrent agent work
+
+**Key files:**
+- `src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx`
+- `src/Web/ReactApp/src/App.tsx`
+- `src/Web/ReactApp/src/test/features/slicer/pages/NewSliceJobPageOnboarding.test.tsx`
