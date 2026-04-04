@@ -21,6 +21,7 @@ const mockState = vi.hoisted(() => {
       return () => { jobEventHandlers.delete(key); };
     }),
     isConnected: vi.fn(() => connected),
+    onReconnected: vi.fn(() => () => {}),
   };
 });
 
@@ -31,6 +32,7 @@ vi.mock('@/services/slicerHubService', () => ({
     unsubscribeFromJob: mockState.unsubscribeFromJob,
     onJobEvent: mockState.onJobEvent,
     isConnected: mockState.isConnected,
+    onReconnected: mockState.onReconnected,
   },
 }));
 

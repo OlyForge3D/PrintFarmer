@@ -82,6 +82,11 @@ export function useSliceJobsRealtime(
         await slicerHubService.ensureConnected();
         if (cancelled) return;
 
+        if (!slicerHubService.isConnected()) {
+          setIsConnected(false);
+          return;
+        }
+
         await slicerHubService.joinUserGroup(userId);
         if (cancelled) return;
 
@@ -92,11 +97,23 @@ export function useSliceJobsRealtime(
       }
     };
 
+    const resubscribe = async () => {
+      if (cancelled || !userId) return;
+      try {
+        await slicerHubService.joinUserGroup(userId);
+        setIsConnected(true);
+      } catch {
+        setIsConnected(false);
+      }
+    };
+
+    const unsubReconnect = slicerHubService.onReconnected(resubscribe);
     setup();
 
     return () => {
       cancelled = true;
       unsubUser?.();
+      unsubReconnect();
       setIsConnected(false);
       if (userId) {
         slicerHubService.leaveUserGroup(userId).catch(() => { /* best effort */ });

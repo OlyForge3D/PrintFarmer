@@ -207,3 +207,9 @@ Extended HistoryJobCard and HistoryJobTable to display per-toolhead filament usa
 - `src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx`
 - `src/Web/ReactApp/src/App.tsx`
 - `src/Web/ReactApp/src/test/features/slicer/pages/NewSliceJobPageOnboarding.test.tsx`
+
+## Learnings
+
+- SignalR group memberships are connection-scoped. On reconnect the client gets a new connectionId and all server-side groups are lost. Any hub service must provide a reconnect callback mechanism so hooks can re-call `JoinUserGroupAsync` / `SubscribeToJobAsync` after reconnection.
+- When `connection.start()` fails in a catch handler, both `this.connection` and `this.connectionPromise` must be nulled. Leaving `this.connection` non-null causes `start()` to return immediately on retry without actually connecting.
+- After `ensureConnected()` resolves, always check `isConnected()` before setting UI state — the catch handler doesn't re-throw, so the promise resolves even on failure.

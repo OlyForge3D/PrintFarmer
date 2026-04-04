@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Slicing;
@@ -40,7 +41,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         IWorkerRepository workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
         DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
-        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, artifactsService, rateLimit, metrics, workerAuth, workerRepository)
+        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, artifactsService, rateLimit, metrics, workerAuth, workerRepository, Options.Create(new Farm.Slicer.Module.Settings.SlicerSettings()))
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

@@ -61,6 +61,11 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
         await slicerHubService.ensureConnected();
         if (cancelled) return;
 
+        if (!slicerHubService.isConnected()) {
+          setState(prev => ({ ...prev, isConnected: false }));
+          return;
+        }
+
         setState(prev => ({ ...prev, isConnected: true }));
         await slicerHubService.subscribeToJob(jobId);
         if (cancelled) return;
@@ -73,12 +78,24 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
       }
     };
 
+    const resubscribe = async () => {
+      if (cancelled || !jobId) return;
+      try {
+        await slicerHubService.subscribeToJob(jobId);
+        setState(prev => ({ ...prev, isConnected: true }));
+      } catch {
+        setState(prev => ({ ...prev, isConnected: false }));
+      }
+    };
+
+    const unsubReconnect = slicerHubService.onReconnected(resubscribe);
     setup();
 
     return () => {
       cancelled = true;
       unsubRef.current?.();
       unsubRef.current = null;
+      unsubReconnect();
       slicerHubService.unsubscribeFromJob(jobId).catch(() => { /* best effort */ });
     };
   }, [jobId, handleEvent]);
