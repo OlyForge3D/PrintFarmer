@@ -22,6 +22,7 @@ import {
   SliceJobStatus,
   SliceJobStatusResponse,
 } from '@/services/sliceJobService';
+import { useSliceJobsRealtime } from '@/features/slicer/hooks/useSliceJobsRealtime';
 import type { BadgeVariant } from '@/common/components/ui/Badge';
 
 type StatusFilter = 'all' | SliceJobStatus;
@@ -86,6 +87,9 @@ export function SliceJobsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
 
+  // Real-time SignalR updates — patches TanStack cache on events
+  const { isConnected: isRealtimeConnected } = useSliceJobsRealtime();
+
   const {
     data: jobs = [],
     isLoading,
@@ -97,6 +101,10 @@ export function SliceJobsPage() {
     staleTime: 10_000,
     refetchInterval: (query) => {
       const data = query.state.data as SliceJobStatusResponse[] | undefined;
+      // When SignalR is live, slow down polling to a background refresh
+      if (isRealtimeConnected) {
+        return data && hasActiveJobs(data) ? 30_000 : 60_000;
+      }
       return data && hasActiveJobs(data) ? 5_000 : 30_000;
     },
   });

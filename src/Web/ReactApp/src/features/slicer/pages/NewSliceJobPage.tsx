@@ -22,10 +22,12 @@ import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea } from '@/common/components/ui';
-import { LayersIcon, EyeIcon, EditIcon } from '@/common/components/icons/MdiIcons';
+import { LayersIcon, EyeIcon, EditIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
+import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
+import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 
 // Lazy load the 3D model viewer for better performance
 const ModelViewer3D = React.lazy(() =>
@@ -83,6 +85,10 @@ export const NewSliceJobPage: React.FC = () => {
   // Profile Editor Modal State
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileEditorType, setProfileEditorType] = useState<ProfileType>('machine');
+
+  // Post-submission progress tracking
+  const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
+  const jobProgress = useSliceJobProgress(submittedJobId);
   
   const stlFile = useSTLFile();
 
@@ -617,11 +623,9 @@ export const NewSliceJobPage: React.FC = () => {
     onSuccess: (res) => {
       setMessage(`Job queued (id ${res.jobId.substring(0, 8)}) position ${res.queuePosition}`);
       setError(null);
-      setModelFileUrl('');
-      setModelFileName('');
-      setRawProfileJson('');
-      setSelectedProfileId('');
+      setSubmittedJobId(res.jobId);
       qc.invalidateQueries({ queryKey: ['slice-jobs-my'] });
+      qc.invalidateQueries({ queryKey: ['slice-jobs'] });
     },
     onError: (err: unknown) => {
       setError(err instanceof Error ? err.message : 'Failed to submit job');
@@ -1097,11 +1101,32 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* STATUS MESSAGES */}
           {error && <Alert type="error">{error}</Alert>}
-          {message && <Alert type="success">{message}</Alert>}
+          {!submittedJobId && message && <Alert type="success">{message}</Alert>}
+
+          {/* REAL-TIME JOB PROGRESS */}
+          {submittedJobId && (
+            <SliceJobProgressPanel
+              jobId={submittedJobId}
+              progress={jobProgress}
+              onNewJob={() => {
+                setSubmittedJobId(null);
+                setMessage(null);
+                setModelFileUrl('');
+                setModelFileName('');
+                setRawProfileJson('');
+                setSelectedProfileId('');
+              }}
+              onRetry={() => {
+                setSubmittedJobId(null);
+                setError(null);
+                setMessage(null);
+              }}
+            />
+          )}
 
           {/* ACTION BUTTONS */}
           <div className="flex flex-col gap-2 sticky bottom-0 bg-pf-background pt-2 border-t border-pf-border">
-            <Button type="submit" loading={submitMutation.isPending} variant="primary" className="w-full">
+            <Button type="submit" loading={submitMutation.isPending} variant="primary" className="w-full" disabled={!!submittedJobId}>
               Submit Job
             </Button>
             <Button
@@ -1115,6 +1140,7 @@ export const NewSliceJobPage: React.FC = () => {
                 setSelectedProfileId('');
                 setError(null);
                 setMessage(null);
+                setSubmittedJobId(null);
               }}
             >
               Reset
@@ -1214,3 +1240,126 @@ export const NewSliceJobPage: React.FC = () => {
 };
 
 export default NewSliceJobPage;
+
+/* ─── Inline progress panel shown after job submission ─── */
+
+function SliceJobProgressPanel({
+  jobId,
+  progress,
+  onNewJob,
+  onRetry,
+}: {
+  jobId: string;
+  progress: ReturnType<typeof useSliceJobProgress>;
+  onNewJob: () => void;
+  onRetry: () => void;
+}) {
+  const isCompleted = progress.status === 'Completed';
+  const isFailed = progress.status === 'Failed';
+  const isCancelled = progress.status === 'Cancelled';
+  const isTerminal = isCompleted || isFailed || isCancelled;
+  const percent = progress.progressPercent;
+
+  return (
+    <div className="rounded-lg border border-pf-border bg-pf-bg-1/50 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-pf-text-primary">
+          Job Progress
+        </h4>
+        <span className="font-mono text-xs text-pf-text-secondary" title={jobId}>
+          {jobId.substring(0, 8)}…
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-2 bg-pf-bg-2 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${
+                isFailed ? 'bg-pf-error' : isCompleted ? 'bg-pf-success' : 'bg-pf-accent'
+              }`}
+              style={{ width: `${Math.min(isCompleted ? 100 : percent, 100)}%` }}
+            />
+          </div>
+          <span className="text-xs font-mono text-pf-text-secondary whitespace-nowrap">
+            {isCompleted ? '100' : percent}%
+          </span>
+        </div>
+        {progress.progressMessage && (
+          <p className="text-xs text-pf-text-tertiary">{progress.progressMessage}</p>
+        )}
+      </div>
+
+      {/* Status + metadata */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-pf-text-secondary">
+        {progress.status && (
+          <span>Status: <strong className="text-pf-text-primary">{progress.status}</strong></span>
+        )}
+        {progress.estimatedPrintTimeSeconds != null && progress.estimatedPrintTimeSeconds > 0 && (
+          <span>Est. print: {sliceJobSvc.formatPrintTime(progress.estimatedPrintTimeSeconds)}</span>
+        )}
+        {progress.filamentUsedGrams != null && progress.filamentUsedGrams > 0 && (
+          <span>Filament: {sliceJobSvc.formatFilamentUsed(progress.filamentUsedGrams)}</span>
+        )}
+      </div>
+
+      {/* Completion actions */}
+      {isCompleted && (
+        <div className="flex items-center gap-2 pt-1">
+          {progress.resultFileUrl && (
+            <Button
+              variant="success"
+              size="sm"
+              iconLeft={<DownloadIcon className="w-3.5 h-3.5" />}
+              onClick={() => window.open(`/api/artifacts/job/${jobId}`, '_blank')}
+            >
+              Download G-code
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={onNewJob}>
+            New Job
+          </Button>
+        </div>
+      )}
+
+      {/* Failure actions */}
+      {isFailed && (
+        <div className="space-y-2 pt-1">
+          {progress.error && (
+            <p className="text-xs text-pf-error bg-pf-error/10 rounded px-2 py-1 break-words">
+              {progress.error}
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            <Button variant="primary" size="sm" onClick={onRetry}>
+              Retry
+            </Button>
+            <Button variant="secondary" size="sm" onClick={onNewJob}>
+              New Job
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Cancelled */}
+      {isCancelled && (
+        <div className="flex items-center gap-2 pt-1">
+          <Button variant="primary" size="sm" onClick={onRetry}>
+            Retry
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onNewJob}>
+            New Job
+          </Button>
+        </div>
+      )}
+
+      {/* Waiting / no SignalR connection yet */}
+      {!isTerminal && !progress.status && (
+        <p className="text-xs text-pf-text-tertiary italic">
+          {progress.isConnected ? 'Waiting for updates…' : 'Connecting to real-time updates…'}
+        </p>
+      )}
+    </div>
+  );
+}
