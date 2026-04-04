@@ -53,6 +53,19 @@ export enum SlicerEngine {
   PrusaSlicer = 1
 }
 
+export interface SendToPrinterRequest {
+  printerId: string;
+  startPrint: boolean;
+}
+
+export interface SendToPrinterResponse {
+  jobId: string;
+  printerId: string;
+  fileName: string;
+  printStarted: boolean;
+  message: string;
+}
+
 export class SliceJobService {
   /**
    * Submit a new slicing job
@@ -62,6 +75,18 @@ export class SliceJobService {
       url: '/slice',
       method: 'POST',
       data: request
+    });
+    return response;
+  }
+
+  /**
+   * Send completed gcode to a printer for printing
+   */
+  async sendToPrinter(jobId: string, printerId: string, startPrint: boolean): Promise<SendToPrinterResponse> {
+    const response = await apiClient.request<SendToPrinterResponse>({
+      url: `/slice/${jobId}/send-to-printer`,
+      method: 'POST',
+      data: { printerId, startPrint } satisfies SendToPrinterRequest
     });
     return response;
   }

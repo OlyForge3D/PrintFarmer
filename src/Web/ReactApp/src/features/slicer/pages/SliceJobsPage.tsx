@@ -15,6 +15,7 @@ import {
   DownloadIcon,
   CloseIcon,
   LayersIcon,
+  PrinterIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import {
@@ -23,6 +24,7 @@ import {
   SliceJobStatusResponse,
 } from '@/services/sliceJobService';
 import { useSliceJobsRealtime } from '@/features/slicer/hooks/useSliceJobsRealtime';
+import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
 import type { BadgeVariant } from '@/common/components/ui/Badge';
 
 type StatusFilter = 'all' | SliceJobStatus;
@@ -86,6 +88,7 @@ export function SliceJobsPage() {
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-slice-jobs-viewmode');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [sendToJobId, setSendToJobId] = useState<string | null>(null);
 
   // Real-time SignalR updates — patches TanStack cache on events
   const { isConnected: isRealtimeConnected } = useSliceJobsRealtime();
@@ -220,6 +223,7 @@ export function SliceJobsPage() {
           onToggleExpand={toggleExpand}
           onCancel={(id) => cancelMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
+          onSendToPrinter={(id) => setSendToJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
         />
       ) : (
@@ -227,9 +231,16 @@ export function SliceJobsPage() {
           jobs={filteredJobs}
           onCancel={(id) => cancelMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
+          onSendToPrinter={(id) => setSendToJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
         />
       )}
+
+      <SendToPrinterModal
+        isOpen={sendToJobId !== null}
+        onClose={() => setSendToJobId(null)}
+        jobId={sendToJobId ?? ''}
+      />
     </PageTemplate>
   );
 }
@@ -242,6 +253,7 @@ function JobTable({
   onToggleExpand,
   onCancel,
   onDownload,
+  onSendToPrinter,
   cancellingId,
 }: {
   jobs: SliceJobStatusResponse[];
@@ -249,6 +261,7 @@ function JobTable({
   onToggleExpand: (id: string) => void;
   onCancel: (id: string) => void;
   onDownload: (id: string) => void;
+  onSendToPrinter: (id: string) => void;
   cancellingId: string | null;
 }) {
   return (
@@ -273,6 +286,7 @@ function JobTable({
               onToggleExpand={() => onToggleExpand(job.id)}
               onCancel={() => onCancel(job.id)}
               onDownload={() => onDownload(job.id)}
+              onSendToPrinter={() => onSendToPrinter(job.id)}
               isCancelling={cancellingId === job.id}
             />
           ))}
@@ -288,6 +302,7 @@ function JobTableRow({
   onToggleExpand,
   onCancel,
   onDownload,
+  onSendToPrinter,
   isCancelling,
 }: {
   job: SliceJobStatusResponse;
@@ -295,6 +310,7 @@ function JobTableRow({
   onToggleExpand: () => void;
   onCancel: () => void;
   onDownload: () => void;
+  onSendToPrinter: () => void;
   isCancelling: boolean;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
@@ -346,6 +362,16 @@ function JobTableRow({
                 <DownloadIcon className="w-3.5 h-3.5" />
               </Button>
             )}
+            {canDownload && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={onSendToPrinter}
+                aria-label="Send to printer"
+              >
+                <PrinterIcon className="w-3.5 h-3.5" />
+              </Button>
+            )}
           </div>
         </td>
       </tr>
@@ -366,11 +392,13 @@ function JobCardGrid({
   jobs,
   onCancel,
   onDownload,
+  onSendToPrinter,
   cancellingId,
 }: {
   jobs: SliceJobStatusResponse[];
   onCancel: (id: string) => void;
   onDownload: (id: string) => void;
+  onSendToPrinter: (id: string) => void;
   cancellingId: string | null;
 }) {
   return (
@@ -381,6 +409,7 @@ function JobCardGrid({
           job={job}
           onCancel={() => onCancel(job.id)}
           onDownload={() => onDownload(job.id)}
+          onSendToPrinter={() => onSendToPrinter(job.id)}
           isCancelling={cancellingId === job.id}
         />
       ))}
@@ -392,11 +421,13 @@ function JobCard({
   job,
   onCancel,
   onDownload,
+  onSendToPrinter,
   isCancelling,
 }: {
   job: SliceJobStatusResponse;
   onCancel: () => void;
   onDownload: () => void;
+  onSendToPrinter: () => void;
   isCancelling: boolean;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
@@ -471,6 +502,16 @@ function JobCard({
               iconLeft={<DownloadIcon className="w-3.5 h-3.5" />}
             >
               Download
+            </Button>
+          )}
+          {canDownload && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={onSendToPrinter}
+              iconLeft={<PrinterIcon className="w-3.5 h-3.5" />}
+            >
+              Send to Printer
             </Button>
           )}
         </div>
