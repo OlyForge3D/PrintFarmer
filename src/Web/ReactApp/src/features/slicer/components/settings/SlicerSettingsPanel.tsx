@@ -47,6 +47,10 @@ interface SlicerSettingsPanelProps {
   className?: string;
   /** Optional function to check if a category has modified settings */
   isCategoryDirty?: (category: SettingsCategory) => boolean;
+  /** Raw Orca settings not explicitly modeled in typed controls */
+  advancedSettings?: Record<string, unknown>;
+  /** Called when dynamic advanced settings change */
+  onAdvancedSettingsChange?: (settings: Record<string, unknown>) => void;
 }
 
 /**
@@ -59,6 +63,8 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   disabled = false,
   className = '',
   isCategoryDirty,
+  advancedSettings,
+  onAdvancedSettingsChange,
 }) => {
   const [viewMode, setViewMode] = useState<SettingsViewMode>(initialViewMode);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('quality');
@@ -177,6 +183,8 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
               activeCategory={activeCategory}
               infillPatternOptions={infillPatternOptions}
               bedAdhesionOptions={bedAdhesionOptions}
+              advancedSettings={advancedSettings}
+              onAdvancedSettingsChange={onAdvancedSettingsChange}
             />
           </>
         )}
@@ -369,7 +377,18 @@ const AdvancedSettings: React.FC<{
   activeCategory: SettingsCategory;
   infillPatternOptions: Array<{ value: string; label: string; icon?: React.ReactNode }>;
   bedAdhesionOptions: Array<{ value: string; label: string }>;
-}> = ({ settings, onUpdate, disabled, activeCategory, infillPatternOptions, bedAdhesionOptions }) => {
+  advancedSettings?: Record<string, unknown>;
+  onAdvancedSettingsChange?: (settings: Record<string, unknown>) => void;
+}> = ({
+  settings,
+  onUpdate,
+  disabled,
+  activeCategory,
+  infillPatternOptions,
+  bedAdhesionOptions,
+  advancedSettings,
+  onAdvancedSettingsChange,
+}) => {
   // Render settings based on active category
   switch (activeCategory) {
     case 'quality':
@@ -1174,6 +1193,14 @@ const AdvancedSettings: React.FC<{
               disabled={disabled}
             />
           </SettingSection>
+
+          {!!advancedSettings && Object.keys(advancedSettings).length > 0 && (
+            <DynamicAdvancedSettingsSection
+              settings={advancedSettings}
+              onChange={onAdvancedSettingsChange}
+              disabled={disabled}
+            />
+          )}
         </div>
       );
 
@@ -1183,3 +1210,158 @@ const AdvancedSettings: React.FC<{
 };
 
 export default SlicerSettingsPanel;
+
+type DynamicSettingKind = 'boolean' | 'number' | 'text';
+
+function toLabel(key: string): string {
+  const spaced = key
+    .replace(/_/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+function inferKind(value: unknown): DynamicSettingKind {
+  if (typeof value === 'boolean') {
+    return 'boolean';
+  }
+
+  if (typeof value === 'number') {
+    return 'number';
+  }
+
+  if (typeof value === 'string') {
+    const lower = value.trim().toLowerCase();
+    if (lower === 'true' || lower === 'false' || lower === '1' || lower === '0') {
+      return 'boolean';
+    }
+    if (lower !== '' && Number.isFinite(Number(lower))) {
+      return 'number';
+    }
+  }
+
+  return 'text';
+}
+
+function toBoolean(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    const lower = value.trim().toLowerCase();
+    return lower === 'true' || lower === '1' || lower === 'yes' || lower === 'on';
+  }
+  return false;
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
+function toText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
+function coerceToOriginalType(original: unknown, next: boolean | number | string): unknown {
+  if (typeof original === 'string') {
+    return String(next);
+  }
+  if (typeof original === 'number') {
+    return typeof next === 'number' ? next : Number(next);
+  }
+  if (typeof original === 'boolean') {
+    return typeof next === 'boolean' ? next : String(next).toLowerCase() === 'true';
+  }
+  return next;
+}
+
+const DynamicAdvancedSettingsSection: React.FC<{
+  settings: Record<string, unknown>;
+  onChange?: (settings: Record<string, unknown>) => void;
+  disabled: boolean;
+}> = ({ settings, onChange, disabled }) => {
+  const keys = React.useMemo(() => {
+    return Object.keys(settings).sort((a, b) => a.localeCompare(b));
+  }, [settings]);
+
+  const update = React.useCallback((key: string, value: boolean | number | string) => {
+    if (!onChange) {
+      return;
+    }
+
+    onChange({
+      ...settings,
+      [key]: coerceToOriginalType(settings[key], value),
+    });
+  }, [onChange, settings]);
+
+  return (
+    <SettingSection icon={<PrecisionIcon />} title="Additional Orca settings (full coverage)">
+      {keys.map((key) => {
+        const currentValue = settings[key];
+        const kind = inferKind(currentValue);
+
+        if (kind === 'boolean') {
+          return (
+            <CompactSettingRow
+              key={key}
+              type="checkbox"
+              label={toLabel(key)}
+              checked={toBoolean(currentValue)}
+              onChange={(v) => update(key, v)}
+              disabled={disabled || !onChange}
+            />
+          );
+        }
+
+        if (kind === 'number') {
+          return (
+            <CompactSettingRow
+              key={key}
+              type="number"
+              label={toLabel(key)}
+              value={toNumber(currentValue)}
+              onChange={(v) => update(key, v)}
+              step={0.01}
+              disabled={disabled || !onChange}
+            />
+          );
+        }
+
+        return (
+          <CompactSettingRow
+            key={key}
+            type="text"
+            label={toLabel(key)}
+            value={toText(currentValue)}
+            onChange={(v) => update(key, v)}
+            disabled={disabled || !onChange}
+          />
+        );
+      })}
+    </SettingSection>
+  );
+};
