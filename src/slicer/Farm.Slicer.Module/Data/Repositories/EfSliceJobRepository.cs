@@ -360,7 +360,9 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         bool descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
         query = sortBy?.ToLowerInvariant() switch
         {
-            "completedat" => descending ? query.OrderByDescending(j => j.CompletedAt) : query.OrderBy(j => j.CompletedAt),
+            "completedat" => descending
+                ? query.OrderByDescending(j => j.CompletedAt ?? DateTime.MaxValue).ThenByDescending(j => j.CreatedAt)
+                : query.OrderBy(j => j.CompletedAt ?? DateTime.MinValue).ThenBy(j => j.CreatedAt),
             _ => descending ? query.OrderByDescending(j => j.CreatedAt) : query.OrderBy(j => j.CreatedAt),
         };
 

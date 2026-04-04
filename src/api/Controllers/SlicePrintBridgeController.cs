@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.Printers;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -60,11 +61,17 @@ public class SlicePrintBridgeController(
                 new { error = "Slicing module is not enabled.", code = "SLICER_DISABLED" });
         }
 
-        // 1. Validate the slice job exists
+        // 1. Validate the slice job exists and belongs to the current user
         SliceJob? job = await jobRepository.GetByIdAsync(id, ct);
         if (job is null)
         {
             return NotFound(new { error = "Slice job not found.", jobId = id });
+        }
+
+        string currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        if (!Guid.TryParse(currentUserId, out Guid userId) || job.UserId != userId)
+        {
+            return Forbid();
         }
 
         // 2. Validate the job is completed
