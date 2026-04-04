@@ -1096,10 +1096,9 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.InfillPercentage = ParseIntValue(infillElem) ?? 20;
         }
 
-        if (root.TryGetProperty("wall_loops", out JsonElement speedElem))
-        {
-            profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
-        }
+        profile.PrintSpeed = ParseProcessPrintSpeed(root, 50);
+        profile.FirstLayerHeight = ParseFirstLayerHeight(root, profile.LayerHeight);
+        profile.FirstLayerPrintSpeed = ParseFirstLayerSpeed(root, profile.PrintSpeed);
 
         if (root.TryGetProperty("enable_support", out JsonElement supportsElem))
         {
@@ -1142,6 +1141,63 @@ public class OrcaProfilesService : ISlicerProfilesService
         return profile;
     }
 #pragma warning restore S1172
+
+    private static int ParseProcessPrintSpeed(JsonElement root, int fallback)
+    {
+        string[] speedKeys = ["print_speed", "inner_wall_speed", "outer_wall_speed", "sparse_infill_speed"];
+
+        foreach (string key in speedKeys)
+        {
+            if (root.TryGetProperty(key, out JsonElement speedElem))
+            {
+                int? parsed = ParseIntValue(speedElem);
+                if (parsed.HasValue)
+                {
+                    return parsed.Value;
+                }
+            }
+        }
+
+        return fallback;
+    }
+
+    private static double ParseFirstLayerHeight(JsonElement root, double fallback)
+    {
+        string[] firstLayerHeightKeys = ["initial_layer_print_height", "first_layer_height"];
+
+        foreach (string key in firstLayerHeightKeys)
+        {
+            if (root.TryGetProperty(key, out JsonElement valueElem))
+            {
+                double? parsed = ParseDoubleValue(valueElem);
+                if (parsed.HasValue)
+                {
+                    return parsed.Value;
+                }
+            }
+        }
+
+        return fallback;
+    }
+
+    private static int ParseFirstLayerSpeed(JsonElement root, int fallback)
+    {
+        string[] firstLayerSpeedKeys = ["initial_layer_speed", "first_layer_speed", "initial_layer_print_speed"];
+
+        foreach (string key in firstLayerSpeedKeys)
+        {
+            if (root.TryGetProperty(key, out JsonElement valueElem))
+            {
+                int? parsed = ParseIntValue(valueElem);
+                if (parsed.HasValue)
+                {
+                    return parsed.Value;
+                }
+            }
+        }
+
+        return fallback;
+    }
 
     private static int? ParseIntValue(JsonElement elem)
     {

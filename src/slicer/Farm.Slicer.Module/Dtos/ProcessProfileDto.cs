@@ -18,6 +18,12 @@ public class ProcessProfileDto
 
     public int PrintSpeed { get; set; } = 50;
 
+    // Normalized first-layer values: explicit Orca first-layer settings when present,
+    // otherwise fallback to the profile's normal layer/speed values.
+    public double FirstLayerHeight { get; set; } = 0.2;
+
+    public int FirstLayerPrintSpeed { get; set; } = 50;
+
     public bool Supports { get; set; }
 
     public string? Description { get; set; }
