@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Farm.Infrastructure;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -102,25 +103,40 @@ public class SliceJobController(
     }
 
     /// <summary>
-    /// Lists slice jobs, optionally filtered.
+    /// Lists slice jobs with pagination and optional filtering.
     /// </summary>
+    /// <param name="page">Page number (1-based, default 1).</param>
+    /// <param name="pageSize">Items per page (default 20, max 100).</param>
     /// <param name="status">Optional status filter.</param>
-    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="sortBy">Sort field: CreatedAt (default) or CompletedAt.</param>
+    /// <param name="sortDir">Sort direction: asc or desc (default desc).</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet]
-    public async Task<IActionResult> ListAsync([FromQuery] string? status, [FromQuery] int limit = 50, CancellationToken ct = default)
+    public async Task<IActionResult> ListAsync(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? status = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = "desc",
+        CancellationToken ct = default)
     {
-        IReadOnlyList<SliceJob> jobs;
-        if (!string.IsNullOrEmpty(status))
+        if (page < 1)
         {
-            jobs = await _jobRepository.GetByStatusAsync(status, limit, ct);
-        }
-        else
-        {
-            jobs = await _jobRepository.GetQueuedJobsAsync(limit, ct);
+            page = 1;
         }
 
-        return Ok(jobs.Select(MapToStatusResponse).ToList());
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        int totalCount = await _jobRepository.CountAsync(status, ct);
+        IReadOnlyList<SliceJob> jobs = await _jobRepository.GetPagedAsync(page, pageSize, status, sortBy, sortDir, ct);
+        int totalPages = totalCount == 0 ? 1 : (int)Math.Ceiling((double)totalCount / pageSize);
+
+        return Ok(new PagedResult<SliceJobStatusResponse>(
+            jobs.Select(MapToStatusResponse).ToList(),
+            totalCount,
+            page,
+            pageSize,
+            totalPages));
     }
 
     /// <summary>
@@ -355,6 +371,37 @@ public class SliceJobController(
         }
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Retries a failed slice job by requeuing it.
+    /// </summary>
+    /// <param name="id">The job ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("{id}/retry")]
+    [Authorize]
+    public async Task<IActionResult> RetryAsync(Guid id, CancellationToken ct)
+    {
+        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
+        if (job is null)
+        {
+            return NotFound();
+        }
+
+        if (job.Status is not SliceJobStatus.Failed)
+        {
+            return BadRequest(new { error = $"Only failed jobs can be retried. Current status: {job.Status}" });
+        }
+
+        await _jobRepository.RetryJobAsync(id, ct);
+
+        job = await _jobRepository.GetByIdAsync(id, ct);
+        if (job is not null)
+        {
+            await _eventService.NotifyJobQueuedAsync(job, ct);
+        }
+
+        return Ok(job is not null ? MapToStatusResponse(job) : null);
     }
 
     /// <summary>

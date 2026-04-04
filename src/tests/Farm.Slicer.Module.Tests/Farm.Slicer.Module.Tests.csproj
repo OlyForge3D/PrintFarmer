@@ -40,6 +40,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Pre-existing: references Farm.OrcaSlicer.Worker which is not a project dependency -->
+    <Compile Remove="SlicerServices\OrcaProfilesServiceProcessParsingTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
