@@ -95,6 +95,8 @@ public class SlicePrintBridgeController(
         }
 
         // 4. Validate the target printer exists
+        // NOTE: PrintFarmer is single-tenant — all authenticated users may access all printers.
+        // If multi-tenant support is added, add printer access authorization here.
         var printer = await printersService.FindByIdAsync(request.PrinterId, ct);
         if (printer is null)
         {

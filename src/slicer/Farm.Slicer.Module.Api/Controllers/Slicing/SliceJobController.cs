@@ -10,6 +10,7 @@ using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 
@@ -28,6 +29,7 @@ public class SliceJobController(
     SliceJobMetrics metrics,
     IWorkerAuthService workerAuth,
     IWorkerRepository workerRepository,
+    IOptions<Farm.Slicer.Module.Settings.SlicerSettings> slicerOptions,
     IWorkerCircuitBreakerService? circuitBreaker = null) : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository;
@@ -38,6 +40,7 @@ public class SliceJobController(
     private readonly SliceJobMetrics _metrics = metrics;
     private readonly IWorkerAuthService _workerAuth = workerAuth;
     private readonly IWorkerRepository _workerRepository = workerRepository;
+    private readonly Farm.Slicer.Module.Settings.SlicerSettings _slicerSettings = slicerOptions.Value;
     private readonly IWorkerCircuitBreakerService? _circuitBreaker = circuitBreaker;
 
     /// <summary>
@@ -397,6 +400,12 @@ public class SliceJobController(
         if (job.Status is not SliceJobStatus.Failed)
         {
             return BadRequest(new { error = $"Only failed jobs can be retried. Current status: {job.Status}" });
+        }
+
+        int maxRetries = _slicerSettings.MaxRetryCount;
+        if (job.RetryCount >= maxRetries)
+        {
+            return BadRequest(new { error = $"Maximum retry count ({maxRetries}) exceeded." });
         }
 
         await _jobRepository.RetryJobAsync(id, ct);

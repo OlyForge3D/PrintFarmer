@@ -68,6 +68,16 @@ export class SlicerHubService {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 5000;
   private connectionPromise: Promise<void> | null = null;
+  private reconnectCallbacks = new Set<() => Promise<void>>();
+
+  /**
+   * Register a callback to re-establish subscriptions after reconnect.
+   * Returns a cleanup function to deregister the callback.
+   */
+  onReconnected(callback: () => Promise<void>): () => void {
+    this.reconnectCallbacks.add(callback);
+    return () => { this.reconnectCallbacks.delete(callback); };
+  }
 
   async start(baseUrl: string = ''): Promise<void> {
     if (this.connection) {
@@ -106,9 +116,12 @@ export class SlicerHubService {
       console.debug('SlicerHub reconnecting...', error);
     });
 
-    this.connection.onreconnected((connectionId) => {
+    this.connection.onreconnected(async (connectionId) => {
       console.debug('SlicerHub reconnected:', connectionId);
       this.reconnectAttempts = 0;
+      for (const cb of this.reconnectCallbacks) {
+        try { await cb(); } catch (e) { console.error('SlicerHub reconnect callback failed:', e); }
+      }
     });
 
     this.connectionPromise = this.connection.start().then(() => {
@@ -116,6 +129,7 @@ export class SlicerHubService {
       this.reconnectAttempts = 0;
     }).catch((error) => {
       console.error('Failed to connect to SlicerHub:', error);
+      this.connection = null;
       this.connectionPromise = null;
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.reconnectAttempts++;
@@ -132,6 +146,7 @@ export class SlicerHubService {
       this.connection = null;
       this.connectionPromise = null;
       this.reconnectAttempts = 0;
+      this.reconnectCallbacks.clear();
     }
   }
 

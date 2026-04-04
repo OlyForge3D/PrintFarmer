@@ -24,6 +24,7 @@ const mockState = vi.hoisted(() => {
       return () => { userJobHandler = null; };
     }),
     isConnected: vi.fn(() => connected),
+    onReconnected: vi.fn(() => () => {}),
   };
 });
 
@@ -34,6 +35,7 @@ vi.mock('@/services/slicerHubService', () => ({
     leaveUserGroup: mockState.leaveUserGroup,
     onUserJobEvent: mockState.onUserJobEvent,
     isConnected: mockState.isConnected,
+    onReconnected: mockState.onReconnected,
   },
 }));
 

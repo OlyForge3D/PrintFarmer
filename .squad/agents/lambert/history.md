@@ -498,3 +498,19 @@ Closed 3 critical API gaps and added E2E tests for the slicer module.
 **Build fix**: Excluded `OrcaProfilesServiceProcessParsingTests.cs` (missing `Farm.OrcaSlicer.Worker` project reference). Updated 2 `StubSliceJobRepository` classes with new interface methods (CountAsync, GetPagedAsync, RetryJobAsync).
 
 **Key files**: ISliceJobRepository, EfSliceJobRepository, SliceJobController, SlicerAdminController, SlicerAdminDtos, SlicePipelineE2ETests.cs.
+
+## Session: Code Review Fix — Retry Cap & Single-Tenant Comment (2026-07-16)
+
+**Role:** Backend Dev
+**Status:** ✅ Complete — Build 0 errors/0 warnings, 43 SliceJob tests pass
+
+### Work Completed
+
+- **Issue 4 — Retry cap for user-initiated retry**: Added `IOptions<SlicerSettings>` to `SliceJobController` constructor, check `job.RetryCount >= maxRetries` before calling `RetryJobAsync`. Returns 400 with clear message when exceeded. Uses existing `SlicerSettings.MaxRetryCount` (default 3) — same config as system retries.
+- **Issue 5 — Single-tenant printer access comment**: Added documentation comment in `SlicePrintBridgeController.SendToPrinterAsync` noting intentional single-tenant design and flagging where multi-tenant auth would go.
+- **Test fix**: Updated `SliceJobCompletionLogTests` constructor call with new `IOptions<SlicerSettings>` parameter.
+
+### Learnings
+
+- `SlicerSettings` exists in both `Farm.Slicer.Module.Domain` and `Farm.Slicer.Module.Settings` namespaces — must fully qualify when both are imported.
+- System retry path (`IncrementRetryAndRequeueAsync`) uses `JobDispatchRetrySettings.MaxAttempts`, user retry path now uses `SlicerSettings.MaxRetryCount` — both default to 3.
