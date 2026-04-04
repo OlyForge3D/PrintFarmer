@@ -476,7 +476,7 @@ function JobCard({
         </div>
 
         {job.errorMessage && (
-          <p className="text-xs text-pf-error bg-pf-error/10 rounded px-2 py-1 break-words">
+          <p className="text-xs text-pf-error bg-pf-error/10 rounded p-2 break-words">
             {job.errorMessage}
           </p>
         )}
@@ -528,7 +528,14 @@ function ProgressCell({ job }: { job: SliceJobStatusResponse }) {
     return (
       <div className="space-y-1">
         <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 bg-pf-bg-2 rounded-full overflow-hidden">
+          <div
+            className="flex-1 h-1.5 bg-pf-bg-2 rounded-full overflow-hidden"
+            role="progressbar"
+            aria-valuenow={Math.min(job.progressPercent, 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`Slice progress: ${job.progressPercent}%`}
+          >
             <div
               className="h-full bg-pf-accent rounded-full transition-all duration-300"
               style={{ width: `${Math.min(job.progressPercent, 100)}%` }}

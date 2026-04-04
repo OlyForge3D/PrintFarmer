@@ -102,3 +102,92 @@ Early entries (pre-2026-03-25) summarized for size management. See decisions-arc
 - Modal `size` presets (sm–xl) top out at 576px — use `width` prop for content-heavy modals that need more room
 - Content-heavy modals benefit from semantic column splits (context vs. history) rather than arbitrary left/right splits
 - `max-w-4xl` (896px) is the right size for 2-column modal layouts — wide enough for readability, narrow enough to feel modal-like
+
+---
+
+## OrcaSlicer UI Parity Audit (2026-07-23)
+
+**Task:** Audit UI components on `feature/orcaslicer-full-ui-parity` branch for OrcaSlicer visual parity  
+**Status:** ✅ COMPLETE — 5 components audited
+
+### Files Audited
+
+1. **SliceJobsPage.tsx** — ✅ PASS (minor deviation noted)
+2. **SendToPrinterModal.tsx** — ✅ PASS
+3. **NewSliceJobPage.tsx (onboarding)** — ⚠️ DEVIATION (fixable)
+4. **SlicerSettingsPanel.tsx** — ✅ PASS
+5. **App.tsx (routes)** — ✅ PASS
+
+### Detailed Findings
+
+**SliceJobsPage.tsx (656 lines):**
+- ✅ PASS: Status badge mapping uses correct variants (Completed→success, Failed→error, Processing→primary, Cancelled→warning, Queued→default)
+- ✅ PASS: Progress bar uses `bg-pf-accent` for fill with proper `bg-pf-bg-2` track — matches OrcaSlicer dense progress style
+- ✅ PASS: Table header uses `bg-pf-bg-1 text-pf-text-secondary` — industrial dark header pattern
+- ✅ PASS: Row hover state `hover:bg-pf-bg-1/50` — subtle interaction feedback
+- ✅ PASS: Card grid uses responsive columns `sm:grid-cols-2 lg:grid-cols-3` — appropriate density
+- ✅ PASS: Icons from MDI (LayersIcon, PrinterIcon, DownloadIcon, CloseIcon, etc.)
+- ✅ PASS: Empty state centered with icon + CTA pattern — matches OrcaSlicer onboarding
+- ⚠️ DEVIATION (minor): Error message uses `text-xs text-pf-error bg-pf-error/10` — acceptable but OrcaSlicer uses solid error background with more padding. Consider `p-2` instead of `px-2 py-1` for better readability.
+
+**SendToPrinterModal.tsx (104 lines):**
+- ✅ PASS: Uses Modal component API correctly (`size="sm"`, `titleIcon`, `title`)
+- ✅ PASS: Child form pattern (mount/unmount with `isOpen`) — prevents stale state
+- ✅ PASS: Online-only printer filter — good UX pattern
+- ✅ PASS: Empty state message uses `text-sm text-pf-text-secondary` — correct token
+- ✅ PASS: Button layout uses `flex items-center justify-end gap-2 mt-6` — standard modal footer pattern
+- ✅ PASS: Primary action button uses `variant="primary"` with icon
+- ✅ PASS: Cancel button uses `variant="secondary"` — correct hierarchy
+- ✅ PASS: Checkbox component for "Start printing immediately" — no raw HTML
+
+**NewSliceJobPage.tsx (onboarding banner at lines 767-803):**
+- ✅ PASS: Icon size `w-16 h-16` — appropriate for hero/onboarding
+- ✅ PASS: Text hierarchy: `text-xl font-semibold` heading, `text-sm text-pf-text-secondary` body
+- ✅ PASS: Button variants correct (primary for main CTA, secondary for alternative)
+- ⚠️ DEVIATION: Missing illustration — OrcaSlicer uses visual illustrations for onboarding. Currently uses just `LayersIcon`. Consider adding an SVG illustration or richer visual treatment.
+- ⚠️ DEVIATION: `py-16` padding is generous but OrcaSlicer empty states are more vertically compact (`py-12` typical). Minor.
+- ✅ PASS: Max-width on description `max-w-md` — good readability constraint
+
+**SlicerSettingsPanel.tsx:**
+- ✅ PASS: Three-tier view mode tabs (Basic/Simple/Advanced) — matches OrcaSlicer exactly
+- ✅ PASS: Category tabs for advanced mode with dirty indicator dots — OrcaSlicer pattern
+- ✅ PASS: Uses `bg-pf-bg-1 rounded-lg` wrapper — correct panel styling
+- ✅ PASS: Tab buttons use `variant="tab"` and `variant="subtle"` appropriately
+- ✅ PASS: Setting sections use `divide-y divide-pf-border` — clean separation
+- ✅ PASS: New `advancedSettings` and `onAdvancedSettingsChange` props — extensibility for dynamic Orca settings
+- ✅ PASS: DynamicAdvancedSettingsSection for unmodeled settings — good architecture
+
+**App.tsx (routes):**
+- ✅ PASS: New routes use FeatureGate + RouteSuspense pattern
+- ✅ PASS: Lazy loading for SliceJobsPage and ImportOfficialProfilesPage — performance
+
+### Accessibility Check
+
+- ✅ aria-label on all icon-only buttons ("Cancel job", "Download gcode", "Send to printer")
+- ✅ aria-label on Select components ("Filter by status", "Select printer")
+- ✅ role="grid" on table, role="row" on rows — semantic structure
+- ✅ data-testid on onboarding elements — testability
+- ⚠️ NOTE: Progress bar lacks `role="progressbar"` and `aria-valuenow` — minor a11y gap (line 531-536)
+
+### Recommendations
+
+1. **Progress bar a11y (SliceJobsPage.tsx:531):** Add ARIA attributes:
+   ```tsx
+   <div
+     role="progressbar"
+     aria-valuenow={job.progressPercent}
+     aria-valuemin={0}
+     aria-valuemax={100}
+     className="h-full bg-pf-accent..."
+   />
+   ```
+
+2. **Onboarding illustration (NewSliceJobPage.tsx):** Consider adding a slicing-themed SVG illustration above the LayersIcon for richer onboarding visual. OrcaSlicer uses printer/slicer imagery.
+
+3. **Error message padding (SliceJobsPage.tsx:479):** Change `px-2 py-1` to `p-2` for more breathing room on error messages.
+
+### Learnings
+- OrcaSlicer's 3-tier settings panel (Basic/Simple/Advanced) is now fully implemented with dirty indicators
+- Progress bars should always include ARIA progressbar role for screen readers
+- Onboarding empty states benefit from illustrations — icon-only feels minimal for "first run" experience
+- PrintFarmer's pf-* token system provides good OrcaSlicer-like dark industrial aesthetic when used consistently
