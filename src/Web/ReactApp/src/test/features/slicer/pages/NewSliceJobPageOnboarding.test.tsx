@@ -230,7 +230,7 @@ describe('NewSliceJobPage — Onboarding', () => {
     expect(screen.queryByTestId('onboarding-banner')).not.toBeInTheDocument();
   });
 
-  it('"Import Official Profiles" button navigates to import page', async () => {
+  it('"Import Profiles" button navigates to import wizard', async () => {
     mockListExtended.mockResolvedValue({
       machineProfiles: [],
       filamentProfiles: [],
@@ -245,24 +245,6 @@ describe('NewSliceJobPage — Onboarding', () => {
     });
 
     await user.click(screen.getByTestId('import-profiles-button'));
-    expect(mockNavigate).toHaveBeenCalledWith('/slicer/import-official');
-  });
-
-  it('"Browse Profiles" button navigates to profiles page', async () => {
-    mockListExtended.mockResolvedValue({
-      machineProfiles: [],
-      filamentProfiles: [],
-      processProfiles: [],
-    });
-
-    const user = userEvent.setup();
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('browse-profiles-button')).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId('browse-profiles-button'));
-    expect(mockNavigate).toHaveBeenCalledWith('/admin/slicer-profiles');
+    expect(mockNavigate).toHaveBeenCalledWith('/profiles/import');
   });
 });

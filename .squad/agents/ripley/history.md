@@ -226,3 +226,20 @@ Participated in root-cause diagnosis for slicer UI visibility issue. Validated t
 
 **Outcome:** Fix deployed via `pfdev redeploy api`. Frontend now sees correct capability flag and displays slicer UI in production deployment.
 
+
+## Learnings
+
+### Slicer UI Visibility Debug (2026-04-05)
+
+- **Root cause**: `slicerEnabled` flag in `Program.cs:101` served dual purpose (module loading + capabilities reporting). In microservices mode (`DEPLOYMENT_MODE=microservices`), it hardcoded `false`, which made `SystemCapabilitiesController` return `slicingEnabled: false`, blocking all slicer UI.
+- **Frontend gating chain**: Two independent gates — `FeatureGate` (App.tsx:129, checks `capabilities.slicingEnabled`) and `SlicerGate` (App.tsx:116, checks `useSlicer().isSlicerAvailable` from SlicerContext). Both must pass.
+- **Nav sidebar gating**: `Layout.tsx:321` hides items with `requiresSlicingCapability: true` when `capabilities?.slicingEnabled === false`.
+- **Capabilities caching**: `useSystemCapabilities()` uses `staleTime: Infinity` — once fetched, never re-fetched until page refresh. If backend returns wrong value, user must hard-refresh.
+- **Nginx trailing-slash pattern**: Slicer nginx locations use trailing slashes (`/api/workers/`). Frontend calls without slash (`/api/workers`). nginx issues 301 redirect. Browser follows transparently. If redirect fails, main API's stub returns 404 `SLICER_DISABLED` and SlicerContext falls back to `workers = []`.
+- **Key endpoint**: `/api/system/capabilities` — the single source of truth for frontend feature gating. Any issue here hides entire feature sections.
+- **Key files**: `src/api/Program.cs` (flag logic), `src/api/Controllers/SystemCapabilitiesController.cs` (endpoint), `src/Web/ReactApp/src/common/hooks/useSystemCapabilities.ts` (frontend hook), `src/Web/ReactApp/src/contexts/SlicerContext.tsx` (worker discovery), `src/Web/ReactApp/src/services/slicerRegistry.ts` (API call to `/api/workers`).
+
+## Learnings
+
+- 2026-07-25: Profile import consolidation — the working profile import path is `/profiles/import` (ProfileImportWizardPage, worker-backed). The old DB-backed path (`/slicer/import-official`, ImportOfficialProfilesPage) was broken. Both old routes (`/slicer/import-official`, `/admin/slicer-profiles`) now redirect to the wizard. The old page files remain on disk as dead code but are not loaded by any route.
+- 2026-07-25: When removing a nav item from Layout.tsx, check if its icon import is still used elsewhere to avoid orphaned imports (SettingsIcon was still used for the user menu cog).
