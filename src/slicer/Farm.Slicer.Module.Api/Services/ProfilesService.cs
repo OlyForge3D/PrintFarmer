@@ -742,7 +742,13 @@ public class ProfilesService(
             Id = p.Id,
             Name = p.Name,
             SlicerType = p.SlicerType.ToString(),
-            Quality = p.Quality.ToString()
+            Quality = p.Quality.ToString(),
+            LayerHeight = p.LayerHeight,
+            InfillPercentage = p.InfillPercentage,
+            IsSystem = p.IsSystem,
+            IsDefault = p.IsDefault,
+            IsPublic = p.IsPublic,
+            Hash = p.Hash ?? string.Empty,
         }).ToList();
         _logger.LogInformation("[ListSystemOrcaProfilesAsync] Returning {ResultCount} system profiles", result.Count);
         return result;
