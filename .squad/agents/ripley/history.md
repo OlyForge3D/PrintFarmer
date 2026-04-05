@@ -243,3 +243,20 @@ Participated in root-cause diagnosis for slicer UI visibility issue. Validated t
 
 - 2026-07-25: Profile import consolidation — the working profile import path is `/profiles/import` (ProfileImportWizardPage, worker-backed). The old DB-backed path (`/slicer/import-official`, ImportOfficialProfilesPage) was broken. Both old routes (`/slicer/import-official`, `/admin/slicer-profiles`) now redirect to the wizard. The old page files remain on disk as dead code but are not loaded by any route.
 - 2026-07-25: When removing a nav item from Layout.tsx, check if its icon import is still used elsewhere to avoid orphaned imports (SettingsIcon was still used for the user menu cog).
+
+## 2026-07-25: Fix Import Official Profiles Page — LANDED
+
+**Role:** Frontend Dev  
+**Status:** ✅ Complete
+
+**Problem:** ImportOfficialProfilesPage at `/slicer/import-official` showed 21 Elegoo Centauri profiles for every printer due to backend bug in `ProfilesService.GetAvailableProfilesForPrinterAsync` (calls `ListSystemOrcaProfilesAsync` without model filtering).
+
+**Fix:** Rewrote data source to use `GET /slicer/profiles/machine/for-model/{modelId}` (worker-backed, returns correct printer-specific profiles). Page now shows machine profiles grouped by nozzle diameter with "Imported" badges, plus CTA to the full Profile Import Wizard (`/profiles/import?modelId={modelId}`). If printer has no linked catalog model, shows guidance to edit the printer.
+
+**Backend bugs filed (not fixed):**
+1. `available-for-printer/{printerId}` endpoint returns unfiltered Elegoo profiles
+2. `process/for-machines` returns 503 (IPrintersService DI missing in slicer-host)
+
+**Validation:** TypeScript clean, production build succeeds, 1695/1695 tests pass, ESLint clean.
+
+**Key file:** `src/Web/ReactApp/src/features/slicer/pages/ImportOfficialProfilesPage.tsx`
