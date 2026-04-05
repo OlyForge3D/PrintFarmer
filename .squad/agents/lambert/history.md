@@ -552,3 +552,24 @@ Created `src/tests/Farm.Web.Api.Tests/Integration/SystemCapabilitiesIntegrationT
 ### Impact
 Unblocked slicer UI visibility in Docker microservices deployments. Production deployment now shows slicer module to users.
 
+
+## 2026-04-05: 3D Models Page Missing STLs — Spawn as Backend Lead
+
+**Role:** Backend Architect
+**Status:** 🔍 Investigation spawned
+
+User reported STL uploads appear successful but files don't show on 3D Models page. Spawned Lambert for investigation of:
+
+1. Upload endpoint persistence (`POST /api/models/upload`)
+2. File persistence to disk/storage
+3. Database entries creation
+4. List endpoint contract (`GET /api/models`)
+5. Server logging and silent failures
+
+Working parallel with Ripley (frontend) and Kane (QA).
+
+**Key files to review:**
+- `src/api/Controllers/ModelsController.cs`
+- `src/infra/Services/ModelService.cs`
+- `src/infra/Data/Repository/ModelRepository.cs`
+- Upload logging and exception handling

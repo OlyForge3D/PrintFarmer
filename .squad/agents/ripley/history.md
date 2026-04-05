@@ -260,3 +260,23 @@ Participated in root-cause diagnosis for slicer UI visibility issue. Validated t
 **Validation:** TypeScript clean, production build succeeds, 1695/1695 tests pass, ESLint clean.
 
 **Key file:** `src/Web/ReactApp/src/features/slicer/pages/ImportOfficialProfilesPage.tsx`
+
+## 2026-04-05: 3D Models Page Missing STLs — Spawn as Frontend Lead
+
+**Role:** Frontend Architect
+**Status:** 🔍 Investigation spawned
+
+User reported STL uploads appear successful but files don't show on 3D Models page. Spawned Ripley for investigation of:
+
+1. Upload flow completion handling
+2. 3D Models page data binding
+3. TanStack Query cache invalidation after success
+4. Silent error states in upload mutation
+
+Working parallel with Lambert (backend) and Kane (QA).
+
+**Key files to review:**
+- `src/features/models/pages/ModelsPage.tsx`
+- `src/features/models/pages/ModelUploadPage.tsx`
+- `src/services/modelService.ts`
+- Cache invalidation in useModels hook
