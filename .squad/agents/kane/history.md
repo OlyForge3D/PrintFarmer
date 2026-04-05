@@ -262,4 +262,3 @@ Validated regression test coverage for slicer UI capability detection across dep
 - Fix is backward-compatible
 
 **Outcome:** Test coverage confirmed sufficient. Fix approved as safe and regression-free.
-

@@ -47,12 +47,20 @@ vi.mock('@/services/printer-signalr', () => ({
   printerSignalRService: {
     connect: vi.fn().mockResolvedValue(undefined),
     onPrinterStatusUpdate: vi.fn().mockReturnValue(() => {}),
+    onAutoDispatchStateChanged: vi.fn().mockReturnValue(() => {}),
   },
 }));
 
 // Mock TasksBadge to avoid query client issues
 vi.mock('@/features/tasks', () => ({
   TasksBadge: () => null,
+}));
+
+vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
+  useAllAutoDispatchStatuses: () => ({
+    data: [],
+    isLoading: false,
+  }),
 }));
 
 describe('Navigation Section Headers', () => {
@@ -66,6 +74,16 @@ describe('Navigation Section Headers', () => {
       </QueryClientProvider>
     );
   };
+
+  describe('Slicer profile consolidation', () => {
+    it('keeps slice entry points while removing the admin slicer profiles link', () => {
+      renderLayout();
+
+      expect(screen.getByRole('link', { name: /^slice$/i })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /slice jobs/i })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /slicer profiles/i })).not.toBeInTheDocument();
+    });
+  });
 
   // NOTE: These tests validate the FUTURE implementation of section headers
   // They may fail until PFarm1-egw is merged
