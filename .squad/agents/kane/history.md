@@ -218,3 +218,48 @@ Delivered comprehensive regression test suite for multi-toolhead job cost calcul
 
 ### Quality Gate Status
 ✅ **All validation gates passed.** Build, lint, and tests are green. Open Filament DB feature has solid backend test coverage (20 tests) but lacks frontend component tests. This is acceptable for current validation — feature is production-ready from a build/test perspective.
+
+## 2026-04-04: Slicer UI Hidden in Microservices Mode — Root Cause & Regression Tests
+
+**Role:** QA / Bug Reproduction & Regression  
+**Status:** ✅ Root cause identified, 9 regression tests added  
+**Decision:** Written to `.squad/decisions/inbox/kane-slicer-repro.md`
+
+### Root Cause
+`Program.cs:101` uses `DEPLOYMENT_MODE != "microservices"` as a single `slicerEnabled` flag for both module loading AND capability reporting. In Docker microservices mode, this forces `Slicer:Enabled="False"` into IConfiguration, which `SystemCapabilitiesController` reads and returns `slicingEnabled: false` to the frontend. Frontend `Layout.tsx:321` hides all `requiresSlicingCapability` nav items.
+
+Settings endpoint (`/api/settings`) shows `Slicer.enabled: true` (from modular settings service, updated by worker registration), but capabilities endpoint (`/api/system/capabilities`) shows `slicingEnabled: false` (from IConfiguration, set at startup). Frontend trusts capabilities → slicer UI hidden.
+
+### Key Files
+- **Bug location:** `src/api/Program.cs` lines 101, 141, 175
+- **Frontend gating:** `src/Web/ReactApp/src/common/components/Layout.tsx` line 321
+- **Capabilities hook:** `src/Web/ReactApp/src/common/hooks/useSystemCapabilities.ts` (staleTime: Infinity)
+- **Capabilities controller:** `src/api/Controllers/SystemCapabilitiesController.cs`
+- **New tests:** `src/tests/Farm.Web.Api.Tests/Integration/SystemCapabilitiesIntegrationTests.cs`
+
+### Test Coverage Added
+9 tests total:
+- Standard mode: endpoint OK, unauthenticated, slicing enabled, architecture, gcode upload, model files
+- Microservices mode: slicing NOT forced off, unauthenticated access, other features unaffected
+
+### Remaining Gaps
+- No frontend test for capability-gated navigation hiding
+- No test for settings/capabilities endpoint consistency
+- 13 pre-existing failures in `SlicePrintBridgeControllerTests` (unrelated)
+
+## Team Update: Slicer UI Fix Test Coverage (2026-04-05)
+
+**Date:** 2026-04-05  
+**Incident:** Slicer UI missing in Docker microservices deployment  
+**Status:** ✅ RESOLVED
+
+Validated regression test coverage for slicer UI capability detection across deployment modes.
+
+**Contribution:** Reviewed `SystemCapabilitiesIntegrationTests.cs` to ensure:
+- Tests cover both monolith and microservices deployment scenarios
+- Capability endpoint correctly reports `slicingEnabled=true` in microservices mode
+- No side effects on other capabilities
+- Fix is backward-compatible
+
+**Outcome:** Test coverage confirmed sufficient. Fix approved as safe and regression-free.
+

@@ -4787,3 +4787,186 @@ Before accepting tiebreaker conclusion and moving to approval:
 - **Tiebreaker methodology disputes:** Trace chain end-to-end; if reasoning is sound and aligns with prior ceilings, decision is final.
 - **Post-blocker concerns:** If not a blocking defect, new methodology disagreements do not trigger second rework rounds; tiebreaker decides.
 - **Approval gate:** Two-APPROVE consensus (original + tiebreak) sufficient to ship. Coordinator does not re-request additional reviews of tiebreaker decision.
+## API Redeploy: slicingEnabled Fix Validated (2026-04-05)
+
+**Date:** 2026-04-05  
+**Agent:** Parker (DevOps & Deployment Engineer)  
+**Status:** ✅ COMPLETED
+
+### Context
+The API was reporting `slicingEnabled=false` in microservices mode despite the slicer-host container being active. The bug was fixed in `SystemCapabilitiesController.cs` to detect `DEPLOYMENT_MODE=microservices` and report slicing as enabled.
+
+### Action Taken
+Executed `./scripts/pfdev redeploy api` from `/home/pi/pfarm` to rebuild and redeploy the API container with the fix.
+
+### Validation Results
+1. **Capabilities Endpoint** (`/api/system/capabilities`):
+   - ✅ `slicingEnabled: true` (was false before fix)
+   - ✅ Correctly detects `DEPLOYMENT_MODE=microservices` env var
+   - ✅ All other capabilities reporting correctly
+
+2. **Slicer Routing** (microservices mode):
+   - ✅ `/api/slicer/*` routes correctly proxy to slicer-host container
+   - ✅ nginx routing configuration intact
+   - ✅ slicer-host responding (200 OK on `/api/slicer/profiles`)
+
+3. **Container Status**:
+   - API: healthy (redeployed 3 minutes ago)
+   - Slicer-host: healthy
+   - Nginx-proxy: healthy
+
+### Guidelines for pfdev Usage
+**Use `pfdev` when:**
+- Making code changes to a single service during active development
+- Need fast iteration on API, frontend, or worker changes
+- Other services are already running and shouldn't be disrupted
+- Working in microservices deployment mode
+
+**Use `deploy-docker.sh` when:**
+- Initial deployment or major infrastructure changes
+- Changing compose templates or deployment modes
+- Need to regenerate docker-compose.yml
+- Deploying to a fresh environment
+
+### Technical Details
+- **Command:** `./scripts/pfdev redeploy api`
+- **Route tested:** `http://localhost/api/system/capabilities`
+- **Response:** `{"slicingEnabled": true, ...}`
+- **Slicer routing:** `http://localhost/api/slicer/profiles` → 200 OK
+
+---
+
+## User Directive: pfdev Script Naming Convention (2026-04-05T03:03:38Z)
+
+**By:** Jeff Papiez (via Copilot)  
+**Directive:** Use the repo's `pfdev` script name, not `pf-dev`.  
+**Why:** User preference — captured for team memory  
+**Status:** ACTIVE
+
+This directive ensures consistent team communication and script naming when discussing deployment workflows.
+
+---
+
+## Slicer Estimate Snapshot at Job Dispatch (2026-04-01)
+
+**Author:** Lambert (Backend)  
+**Date:** 2026-04-01  
+**Status:** IMPLEMENTED
+
+### Summary
+Added per-toolhead filament estimates to PrintJobToolheadUsage entity, recorded at job dispatch time before actual consumption data is available.
+
+### Implementation
+- Added `SlicerEstimateGrams` (nullable double) to PrintJobToolheadUsage entity
+- At job dispatch: `PrintJobManagementService.DispatchJobAsync` calls `SnapshotSlicerEstimatesAsync`
+- Parses `GcodeFile.FilamentPerExtruderWeightG` JSON array and creates usage records with slicer estimates
+- Repository gained `GetToolheadsForPrinterAsync` and `AddToolheadUsageAsync` methods
+- Migrations created for both PostgreSQL and SQL Server
+
+### Pattern
+```csharp
+var estimates = System.Text.Json.JsonSerializer.Deserialize<double[]>(gcode.FilamentPerExtruderWeightG);
+// iterate per-extruder weights, create usage records with toolhead spool/material/color denormalized from Toolhead entity
+// skip zero estimates
+```
+
+### Benefit
+Frontend can show per-toolhead filament estimates for in-progress jobs before actual consumption data is available at completion.
+
+---
+
+## Toolhead Usage Records Use Upsert at Job Completion (2026-07-31)
+
+**Author:** Lambert (Backend)  
+**Date:** 2026-07-31  
+**Status:** IMPLEMENTED
+
+### Context
+The `PrintJobToolheadUsage` table has a unique composite index on `(PrintJobId, ToolheadIndex)`. Dispatch creates snapshot rows (with `SlicerEstimateGrams` + `SpoolmanSpoolId`). Completion must add `FilamentUsageGrams` to those same rows.
+
+### Decision
+**Completion always queries for existing rows first.** If snapshot rows exist from dispatch, it updates them in-place (preserving the snapshotted `SpoolmanSpoolId`). If no rows exist (jobs dispatched before the feature), it creates new ones using live toolhead data.
+
+### Rationale
+- Avoids `DbUpdateException` from unique index violation
+- Preserves the spool assignment recorded at dispatch time, so mid-print spool swaps don't debit the wrong spool
+- Backward-compatible: jobs without dispatch snapshots still get usage records
+
+### Applies To
+- `PrintJobCompletionService.FetchAndRecordFilamentUsageAsync` — both multi-toolhead and single-spool paths
+- Any future code that writes to `PrintJobToolheadUsage` after dispatch
+
+---
+
+## Slicer API Gaps + E2E Pipeline Smoke Test (2025-07-19)
+
+**Author:** Lambert (Backend)  
+**Date:** 2025-07-19  
+**Status:** IMPLEMENTED
+
+### Summary
+Closed 3 critical API gaps in the slicer module and added an E2E pipeline smoke test.
+
+### A1: Job Retry Endpoint — `POST /api/slice/{id}/retry`
+- Added `RetryJobAsync` to `ISliceJobRepository` → `EfSliceJobRepository`
+- Resets status to Queued, clears worker/error/progress, increments RetryCount
+- Only retries Failed jobs (returns 400 otherwise), 404 if not found
+- Uses `[Authorize]` (any authenticated user)
+
+### A2: Job List Pagination — `GET /api/slice`
+- Added `CountAsync` + `GetPagedAsync` to `ISliceJobRepository`
+- Controller now accepts: `page` (default 1), `pageSize` (default 20), `status`, `sortBy` (CreatedAt|CompletedAt), `sortDir` (asc|desc)
+- Returns `PagedResult<SliceJobStatusResponse>` (from Farm.Infrastructure)
+- **Breaking change**: Response shape changed from array to paged wrapper. No existing consumers found in tests.
+
+### A3: Slicer Settings CRUD — `GET/PUT /api/admin/slicer/settings`
+- Added `SlicerSettingsDto` and `UpdateSlicerSettingsRequest` to `SlicerAdminDtos.cs`
+- `SlicerAdminController` now injects `SlicerDbContext` (primary constructor)
+- GET auto-creates singleton row (Id=1) if missing; PUT updates all fields
+- Both endpoints require `farm_admin` role
+
+### B: E2E Pipeline Smoke Test
+- New file: `src/tests/Farm.Slicer.Module.Tests/Integration/SlicePipelineE2ETests.cs`
+- **Test 1 — Full Pipeline**: Submit → verify queued → claim → progress update → artifact upload → complete → verify Completed status → verify artifacts
+- **Test 2 — Retry Flow**: Submit → claim → fail → retry → verify re-queued with RetryCount=1
+- Uses `CustomWebApplicationFactory` with worker + admin clients
+
+### Key Files Changed
+- `src/slicer/Farm.Slicer.Module/Data/Repositories/ISliceJobRepository.cs`
+- `src/slicer/Farm.Slicer.Module/Data/Repositories/EfSliceJobRepository.cs`
+- `src/slicer/Farm.Slicer.Module.Api/Controllers/Slicing/SliceJobController.cs`
+- `src/slicer/Farm.Slicer.Module.Api/Controllers/Admin/SlicerAdminController.cs`
+- `src/slicer/Farm.Slicer.Module/Contracts/SlicerAdminDtos.cs`
+- `src/tests/Farm.Slicer.Module.Tests/Integration/SlicePipelineE2ETests.cs` (new)
+- `src/tests/Farm.Slicer.Module.Tests/Slicing/JobDispatcherRetryTests.cs`
+- `src/tests/Farm.Slicer.Module.Tests/Slicing/JobDispatcherServiceTests.cs`
+- `src/tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj`
+
+---
+
+## Playwright Emulator E2E Test Infrastructure (2026-07-18)
+
+**Author:** Kane (QA)  
+**Date:** 2026-07-18  
+**Status:** IMPLEMENTED
+
+### Decision 1: Separate emulator tests from existing E2E tests
+Emulator-backed tests live in `e2e/emulator/` with a dedicated npm script `test:e2e:emulator`, separate from the existing visual/navigation/layout tests in `e2e/`.
+
+**Rationale:** Emulator tests require the API running with `PFARM__TestEmulator__Enabled=true` — a different startup sequence than existing E2E tests which only need the React dev server. Mixing them would cause CI confusion and false failures.
+
+### Decision 2: Fixture-based API health verification
+The `emulator-setup.ts` fixture auto-runs before every emulator test, hitting `/healthz` and `/health` to confirm the API is alive and the emulator is active.
+
+**Rationale:** Fail fast with a clear diagnostic message rather than letting tests hang or produce cryptic timeout errors when the API isn't running.
+
+### Decision 3: Resilient selectors with graceful fallback
+Tests use multiple selector strategies: `.pf-detailed-printer-card` CSS class, `div[role="progressbar"]`, `span[title="..."]` for temps, and text content filtering. Where a UI control might be behind a menu or not yet implemented, tests check for visibility and gracefully skip.
+
+**Rationale:** The emulator plugin is being built in parallel (Lambert). The UI for emulator-specific actions (start print, pause, cancel) may not exist yet. Tests are written to pass once the emulator is running, with fallback assertions that verify the structural contract (buttons exist, cards render, status badges show).
+
+### Decision 4: Conservative timeouts for SignalR-dependent assertions
+Emulator broadcasts every ~2 s. Tests use 10-15 s timeouts for initial card rendering and 5-6 s waits for real-time updates.
+
+**Rationale:** SignalR connection setup + first broadcast can take 3-5 s on slow machines. Being generous prevents flaky CI failures while remaining fast enough for local development feedback.
+

@@ -98,3 +98,20 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 **Files:** Documented in decisions.md; orchestration logs (`2026-03-26T01-45-41Z-brett.md`).
 
+
+## Team Update: Slicer UI Fix (2026-04-05)
+
+**Date:** 2026-04-05  
+**Incident:** Slicer UI missing in Docker microservices deployment  
+**Status:** ✅ RESOLVED
+
+Jeff Papiez reported slicer UI was missing in live deployment despite slicer-host container running. Root cause: `src/api/Program.cs` conflated slicer module loading with platform capability reporting. In microservices mode, slicer-host runs as separate container, so assembly check returned false.
+
+**Team Response:**
+- **Lambert:** Diagnosed root cause and implemented fix in `SystemCapabilitiesController.cs` to detect `DEPLOYMENT_MODE=microservices`
+- **Ripley:** Validated frontend capability detection was working correctly
+- **Kane:** Added regression test coverage in `SystemCapabilitiesIntegrationTests.cs`
+- **Parker:** Deployed fix using `pfdev redeploy api` (per user directive to use canonical script name)
+
+**Outcome:** `slicingEnabled=true` now reported correctly in microservices mode. Slicer UI visible in production deployment.
+
