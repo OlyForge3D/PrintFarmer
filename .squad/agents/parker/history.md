@@ -172,10 +172,31 @@ Improves operational reliability by allowing ML API timeout behavior to be tuned
 - Pushed to origin/release without issues
 - Lesson: Base image tool availability (curl vs wget) must be explicitly documented when changing download strategies
 
+## 2026-04-04: Slicer UI Hidden in Microservices Mode — Root Cause Fix
+
+**Time:** 2026-04-05 ~03:00 UTC  
+**Task:** Debug why frontend hides slicer features in Docker microservices deployment  
+**Outcome:** ✅ Fixed and deployed
+
+**Root Cause:** `Program.cs` used a single `slicerEnabled` flag for both (a) local slicer module DLL loading and (b) frontend capability reporting. When `DEPLOYMENT_MODE=microservices`, the flag was `false` — correctly preventing local module loading, but incorrectly telling the frontend that slicing is unavailable. The frontend reads `GET /api/system/capabilities` → `slicingEnabled: false` → hides slicer nav items via `requiresSlicingCapability` gate in `Layout.tsx`.
+
+**Fix:** Separated into two flags:
+- `slicerModuleEnabled` — controls DLL loading (false in microservices mode)
+- `slicerEnabled` — controls frontend capability reporting (true — slicer-host provides it via nginx)
+
+**Verification:** API capabilities endpoint now returns `slicingEnabled: true, SlicerModuleLoaded: false`. Slicer routing through nginx to slicer-host confirmed working.
+
+**Key files:** `src/api/Program.cs`, `src/api/Controllers/SystemCapabilitiesController.cs`, `deploy/nginx/nginx-proxy-split.conf`
+
+**Additional finding:** The fix existed as uncommitted local changes that were made AFTER the Docker image build. Always rebuild containers after code changes — Docker `COPY` uses the working tree, but only at build time.
+
 ## Learnings
 
 - **Base image tool consistency:** When switching between curl/wget or other utilities in container RUNs, verify availability across all variants of the base image — don't assume symmetry
 - **Dockerfile + docs coupling:** Model download logic that depends on specific base image tool availability warrants inline docs to prevent future surprises and regressions
+- **Capability flags vs module flags:** In microservices mode, local module loading (DLLs) and user-facing capability reporting must be separate flags. A disabled local module doesn't mean the feature is unavailable — the slicer-host provides it.
+- **Docker image staleness:** After editing source files, always `docker compose build --no-cache <service>` before testing. Uncommitted changes that post-date the image build are invisible to running containers.
+- **Debugging chain for hidden UI features:** Check capabilities endpoint → check Program.cs flag logic → verify DEPLOYMENT_MODE env var → compare container build time vs file modification time.
 
 ## 2026-03-25: Obico ml_api wget Fix (DevOps)
 
