@@ -806,17 +806,10 @@ export const NewSliceJobPage: React.FC = () => {
           <div className="flex gap-3">
             <Button
               variant="primary"
-              onClick={() => navigate('/slicer/import-official')}
+              onClick={() => navigate('/profiles/import')}
               data-testid="import-profiles-button"
             >
-              Import Official Profiles
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => navigate('/admin/slicer-profiles')}
-              data-testid="browse-profiles-button"
-            >
-              Browse Profiles
+              Import Profiles
             </Button>
           </div>
         </div>
