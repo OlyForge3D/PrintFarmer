@@ -186,3 +186,30 @@ Improves operational reliability by allowing ML API timeout behavior to be tuned
 Switched ml_api model downloads from curl to wget to resolve `/bin/sh: 1: curl: not found` failures. The ml_api_base image ships wget but not curl reliably. Commit 6efe08e pushed to release branch.
 
 **Files:** obico-server ml_api/ (sibling repo)
+
+## Deployment: Slicer UI Fix via pfdev Redeploy (2026-04-05)
+
+**Date:** 2026-04-05  
+**Role:** Deployment & Infrastructure Engineer  
+**Status:** ✅ COMPLETED
+
+### Deployment Action
+Executed `./scripts/pfdev redeploy api` to deploy backend fix for slicer UI visibility in microservices mode.
+
+**Rationale:** Used targeted `pfdev` script per user directive (Jeff Papiez preference for canonical script name) rather than full `deploy-docker.sh`:
+- Fast iteration (5 min vs full-stack redeploy)
+- Minimal disruption to other services
+- Appropriate for single-service code change during active development
+
+### Validation
+- ✅ API container rebuilt and redeployed
+- ✅ `/api/system/capabilities` returns `slicingEnabled=true`
+- ✅ Slicer routing working (`/api/slicer/profiles` → 200 OK)
+- ✅ All containers healthy (API, slicer-host, nginx-proxy)
+
+### User Directive Captured
+Documented Jeff Papiez preference: use `pfdev` (canonical), not `pf-dev` or `pf-dev.sh`. Decision record created for team reference.
+
+### Key Lesson
+In microservices deployments, module-loading logic and capability reporting need independent detection paths. Conflating them causes false-negative capability reports when services run as separate containers.
+

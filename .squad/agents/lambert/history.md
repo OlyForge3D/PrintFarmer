@@ -514,3 +514,41 @@ Closed 3 critical API gaps and added E2E tests for the slicer module.
 
 - `SlicerSettings` exists in both `Farm.Slicer.Module.Domain` and `Farm.Slicer.Module.Settings` namespaces — must fully qualify when both are imported.
 - System retry path (`IncrementRetryAndRequeueAsync`) uses `JobDispatchRetrySettings.MaxAttempts`, user retry path now uses `SlicerSettings.MaxRetryCount` — both default to 3.
+
+## Slicer UI Fix — Deployment-Mode Capability Detection (2026-04-05)
+
+**Date:** 2026-04-05  
+**Role:** Backend Architect  
+**Status:** ✅ COMPLETED
+
+### Problem
+Slicer UI missing in Docker microservices deployment despite slicer-host container running healthy. Root cause: `src/api/Program.cs` conflated two separate concerns:
+- Module loading gate (correctly skips slicer DI in microservices mode)
+- Capability reporting (incorrectly reported `slicingEnabled=false` when running as separate container)
+
+### Root Cause Analysis
+Line 101 set `slicerEnabled = (DEPLOYMENT_MODE != "microservices")`. This flag served as both a module-loading gate AND the source for capability reporting. In microservices mode:
+- Module loading correctly skipped (assembly not present)
+- But capability reporting read the same flag → `slicingEnabled=false` → frontend hid slicer UI
+
+### Implementation
+Modified `SystemCapabilitiesController` to detect `DEPLOYMENT_MODE=microservices` environment variable independently of module-loading state. When in microservices mode, report `slicingEnabled=true` (assumes remote slicer-host is available).
+
+### Test Coverage
+Created `src/tests/Farm.Web.Api.Tests/Integration/SystemCapabilitiesIntegrationTests.cs`:
+- 6 tests for standard (monolith) mode
+- 3 tests for microservices mode ensuring correct capability reporting
+- Validates no side effects on other capabilities
+
+### Files Changed
+- `src/api/Program.cs` — SystemCapabilitiesController capability detection logic
+- `src/tests/Farm.Web.Api.Tests/Integration/SystemCapabilitiesIntegrationTests.cs` — New regression test file
+
+### Validation
+- `/api/system/capabilities` now returns `slicingEnabled=true` in microservices mode
+- Slicer-host routing verified via nginx
+- All other capabilities reporting correctly
+
+### Impact
+Unblocked slicer UI visibility in Docker microservices deployments. Production deployment now shows slicer module to users.
+

@@ -213,3 +213,16 @@ Extended HistoryJobCard and HistoryJobTable to display per-toolhead filament usa
 - SignalR group memberships are connection-scoped. On reconnect the client gets a new connectionId and all server-side groups are lost. Any hub service must provide a reconnect callback mechanism so hooks can re-call `JoinUserGroupAsync` / `SubscribeToJobAsync` after reconnection.
 - When `connection.start()` fails in a catch handler, both `this.connection` and `this.connectionPromise` must be nulled. Leaving `this.connection` non-null causes `start()` to return immediately on retry without actually connecting.
 - After `ensureConnected()` resolves, always check `isConnected()` before setting UI state — the catch handler doesn't re-throw, so the promise resolves even on failure.
+
+## Team Update: Slicer UI Fix (2026-04-05)
+
+**Date:** 2026-04-05  
+**Incident:** Slicer UI missing in Docker microservices deployment  
+**Status:** ✅ RESOLVED
+
+Participated in root-cause diagnosis for slicer UI visibility issue. Validated that frontend capability detection (`useSystemCapabilities`) was working correctly and isolated problem to backend `/api/system/capabilities` endpoint.
+
+**Backend Fix:** Lambert updated `SystemCapabilitiesController.cs` to detect `DEPLOYMENT_MODE=microservices` environment variable and report `slicingEnabled=true` when in microservices deployment mode.
+
+**Outcome:** Fix deployed via `pfdev redeploy api`. Frontend now sees correct capability flag and displays slicer UI in production deployment.
+
