@@ -137,3 +137,138 @@
 - `.squad/casting/registry.json` — Three new registry entries
 
 ---
+
+---
+
+## 3D Models Upload & Display: Multi-Agent Investigation (2026-04-05)
+
+**Status:** Multiple coordinated fixes identified and ready  
+**Owners:** Dallas (Lead), Ripley (Frontend), Lambert (Backend), Kane (QA)
+
+### Summary
+
+Three independent bugs discovered affecting 3D model upload, display, and download:
+
+1. **Frontend cache mismatch** (Ripley) — Upload modal invalidating wrong query key
+2. **Backend schema initialization** (Lambert) — SlicerDbContext never initialized at startup
+3. **File path resolution** (Parker/Lambert) — Service returning relative paths instead of absolute
+
+All fixes are surgical and low-risk. Ready for coordinated merge after validation.
+
+### Bug Details
+
+#### Bug A: Models Not Appearing After Upload (Frontend)
+
+**Root Cause:** `ModelUploadModal` was calling `queryClient.invalidateQueries(['models-search'])` but `FileBrowser` uses `['file-browser', viewMode, params]` key.
+
+**Fix:** Remove manual invalidation, rely on `onUploadSuccess()` callback that calls `fileBrowserRef.current?.refetch()`.
+
+**Files Changed:**
+- `src/Web/ReactApp/src/common/components/modals/ModelUploadModal.tsx`
+
+**Status:** ✅ Implemented
+
+---
+
+#### Bug B: Models Not Persisting After Upload (Backend Schema)
+
+**Root Cause:** `SlicerDbContext` had no initialization logic. `Model3D` table never created. Uploads appeared to succeed but data wasn't persisted.
+
+**Fix:** Initialize `SlicerDbContext` during startup via `DatabaseInitializationExtensions.InitializeDatabaseAsync()`.
+
+**Files Changed:**
+- `src/api/Infrastructure/DatabaseInitializationExtensions.cs`
+- `src/api/ProgramHelpers.cs`
+
+**Status:** ✅ Implemented
+
+---
+
+#### Bug C: 404 When Downloading Model Files (Backend Paths)
+
+**Root Cause:** `GetModelFilePathAsync()` and `GetModelThumbnailPathAsync()` returned relative paths (e.g., `filename.stl`). Controller's `File.Exists(filePath)` check failed.
+
+**Fix:** Return absolute paths using `Path.Combine(_modelsPath, model.FileName)`.
+
+**Files Changed:**
+- `src/slicer/Farm.Slicer.Module/Services/Model3DFileService.cs`
+
+**Consequence:** 4 models uploaded on Apr 5 became orphaned (database records exist but files unreachable). Users must re-upload.
+
+**Status:** ✅ Implemented
+
+---
+
+#### Bug D: Tag Filtering Not Implemented (Deferred)
+
+**Root Cause:** `Model3DFileService.QueryAsync()` accepts `tagIds` but never passes to repository. Feature is a non-functional stub.
+
+**Fix:** Add `tagIds` parameter to `IModel3DFileRepository.QueryModelsAsync()` and implement cross-context filtering (`Model3DTagMapping` in `AppDbContext`, `Model3D` in `SlicerDbContext`).
+
+**Challenge:** Cross-context query design needed. Requires coordination between Lambert and backend architecture.
+
+**Status:** 🔄 IN PROGRESS (separate work item, not blocking upload/download)
+
+**Test Gap:** No tests for tag filtering exist. Kane adding comprehensive tests.
+
+---
+
+### Validation Checklist
+
+Before merging:
+- [ ] Frontend upload shows models immediately (Ripley's cache fix)
+- [ ] Database schema exists and accepts inserts (Lambert's init fix)
+- [ ] File downloads return 200 OK, not 404 (Parker's path fix)
+- [ ] Thumbnails display correctly (if generated)
+- [ ] No regression in existing model operations (Kane's tests)
+
+### Team Impact
+
+**Ripley:** Document FileBrowser + upload modal pattern in squad skills  
+**Lambert:** Document SlicerDbContext initialization pattern  
+**Kane:** Tag filtering is now a documented priority work item  
+**Parker:** Coordinate with Lambert on volume mount validation in health checks  
+
+### Next Steps
+
+1. Validation tests run and pass
+2. Atomic commit of all three fixes
+3. Notify user both upload visibility and file download working
+4. File separate issue for tag filtering with proper design
+
+---
+
+## Tag Filtering Implementation Gaps (2026-01-11 — Kane)
+
+**Status:** Bug identified, deferred for proper design  
+**Severity:** Medium — Feature non-functional but not affecting core upload/download  
+
+### Root Cause
+
+`Model3DFileService.QueryAsync()` accepts `tagIds` parameter (line 165) but completely ignores it:
+- Not passed to repository layer
+- Repository interface has no `tagIds` parameter
+- No cross-context query logic implemented
+
+### Challenge
+
+`Model3DTagMapping` lives in `AppDbContext`, `Model3D` lives in `SlicerDbContext`. Cross-context join requires:
+1. Query model IDs from Model3DTagMapping in AppDbContext
+2. Filter Model3D in SlicerDbContext by those IDs
+3. Paginate correctly across both contexts
+
+### Recommendation
+
+Coordinate with Lambert on cross-context query strategy. Consider:
+- Service-layer join (fetch tag mappings, then filter models) — Simple but less efficient
+- Database view (if using SQL Server/PostgreSQL) — Complex but efficient
+- Specification pattern with predicate composition — Flexible, testable
+
+### Test Coverage
+
+Kane adding tests:
+- Tag filtering with single tag
+- Tag filtering with multiple tags (AND/OR logic)
+- Filter by non-existent tag (empty results)
+- Verify filter doesn't affect pagination
+

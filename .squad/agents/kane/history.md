@@ -283,3 +283,62 @@ Working parallel with Ripley (frontend) and Lambert (backend).
 - Backend contract validation for upload response structure
 - Frontend cache invalidation tracing
 - Silent error detection in upload mutation
+
+## Learnings
+
+### 2026-01-11: STL Upload Tag Filtering Bug - Missing Implementation
+**Context:** User reported STL files upload successfully but don't appear on 3D Models page when filtering by tags.
+
+**Root Cause:** The `Model3DFileService.QueryAsync` method accepts a `tagIds` parameter but never uses it. The repository layer doesn't even have a parameter for tag filtering. Classic case of incomplete feature implementation that passed code review because:
+- Controller compiles correctly (passes tagIds)
+- Service compiles correctly (accepts but ignores tagIds)
+- Repository compiles correctly (no tagIds parameter)
+- All unit tests pass (they mock everything)
+- **NO integration tests for tag filtering**
+
+**Key Insight:** This is why integration tests matter more than unit tests for features that cross layers. Each layer worked in isolation, but the feature doesn't work end-to-end. The bug would have been caught immediately with a single test: "Upload file with tag, filter by tag, verify file appears."
+
+**Test Coverage Gap:** Searched entire test suite — zero tests for tag filtering in the query endpoint. Upload is tested, listing is tested, but the actual filtering logic was never verified.
+
+**Architecture Note:** Additional complexity here — `Model3DTagMapping` lives in `AppDbContext` but `Model3D` lives in `SlicerDbContext`. Need cross-context query strategy for the fix.
+
+**Fix Scope:**
+1. Repository interface: Add `tagIds` parameter to `QueryModelsAsync`
+2. Repository implementation: Join with tag mappings and filter
+3. Service: Pass `tagIds` to repository
+4. Tests: Add tag filtering regression tests
+5. Manual verification: Upload → tag → filter → verify visibility
+
+**Recommendation:** Assigned to Lambert (backend/data access owner). Medium-high priority — breaks core feature but has workaround (view all models without filtering).
+
+**Takeaway for future work:** When reviewing API endpoints, check the full path from controller → service → repository → database. If any layer accepts a parameter but doesn't use it, that's a red flag. Also, search for integration tests that exercise the full feature path, not just individual methods.
+
+---
+
+## 2026-04-05T16:17:29Z — Orchestration: Model Cleanup & Display Name Regression Coverage
+
+**Spawned By:** Scribe (team coordination)  
+**Coordination:** Lambert (backend cleanup), Ripley (frontend display)
+
+### Assignment
+
+QA and test coverage for model cleanup validation and display name consistency:
+
+1. **Orphaned Record Cleanup Tests** — Verify cleanup doesn't affect valid models
+2. **Tag Filtering Cross-Context Tests** — Integration tests for query logic, ALL/ANY filtering
+3. **Display Name Consistency Tests** — End-to-end upload → query → picker flow validation
+4. **Regression Suite** — No breaks to existing model operations
+
+### Success Criteria
+
+✓ Tag filtering tests pass (cross-context logic validated)  
+✓ Orphaned record cleanup validated safe  
+✓ Display name consistency across flow  
+✓ All existing model tests still passing  
+
+### Related Decisions
+
+- `.squad/decisions/decisions.md` — 3D Models Upload & Display multi-agent investigation
+- `.squad/decisions/decisions.md` — Tag Filtering Implementation Gaps (test gaps identified)
+- `.squad/orchestration-log/2026-04-05T16-17-29Z-kane.md` — Orchestration manifest
+

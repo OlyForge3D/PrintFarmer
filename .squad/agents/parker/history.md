@@ -260,3 +260,81 @@ Documented Jeff Papiez preference: use `pfdev` (canonical), not `pf-dev` or `pf-
 ### Key Lesson
 In microservices deployments, module-loading logic and capability reporting need independent detection paths. Conflating them causes false-negative capability reports when services run as separate containers.
 
+
+## 2026-04-05: 3D Model File Storage Path Bug Fix
+
+**Role:** DevOps & Deployment Engineer  
+**Status:** ✅ Complete — Code fixed, deployment validated
+
+### Problem Investigation
+
+User reported 404 errors when accessing uploaded 3D models via `/api/3d-models/file/{id}`. Investigation revealed:
+
+1. **Database records exist** with `FilePath = "/"` and GUID-based filenames
+2. **Physical files missing** from container's `/app/models` directory (mounted volume)
+3. **Root cause**: `Model3DFileService.GetModelFilePathAsync()` was constructing **relative** paths instead of **absolute** paths
+   - Controller expected: `/app/models/c403db80-8b5e-4346-ab6b-b454cb5799e9.stl` (absolute)
+   - Service returned: `c403db80-8b5e-4346-ab6b-b454cb5799e9.stl` (relative)
+   - File existence check failed: `File.Exists(relative_path)` → false → 404
+
+### Technical Details
+
+**Broken logic** in `Model3DFileService.cs` line 264:
+```csharp
+// BEFORE: Incorrectly stripped base path and returned relative
+return Path.Combine(model.FilePath, model.FileName)
+    .Replace(_modelsPath, string.Empty)
+    .TrimStart(Path.DirectorySeparatorChar, '/');
+```
+
+When `model.FilePath = "/"`, `_modelsPath = "/app/models"`, and `model.FileName = "guid.stl"`:
+- `Path.Combine("/", "guid.stl")` → `/guid.stl`
+- `.Replace("/app/models", "")` → `/guid.stl` (no match)
+- `.TrimStart(...)` → `guid.stl` (relative path)
+- Controller `File.Exists("guid.stl")` → false (not an absolute path)
+
+**Fix** in `Model3DFileService.cs`:
+```csharp
+// AFTER: Return absolute path directly
+return Path.Combine(_modelsPath, model.FileName);
+// Returns: /app/models/c403db80-8b5e-4346-ab6b-b454cb5799e9.stl
+```
+
+Also fixed `GetModelThumbnailPathAsync()` with same pattern.
+
+### Deployment & Validation
+
+1. **Built solution** in Release mode: 0 errors, 1 minor warning (SA1515 blank line)
+2. **Rebuilt API container** with `docker compose build --no-cache api`
+3. **Restarted API service**: `docker compose up -d api`
+4. **Verified volume mount**: `/home/pi/.printfarmer/models` → `/app/models` (correct)
+5. **Confirmed environment variable**: `MODEL_UPLOAD_PATH=/app/models` (correct)
+
+### Data Loss Discovery
+
+Existing model records (4 files uploaded Apr 5 04:12-04:13 UTC) have **no physical files**:
+- Files were uploaded to a previous container before proper volume persistence
+- Container was deleted during rebuild, files lost
+- Database records remain orphaned
+
+**Resolution**: Users must re-upload models. Fix prevents future data loss.
+
+### Key Files Modified
+
+- `src/slicer/Farm.Slicer.Module/Services/Model3DFileService.cs` (GetModelFilePathAsync, GetModelThumbnailPathAsync)
+
+### Deployment Configuration Verified
+
+Docker compose configuration (correct):
+- Environment: `MODEL_UPLOAD_PATH=/app/models`
+- Volume mount: `${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models`
+- `.env` override: `EXTERNAL_MODELS_PATH=/home/pi/.printfarmer/models`
+- Actual mount: `/home/pi/.printfarmer/models` → `/app/models` ✅
+
+### Learnings
+
+- In Docker microservices, **volume mounts must be validated** before users upload data
+- DB records without physical files indicate **storage misconfiguration or data loss**
+- Service methods must return **absolute paths** when callers use `File.Exists()` checks
+- The `FilePath` column storing `"/"` was a red herring — the real issue was path construction logic
+
