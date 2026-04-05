@@ -573,3 +573,65 @@ Working parallel with Ripley (frontend) and Kane (QA).
 - `src/infra/Services/ModelService.cs`
 - `src/infra/Data/Repository/ModelRepository.cs`
 - Upload logging and exception handling
+
+## 2026-04-04: Fixed 3D Models Not Appearing After Upload
+
+### Problem
+Users reported uploading .stl files successfully, but the 3D Models page showed no files.
+
+### Investigation
+- Traced data flow from upload endpoint (`/api/3d-models/upload` in `Model3DFilesController`) to listing endpoint (`/api/3d-models` GET)
+- Discovered the slicer module uses a **separate database context** (`SlicerDbContext`) with its own schema
+- Found that `SlicerDbContext` was never being initialized during application startup
+- `Models3D` table was never created, so uploads failed silently
+
+### Root Cause
+The main `AppDbContext` has initialization logic in `DatabaseInitializationExtensions.cs` that calls `EnsureCreated()` for SQLite, but `SlicerDbContext` had no initialization. The slicer module was loaded, controllers registered, but the database schema was missing.
+
+### Fix
+Added `SlicerDbContext` initialization to the startup pipeline in `DatabaseInitializationExtensions.cs`:
+1. Modified `InitializeDatabaseAsync` to accept optional `SlicerDbContext` parameter
+2. Added schema initialization logic after main context initialization
+3. Updated `ProgramHelpers.cs` to resolve and pass `SlicerDbContext` to the initializer
+
+For SQLite: Uses `EnsureCreated()` (no migrations assembly exists)  
+For PostgreSQL/SQL Server: Uses `Migrate()` (migrations assemblies exist)
+
+### Files Changed
+- `src/api/Infrastructure/DatabaseInitializationExtensions.cs` — Added slicer schema initialization
+- `src/api/ProgramHelpers.cs` — Pass SlicerDbContext to initializer
+
+### Validation
+Tested locally:
+- Deleted database
+- Restarted API
+- Verified Models3D table was created successfully
+- Log output confirmed: "[Startup]   ✓ Slicer schema ensured (SQLite — no migration assembly)"
+
+---
+
+## 2026-04-05T16:17:29Z — Orchestration: Model Cleanup & Backend Mapping
+
+**Spawned By:** Scribe (team coordination)  
+**Coordination:** Ripley (frontend display), Kane (test coverage)
+
+### Assignment
+
+Backend data layer work for orphaned 3D model record cleanup and cross-context tag filtering:
+
+1. **Orphaned Record Cleanup** — Identify and remove records from Apr 5 path migration (old relative paths)
+2. **Schema Validation** — Ensure Model3D, Model3DTagMapping, and display name fields consistent
+3. **Cross-Context Tag Filtering** — Design and implement tag filtering across AppDbContext → SlicerDbContext
+
+### Success Criteria
+
+✓ Orphaned records identified and cleanable without affecting valid models  
+✓ Tag filtering query logic validated (cross-context join strategy confirmed)  
+✓ Schema initialization includes both contexts, tag mappings verified  
+
+### Related Decisions
+
+- `.squad/decisions/decisions.md` — 3D Models Upload & Display multi-agent investigation
+- `.squad/decisions/decisions.md` — Tag Filtering Implementation Gaps (deferred work item)
+- `.squad/orchestration-log/2026-04-05T16-17-29Z-lambert.md` — Orchestration manifest
+

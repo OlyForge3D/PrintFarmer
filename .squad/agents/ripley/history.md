@@ -280,3 +280,60 @@ Working parallel with Lambert (backend) and Kane (QA).
 - `src/features/models/pages/ModelUploadPage.tsx`
 - `src/services/modelService.ts`
 - Cache invalidation in useModels hook
+
+## 2026-01-12: 3D Models Upload Bug Fix — Query Invalidation Mismatch
+
+**Role:** Frontend Dev  
+**Status:** ✅ Complete  
+**Tests:** ModelsPage tests passing, ESLint clean
+
+### Root Cause
+
+`ModelUploadModal` was invalidating query key `['models-search']` after upload, but `FileBrowser` uses query key `['file-browser', viewMode, JSON.stringify(actualQueryParams)]`. Mismatched keys meant uploads succeeded but the models list never refetched.
+
+### Fix
+
+Removed the stale `queryClient.invalidateQueries({ queryKey: ['models-search'] })` call and relied entirely on the existing `onUploadSuccess` callback that calls `fileBrowserRef.current?.refetch()`. This targets the correct `['file-browser', ...]` query key.
+
+### Files Changed
+
+- `src/Web/ReactApp/src/common/components/modals/ModelUploadModal.tsx`: Removed unused `useQueryClient` import and `queryClient.invalidateQueries` call. The modal now only uses the `onUploadSuccess` callback for refetch coordination.
+
+### Validation
+
+- ESLint: 0 errors
+- ModelsPage tests: 2/2 passing
+- No TypeScript errors
+
+## Learnings
+
+- **Query key consistency is critical**: When using callbacks like `onUploadSuccess={() => fileBrowserRef.current?.refetch()}`, that's the correct refetch mechanism — don't add manual query invalidation that targets a different key pattern.
+- **FileBrowser uses dynamic query keys**: The `useFileBrowser` hook constructs keys as `['file-browser', viewMode, JSON.stringify(actualQueryParams)]`. Any manual invalidation must match this exact structure, or use the exposed `refetch()` method via the component ref.
+- **Remove dead code**: When removing `queryClient.invalidateQueries()`, also remove unused `useQueryClient` and `queryClient` variable to keep lint clean.
+
+---
+
+## 2026-04-05T16:17:29Z — Orchestration: Model Picker Display Name Fixes
+
+**Spawned By:** Scribe (team coordination)  
+**Coordination:** Lambert (backend mapping), Kane (regression testing)
+
+### Assignment
+
+Frontend UI work for model picker display names and rendering consistency:
+
+1. **Display Name Rendering** — Ensure picker shows complete, untruncated model names
+2. **Encoding & Character Handling** — Validate UTF-8, special characters, no artifacts
+3. **UI Consistency** — Names match backend DTO output (Model3D.DisplayName)
+
+### Success Criteria
+
+✓ Model picker displays complete display names without truncation  
+✓ No encoding artifacts (special chars, UTF-8 handled correctly)  
+✓ Names consistent across upload → query → picker flow  
+
+### Related Decisions
+
+- `.squad/decisions/decisions.md` — 3D Models Upload & Display multi-agent investigation
+- `.squad/orchestration-log/2026-04-05T16-17-29Z-ripley.md` — Orchestration manifest
+
