@@ -262,3 +262,24 @@ Validated regression test coverage for slicer UI capability detection across dep
 - Fix is backward-compatible
 
 **Outcome:** Test coverage confirmed sufficient. Fix approved as safe and regression-free.
+
+## 2026-04-05: 3D Models Page Missing STLs — Spawn as QA Lead
+
+**Role:** QA / Regression Specialist
+**Status:** 🔍 Investigation spawned
+
+User reported STL uploads appear successful but files don't show on 3D Models page. Spawned Kane for:
+
+1. Reproduce exact upload flow end-to-end
+2. Verify success indicators (frontend toast + backend response)
+3. Check Models page visibility and file listing
+4. Cache state validation via browser DevTools
+5. Design regression test pattern
+
+Working parallel with Ripley (frontend) and Lambert (backend).
+
+**Investigation approach:**
+- Playwright E2E test of full upload-to-visibility flow
+- Backend contract validation for upload response structure
+- Frontend cache invalidation tracing
+- Silent error detection in upload mutation
