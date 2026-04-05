@@ -125,6 +125,12 @@ const mockProcessProfiles: OrcaProcessProfile[] = [
   }
 ];
 
+const mockProfilesSummary = {
+  machineProfiles: mockMachineProfiles,
+  filamentProfiles: mockFilamentProfiles,
+  processProfiles: mockProcessProfiles,
+};
+
 const mockSlicers = [
   { id: '1', name: 'orcaslicer-worker-1', slicerType: 'OrcaSlicer', version: '2.3.1' },
   { id: '2', name: 'prusaslicer-worker-1', slicerType: 'PrusaSlicer', version: '2.7.0' }
@@ -147,6 +153,7 @@ vi.mock('@/services/api', () => ({
 // Mock slicer profiles service
 vi.mock('@/services/slicerProfilesService', () => ({
   slicerProfilesService: {
+    listExtended: vi.fn(() => Promise.resolve(mockProfilesSummary)),
     getMachineProfilesForModel: vi.fn(() => Promise.resolve(mockMachineProfiles)),
     getFilamentProfilesForMachines: vi.fn(() => Promise.resolve(mockFilamentProfiles)),
     getProcessProfilesForMachines: vi.fn(() => Promise.resolve(mockProcessProfiles)),
@@ -164,7 +171,7 @@ vi.mock('@/services/slicerRegistry', () => ({
 // Mock slice job service
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
-    submit: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
+    submitJob: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
   }
 }));
 
