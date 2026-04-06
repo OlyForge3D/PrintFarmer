@@ -38,7 +38,7 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
   return (
     <div className={clsx('bg-pf-panel border border-pf-border rounded-lg p-4', className)}>
       <label className="block text-sm font-semibold text-pf-text-primary mb-3">Slicer Engine</label>
-      <div className="flex gap-3">
+      <div className="flex flex-col gap-3">
         {engineOptions.map(opt => {
           const isSelected = opt.value === selectedSlicerId;
           const iconSrc = getSlicerIconSrc(opt.value);
@@ -51,7 +51,7 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
               onClick={() => onSlicerChange(opt.value)}
               aria-pressed={isSelected}
               className={clsx(
-                'flex items-center gap-3 flex-1 px-4 py-3 rounded-lg border-2 transition-all cursor-pointer',
+                'flex w-full items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all cursor-pointer',
                 'hover:border-pf-accent hover:bg-pf-accent-bg/10',
                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent',
                 isSelected
