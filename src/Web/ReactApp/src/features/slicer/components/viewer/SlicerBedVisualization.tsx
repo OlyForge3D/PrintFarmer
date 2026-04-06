@@ -2,9 +2,9 @@
  * Slicer 3D Bed Visualization Component
  * A Three.js canvas showing the print bed similar to OrcaSlicer
  */
-import React, { Suspense, useRef, useEffect } from 'react';
+import React, { Suspense, useRef, useState, useEffect, useCallback } from 'react';
 import { Canvas, useThree, useLoader } from '@react-three/fiber';
-import { OrbitControls, Environment, Html } from '@react-three/drei';
+import { OrbitControls, Environment, Html, TransformControls } from '@react-three/drei';
 import { STLLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
@@ -33,6 +33,10 @@ export interface SlicerBedVisualizationProps {
   models?: LoadedModel[];
   selectedModelId?: string;
   onModelSelect?: (modelId: string | null) => void;
+  /** Active transform tool: 'translate' | 'rotate' | 'scale' */
+  transformMode?: 'translate' | 'rotate' | 'scale';
+  /** Called when a model is moved/rotated/scaled via TransformControls */
+  onModelTransform?: (modelId: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
   showGrid?: boolean;
   showAxes?: boolean;
   gridDivisions?: number;
@@ -296,7 +300,8 @@ function STLModel({
   rotation = [0, 0, 0], 
   scale = [1, 1, 1],
   selected = false,
-  onClick
+  onClick,
+  meshRef,
 }: { 
   url: string;
   position?: [number, number, number];
@@ -304,9 +309,11 @@ function STLModel({
   scale?: [number, number, number];
   selected?: boolean;
   onClick?: () => void;
+  meshRef?: React.RefObject<THREE.Mesh | null>;
 }) {
   const geometry = useLoader(STLLoader, url);
-  const meshRef = useRef<THREE.Mesh>(null);
+  const internalRef = useRef<THREE.Mesh>(null);
+  const ref = meshRef || internalRef;
 
   // Center geometry and place on bed
   useEffect(() => {
@@ -324,37 +331,43 @@ function STLModel({
 
   return (
     <mesh
-      ref={meshRef}
+      ref={ref}
       geometry={geometry}
       position={position}
       rotation={rotation}
       scale={scale}
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.();
+      }}
       castShadow
       receiveShadow
     >
       <meshStandardMaterial 
-        color={selected ? "#ff8844" : "#0088cc"}
-        metalness={0.3}
-        roughness={0.4}
-        emissive={selected ? "#442200" : "#000000"}
+        color={selected ? "#00d66b" : "#00ae56"}
+        metalness={0.15}
+        roughness={0.45}
+        emissive={selected ? "#003d1a" : "#001a0d"}
       />
     </mesh>
   );
 }
 
 /**
- * Camera controller with optimal positioning
+ * Camera controller with optimal positioning.
+ * OrbitControls ref is exposed so TransformControls can disable orbiting during drag.
  */
-function CameraController({ bedWidth, bedDepth, bedHeight }: { bedWidth: number; bedDepth: number; bedHeight: number }) {
+function CameraController({ 
+  bedWidth, bedDepth, bedHeight, orbitRef 
+}: { 
+  bedWidth: number; bedDepth: number; bedHeight: number;
+  orbitRef: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
+}) {
   const { camera } = useThree();
 
   useEffect(() => {
-    // Calculate camera distance based on bed size
     const maxDimension = Math.max(bedWidth, bedDepth, bedHeight);
     const distance = maxDimension * 1.5;
-
-    // Position camera at isometric-ish angle
     camera.position.set(distance * 0.7, -distance * 0.7, distance * 0.6);
     camera.up.set(0, 0, 1); // Enforce Z-up for 3D printing convention
     camera.lookAt(0, 0, bedHeight / 4);
@@ -363,6 +376,7 @@ function CameraController({ bedWidth, bedDepth, bedHeight }: { bedWidth: number;
 
   return (
     <OrbitControls
+      ref={orbitRef}
       enablePan={true}
       enableRotate={true}
       enableZoom={true}
@@ -372,7 +386,65 @@ function CameraController({ bedWidth, bedDepth, bedHeight }: { bedWidth: number;
       rotateSpeed={0.8}
       zoomSpeed={1.2}
       minPolarAngle={0}
-      maxPolarAngle={Math.PI / 2 + 0.3} // Allow slightly below horizon
+      maxPolarAngle={Math.PI / 2 + 0.3}
+    />
+  );
+}
+
+/**
+ * Wrapper that attaches TransformControls to the selected model mesh.
+ * Uses an effect to detect when the mesh ref becomes available.
+ */
+function ModelTransformControls({
+  meshRef,
+  mode,
+  orbitRef,
+  onTransformEnd,
+}: {
+  meshRef: React.RefObject<THREE.Mesh | null>;
+  mode: 'translate' | 'rotate' | 'scale';
+  orbitRef: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
+  onTransformEnd?: () => void;
+}) {
+  const transformRef = useRef<React.ComponentRef<typeof TransformControls>>(null);
+  const [mesh, setMesh] = useState<THREE.Mesh | null>(null);
+
+  // Sync ref → state so we re-render when the mesh appears
+  useEffect(() => {
+    setMesh(meshRef.current);
+  }, [meshRef]);
+
+  // Disable orbit while dragging
+  useEffect(() => {
+    const controls = transformRef.current;
+    if (!controls) return;
+
+    const handler = (event: { value: boolean }) => {
+      if (orbitRef.current) {
+        orbitRef.current.enabled = !event.value;
+      }
+      if (!event.value) {
+        onTransformEnd?.();
+      }
+    };
+
+    controls.addEventListener('dragging-changed', handler as unknown as EventListener);
+    return () => {
+      controls.removeEventListener('dragging-changed', handler as unknown as EventListener);
+    };
+  }, [orbitRef, onTransformEnd]);
+
+  if (!mesh) return null;
+
+  return (
+    <TransformControls
+      ref={transformRef}
+      object={mesh}
+      mode={mode}
+      size={0.7}
+      translationSnap={1}
+      rotationSnap={THREE.MathUtils.degToRad(5)}
+      scaleSnap={0.05}
     />
   );
 }
@@ -385,9 +457,29 @@ function BedScene({
   models = [],
   selectedModelId,
   onModelSelect,
+  transformMode = 'translate',
+  onModelTransform,
   showAxes = true,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
+  const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
+  const selectedMeshRef = useRef<THREE.Mesh>(null);
+
+  const handleTransformEnd = useCallback(() => {
+    if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
+    const mesh = selectedMeshRef.current;
+    onModelTransform(
+      selectedModelId,
+      mesh.position.toArray() as [number, number, number],
+      [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+      mesh.scale.toArray() as [number, number, number],
+    );
+  }, [selectedModelId, onModelTransform]);
+
+  // Deselect when clicking the bed/background
+  const handlePointerMissed = useCallback(() => {
+    onModelSelect?.(null);
+  }, [onModelSelect]);
 
   return (
     <>
@@ -404,7 +496,7 @@ function BedScene({
       <pointLight position={[0, 0, height * 1.5]} intensity={0.3} />
 
       {/* Camera controls */}
-      <CameraController bedWidth={width} bedDepth={depth} bedHeight={height} />
+      <CameraController bedWidth={width} bedDepth={depth} bedHeight={height} orbitRef={orbitRef} />
 
       {/* Print bed */}
       <PrintBedPlatform 
@@ -421,20 +513,33 @@ function BedScene({
       {showAxes && <AxisIndicators size={Math.min(width, depth) * 0.15} />}
 
       {/* Loaded models */}
-      {models.map((model) => (
-        <Suspense key={model.id} fallback={<LoadingIndicator />}>
-          {model.fileType === 'stl' && (
-            <STLModel
-              url={model.url}
-              position={model.position}
-              rotation={model.rotation}
-              scale={model.scale}
-              selected={model.id === selectedModelId}
-              onClick={() => onModelSelect?.(model.id)}
-            />
-          )}
-        </Suspense>
-      ))}
+      <group onPointerMissed={handlePointerMissed}>
+        {models.map((model) => (
+          <Suspense key={model.id} fallback={<LoadingIndicator />}>
+            {model.fileType === 'stl' && (
+              <STLModel
+                url={model.url}
+                position={model.position}
+                rotation={model.rotation}
+                scale={model.scale}
+                selected={model.id === selectedModelId}
+                onClick={() => onModelSelect?.(model.id)}
+                meshRef={model.id === selectedModelId ? selectedMeshRef : undefined}
+              />
+            )}
+          </Suspense>
+        ))}
+      </group>
+
+      {/* TransformControls for the selected model */}
+      {selectedModelId && (
+        <ModelTransformControls
+          meshRef={selectedMeshRef}
+          mode={transformMode}
+          orbitRef={orbitRef}
+          onTransformEnd={handleTransformEnd}
+        />
+      )}
 
       {/* Environment for reflections */}
       <Environment preset="studio" />
@@ -450,6 +555,8 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   models = [],
   selectedModelId,
   onModelSelect,
+  transformMode = 'translate',
+  onModelTransform,
   showAxes = true,
   backgroundColor = '#2a2a2e',
   className = '',
@@ -484,6 +591,8 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             models={models}
             selectedModelId={selectedModelId}
             onModelSelect={onModelSelect}
+            transformMode={transformMode}
+            onModelTransform={onModelTransform}
             showAxes={showAxes}
           />
         </Suspense>

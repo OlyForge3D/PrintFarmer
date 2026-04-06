@@ -18,6 +18,8 @@ export interface SlicerWorkspaceProps {
   selectedModelId?: string;
   /** Callback when a model is selected */
   onModelSelect?: (modelId: string | null) => void;
+  /** Callback when a model is moved/rotated/scaled */
+  onModelTransform?: (modelId: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
   /** Callback when Add Model is clicked */
   onAddModel?: () => void;
   /** Callback when Settings & Profiles is clicked */
@@ -41,6 +43,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   models = [],
   selectedModelId,
   onModelSelect,
+  onModelTransform,
   onAddModel,
   onSettingsProfiles,
   onSlice,
@@ -122,6 +125,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setShowLayers(prev => !prev);
   }, []);
 
+  // Map left-tool type to Three.js TransformControls mode
+  const transformMode = activeTool === 'rotate' ? 'rotate' 
+    : activeTool === 'scale' ? 'scale' 
+    : 'translate';
+
   return (
     <div className={`flex flex-col h-full bg-pf-bg-0 ${className}`}>
       {/* Top Toolbar */}
@@ -153,6 +161,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           models={models}
           selectedModelId={selectedModelId}
           onModelSelect={onModelSelect}
+          transformMode={transformMode}
+          onModelTransform={onModelTransform}
           showGrid={true}
           showAxes={true}
           className="w-full h-full"
