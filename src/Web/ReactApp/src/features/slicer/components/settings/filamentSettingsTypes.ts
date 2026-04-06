@@ -12,6 +12,8 @@ export type FilamentSettingsCategory =
   | 'flow' 
   | 'cooling' 
   | 'retraction' 
+  | 'physical'
+  | 'gcode'
   | 'other';
 
 /**
@@ -259,16 +261,20 @@ export const FILAMENT_SETTING_TO_CATEGORY_MAP: Record<string, FilamentSettingsCa
   wipeBeforeRetract: 'retraction',
   retractionLiftZ: 'retraction',
   
+  // Physical tab
+  density: 'physical',
+  cost: 'physical',
+  
+  // G-code tab
+  startGcode: 'gcode',
+  endGcode: 'gcode',
+  
   // Other tab
   name: 'other',
   material: 'other',
   color: 'other',
-  density: 'other',
-  cost: 'other',
   filamentLoadTime: 'other',
   filamentUnloadTime: 'other',
   filamentRammingParameters: 'other',
   toolchangeDelay: 'other',
-  startGcode: 'other',
-  endGcode: 'other',
 };
