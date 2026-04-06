@@ -642,9 +642,9 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
     <div className={`${className} border border-pf-border rounded-lg overflow-hidden relative`} style={{ backgroundColor: '#2d3748' }}>
       <Canvas
         camera={{ 
-          position: [100, -100, 80], // Z-up isometric view from front-right-above
+          position: [0, 0, 150], // Top-down view: looking down the Z-axis at the XY plane
           fov: 45,
-          up: [0, 0, 1] // Set Z as up axis for correct orientation
+          up: [0, 1, 0] // Standard Y-up (standard Three.js convention for flat models)
         }}
         shadows
         style={{ backgroundColor: '#2d3748' }} // Darker gray background
