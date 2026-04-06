@@ -51,7 +51,7 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
               onClick={() => onSlicerChange(opt.value)}
               aria-pressed={isSelected}
               className={clsx(
-                'w-full px-4 py-3 rounded-lg border-2 transition-all cursor-pointer',
+                'w-full px-3 py-2 rounded-lg border-2 transition-all cursor-pointer',
                 'hover:border-pf-accent hover:bg-pf-accent-bg/10',
                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent',
                 isSelected
@@ -59,27 +59,27 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
                   : 'border-pf-border bg-pf-bg-1',
               )}
             >
-              <span className="flex w-full items-center gap-4 text-left">
+              <span className="flex w-full items-center gap-3 text-left">
                 {iconSrc ? (
                   <img
                     src={iconSrc}
                     alt=""
-                    className="h-14 w-14 shrink-0 rounded-xl object-contain"
+                    className="h-8 w-8 shrink-0 rounded-lg object-contain"
                   />
                 ) : (
-                  <span className="h-14 w-14 shrink-0 flex items-center justify-center text-2xl" role="img" aria-hidden="true">
+                  <span className="h-8 w-8 shrink-0 flex items-center justify-center text-lg" role="img" aria-hidden="true">
                     🔪
                   </span>
                 )}
                 <span className="min-w-0">
                   <span className={clsx(
-                    'block text-2xl leading-tight font-semibold truncate',
+                    'block text-sm leading-tight font-semibold truncate',
                     isSelected ? 'text-pf-accent' : 'text-pf-text-primary',
                   )}>
                     {name}
                   </span>
                   {version && (
-                    <span className="block text-xl leading-tight text-pf-text-muted truncate mt-0.5">{version}</span>
+                    <span className="block text-xs leading-tight text-pf-text-muted truncate mt-0.5">{version}</span>
                   )}
                 </span>
               </span>

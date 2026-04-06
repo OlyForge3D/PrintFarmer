@@ -59,7 +59,6 @@ import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
-import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -77,7 +76,6 @@ const LazyWorkerManagementPage = lazy(() =>
 const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
 );
-const LazyOrcaSlicerPage = lazy(() => import('@/features/slicer/pages/OrcaSlicerPage'));
 const LazySliceJobsPage = lazy(() =>
   import('@/features/slicer/pages/SliceJobsPage').then(mod => ({ default: mod.SliceJobsPage }))
 );
@@ -93,27 +91,6 @@ function RouteLoader() {
 
 function RouteSuspense({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<RouteLoader />}>{children}</Suspense>;
-}
-
-function SlicerUnavailableMessage() {
-  return (
-    <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-semibold text-pf-text-primary">Slicer is not available</h1>
-      <p className="mt-2 text-pf-text-secondary">
-        The 3D slicer workspace loads only when a slicer worker is enabled and registered.
-      </p>
-      <p className="mt-2 text-sm text-pf-text-tertiary">
-        If you expect slicing to work here, enable the worker and/or register at least one slicer service.
-      </p>
-    </div>
-  );
-}
-
-function SlicerGate({ children }: { children: React.ReactNode }) {
-  const { isLoading, isSlicerAvailable } = useSlicer();
-  if (isLoading) return <RouteLoader />;
-  if (!isSlicerAvailable) return <SlicerUnavailableMessage />;
-  return children;
 }
 
 /**
@@ -240,21 +217,9 @@ function AuthenticatedAppRoutes() {
           <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
           <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
         </Route>
-        <Route path="jobs/new" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
+        <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="slice-jobs" element={<FeatureGate feature="slicing"><RouteSuspense><LazySliceJobsPage /></RouteSuspense></FeatureGate>} />
         <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
-        <Route
-          path="slicer"
-          element={
-            <FeatureGate feature="slicing">
-              <SlicerGate>
-                <RouteSuspense>
-                  <LazyOrcaSlicerPage />
-                </RouteSuspense>
-              </SlicerGate>
-            </FeatureGate>
-          }
-        />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />
       </Route>
     </Routes>

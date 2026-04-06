@@ -109,7 +109,7 @@ const navigation: NavigationElement[] = [
   },
   {
     name: 'Slice',
-    href: '/jobs/new',
+    href: '/slicer',
     icon: BoxIcon,
     requiredPermission: { resource: 'models', action: 'read' },
     requiresSlicer: true,

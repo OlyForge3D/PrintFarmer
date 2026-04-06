@@ -170,7 +170,7 @@ export function SliceJobsPage() {
         isFetching ? <Spinner size="sm" className="ml-2" /> : undefined
       }
       actions={
-        <Button variant="primary" onClick={() => navigate('/jobs/new')}>
+        <Button variant="primary" onClick={() => navigate('/slicer')}>
           New Slice Job
         </Button>
       }
@@ -214,7 +214,7 @@ export function SliceJobsPage() {
         <EmptyState
           hasFilter={statusFilter !== 'all'}
           onClearFilter={() => setStatusFilter('all')}
-          onCreateJob={() => navigate('/jobs/new')}
+          onCreateJob={() => navigate('/slicer')}
         />
       ) : viewMode === 'explorer' ? (
         <JobTable

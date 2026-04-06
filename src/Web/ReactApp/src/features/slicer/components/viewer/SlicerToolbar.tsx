@@ -41,20 +41,24 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
 }) => {
   const sizedIcon = React.isValidElement<{ className?: string }>(icon)
     ? React.cloneElement(icon, {
-        className: clsx('w-8 h-8', icon.props.className),
+        className: clsx('w-9 h-9', icon.props.className),
       })
     : icon;
 
   return (
     <Button
-      variant={active ? 'primary' : 'subtle'}
+      variant="unstyled"
       onClick={onClick}
       disabled={disabled}
       title={title || label}
-      className={`
-        flex items-center justify-center p-2.5 rounded-md
-        ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
-      `}
+      className={clsx(
+        'flex items-center justify-center p-1.5 rounded-lg transition-all',
+        'border shadow-sm',
+        active
+          ? 'bg-pf-accent/20 border-pf-accent shadow-pf-accent/20'
+          : 'bg-pf-bg-2 border-pf-border/60 hover:bg-pf-bg-2/80 hover:border-pf-accent/50 hover:shadow-md',
+        disabled && 'opacity-40 cursor-not-allowed',
+      )}
       iconLeft={label ? sizedIcon : undefined}
     >
       {label ? <span className="text-sm hidden xl:inline">{label}</span> : sizedIcon}

@@ -218,7 +218,14 @@ vi.mock('../../components/job', () => ({
         ))}
       </select>
     </div>
-  )
+  ),
+  SlicerSelector: ({ onSlicerChange }: { selectedSlicerId: string; onSlicerChange: (id: string) => void }) => (
+    <div data-testid="slicer-selector">
+      <select data-testid="slicer-select" onChange={(e) => onSlicerChange(e.target.value)}>
+        <option value="orcaslicer">OrcaSlicer</option>
+      </select>
+    </div>
+  ),
 }));
 
 // Mock 3D viewer
@@ -267,7 +274,7 @@ const createTestQueryClient = () => new QueryClient({
   },
 });
 
-const renderWithProviders = (ui: React.ReactElement, { route = '/slice/new' } = {}) => {
+const renderWithProviders = (ui: React.ReactElement, { route = '/slicer' } = {}) => {
   const queryClient = createTestQueryClient();
   
   return {
@@ -276,7 +283,7 @@ const renderWithProviders = (ui: React.ReactElement, { route = '/slice/new' } = 
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <Routes>
-              <Route path="/slice/new" element={ui} />
+              <Route path="/slicer" element={ui} />
             </Routes>
           </AuthProvider>
         </QueryClientProvider>
@@ -555,7 +562,7 @@ describe('NewSliceJobPage', () => {
 
   describe('URL Parameters', () => {
     it('should support model selection from URL parameter', async () => {
-      renderWithProviders(<NewSliceJobPage />, { route: '/slice/new?modelId=model-3d-1' });
+      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
       
       await waitFor(() => {
         expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();
