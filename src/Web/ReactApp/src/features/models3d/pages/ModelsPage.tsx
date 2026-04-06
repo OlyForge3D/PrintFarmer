@@ -130,7 +130,7 @@ export const ModelsPage: React.FC = () => {
             onSelectionChange={setSelectedModelIds}
             onOpenModel={setViewerModel}
             onSliceModel={(model) => {
-              window.location.assign(`/jobs/new?modelId=${model.id}`);
+              window.location.assign(`/slicer?modelId=${model.id}`);
             }}
             onShowTagModal={() => setShowBulkTagModal(true)}
             onShowSingleTagModal={(model) => {

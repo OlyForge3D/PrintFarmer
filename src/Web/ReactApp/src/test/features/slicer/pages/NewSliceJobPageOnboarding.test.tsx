@@ -82,6 +82,7 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
 // Mock heavy sub-components to keep tests fast and focused
 vi.mock('@/features/slicer/components/job', () => ({
   PrinterSlicerSelector: () => <div data-testid="printer-slicer-selector">PrinterSelector</div>,
+  SlicerSelector: () => <div data-testid="slicer-selector">SlicerSelector</div>,
 }));
 
 vi.mock('@/features/models3d/components/3d/ModelViewer3D', () => ({
@@ -154,7 +155,7 @@ const createTestQueryClient = () =>
     },
   });
 
-function renderPage(route = '/jobs/new') {
+function renderPage(route = '/slicer') {
   const queryClient = createTestQueryClient();
   return {
     ...render(
@@ -162,7 +163,7 @@ function renderPage(route = '/jobs/new') {
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <Routes>
-              <Route path="/jobs/new" element={<NewSliceJobPage />} />
+              <Route path="/slicer" element={<NewSliceJobPage />} />
             </Routes>
           </AuthProvider>
         </QueryClientProvider>

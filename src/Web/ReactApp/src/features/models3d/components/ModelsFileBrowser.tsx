@@ -132,7 +132,7 @@ export const ModelsFileBrowser = ({
       if (onSliceModel) {
         onSliceModel(model);
       } else {
-        window.location.assign(`/jobs/new?modelId=${model.id}`);
+        window.location.assign(`/slicer?modelId=${model.id}`);
       }
     },
     [onSliceModel]

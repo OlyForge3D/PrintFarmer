@@ -136,7 +136,7 @@ export const ModelListView: React.FC<ModelListViewProps> = ({
                     <TagIcon className="w-4 h-4" />
                   </Button>
                   <Button
-                    onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
+                    onClick={() => navigate(`/slicer?modelId=${model.id}`)}
                     variant="subtle"
                     size="sm"
                     title="Slice Model"

@@ -25,18 +25,17 @@ const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, on
   <Button
     onClick={onClick}
     title={title}
-    variant={active ? 'primary' : 'subtle'}
-    className={`
-      w-12 h-12 flex items-center justify-center rounded-lg transition-colors p-0
-      ${active 
-        ? 'bg-pf-accent text-white shadow-lg' 
-        : 'bg-pf-bg-2 text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-      }
-      border border-pf-border hover:border-pf-accent
-    `}
+    variant="unstyled"
+    className={clsx(
+      'w-12 h-12 flex items-center justify-center rounded-lg transition-all p-0',
+      'border shadow-sm',
+      active
+        ? 'bg-pf-accent text-white shadow-lg border-pf-accent'
+        : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border/60 hover:bg-pf-bg-2/80 hover:text-pf-text-primary hover:border-pf-accent/50 hover:shadow-md',
+    )}
   >
     {React.isValidElement<{ className?: string }>(icon)
-      ? React.cloneElement(icon, { className: clsx('w-8 h-8', icon.props.className) })
+      ? React.cloneElement(icon, { className: clsx('w-9 h-9', icon.props.className) })
       : icon}
   </Button>
 );

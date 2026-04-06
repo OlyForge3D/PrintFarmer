@@ -138,7 +138,7 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
                     <TagIcon className="w-4 h-4" />
                   </Button>
                   <Button
-                    onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
+                    onClick={() => navigate(`/slicer?modelId=${model.id}`)}
                     variant="primary"
                     size="sm"
                     className="flex-1"
