@@ -3,6 +3,7 @@
  * Source: https://github.com/SoftFever/OrcaSlicer/tree/main/resources/images
  */
 import React from 'react';
+import clsx from 'clsx';
 
 import toolbarOpenSvg from '@/assets/orcaslicer/toolbar_open.svg';
 import toolbarArrangeSvg from '@/assets/orcaslicer/toolbar_arrange.svg';
@@ -26,7 +27,7 @@ interface IconProps {
 }
 
 function OrcaIcon({ src, alt, className = 'w-8 h-8' }: { src: string; alt: string; className?: string }) {
-  return <img src={src} alt={alt} className={className} draggable={false} />;
+  return <img src={src} alt={alt} className={clsx('shrink-0', className)} draggable={false} />;
 }
 
 export const AddModelIcon: React.FC<IconProps> = ({ className }) => (
