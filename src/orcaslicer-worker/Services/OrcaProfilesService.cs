@@ -1274,10 +1274,10 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.LayerHeight = ParseDoubleValue(layerElem) ?? 0.2;
         }
 
-        if (root.TryGetProperty("fill_density", out JsonElement infillElem))
-        {
-            profile.InfillPercentage = ParseIntValue(infillElem) ?? 20;
-        }
+        // Try sparse_infill_density first (primary key), fallback to fill_density
+        profile.InfillPercentage = ParseOptionalInt(root, "sparse_infill_density")
+            ?? ParseOptionalInt(root, "fill_density")
+            ?? 20;
 
         profile.PrintSpeed = ParseProcessPrintSpeed(root, 50);
         profile.FirstLayerHeight = ParseFirstLayerHeight(root, profile.LayerHeight);
@@ -1296,19 +1296,18 @@ public class OrcaProfilesService : ISlicerProfilesService
         profile.WallCount = ParseOptionalInt(root, "wall_loops") ?? 3;
 
         // ── Infill ─────────────────────────────────────────────────────────
-        if (root.TryGetProperty("fill_pattern", out JsonElement patternElem))
-        {
-            profile.InfillPattern = ParseStringValue(patternElem);
-        }
-        else if (root.TryGetProperty("sparse_infill_pattern", out JsonElement sparsePatternElem))
-        {
-            profile.InfillPattern = ParseStringValue(sparsePatternElem);
-        }
+        // Try sparse_infill_pattern first (primary key), fallback to fill_pattern
+        profile.InfillPattern = ParseOptionalString(root, "sparse_infill_pattern")
+            ?? ParseOptionalString(root, "fill_pattern");
 
         // ── Speed (per-feature) ────────────────────────────────────────────
-        profile.OuterWallSpeed = ParseOptionalInt(root, "outer_wall_speed");
-        profile.InnerWallSpeed = ParseOptionalInt(root, "inner_wall_speed");
-        profile.InfillSpeed = ParseOptionalInt(root, "sparse_infill_speed");
+        // OrcaSlicer uses snake_case property names
+        profile.OuterWallSpeed = ParseOptionalInt(root, "outer_wall_speed")
+            ?? ParseOptionalInt(root, "external_perimeter_speed");
+        profile.InnerWallSpeed = ParseOptionalInt(root, "inner_wall_speed")
+            ?? ParseOptionalInt(root, "perimeter_speed");
+        profile.InfillSpeed = ParseOptionalInt(root, "sparse_infill_speed")
+            ?? ParseOptionalInt(root, "infill_speed");
         profile.TopSurfaceSpeed = ParseOptionalInt(root, "top_surface_speed");
         profile.TravelSpeed = ParseOptionalInt(root, "travel_speed");
 
@@ -1355,8 +1354,10 @@ public class OrcaProfilesService : ISlicerProfilesService
             ?? ParseOptionalInt(root, "first_layer_bed_temperature");
 
         // ── Retraction ─────────────────────────────────────────────────────
-        profile.RetractionLength = ParseOptionalDouble(root, "retraction_length");
-        profile.RetractionSpeed = ParseOptionalDouble(root, "retraction_speed");
+        profile.RetractionLength = ParseOptionalDouble(root, "retraction_length")
+            ?? ParseOptionalDouble(root, "retract_length");
+        profile.RetractionSpeed = ParseOptionalDouble(root, "retraction_speed")
+            ?? ParseOptionalDouble(root, "retract_speed");
 
         // ── Line widths ────────────────────────────────────────────────────
         profile.LineWidthDefault = ParseOptionalDouble(root, "line_width");
@@ -1560,6 +1561,16 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (root.TryGetProperty(key, out JsonElement elem))
         {
             return ParseBoolValue(elem);
+        }
+
+        return null;
+    }
+
+    private static string? ParseOptionalString(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out JsonElement elem))
+        {
+            return ParseStringValue(elem);
         }
 
         return null;
