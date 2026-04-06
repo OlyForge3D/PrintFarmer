@@ -3576,3 +3576,152 @@ export interface TimezoneInfo {
   displayName: string;
   offset: string;
 }
+
+// ── Slicer Profile DTOs ──────────────────────────────────────────────────
+
+export interface MachineProfileDto {
+  name: string;
+  manufacturer: string;
+  description?: string;
+  printer_model?: string;
+  printerVariant?: string;
+  instantiation: boolean;
+  inherits?: string;
+  nozzleDiameter?: number;
+  nozzleType?: string;
+  buildVolumeX?: number;
+  buildVolumeY?: number;
+  buildVolumeZ?: number;
+  printableArea?: string;
+  maxPrintSpeed?: number;
+  motionType?: string;
+  gcodeDialect?: string;
+  hasHeatedBed?: boolean;
+  hasHeatedChamber?: boolean;
+  maxBedTemperature?: number;
+  maxHotendTemperature?: number;
+  extruderCount: number;
+  supportMultiMaterial?: boolean;
+  retractionLength?: number;
+  retractionSpeed?: number;
+  retractionLiftZ?: number;
+  detractionSpeed?: number;
+  bedType?: string;
+  bedShape?: string;
+  startGcode?: string;
+  endGcode?: string;
+  maxAccelerationX?: number;
+  maxAccelerationY?: number;
+  maxFeedrateX?: number;
+  maxFeedrateY?: number;
+  settings: Record<string, unknown>;
+}
+
+export interface FilamentProfileDto {
+  name: string;
+  material: string;
+  manufacturer?: string;
+  description?: string;
+  color?: string;
+  compatible_printers: string[];
+  instantiation: boolean;
+  inherits?: string;
+  nozzleTemperature: number;
+  bedTemperature: number;
+  firstLayerNozzleTemperature?: number;
+  firstLayerBedTemperature?: number;
+  chamberTemperature?: number;
+  maxVolumetricSpeed?: number;
+  flowRatio?: number;
+  printSpeed: number;
+  enablePressureAdvance?: boolean;
+  pressureAdvance?: number;
+  retractionLength?: number;
+  retractionSpeed?: number;
+  detractionSpeed?: number;
+  enableFanCooling?: boolean;
+  minFanSpeed?: number;
+  maxFanSpeed?: number;
+  bridgeFanSpeed?: number;
+  density?: number;
+  cost?: number;
+  startGcode?: string;
+  endGcode?: string;
+  settings: Record<string, unknown>;
+}
+
+export interface ProcessProfileDto {
+  name: string;
+  quality: string;
+  description?: string;
+  compatible_printers: string[];
+  instantiation: boolean;
+  inherits?: string;
+  layerHeight: number;
+  firstLayerHeight: number;
+  topLayers: number;
+  bottomLayers: number;
+  wallCount: number;
+  infillPercentage: number;
+  infillPattern?: string;
+  printSpeed: number;
+  firstLayerPrintSpeed: number;
+  outerWallSpeed?: number;
+  innerWallSpeed?: number;
+  infillSpeed?: number;
+  topSurfaceSpeed?: number;
+  travelSpeed?: number;
+  bedAdhesion?: string;
+  supports: boolean;
+  supportType?: string;
+  supportDensity?: number;
+  supportAngle?: number;
+  seamPosition?: string;
+  enableIroning?: boolean;
+  nozzleTemp?: number;
+  bedTemp?: number;
+  firstLayerNozzleTemp?: number;
+  firstLayerBedTemp?: number;
+  retractionLength?: number;
+  retractionSpeed?: number;
+  lineWidthDefault?: number;
+  lineWidthOuterWall?: number;
+  lineWidthInnerWall?: number;
+  defaultAcceleration?: number;
+  outerWallAcceleration?: number;
+  settings: Record<string, unknown>;
+}
+
+// ── Profile Schema Types (schema-driven settings editor) ─────────────────
+
+export interface ProfileFieldMetadata {
+  key: string;
+  label: string;
+  fieldType: 'number' | 'integer' | 'boolean' | 'string' | 'enum';
+  category: string;
+  description?: string;
+  defaultValue?: unknown;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  options?: EnumOption[];
+  isAdvanced: boolean;
+}
+
+export interface EnumOption {
+  value: string;
+  label: string;
+}
+
+export interface ProfileTypeSchema {
+  profileType: string;
+  categories: string[];
+  fields: ProfileFieldMetadata[];
+}
+
+export interface ProfileSchemasResponse {
+  process: ProfileTypeSchema;
+  machine: ProfileTypeSchema;
+  filament: ProfileTypeSchema;
+}

@@ -52,6 +52,8 @@ import {
   ResolveHostnameRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
+  ProfileSchemasResponse,
+  ProfileTypeSchema,
   SlicerModelAliasDto,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
@@ -3061,6 +3063,22 @@ export class ApiClient {
    */
   async getSlicerJobStatus(jobId: string): Promise<Record<string, unknown>> {
     const response = await this.client.get(`/slicer/jobs/${encodeURIComponent(jobId)}/status`);
+    return response.data;
+  }
+
+  /**
+   * Get all profile schemas (process, machine, filament)
+   */
+  async getProfileSchemas(): Promise<ProfileSchemasResponse> {
+    const response = await this.client.get<ProfileSchemasResponse>('/slicer/profiles/schemas');
+    return response.data;
+  }
+
+  /**
+   * Get process profile schema
+   */
+  async getProcessProfileSchema(): Promise<ProfileTypeSchema> {
+    const response = await this.client.get<ProfileTypeSchema>('/slicer/profiles/schema/process');
     return response.data;
   }
 
