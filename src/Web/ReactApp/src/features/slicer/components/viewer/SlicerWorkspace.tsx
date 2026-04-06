@@ -176,6 +176,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           onToolChange={handleToolChange}
           onLayersToggle={handleLayersToggle}
           showLayers={showLayers}
+          hasSelection={hasSelection}
         />
       </div>
 

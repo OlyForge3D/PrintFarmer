@@ -18,13 +18,15 @@ interface ToolButtonProps {
   icon: React.ReactNode;
   title: string;
   active?: boolean;
+  disabled?: boolean;
   onClick?: () => void;
 }
 
-const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, onClick }) => (
+const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, disabled = false, onClick }) => (
   <Button
     onClick={onClick}
     title={title}
+    disabled={disabled}
     variant="unstyled"
     className={clsx(
       'w-12 h-12 flex items-center justify-center rounded-lg transition-all p-0',
@@ -32,6 +34,7 @@ const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, on
       active
         ? 'bg-pf-accent text-white shadow-lg border-pf-accent'
         : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border/60 hover:bg-pf-bg-2/80 hover:text-pf-text-primary hover:border-pf-accent/50 hover:shadow-md',
+      disabled && 'opacity-40 cursor-not-allowed',
     )}
   >
     {React.isValidElement<{ className?: string }>(icon)
@@ -45,6 +48,7 @@ export interface SlicerLeftToolsProps {
   onToolChange: (tool: ToolType) => void;
   onLayersToggle?: () => void;
   showLayers?: boolean;
+  hasSelection?: boolean;
 }
 
 export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
@@ -52,6 +56,7 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
   onToolChange,
   onLayersToggle,
   showLayers = false,
+  hasSelection = false,
 }) => {
   return (
     <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10">
@@ -61,18 +66,21 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
           icon={<MoveToolIcon />}
           title="Move (T)"
           active={activeTool === 'move'}
+          disabled={!hasSelection}
           onClick={() => onToolChange('move')}
         />
         <ToolButton
           icon={<RotateToolIcon />}
           title="Rotate (R)"
           active={activeTool === 'rotate'}
+          disabled={!hasSelection}
           onClick={() => onToolChange('rotate')}
         />
         <ToolButton
           icon={<ScaleToolIcon />}
           title="Scale (S)"
           active={activeTool === 'scale'}
+          disabled={!hasSelection}
           onClick={() => onToolChange('scale')}
         />
       </div>
