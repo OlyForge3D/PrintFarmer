@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Slicer.Module.Api.Hubs;
@@ -741,7 +742,13 @@ public class ProfilesService(
             Id = p.Id,
             Name = p.Name,
             SlicerType = p.SlicerType.ToString(),
-            Quality = p.Quality.ToString()
+            Quality = p.Quality.ToString(),
+            LayerHeight = p.LayerHeight,
+            InfillPercentage = p.InfillPercentage,
+            IsSystem = p.IsSystem,
+            IsDefault = p.IsDefault,
+            IsPublic = p.IsPublic,
+            Hash = p.Hash ?? string.Empty,
         }).ToList();
         _logger.LogInformation("[ListSystemOrcaProfilesAsync] Returning {ResultCount} system profiles", result.Count);
         return result;
@@ -1941,8 +1948,59 @@ public class ProfilesService(
             throw new KeyNotFoundException($"Printer with ID {printerId} not found");
         }
 
-        _logger.LogDebug("[GetAvailableProfilesForPrinterAsync] Found printer: {PrinterName}, retrieving OrcaSlicer system profiles", printer.Name);
-        return await ListSystemOrcaProfilesAsync(ct);
+        _logger.LogDebug("[GetAvailableProfilesForPrinterAsync] Found printer: {PrinterName} (ModelId: {ModelId})", printer.Name, printer.ModelId);
+
+        // Resolve the OrcaSlicer alias for this printer's model
+        IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(printer.ModelId, ct);
+        SlicerModelAliasDto? orcaAlias = aliases.FirstOrDefault(a =>
+            string.Equals(a.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase));
+
+        if (orcaAlias is null || string.IsNullOrWhiteSpace(orcaAlias.SlicerModelName))
+        {
+            _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No OrcaSlicer alias for model {ModelId}, falling back to system profiles", printer.ModelId);
+            return await ListSystemOrcaProfilesAsync(ct);
+        }
+
+        string alias = orcaAlias.SlicerModelName;
+        _logger.LogInformation("[GetAvailableProfilesForPrinterAsync] Using OrcaSlicer alias '{Alias}' for printer {PrinterName}", alias, printer.Name);
+
+        try
+        {
+            using HttpClient httpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+            // Get machine profiles matching this printer's alias from the worker
+            IReadOnlyList<MachineProfileDto> machines = await GetMachineProfilesByAliasAsync(httpClient, alias, ct);
+            if (machines.Count == 0)
+            {
+                _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No machine profiles found for alias '{Alias}'", alias);
+                return [];
+            }
+
+            List<string> machineNames = machines.Select(m => m.Name).ToList();
+            _logger.LogDebug("[GetAvailableProfilesForPrinterAsync] Found {Count} machine profiles, fetching compatible process profiles", machines.Count);
+
+            // Get process profiles compatible with those machines
+            IReadOnlyList<ProcessProfileDto> processProfiles = await GetProcessProfilesForMachinesAsync(httpClient, machineNames, ct);
+            _logger.LogInformation("[GetAvailableProfilesForPrinterAsync] Found {Count} process profiles for printer {PrinterName}", processProfiles.Count, printer.Name);
+
+            return processProfiles.Select(p => new SlicerProfileListItemDto
+            {
+                Id = Guid.NewGuid(),
+                Name = p.Name,
+                SlicerType = "OrcaSlicer",
+                Quality = p.Quality,
+                LayerHeight = p.LayerHeight,
+                InfillPercentage = p.InfillPercentage,
+                IsSystem = true,
+                IsPublic = false,
+                Hash = string.Empty
+            }).ToList();
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[GetAvailableProfilesForPrinterAsync] Worker unavailable, falling back to system profiles");
+            return await ListSystemOrcaProfilesAsync(ct);
+        }
     }
 
     /// <summary>

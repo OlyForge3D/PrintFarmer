@@ -614,3 +614,33 @@ The slicer subsystem is **far more complete than assumed.** The core pipeline (s
 5. **Profile system is sophisticated** — 3123-line ProfilesService with hierarchical profiles, deduplication, cloning, compatibility validation. Worker caches profiles in SQLite.
 6. **The biggest user-facing gap is job visibility** — Users can submit but can't see a queue, can't track progress in real-time, can't bridge to printing
 7. **`feature/orcaslicer-full-ui-parity` branch has no unique commits** — all slicer work already landed on development
+
+## Learnings
+
+### 3D Models Upload/Display Bug Synthesis (2026-01-12)
+
+**Context:** User reported STL uploads succeed but files not appearing on 3D Models page. Separate issue: selecting a model yields 404 from `/api/3d-models/file/{id}`.
+
+**Evidence synthesis across team:**
+
+1. **Ripley (Frontend):** Fixed query invalidation mismatch where `ModelUploadModal` was invalidating `['models-search']` but `FileBrowser` uses `['file-browser', viewMode, params]`. Fix: Remove manual invalidation, use `onUploadSuccess` callback that calls `fileBrowserRef.current?.refetch()`.
+
+2. **Kane (QA):** Identified tag filtering bug — `Model3DFileService.QueryAsync` accepts `tagIds` parameter but never uses it. Repository layer has no tag filtering implementation. This is a *separate bug* from the 404 file endpoint issue.
+
+3. **Lambert (Backend):** Fixed database schema initialization issue — `SlicerDbContext` was never initialized, causing uploads to fail silently. Also working on file path bug where `GetModelFilePathAsync` was returning relative paths instead of absolute paths, causing 404s when frontend tries to download files.
+
+**Root cause assessment:**
+
+**Two separate bugs:**
+- **Bug A (Upload not showing):** Fixed by Ripley (frontend cache) + Lambert (SlicerDbContext init). Models now appear on page after upload.
+- **Bug B (404 on file download):** Lambert's file path fix in progress — `GetModelFilePathAsync` and `GetModelThumbnailPathAsync` now return absolute paths (`Path.Combine(_modelsPath, model.FileName)`) instead of relative paths that included virtual directories.
+
+**Tag filtering:** Separate feature gap (Kane's finding) — not causing current user-reported issues but should be fixed to prevent confusion when users try to filter by tags.
+
+**Decision:** Ship Ripley's frontend fix immediately (it's a pure cache bug, low risk). Lambert's file path fix appears to address the 404 issue and should be tested + merged ASAP. Tag filtering can be queued as separate work item.
+
+**Key insight:** This was *two independent bugs masquerading as one*:
+1. Cache invalidation (frontend) → models not appearing
+2. File path resolution (backend) → 404 on download
+
+Both needed fixes, but they're orthogonal. The cache fix unblocked visibility, the path fix unblocks downloads.

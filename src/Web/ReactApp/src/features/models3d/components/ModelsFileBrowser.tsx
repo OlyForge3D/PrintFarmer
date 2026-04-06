@@ -170,6 +170,7 @@ export const ModelsFileBrowser = ({
     try {
       await apiClient.deleteModel3dFile(file.id);
       toast.success('Model deleted successfully');
+      await fileBrowserRef.current?.refetch();
     } catch (error) {
       toast.error('Failed to delete model');
       console.error('Delete error:', error);
@@ -219,14 +220,17 @@ export const ModelsFileBrowser = ({
       const response = await apiClient.get3DModelsQuery(payload);
 
       const searchResponse = response as unknown as Model3DSearchResponse;
-      const totalSize = searchResponse.models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
+
+      // Guard against stub/malformed responses (e.g. slicer module disabled returns [])
+      const models = Array.isArray(searchResponse?.models) ? searchResponse.models : [];
+      const totalSize = models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
 
       return {
-        items: searchResponse.models,
-        totalItems: searchResponse.totalCount,
-        totalPages: searchResponse.totalPages,
+        items: models,
+        totalItems: searchResponse?.totalCount ?? 0,
+        totalPages: searchResponse?.totalPages ?? 0,
         totalSize,
-        page: searchResponse.page,
+        page: searchResponse?.page ?? 1,
       };
     },
     []

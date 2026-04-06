@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Models;
+using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Rendering;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Host;
@@ -32,6 +34,9 @@ public static class StubServiceRegistrations
 
         // Real implementation — self-contained in Farm.Infrastructure, only needs ILogger<StubServiceRegistrations>.
         services.AddScoped<I3MfToStlConversionService, ThreeMfToStlConversionService>();
+
+        // Thumbnail generation for 3D model uploads (STL, 3MF, OBJ, etc.)
+        services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();
 
         return services;
     }

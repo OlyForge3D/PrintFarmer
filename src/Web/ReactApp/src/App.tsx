@@ -73,9 +73,7 @@ import './App.css';
 const LazyWorkerManagementPage = lazy(() =>
   import('@/features/slicer/pages/WorkerManagementPage').then(mod => ({ default: mod.WorkerManagementPage }))
 );
-const LazySlicerProfilesPage = lazy(() =>
-  import('@/features/slicer/pages/SlicerProfilesPage').then(mod => ({ default: mod.SlicerProfilesPage }))
-);
+
 const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
 );
@@ -83,9 +81,7 @@ const LazyOrcaSlicerPage = lazy(() => import('@/features/slicer/pages/OrcaSlicer
 const LazySliceJobsPage = lazy(() =>
   import('@/features/slicer/pages/SliceJobsPage').then(mod => ({ default: mod.SliceJobsPage }))
 );
-const LazyImportOfficialProfilesPage = lazy(() =>
-  import('@/features/slicer/pages/ImportOfficialProfilesPage').then(mod => ({ default: mod.ImportOfficialProfilesPage }))
-);
+
 
 function RouteLoader() {
   return (
@@ -236,7 +232,7 @@ function AuthenticatedAppRoutes() {
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
           <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<FeatureGate feature="slicing"><RouteSuspense><LazySlicerProfilesPage /></RouteSuspense></FeatureGate>} />
+          <Route path="slicer-profiles" element={<Navigate to="/profiles/import" replace />} />
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="webhooks" element={<WebhooksAdminPage />} />
           <Route path="data" element={<DataManagementPage />} />
@@ -246,7 +242,7 @@ function AuthenticatedAppRoutes() {
         </Route>
         <Route path="jobs/new" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="slice-jobs" element={<FeatureGate feature="slicing"><RouteSuspense><LazySliceJobsPage /></RouteSuspense></FeatureGate>} />
-        <Route path="slicer/import-official" element={<FeatureGate feature="slicing"><RouteSuspense><LazyImportOfficialProfilesPage /></RouteSuspense></FeatureGate>} />
+        <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
         <Route
           path="slicer"
           element={

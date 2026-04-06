@@ -234,14 +234,7 @@ const navigation: NavigationElement[] = [
     requiresSlicer: true,
     requiresSlicingCapability: true
   },
-  {
-    name: 'Slicer Profiles',
-    href: '/admin/slicer-profiles',
-    icon: SettingsIcon,
-    requiredRole: 'farm_admin',
-    requiresSlicer: true,
-    requiresSlicingCapability: true
-  },
+
   {
     name: 'System',
     href: '/admin/system',

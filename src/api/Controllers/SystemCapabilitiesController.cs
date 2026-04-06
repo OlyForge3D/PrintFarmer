@@ -27,10 +27,23 @@ public class SystemCapabilitiesController(
         var arch = RuntimeInformation.ProcessArchitecture;
         bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
 
-        // Read resolved values — Program.cs writes these after applying ARM + DEPLOYMENT_MODE logic
         bool modelFilesEnabled = _configuration.GetValue("Platform:ModelFilesEnabled", true);
         bool slicerEnabled = _configuration.GetValue("Slicer:Enabled", true);
         bool thumbnailEnabled = _configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
+
+        // In microservices mode the slicer module is NOT loaded in this API process,
+        // but the standalone slicer-host provides the capability. Report slicing as
+        // available so the frontend shows the slicer UI (nginx routes slicer paths
+        // to the slicer-host container).
+        bool isMicroservices = string.Equals(
+            _configuration.GetValue<string>("DEPLOYMENT_MODE"),
+            "microservices",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (isMicroservices && !isArm)
+        {
+            slicerEnabled = true;
+        }
 
         string? platformNote = isArm && (!modelFilesEnabled || !slicerEnabled || !thumbnailEnabled)
             ? "Running on ARM64 — 3D model and slicing features are disabled"

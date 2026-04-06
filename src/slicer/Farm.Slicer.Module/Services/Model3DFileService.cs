@@ -193,7 +193,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             catch
             {
                 // Path doesn't exist — return empty results
-                return new Model3DListResponse([], 0, 0, page, pageSize, 0, 0);
+                return new Model3DListResponse(Models: [], TotalCount: 0, TotalSize: 0, Page: page, PageSize: pageSize, TotalPages: 0, TotalItems: 0);
             }
         }
 
@@ -222,8 +222,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         int totalPages = totalCount > 0 ? (int)Math.Ceiling((double)totalCount / pageSize) : 0;
 
         return new Model3DListResponse(
-            Files: entries,
-            TotalFiles: totalCount,
+            Models: entries,
+            TotalCount: totalCount,
             TotalSize: totalSize,
             Page: page,
             PageSize: pageSize,
@@ -253,15 +253,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <returns>Full filesystem path to the model file, or null if not found</returns>
     public async Task<string?> GetModelFilePathAsync(Guid id, CancellationToken ct)
     {
-        Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
+        // Use unfiltered query for file operations - files should be accessible regardless of validation status
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(id, ct);
         if (model == null)
         {
             return null;
         }
 
-        // Return relative path by combining FilePath (directory) with FileName (GUID filename)
-        // FilePath is the storage directory, FileName is the GUID-based filename
-        return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, string.Empty).TrimStart(Path.DirectorySeparatorChar, '/');
+        // Return absolute path using the configured storage directory
+        return Path.Combine(_modelsPath, model.FileName);
     }
 
     /// <summary>
@@ -272,8 +272,9 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <returns>Full filesystem path to thumbnail, or null if thumbnail not available</returns>
     public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
     {
-        Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
-        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(model.FilePath, model.ThumbnailFileName));
+        // Use unfiltered query for file operations - thumbnails should be accessible regardless of validation status
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(id, ct);
+        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(_modelsPath, model.ThumbnailFileName));
     }
 
     /// <summary>
@@ -390,6 +391,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             throw new InvalidOperationException("Unsafe file path generated");
         }
 
+        _logger.LogInformation("Starting model upload: {FileName} ({FileSize} bytes), ID: {ModelId}", originalName, modelFile.Length, modelId);
+
         // Use temp file pattern for safety: write to temp, then move to final location
         string tempFileName = $"{modelId}.tmp{fileExtension}";
         string tempFilePath = Path.Combine(_modelsPath, tempFileName);
@@ -448,11 +451,14 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 // analysis is optional; resolve from DI if available via _analysisService
                 if (_analysisService != null)
                 {
+                    _logger.LogDebug("Analyzing model metadata for {ModelId}", modelId);
                     analysis = await _analysisService.AnalyzeModelAsync(tempFilePath, fileExtension, ct);
+                    _logger.LogDebug("Model analysis complete for {ModelId}: {DimensionX}x{DimensionY}x{DimensionZ}mm", modelId, analysis?.DimensionX, analysis?.DimensionY, analysis?.DimensionZ);
                 }
             }
-            catch
+            catch (Exception analysisEx)
             {
+                _logger.LogWarning("Model analysis failed for {ModelId}: {Message}", modelId, analysisEx.Message);
             }
 
             // Step 3: Check for duplicates
@@ -551,12 +557,14 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
             await _model3dFiles.AddAsync(model, ct);
             await _model3dFiles.SaveChangesAsync(ct);
+            _logger.LogInformation("Model record saved to database: {ModelId}", modelId);
 
             // Step 6: Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
             try
             {
                 if (_thumbnailService != null)
                 {
+                    _logger.LogDebug("Starting thumbnail generation for {ModelId}", modelId);
                     string thumbnailFileName = _fileOperations.GenerateThumbnailFileName(modelId, _thumbnailService.ThumbnailFileExtension);
                     string thumbnailPath = Path.Combine(_modelsPath, thumbnailFileName);
 
@@ -577,7 +585,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
                             _logger.LogInformation("Thumbnail generated successfully for model {ModelId}", modelId);
                         }
+                        else
+                        {
+                            _logger.LogWarning("Thumbnail generation returned false for model {ModelId}", modelId);
+                        }
                     }
+                }
+                else
+                {
+                    _logger.LogDebug("Thumbnail service not available, skipping thumbnail generation for {ModelId}", modelId);
                 }
             }
             catch (Exception thumbnailEx)
@@ -587,6 +603,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 // Don't rethrow - upload should succeed even if thumbnail generation fails
             }
 
+            _logger.LogInformation("Model upload complete: {ModelId} ({FileName}). All post-processing finished.", modelId, fileName);
             return new Model3DUploadResultDto
             {
                 Id = modelId,

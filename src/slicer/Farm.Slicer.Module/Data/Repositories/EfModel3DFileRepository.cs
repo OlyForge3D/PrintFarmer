@@ -34,6 +34,12 @@ public class EfModel3DFileRepository(SlicerDbContext db) : IModel3DFileRepositor
     }
 
     /// <inheritdoc/>
+    public async Task<Model3D?> GetByIdUnfilteredAsync(Guid id, CancellationToken ct)
+    {
+        return await _db.Models3D.FirstOrDefaultAsync(m => m.Id == id, ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct)
     {
         return await _db.Models3D
