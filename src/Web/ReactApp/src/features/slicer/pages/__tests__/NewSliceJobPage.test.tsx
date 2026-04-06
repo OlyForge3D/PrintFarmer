@@ -242,27 +242,13 @@ vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
 }));
 
 // Mock SlicerSettingsPanel
-vi.mock('@/features/slicer/components/settings', () => ({
-  SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
-  DEFAULT_BASIC_SETTINGS: {
-    layerHeight: 0.2,
-    infillDensity: 15,
-    supportEnabled: false,
-    supportStyle: 'normal',
-    brimEnabled: false,
-    brimWidth: 5,
-    wallLoops: 2,
-    topLayers: 4,
-    bottomLayers: 4,
-    infillPattern: 'grid',
-    printSpeed: 50,
-    outerWallSpeed: 25,
-    innerWallSpeed: 40,
-    infillSpeed: 80,
-    supportSpeed: 40,
-    travelSpeed: 150,
-  },
-}));
+vi.mock('@/features/slicer/components/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/slicer/components/settings')>();
+  return {
+    ...actual,
+    SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
+  };
+});
 
 // Mock useSTLFile hook
 vi.mock('@/common/hooks/useSTLFile', () => ({
