@@ -96,6 +96,9 @@ deploy/nginx/certs/
 .playwright-mcp/
 .playwright-cli/
 
+# Local parity capture artifacts
+simplyprint-*
+
 # Dotnet installer duplicates
 dotnet-install.sh.*
 
