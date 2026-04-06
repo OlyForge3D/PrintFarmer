@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- PrusaSlicer logo - stylized orange slicer blade with P -->
+  <defs>
+    <linearGradient id="prusa-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FA6831;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ED4E0E;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Hexagonal base shape -->
+  <path d="M32 4L56 18V46L32 60L8 46V18L32 4Z" fill="url(#prusa-grad)"/>
+  <!-- Layer slice lines -->
+  <path d="M14 30H50" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.9"/>
+  <path d="M16 36H48" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M18 42H46" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+  <!-- Prusa P lettermark -->
+  <path d="M26 14V26M26 14H34C37 14 39 16 39 19C39 22 37 24 34 24H26" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
