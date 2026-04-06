@@ -2,7 +2,7 @@
  * Slicer 3D Bed Visualization Component
  * A Three.js canvas showing the print bed similar to OrcaSlicer
  */
-import React, { Suspense, useRef, useState, useEffect, useCallback } from 'react';
+import React, { Suspense, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { Canvas, useThree, useLoader } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, TransformControls } from '@react-three/drei';
 import { STLLoader } from 'three-stdlib';
@@ -311,23 +311,26 @@ function STLModel({
   onClick?: () => void;
   meshRef?: React.RefObject<THREE.Mesh | null>;
 }) {
-  const geometry = useLoader(STLLoader, url);
+  const rawGeometry = useLoader(STLLoader, url);
   const internalRef = useRef<THREE.Mesh>(null);
   const ref = meshRef || internalRef;
 
-  // Center geometry and place on bed
-  useEffect(() => {
-    if (geometry) {
-      geometry.computeBoundingBox();
-      if (geometry.boundingBox) {
-        const centerX = (geometry.boundingBox.min.x + geometry.boundingBox.max.x) / 2;
-        const centerY = (geometry.boundingBox.min.y + geometry.boundingBox.max.y) / 2;
-        const minZ = geometry.boundingBox.min.z;
-        geometry.translate(-centerX, -centerY, -minZ);
-        geometry.computeVertexNormals();
-      }
+  // Clone geometry so we don't mutate the useLoader cache, center it on the
+  // bed, and recompute bounding sphere so raycasting (click-to-select) works.
+  const geometry = useMemo(() => {
+    const geo = rawGeometry.clone();
+    geo.computeBoundingBox();
+    if (geo.boundingBox) {
+      const centerX = (geo.boundingBox.min.x + geo.boundingBox.max.x) / 2;
+      const centerY = (geo.boundingBox.min.y + geo.boundingBox.max.y) / 2;
+      const minZ = geo.boundingBox.min.z;
+      geo.translate(-centerX, -centerY, -minZ);
     }
-  }, [geometry]);
+    geo.computeVertexNormals();
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    return geo;
+  }, [rawGeometry]);
 
   return (
     <mesh
@@ -344,10 +347,10 @@ function STLModel({
       receiveShadow
     >
       <meshStandardMaterial 
-        color={selected ? "#58a6ff" : "#0969da"}
+        color={selected ? "#00c853" : "#009688"}
         metalness={0.15}
         roughness={0.45}
-        emissive={selected ? "#0a2540" : "#041a33"}
+        emissive={selected ? "#003d19" : "#002b26"}
       />
     </mesh>
   );

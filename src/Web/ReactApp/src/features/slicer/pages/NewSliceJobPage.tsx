@@ -192,6 +192,8 @@ export const NewSliceJobPage: React.FC = () => {
   const [useModelPicker, setUseModelPicker] = useState(true);
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  // Multi-model bed state — accumulates models added via the "+" button
+  const [bedModels, setBedModels] = useState<LoadedModel[]>([]);
 
   // Track which model is selected on the 3D bed (for TransformControls)
   const [selectedBedModelId, setSelectedBedModelId] = useState<string | null>(null);
@@ -790,16 +792,32 @@ export const NewSliceJobPage: React.FC = () => {
     } catch { /* ignore */ }
   }, [STORAGE_KEYS.processProfileId, selectedProcessPresetId]);
 
-  // Derive model file URL when selected
+  // Derive model file URL when selected and add to bed
   useEffect(() => {
     if (useModelPicker && selectedModelId) {
       const apiBase = getApiBaseUrl();
       const mdl = models?.find(m => m.id === selectedModelId);
+      const url = `${apiBase}/3d-models/file/${selectedModelId}`;
+      const fileName = mdl?.originalFileName || mdl?.fileName || 'model.stl';
       queueMicrotask(() => {
-        setModelFileUrl(`${apiBase}/3d-models/file/${selectedModelId}`);
+        setModelFileUrl(url);
         if (mdl) {
-          setModelFileName(mdl.originalFileName || mdl.fileName);
+          setModelFileName(fileName);
         }
+        // Add to bed models if not already present
+        setBedModels(prev => {
+          if (prev.some(m => m.id === selectedModelId)) return prev;
+          const offset = prev.length * 30; // offset each model so they don't overlap
+          return [...prev, {
+            id: selectedModelId,
+            url,
+            fileName,
+            fileType: 'stl' as const,
+            position: [offset, 0, 0] as [number, number, number],
+            rotation: [0, 0, 0] as [number, number, number],
+            scale: [1, 1, 1] as [number, number, number],
+          }];
+        });
       });
     }
   }, [useModelPicker, selectedModelId, models]);
@@ -920,16 +938,6 @@ export const NewSliceJobPage: React.FC = () => {
     submitSliceJob();
   };
 
-  const previewFileType = useMemo<'stl' | '3mf' | 'obj' | 'ply'>(() => {
-    if (modelFileName) {
-      const ext = modelFileName.split('.').pop()?.toLowerCase();
-      if (ext === '3mf') return '3mf';
-      if (ext === 'obj') return 'obj';
-      if (ext === 'ply') return 'ply';
-    }
-    return 'stl';
-  }, [modelFileName]);
-
   const workspaceBedConfig = useMemo<BedConfig>(() => ({
     width: bedDimensions?.width ?? 220,
     depth: bedDimensions?.depth ?? 220,
@@ -938,21 +946,8 @@ export const NewSliceJobPage: React.FC = () => {
     textureFormat: bedTextureInfo.format,
   }), [bedDimensions, bedTextureInfo.format, bedTextureInfo.url]);
 
-  const workspaceModels = useMemo<LoadedModel[]>(() => {
-    if (!modelFileUrl || previewFileType !== 'stl') {
-      return [];
-    }
-
-    return [{
-      id: selectedModelId || modelFileName || 'preview-model',
-      url: modelFileUrl,
-      fileName: modelFileName || 'preview-model.stl',
-      fileType: 'stl',
-      position: [0, 0, 0],
-      rotation: [0, 0, 0],
-      scale: [1, 1, 1],
-    }];
-  }, [modelFileName, modelFileUrl, previewFileType, selectedModelId]);
+  // workspaceModels is the live bedModels state (multi-model accumulation)
+  const workspaceModels = bedModels;
 
   const handleWorkspaceAddModel = useCallback(() => {
     if (!useModelPicker) {
@@ -1427,6 +1422,7 @@ export const NewSliceJobPage: React.FC = () => {
                 setSelectedModelId('');
                 setModelFileUrl('');
                 setModelFileName('');
+                setBedModels([]);
               }
             }}
             models={models}
@@ -1469,6 +1465,7 @@ export const NewSliceJobPage: React.FC = () => {
                 setMessage(null);
                 setModelFileUrl('');
                 setModelFileName('');
+                setBedModels([]);
               }}
               onRetry={() => {
                 setSubmittedJobId(null);
@@ -1490,6 +1487,7 @@ export const NewSliceJobPage: React.FC = () => {
               onClick={() => {
                 setModelFileUrl('');
                 setModelFileName('');
+                setBedModels([]);
                 setError(null);
                 setMessage(null);
                 setSubmittedJobId(null);
