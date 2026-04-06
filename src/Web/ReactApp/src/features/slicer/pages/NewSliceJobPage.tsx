@@ -23,7 +23,7 @@ import {
   type SimpleSlicerSettings,
   type AdvancedSlicerSettings,
 } from '@/features/slicer/components/settings';
-import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job';
+import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
 import { ModelSelector } from '../components/job/ModelSelector';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
@@ -192,6 +192,9 @@ export const NewSliceJobPage: React.FC = () => {
   const [useModelPicker, setUseModelPicker] = useState(true);
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+
+  // Track which model is selected on the 3D bed (for TransformControls)
+  const [selectedBedModelId, setSelectedBedModelId] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -958,6 +961,23 @@ export const NewSliceJobPage: React.FC = () => {
     setModelPickerOpen(true);
   }, [useModelPicker]);
 
+  const handleWorkspaceModelSelect = useCallback((modelId: string | null) => {
+    setSelectedBedModelId(modelId);
+  }, []);
+
+  const handleWorkspaceModelTransform = useCallback((
+    modelId: string,
+    position: [number, number, number],
+    rotation: [number, number, number],
+    scale: [number, number, number],
+  ) => {
+    // Update the workspace model's transform — currently single-model, but ready for multi-model
+    void modelId;
+    void position;
+    void rotation;
+    void scale;
+  }, []);
+
   const handleWorkspaceSettingsProfiles = useCallback(() => {
     const settingsPanel = document.querySelector('[aria-label="Process profile options menu"]');
     if (settingsPanel instanceof HTMLElement) {
@@ -1034,19 +1054,12 @@ export const NewSliceJobPage: React.FC = () => {
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}
         <div className="w-full lg:w-96 space-y-2 shrink-0 pb-4 max-h-screen overflow-y-auto">
 
-          {/* SLICER SELECTION - Shows name and version */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-3">
-            <label className="block text-sm font-semibold text-pf-text-primary mb-2">Slicer</label>
-            <Select
-              value={selectedSlicerId}
-              onChange={e => setSelectedSlicerId(Number(e.target.value))}
-              className="w-full"
-            >
-              {engineOptions.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </Select>
-          </div>
+          {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
+          <SlicerSelector
+            selectedSlicerId={selectedSlicerId}
+            onSlicerChange={setSelectedSlicerId}
+            engineOptions={engineOptions}
+          />
 
           {/* PRINTER SELECTION - Select from registered printers first */}
           <PrinterSlicerSelector
@@ -1494,8 +1507,9 @@ export const NewSliceJobPage: React.FC = () => {
               <SlicerWorkspace
                 bedConfig={workspaceBedConfig}
                 models={workspaceModels}
-                selectedModelId={workspaceModels[0]?.id}
-                onModelSelect={() => undefined}
+                selectedModelId={selectedBedModelId ?? workspaceModels[0]?.id}
+                onModelSelect={handleWorkspaceModelSelect}
+                onModelTransform={handleWorkspaceModelTransform}
                 onAddModel={handleWorkspaceAddModel}
                 onSettingsProfiles={handleWorkspaceSettingsProfiles}
                 onSlice={submitSliceJob}
