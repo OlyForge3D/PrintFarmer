@@ -1182,6 +1182,61 @@ public class ProfilesController(
         }
     }
 
+    // ── Schema metadata endpoints (static, public, cached) ─────────
+
+    /// <summary>
+    /// Returns combined schema metadata for all profile types (process, machine, filament),
+    /// powering schema-driven settings editors in the UI.
+    /// </summary>
+    [HttpGet("schemas")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 3600)]
+    [ProducesResponseType(typeof(ProfileSchemasResponseDto), StatusCodes.Status200OK)]
+    [Tags("Slicer Profile Schemas")]
+    public IActionResult GetAllSchemas()
+    {
+        return Ok(ProfileSchemaProvider.GetAllSchemas());
+    }
+
+    /// <summary>
+    /// Returns schema metadata for process profile fields.
+    /// </summary>
+    [HttpGet("schema/process")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 3600)]
+    [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
+    [Tags("Slicer Profile Schemas")]
+    public IActionResult GetProcessSchema()
+    {
+        return Ok(ProfileSchemaProvider.GetProcessSchema());
+    }
+
+    /// <summary>
+    /// Returns schema metadata for machine profile fields.
+    /// </summary>
+    [HttpGet("schema/machine")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 3600)]
+    [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
+    [Tags("Slicer Profile Schemas")]
+    public IActionResult GetMachineSchema()
+    {
+        return Ok(ProfileSchemaProvider.GetMachineSchema());
+    }
+
+    /// <summary>
+    /// Returns schema metadata for filament profile fields.
+    /// </summary>
+    [HttpGet("schema/filament")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 3600)]
+    [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
+    [Tags("Slicer Profile Schemas")]
+    public IActionResult GetFilamentSchema()
+    {
+        return Ok(ProfileSchemaProvider.GetFilamentSchema());
+    }
+
     /// <summary>
     /// Gets the current user's ID from the authentication claims.
     /// </summary>

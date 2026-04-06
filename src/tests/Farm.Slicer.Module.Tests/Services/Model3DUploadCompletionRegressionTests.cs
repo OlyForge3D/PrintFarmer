@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -85,7 +85,7 @@ public class Model3DUploadCompletionRegressionTests
         // Arrange
         var fileSystemCallSequence = new List<string>();
         var mockFileSystem = new Mock<Farm.Infrastructure.IO.IFileSystem>();
-        
+
         // Track when file operations happen
         mockFileSystem.Setup(fs => fs.DirectoryExists(It.IsAny<string>())).Returns(true);
         mockFileSystem.Setup(fs => fs.OpenWrite(It.IsAny<string>()))
@@ -137,13 +137,13 @@ public class Model3DUploadCompletionRegressionTests
 
         // Assert
         result.Should().NotBeNull("upload should complete successfully");
-        
+
         // Critical assertion: File operations must complete before method returns
-        fileSystemCallSequence.Should().Contain("MoveFile", 
+        fileSystemCallSequence.Should().Contain("MoveFile",
             "temp file must be moved to final location before returning success");
-        fileSystemCallSequence.Should().Contain("AddAsync", 
+        fileSystemCallSequence.Should().Contain("AddAsync",
             "database record must be created before returning success");
-        
+
         var moveFileIndex = fileSystemCallSequence.IndexOf("MoveFile");
         var addAsyncIndex = fileSystemCallSequence.IndexOf("AddAsync");
         moveFileIndex.Should().BeLessThan(addAsyncIndex,
@@ -160,7 +160,7 @@ public class Model3DUploadCompletionRegressionTests
         // Arrange
         var operationSequence = new List<string>();
         var mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
-        
+
         mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Model3D?)null);
         mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()))
@@ -202,7 +202,7 @@ public class Model3DUploadCompletionRegressionTests
         result.Should().NotBeNull();
         operationSequence.Should().Contain("SaveChangesAsync",
             "database changes must be committed before returning success");
-        
+
         var saveIndex = operationSequence.IndexOf("SaveChangesAsync");
         operationSequence.Count.Should().Be(saveIndex + 1,
             "SaveChangesAsync must be the final operation before method returns");
@@ -238,10 +238,10 @@ public class Model3DUploadCompletionRegressionTests
             {
                 operationSequence.Add("ThumbnailGenerationStarted");
                 thumbnailGenerationStarted.SetResult(true);
-                
+
                 // Simulate long-running thumbnail generation (e.g., complex 3MF conversion)
                 await Task.Delay(100);
-                
+
                 operationSequence.Add("ThumbnailGenerationComplete");
                 thumbnailGenerationComplete.SetResult(true);
                 return true;
@@ -284,26 +284,26 @@ public class Model3DUploadCompletionRegressionTests
 
         // Act
         var uploadTask = service.UploadModelAsync(file, CancellationToken.None);
-        
+
         // Wait for thumbnail generation to start
         await thumbnailGenerationStarted.Task;
-        
+
         // Critical assertion: Upload should not complete while thumbnail is still generating
         uploadTask.IsCompleted.Should().BeFalse(
             "UploadModelAsync must wait for thumbnail generation to complete before returning");
-        
+
         // Wait for upload to complete
         var result = await uploadTask;
 
         // Assert
         result.Should().NotBeNull();
-        
+
         thumbnailGenerationComplete.Task.IsCompleted.Should().BeTrue(
             "thumbnail generation must be complete when upload returns");
-        
+
         operationSequence.Should().Contain("ThumbnailGenerationComplete",
             "thumbnail must be fully generated before method returns");
-        
+
         var thumbnailCompleteIndex = operationSequence.IndexOf("ThumbnailGenerationComplete");
         operationSequence.Count.Should().Be(thumbnailCompleteIndex + 1,
             "thumbnail generation must be the final operation before method returns");
@@ -378,10 +378,10 @@ public class Model3DUploadCompletionRegressionTests
 
         // Assert
         result.Should().NotBeNull("upload should succeed despite thumbnail failure");
-        
+
         operationSequence.Should().Contain("ThumbnailAttemptFailed",
             "thumbnail generation must be attempted (and allowed to fail) before returning");
-        
+
         // Verify best-effort pattern: failure is logged but doesn't bubble up
         mockThumbnailService.Verify(t => t.GenerateThumbnailAsync(
             It.IsAny<string>(),
@@ -404,7 +404,7 @@ public class Model3DUploadCompletionRegressionTests
     {
         // Arrange
         var operationSequence = new List<string>();
-        
+
         var mockFileSystem = new Mock<Farm.Infrastructure.IO.IFileSystem>();
         mockFileSystem.Setup(fs => fs.DirectoryExists(It.IsAny<string>())).Returns(true);
         mockFileSystem.Setup(fs => fs.OpenWrite(It.IsAny<string>()))
@@ -470,7 +470,7 @@ public class Model3DUploadCompletionRegressionTests
 
         // Assert
         result.Should().NotBeNull();
-        
+
         // Verify complete pipeline executed in correct order
         operationSequence.Should().ContainInOrder(new[]
         {
@@ -480,7 +480,7 @@ public class Model3DUploadCompletionRegressionTests
             "DatabaseCommit",
             "ThumbnailGeneration"
         }, "upload pipeline must execute in the correct order: file → database → thumbnail");
-        
+
         // Verify no operations happen after the last expected step
         var thumbnailIndex = operationSequence.LastIndexOf("ThumbnailGeneration");
         thumbnailIndex.Should().Be(operationSequence.Count - 1,
