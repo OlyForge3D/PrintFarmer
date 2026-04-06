@@ -1,5 +1,7 @@
-import React from 'react';
-import { Button, Input, Select } from '@/common/components/ui';
+import React, { useState, useMemo, useCallback } from 'react';
+import { Button, Input } from '@/common/components/ui';
+import { CubeIcon } from '@/common/components/icons/MdiIcons';
+import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import type { Model3DBasic } from './types';
 
 interface ModelSelectorProps {
@@ -29,9 +31,12 @@ interface ModelSelectorProps {
   className?: string;
 }
 
+const getModelId = (m: Model3DBasic) => m.id;
+const getModelLabel = (m: Model3DBasic) => m.originalFileName;
+
 /**
  * Model selection component.
- * Supports both library picker and manual URL input modes.
+ * Supports both library picker (searchable modal) and manual URL input modes.
  */
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
   useModelPicker,
@@ -45,8 +50,22 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   onFileUrlChange,
   fileName,
   onFileNameChange,
-  className
+  className,
 }) => {
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+
+  const selectedModel = useMemo(
+    () => models?.find((m) => m.id === selectedModelId),
+    [models, selectedModelId],
+  );
+
+  const handleSelect = useCallback(
+    (model: Model3DBasic) => {
+      onModelIdChange(model.id);
+    },
+    [onModelIdChange],
+  );
+
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3 ${className ?? ''}`}>
       <div className="flex items-center justify-between">
@@ -62,29 +81,38 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           {useModelPicker ? 'Enter URL manually' : 'Pick from library'}
         </Button>
       </div>
-      
+
       {useModelPicker ? (
         <div>
-          {isLoadingModels ? (
-            <Select disabled className="bg-pf-disabled">
-              <option>Loading models...</option>
-            </Select>
-          ) : modelsError ? (
+          {modelsError ? (
             <p className="text-sm text-pf-error">{modelsError.message}</p>
-          ) : models && models.length > 0 ? (
-            <Select 
-              value={selectedModelId} 
-              onChange={e => onModelIdChange(e.target.value)}
-            >
-              <option value="">-- Select model --</option>
-              {models.map(m => (
-                <option key={m.id} value={m.id}>{m.originalFileName}</option>
-              ))}
-            </Select>
           ) : (
-            <Select disabled className="bg-pf-disabled">
-              <option>-- No models available --</option>
-            </Select>
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setIsPickerOpen(true)}
+                iconLeft={<CubeIcon className="w-4 h-4" />}
+                className="w-full justify-start text-left"
+              >
+                <span className={selectedModel ? 'text-pf-text-primary' : 'text-pf-text-muted'}>
+                  {selectedModel?.originalFileName ?? 'Select a model...'}
+                </span>
+              </Button>
+
+              <SearchablePickerModal<Model3DBasic>
+                isOpen={isPickerOpen}
+                onClose={() => setIsPickerOpen(false)}
+                onSelect={handleSelect}
+                items={models ?? []}
+                getItemId={getModelId}
+                getLabel={getModelLabel}
+                selectedId={selectedModelId}
+                title="Select 3D Model"
+                searchPlaceholder="Search models by filename..."
+                emptyMessage="No models match your search."
+                isLoading={isLoadingModels}
+              />
+            </>
           )}
         </div>
       ) : (
@@ -94,7 +122,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <Input
               type="url"
               value={fileUrl}
-              onChange={e => onFileUrlChange(e.target.value)}
+              onChange={(e) => onFileUrlChange(e.target.value)}
               placeholder="https://... or /storage/..."
             />
           </div>
@@ -103,7 +131,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <Input
               type="text"
               value={fileName}
-              onChange={e => onFileNameChange(e.target.value)}
+              onChange={(e) => onFileNameChange(e.target.value)}
               placeholder="model.stl"
             />
           </div>
