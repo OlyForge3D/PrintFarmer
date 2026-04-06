@@ -41,7 +41,7 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
 }) => {
   const sizedIcon = React.isValidElement<{ className?: string }>(icon)
     ? React.cloneElement(icon, {
-        className: clsx('w-9 h-9', icon.props.className),
+        className: clsx('w-9 h-9 shrink-0', icon.props.className),
       })
     : icon;
 
@@ -52,7 +52,7 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
       disabled={disabled}
       title={title || label}
       className={clsx(
-        'flex items-center justify-center p-1.5 rounded-lg transition-all',
+        'flex items-center justify-center p-1.5 rounded-lg transition-all shrink-0',
         'border shadow-sm',
         active
           ? 'bg-pf-accent/20 border-pf-accent shadow-pf-accent/20'
@@ -110,7 +110,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   hasModels = false,
 }) => {
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border">
+    <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border overflow-x-auto">
       {/* Add/Arrange group */}
       <ToolbarButton
         icon={<AddModelIcon />}
