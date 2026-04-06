@@ -344,10 +344,10 @@ function STLModel({
       receiveShadow
     >
       <meshStandardMaterial 
-        color={selected ? "#00d66b" : "#00ae56"}
+        color={selected ? "#58a6ff" : "#0969da"}
         metalness={0.15}
         roughness={0.45}
-        emissive={selected ? "#003d1a" : "#001a0d"}
+        emissive={selected ? "#0a2540" : "#041a33"}
       />
     </mesh>
   );
