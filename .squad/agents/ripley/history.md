@@ -121,3 +121,13 @@ When modal success requires data refresh:
 
 **Lesson:** When a modal invalidates queries on close, verify the key matches the *actual* consuming hook. A stale query key string is invisible — it silently does nothing.
 
+### Delete Without Refetch Pattern (2026-07-31)
+
+**Bug:** Clicking delete on a model showed success toast, but the deleted model stayed visible until manual page refresh.
+
+**Root cause:** `handleDeleteConfirm` in `ModelsFileBrowser` called `apiClient.deleteModel3dFile()` and showed a toast, but never called `fileBrowserRef.current?.refetch()` afterward. The upload modal already used this exact refetch pattern — delete just missed it.
+
+**Fix:** Added `await fileBrowserRef.current?.refetch()` after successful delete API call. One line.
+
+**Lesson:** Every mutation that changes the backing data for a `FileBrowser` must call `fileBrowserRef.current?.refetch()` on success. This is the canonical refresh pattern — query invalidation by key prefix also works but the ref-based refetch is what all FileBrowser consumers use. Always verify both success feedback (toast) AND data refresh (refetch) are present in mutation handlers.
+
