@@ -170,6 +170,29 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
   supportInterfaceLayers: number;
   supportXYDistance: number;
   supportBaseInterfaceLayers: number;
+  
+  // Multimaterial settings
+  filament1ProfileId?: string;
+  filament2ProfileId?: string;
+  filament3ProfileId?: string;
+  purgeOnLayerChange?: boolean;
+  purgeTowerVolume?: number;
+  wipeTowerWidth?: number;
+  
+  // Wall generator & Walls & surfaces settings
+  minWallThickness?: number;
+  
+  // Flow ratio settings
+  outerWallFlowRatio?: number;
+  innerWallFlowRatio?: number;
+  
+  // Bridging settings
+  maxBridgeLength?: number;
+  bridgeSpeedReduction?: number;
+  
+  // Overhangs settings
+  overhangAngle?: number;
+  overhangPerimeterSpeed?: number;
 }
 
 /** Default values for basic settings */
@@ -341,6 +364,23 @@ export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
   ironingSpacing: 'other',
   ironingSpeed: 'other',
   ironingAngle: 'other',
+  
+  // Multimaterial tab
+  filament1ProfileId: 'multimaterial',
+  filament2ProfileId: 'multimaterial',
+  filament3ProfileId: 'multimaterial',
+  purgeOnLayerChange: 'multimaterial',
+  purgeTowerVolume: 'multimaterial',
+  wipeTowerWidth: 'multimaterial',
+  
+  // Quality tab - Wall generator, Walls & surfaces, Flow ratio, Bridging, Overhangs
+  minWallThickness: 'quality',
+  outerWallFlowRatio: 'quality',
+  innerWallFlowRatio: 'quality',
+  maxBridgeLength: 'quality',
+  bridgeSpeedReduction: 'quality',
+  overhangAngle: 'quality',
+  overhangPerimeterSpeed: 'quality',
 };
 
 /**
