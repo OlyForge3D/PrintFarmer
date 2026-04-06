@@ -972,6 +972,11 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.PrinterModel = printerModelElem.GetString();
         }
 
+        if (root.TryGetProperty("printer_variant", out JsonElement variantElem))
+        {
+            profile.PrinterVariant = ParseStringValue(variantElem);
+        }
+
         // Extract nozzle diameter from settings - REQUIRED property
         // nozzle_diameter is typically an array like ["0.4"], get the first value
         if (root.TryGetProperty("nozzle_diameter", out JsonElement nozzleElem))
@@ -992,10 +997,137 @@ public class OrcaProfilesService : ISlicerProfilesService
             return null; // Reject profiles without nozzle_diameter
         }
 
+        // ── Nozzle type ────────────────────────────────────────────────────
+        if (root.TryGetProperty("nozzle_type", out JsonElement nozzleTypeElem))
+        {
+            profile.NozzleType = ParseStringValue(nozzleTypeElem);
+        }
+
+        // ── Build volume ───────────────────────────────────────────────────
+        ExtractBuildVolume(root, profile);
+
+        // ── Capabilities ───────────────────────────────────────────────────
+        profile.MaxPrintSpeed = ParseOptionalInt(root, "machine_max_speed_z")
+            ?? ParseOptionalInt(root, "max_print_speed");
+
+        if (root.TryGetProperty("printer_type", out JsonElement typeElem))
+        {
+            profile.MotionType = ParseStringValue(typeElem);
+        }
+        else if (root.TryGetProperty("machine_type", out JsonElement machTypeElem))
+        {
+            profile.MotionType = ParseStringValue(machTypeElem);
+        }
+
+        if (root.TryGetProperty("gcode_flavor", out JsonElement gcodeElem))
+        {
+            profile.GcodeDialect = ParseStringValue(gcodeElem);
+        }
+
+        profile.HasHeatedBed = ParseOptionalBool(root, "has_heated_bed")
+            ?? (root.TryGetProperty("bed_custom_texture", out _) ? true : null);
+        profile.HasHeatedChamber = ParseOptionalBool(root, "has_heated_chamber");
+        profile.MaxBedTemperature = ParseOptionalInt(root, "max_bed_temp")
+            ?? ParseOptionalInt(root, "bed_temperature_limit");
+        profile.MaxHotendTemperature = ParseOptionalInt(root, "max_hotend_temp")
+            ?? ParseOptionalInt(root, "nozzle_temperature_range_high");
+        profile.SupportMultiMaterial = ParseOptionalBool(root, "single_extruder_multi_material");
+
+        // Extruder count from extruder arrays or explicit property
+        if (root.TryGetProperty("extruder_count", out JsonElement extCountElem))
+        {
+            profile.ExtruderCount = ParseIntValue(extCountElem) ?? 1;
+        }
+        else if (root.TryGetProperty("nozzle_diameter", out JsonElement nozzleArrayElem)
+            && nozzleArrayElem.ValueKind == JsonValueKind.Array)
+        {
+            profile.ExtruderCount = nozzleArrayElem.GetArrayLength();
+        }
+
+        // ── Retraction ─────────────────────────────────────────────────────
+        profile.RetractionLength = ParseOptionalDouble(root, "retraction_length")
+            ?? ParseOptionalDouble(root, "retract_length");
+        profile.RetractionSpeed = ParseOptionalDouble(root, "retraction_speed")
+            ?? ParseOptionalDouble(root, "retract_speed");
+        profile.RetractionLiftZ = ParseOptionalDouble(root, "retract_lift_above")
+            ?? ParseOptionalDouble(root, "retraction_minimum_travel");
+        profile.DetractionSpeed = ParseOptionalDouble(root, "deretraction_speed")
+            ?? ParseOptionalDouble(root, "deretract_speed");
+
+        // ── Bed ────────────────────────────────────────────────────────────
+        if (root.TryGetProperty("curr_bed_type", out JsonElement bedTypeElem))
+        {
+            profile.BedType = ParseStringValue(bedTypeElem);
+        }
+
+        if (root.TryGetProperty("bed_shape", out JsonElement bedShapeElem))
+        {
+            profile.BedShape = ParseStringValue(bedShapeElem);
+        }
+
+        // ── G-code ─────────────────────────────────────────────────────────
+        if (root.TryGetProperty("machine_start_gcode", out JsonElement startGcodeElem))
+        {
+            profile.StartGcode = ParseStringValue(startGcodeElem);
+        }
+
+        if (root.TryGetProperty("machine_end_gcode", out JsonElement endGcodeElem))
+        {
+            profile.EndGcode = ParseStringValue(endGcodeElem);
+        }
+
+        // ── Motion limits ──────────────────────────────────────────────────
+        profile.MaxAccelerationX = ParseOptionalDouble(root, "machine_max_acceleration_x");
+        profile.MaxAccelerationY = ParseOptionalDouble(root, "machine_max_acceleration_y");
+        profile.MaxFeedrateX = ParseOptionalDouble(root, "machine_max_speed_x");
+        profile.MaxFeedrateY = ParseOptionalDouble(root, "machine_max_speed_y");
+
         // Store all settings as raw JSON for flexibility
         profile.Settings = SerializeElementToDict(root);
 
         return profile;
+    }
+
+    private static void ExtractBuildVolume(JsonElement root, MachineProfileDto profile)
+    {
+        // OrcaSlicer stores build volume as printable_area polygon or explicit dimensions
+        if (root.TryGetProperty("printable_area", out JsonElement areaElem))
+        {
+            profile.PrintableArea = ParseStringValue(areaElem);
+
+            // Parse dimensions from printable_area like "0x0,220x0,220x220,0x220"
+            string? area = profile.PrintableArea;
+            if (!string.IsNullOrEmpty(area))
+            {
+                string[] points = area.Split(',');
+                if (points.Length >= 3)
+                {
+                    // Third point typically has max X and Y
+                    string[] maxPoint = points[2].Split('x');
+                    if (maxPoint.Length == 2)
+                    {
+                        if (double.TryParse(maxPoint[0], System.Globalization.CultureInfo.InvariantCulture, out double x))
+                        {
+                            profile.BuildVolumeX = x;
+                        }
+
+                        if (double.TryParse(maxPoint[1], System.Globalization.CultureInfo.InvariantCulture, out double y))
+                        {
+                            profile.BuildVolumeY = y;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (root.TryGetProperty("printable_height", out JsonElement heightElem))
+        {
+            profile.BuildVolumeZ = ParseDoubleValue(heightElem);
+        }
+        else if (root.TryGetProperty("max_print_height", out JsonElement maxHeightElem))
+        {
+            profile.BuildVolumeZ = ParseDoubleValue(maxHeightElem);
+        }
     }
 
 #pragma warning disable S1172 // Unused parameters are required by interface
@@ -1053,6 +1185,57 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
         }
 
+        // ── Extended temperature ───────────────────────────────────────────
+        profile.FirstLayerNozzleTemperature = ParseOptionalInt(root, "nozzle_temperature_initial_layer")
+            ?? ParseOptionalInt(root, "first_layer_temperature");
+        profile.FirstLayerBedTemperature = ParseOptionalInt(root, "hot_plate_temp_initial_layer")
+            ?? ParseOptionalInt(root, "first_layer_bed_temperature");
+        profile.ChamberTemperature = ParseOptionalInt(root, "chamber_temperature")
+            ?? ParseOptionalInt(root, "chamber_temp");
+        profile.MaxVolumetricSpeed = ParseOptionalDouble(root, "filament_max_volumetric_speed");
+
+        // ── Flow ───────────────────────────────────────────────────────────
+        profile.FlowRatio = ParseOptionalDouble(root, "filament_flow_ratio");
+        profile.EnablePressureAdvance = ParseOptionalBool(root, "enable_pressure_advance");
+        profile.PressureAdvance = ParseOptionalDouble(root, "pressure_advance");
+
+        // ── Retraction ─────────────────────────────────────────────────────
+        profile.RetractionLength = ParseOptionalDouble(root, "filament_retraction_length");
+        profile.RetractionSpeed = ParseOptionalDouble(root, "filament_retraction_speed")
+            ?? ParseOptionalDouble(root, "filament_retract_speed");
+        profile.DetractionSpeed = ParseOptionalDouble(root, "filament_deretraction_speed")
+            ?? ParseOptionalDouble(root, "filament_deretract_speed");
+
+        // ── Cooling ────────────────────────────────────────────────────────
+        profile.EnableFanCooling = ParseOptionalBool(root, "fan_cooling");
+        profile.MinFanSpeed = ParseOptionalInt(root, "fan_min_speed");
+        profile.MaxFanSpeed = ParseOptionalInt(root, "fan_max_speed");
+        profile.BridgeFanSpeed = ParseOptionalInt(root, "overhang_fan_speed");
+
+        // ── Physical properties ────────────────────────────────────────────
+        profile.Density = ParseOptionalDouble(root, "filament_density");
+        profile.Cost = ParseOptionalDouble(root, "filament_cost");
+
+        if (root.TryGetProperty("default_filament_colour", out JsonElement colorElem))
+        {
+            profile.Color = ParseStringValue(colorElem);
+        }
+        else if (root.TryGetProperty("filament_colour", out JsonElement colorElem2))
+        {
+            profile.Color = ParseStringValue(colorElem2);
+        }
+
+        // ── G-code ─────────────────────────────────────────────────────────
+        if (root.TryGetProperty("filament_start_gcode", out JsonElement startGcodeElem))
+        {
+            profile.StartGcode = ParseStringValue(startGcodeElem);
+        }
+
+        if (root.TryGetProperty("filament_end_gcode", out JsonElement endGcodeElem))
+        {
+            profile.EndGcode = ParseStringValue(endGcodeElem);
+        }
+
         // Profile is now fully resolved - check for compatible_printers first
         if (root.TryGetProperty("compatible_printers", out JsonElement compatibleElem))
         {
@@ -1104,6 +1287,85 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             profile.Supports = ParseBoolValue(supportsElem);
         }
+
+        // ── Layers ─────────────────────────────────────────────────────────
+        profile.TopLayers = ParseOptionalInt(root, "top_shell_layers") ?? 4;
+        profile.BottomLayers = ParseOptionalInt(root, "bottom_shell_layers") ?? 3;
+
+        // ── Walls ──────────────────────────────────────────────────────────
+        profile.WallCount = ParseOptionalInt(root, "wall_loops") ?? 3;
+
+        // ── Infill ─────────────────────────────────────────────────────────
+        if (root.TryGetProperty("fill_pattern", out JsonElement patternElem))
+        {
+            profile.InfillPattern = ParseStringValue(patternElem);
+        }
+        else if (root.TryGetProperty("sparse_infill_pattern", out JsonElement sparsePatternElem))
+        {
+            profile.InfillPattern = ParseStringValue(sparsePatternElem);
+        }
+
+        // ── Speed (per-feature) ────────────────────────────────────────────
+        profile.OuterWallSpeed = ParseOptionalInt(root, "outer_wall_speed");
+        profile.InnerWallSpeed = ParseOptionalInt(root, "inner_wall_speed");
+        profile.InfillSpeed = ParseOptionalInt(root, "sparse_infill_speed");
+        profile.TopSurfaceSpeed = ParseOptionalInt(root, "top_surface_speed");
+        profile.TravelSpeed = ParseOptionalInt(root, "travel_speed");
+
+        // ── Adhesion ───────────────────────────────────────────────────────
+        if (root.TryGetProperty("skirt_type", out JsonElement adhesionElem))
+        {
+            profile.BedAdhesion = ParseStringValue(adhesionElem);
+        }
+        else if (root.TryGetProperty("brim_type", out JsonElement brimElem))
+        {
+            string? brimVal = ParseStringValue(brimElem);
+            if (!string.IsNullOrEmpty(brimVal) && brimVal != "no_brim")
+            {
+                profile.BedAdhesion = "brim";
+            }
+        }
+
+        // ── Support details ────────────────────────────────────────────────
+        if (root.TryGetProperty("support_type", out JsonElement supportTypeElem))
+        {
+            profile.SupportType = ParseStringValue(supportTypeElem);
+        }
+
+        profile.SupportDensity = ParseOptionalInt(root, "support_base_pattern_spacing")
+            is not null ? ParseOptionalInt(root, "support_threshold_angle") : null;
+        profile.SupportAngle = ParseOptionalInt(root, "support_threshold_angle");
+
+        // ── Seam ───────────────────────────────────────────────────────────
+        if (root.TryGetProperty("seam_position", out JsonElement seamElem))
+        {
+            profile.SeamPosition = ParseStringValue(seamElem);
+        }
+
+        // ── Ironing ────────────────────────────────────────────────────────
+        profile.EnableIroning = ParseOptionalBool(root, "ironing_type") is not null
+            ? ParseOptionalBool(root, "ironing_type") : ParseOptionalBool(root, "enable_ironing");
+
+        // ── Temperature ────────────────────────────────────────────────────
+        profile.NozzleTemp = ParseOptionalInt(root, "nozzle_temperature");
+        profile.BedTemp = ParseOptionalInt(root, "bed_temperature")
+            ?? ParseOptionalInt(root, "hot_plate_temp");
+        profile.FirstLayerNozzleTemp = ParseOptionalInt(root, "nozzle_temperature_initial_layer");
+        profile.FirstLayerBedTemp = ParseOptionalInt(root, "hot_plate_temp_initial_layer")
+            ?? ParseOptionalInt(root, "first_layer_bed_temperature");
+
+        // ── Retraction ─────────────────────────────────────────────────────
+        profile.RetractionLength = ParseOptionalDouble(root, "retraction_length");
+        profile.RetractionSpeed = ParseOptionalDouble(root, "retraction_speed");
+
+        // ── Line widths ────────────────────────────────────────────────────
+        profile.LineWidthDefault = ParseOptionalDouble(root, "line_width");
+        profile.LineWidthOuterWall = ParseOptionalDouble(root, "outer_wall_line_width");
+        profile.LineWidthInnerWall = ParseOptionalDouble(root, "inner_wall_line_width");
+
+        // ── Acceleration ───────────────────────────────────────────────────
+        profile.DefaultAcceleration = ParseOptionalInt(root, "default_acceleration");
+        profile.OuterWallAcceleration = ParseOptionalInt(root, "outer_wall_acceleration");
 
         // Profile is now fully resolved - check for compatible_printers first
         if (root.TryGetProperty("compatible_printers", out JsonElement compatibleElem))
@@ -1271,6 +1533,36 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         return false;
+    }
+
+    private static int? ParseOptionalInt(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out JsonElement elem))
+        {
+            return ParseIntValue(elem);
+        }
+
+        return null;
+    }
+
+    private static double? ParseOptionalDouble(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out JsonElement elem))
+        {
+            return ParseDoubleValue(elem);
+        }
+
+        return null;
+    }
+
+    private static bool? ParseOptionalBool(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out JsonElement elem))
+        {
+            return ParseBoolValue(elem);
+        }
+
+        return null;
     }
 
     private static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
