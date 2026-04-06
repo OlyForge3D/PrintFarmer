@@ -1,6 +1,7 @@
 import React, { useState, useEffect, Suspense, useMemo, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
 import { 
   slicerProfilesService,
@@ -27,11 +28,12 @@ import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea } from '@/common/components/ui';
-import { LayersIcon, EyeIcon, EditIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
+import { LayersIcon, EyeIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
+import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 
 // Lazy load the 3D model viewer for better performance
@@ -74,10 +76,90 @@ export const NewSliceJobPage: React.FC = () => {
   const [slicerSettings, setSlicerSettings] = useState<BasicSlicerSettings>(DEFAULT_BASIC_SETTINGS);
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
 
+  // === Process Profile Management state ===
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = React.useRef<HTMLDivElement>(null);
+  const importFileRef = React.useRef<HTMLInputElement>(null);
+  const [saveProfileState, setSaveProfileState] = useState<{ open: boolean; name: string }>({ open: false, name: '' });
+
   // Callback for settings panel changes
   const handleSlicerSettingsChange = useCallback((newSettings: BasicSlicerSettings) => {
     setSlicerSettings(newSettings);
   }, []);
+
+  // === Process Profile Management handlers ===
+  const handleResetProcessProfile = useCallback(() => {
+    setSlicerSettings(DEFAULT_BASIC_SETTINGS);
+    setAdvancedProcessSettings({});
+  }, []);
+
+  const handleCopyProcess = useCallback(() => {
+    if (!selectedProcessPresetId) return;
+    setProfileMenuOpen(false);
+    // Derive a display name from the preset ID for the default copy name
+    const displayName = selectedProcessPresetId.startsWith('system:')
+      ? selectedProcessPresetId.slice('system:'.length)
+      : selectedProcessPresetId.startsWith('custom:')
+      ? selectedProcessPresetId.slice('custom:'.length)
+      : selectedProcessPresetId;
+    setSaveProfileState({ open: true, name: `${displayName} (Copy)` });
+  }, [selectedProcessPresetId]);
+
+  const handleConfirmSaveProfile = useCallback(async () => {
+    if (!saveProfileState.name.trim() || !selectedProcessPresetId) return;
+    const sourceId = selectedProcessPresetId.startsWith('system:')
+      ? selectedProcessPresetId.slice('system:'.length)
+      : selectedProcessPresetId.startsWith('custom:')
+      ? selectedProcessPresetId.slice('custom:'.length)
+      : selectedProcessPresetId;
+    try {
+      await slicerProfilesService.cloneProfile({
+        sourceProfileId: sourceId,
+        profileType: 'process',
+        name: saveProfileState.name.trim(),
+      });
+      toast.success(`Profile "${saveProfileState.name.trim()}" saved`);
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+      setSaveProfileState({ open: false, name: '' });
+    } catch {
+      toast.error('Failed to save profile');
+    }
+  }, [saveProfileState.name, selectedProcessPresetId, qc]);
+
+  const handleImportProcess = useCallback(() => {
+    setProfileMenuOpen(false);
+    importFileRef.current?.click();
+  }, []);
+
+  const handleProfileFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      await slicerProfilesService.uploadProfile({
+        rawJson: text,
+        profileType: 'process',
+        name: (parsed.name as string) || file.name.replace('.json', ''),
+      });
+      toast.success('Profile imported successfully');
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    } catch {
+      toast.error('Failed to import profile — make sure it is valid OrcaSlicer process JSON');
+    }
+  }, [qc]);
+
+  // Close profile menu when clicking outside
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [profileMenuOpen]);
 
   // === Model Selection ===
   const [modelFileUrl, setModelFileUrl] = useState('');
@@ -692,8 +774,7 @@ export const NewSliceJobPage: React.FC = () => {
     }
   });
 
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitSliceJob = useCallback(() => {
     setError(null);
 
     if (useModelPicker) {
@@ -752,9 +833,31 @@ export const NewSliceJobPage: React.FC = () => {
     };
 
     submitMutation.mutate(request);
+  }, [
+    advancedProcessSettings,
+    capabilitiesError,
+    modelFileName,
+    modelFileUrl,
+    parsedCapabilities,
+    priority,
+    rawProfileJson,
+    selectedProcessPresetId,
+    selectedProfileId,
+    slicerInfo.engine,
+    slicerSettings,
+    submitMutation,
+    useModelPicker,
+    useProfile,
+    user?.id,
+    selectedModelId,
+  ]);
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitSliceJob();
   };
 
-  const getFileType = (): 'stl' | '3mf' | 'obj' | 'ply' => {
+  const previewFileType = useMemo<'stl' | '3mf' | 'obj' | 'ply'>(() => {
     if (modelFileName) {
       const ext = modelFileName.split('.').pop()?.toLowerCase();
       if (ext === '3mf') return '3mf';
@@ -762,7 +865,46 @@ export const NewSliceJobPage: React.FC = () => {
       if (ext === 'ply') return 'ply';
     }
     return 'stl';
-  };
+  }, [modelFileName]);
+
+  const workspaceBedConfig = useMemo<BedConfig>(() => ({
+    width: bedDimensions?.width ?? 220,
+    depth: bedDimensions?.depth ?? 220,
+    height: bedDimensions?.height ?? 250,
+    textureUrl: bedTextureInfo.url,
+    textureFormat: bedTextureInfo.format,
+  }), [bedDimensions, bedTextureInfo.format, bedTextureInfo.url]);
+
+  const workspaceModels = useMemo<LoadedModel[]>(() => {
+    if (!modelFileUrl || previewFileType !== 'stl') {
+      return [];
+    }
+
+    return [{
+      id: selectedModelId || modelFileName || 'preview-model',
+      url: modelFileUrl,
+      fileName: modelFileName || 'preview-model.stl',
+      fileType: 'stl',
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    }];
+  }, [modelFileName, modelFileUrl, previewFileType, selectedModelId]);
+
+  const handleWorkspaceAddModel = useCallback(() => {
+    toast.info('Use the Model section in the left panel to choose the model for this slice job.');
+  }, []);
+
+  const handleWorkspaceSettingsProfiles = useCallback(() => {
+    const settingsPanel = document.querySelector('[aria-label="Process profile options menu"]');
+    if (settingsPanel instanceof HTMLElement) {
+      settingsPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      settingsPanel.focus();
+      return;
+    }
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   // Show onboarding banner when no machine profiles exist and loading is complete
   if (!isProfilesSummaryLoading && !hasAnyMachineProfiles) {
@@ -834,10 +976,10 @@ export const NewSliceJobPage: React.FC = () => {
     >
       <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-6 h-full">
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}
-        <div className="w-full lg:w-96 space-y-4 shrink-0 pb-4 max-h-screen overflow-y-auto">
+        <div className="w-full lg:w-96 space-y-2 shrink-0 pb-4 max-h-screen overflow-y-auto">
 
           {/* SLICER SELECTION - Shows name and version */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3">
             <label className="block text-sm font-semibold text-pf-text-primary mb-2">Slicer</label>
             <Select
               value={selectedSlicerId}
@@ -864,11 +1006,11 @@ export const NewSliceJobPage: React.FC = () => {
               setSelectedProcessPresetId('');
               // Machine profile auto-select will happen via the effect
             }}
-            className="bg-pf-panel border border-pf-border rounded-lg p-4"
+            className="bg-pf-panel border border-pf-border rounded-lg p-3"
           />
 
           {/* MACHINE PROFILE SELECTION - Filtered by selected printer */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-sm font-semibold text-pf-text-primary">
                 Machine Profile
@@ -943,7 +1085,7 @@ export const NewSliceJobPage: React.FC = () => {
           </div>
 
           {/* FILAMENT PROFILE - two-step selection: material type then profile */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-sm font-semibold text-pf-text-primary">Filament Profile</label>
               {selectedFilamentProfileId && (
@@ -1035,42 +1177,160 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* PROCESS PROFILE - Custom profiles first, then system presets grouped by quality */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
+          {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3">
+            {/* Header: label + ⋮ options menu */}
             <div className="flex items-center justify-between mb-2">
               <label className="block text-sm font-semibold text-pf-text-primary">Process Profile</label>
-            </div>
-            {(availableProcessProfiles.length > 0 || customProcessProfiles.length > 0) ? (
-              <Select
-                value={selectedProcessPresetId}
-                onChange={e => setSelectedProcessPresetId(e.target.value)}
-                className="w-full"
-              >
-                <option value="">-- Select Process Profile --</option>
-                {/* Custom profiles first with ★ indicator */}
-                {customProcessProfiles.length > 0 && (
-                  <optgroup label="★ My Profiles">
-                    {customProcessProfiles.map(profile => (
-                      <option key={`custom-${profile.id}`} value={`custom:${profile.id}`}>
-                        ★ {profile.name}
-                      </option>
-                    ))}
-                  </optgroup>
+              <div className="relative" ref={profileMenuRef}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="p-1 h-auto"
+                  onClick={() => setProfileMenuOpen(v => !v)}
+                  title="Profile options"
+                  aria-label="Process profile options menu"
+                  aria-expanded={profileMenuOpen}
+                  aria-haspopup="menu"
+                >
+                  <MoreVerticalIcon className="w-4 h-4" />
+                </Button>
+                {profileMenuOpen && (
+                  <div
+                    className="absolute right-0 top-full mt-1 z-20 bg-pf-panel border border-pf-border rounded-lg shadow-lg min-w-40 py-1"
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={handleCopyProcess}
+                      disabled={!selectedProcessPresetId}
+                      iconLeft={<CopyIcon className="w-3.5 h-3.5" />}
+                    >
+                      Copy selected
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={handleImportProcess}
+                      iconLeft={<FileImportIcon className="w-3.5 h-3.5" />}
+                    >
+                      Import profile
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
+                      onClick={() => { setProfileMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                      iconLeft={<EditIcon className="w-3.5 h-3.5" />}
+                    >
+                      Manage profiles
+                    </Button>
+                  </div>
                 )}
-                {/* System presets grouped by quality level */}
-                {processProfilesByQuality.map(([quality, profiles]) => (
-                  <optgroup key={quality} label={quality.charAt(0).toUpperCase() + quality.slice(1)}>
-                    {profiles.map(profile => (
-                      <option key={profile.name} value={`system:${profile.name}`}>
-                        {profile.name} ({profile.layerHeight}mm)
-                      </option>
+              </div>
+            </div>
+
+            {/* Hidden file input for importing profiles */}
+            {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".json"
+              className="sr-only"
+              onChange={handleProfileFileImport}
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+
+            {/* Select + Reset + Save row */}
+            {(availableProcessProfiles.length > 0 || customProcessProfiles.length > 0) ? (
+              <>
+                <div className="flex gap-1">
+                  <Select
+                    value={selectedProcessPresetId}
+                    onChange={e => setSelectedProcessPresetId(e.target.value)}
+                    className="flex-1 min-w-0"
+                  >
+                    <option value="">-- Select Process Profile --</option>
+                    {/* Custom profiles first with ★ indicator */}
+                    {customProcessProfiles.length > 0 && (
+                      <optgroup label="★ My Profiles">
+                        {customProcessProfiles.map(profile => (
+                          <option key={`custom-${profile.id}`} value={`custom:${profile.id}`}>
+                            ★ {profile.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {/* System presets grouped by quality level */}
+                    {processProfilesByQuality.map(([quality, profiles]) => (
+                      <optgroup key={quality} label={quality.charAt(0).toUpperCase() + quality.slice(1)}>
+                        {profiles.map(profile => (
+                          <option key={profile.name} value={`system:${profile.name}`}>
+                            {profile.name} ({profile.layerHeight}mm)
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
-                  </optgroup>
-                ))}
-              </Select>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="px-2 shrink-0"
+                    title="Reset settings to defaults"
+                    aria-label="Reset settings to defaults"
+                    onClick={handleResetProcessProfile}
+                  >
+                    <RefreshIcon className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="px-2 shrink-0"
+                    title="Save as custom profile"
+                    aria-label="Save as custom profile"
+                    disabled={!selectedProcessPresetId}
+                    onClick={handleCopyProcess}
+                  >
+                    <SaveIcon className="w-4 h-4" />
+                  </Button>
+                </div>
+                {/* Inline save-as name input */}
+                {saveProfileState.open && (
+                  <div className="mt-2 flex gap-1 items-center">
+                    <Input
+                      type="text"
+                      value={saveProfileState.name}
+                      onChange={e => setSaveProfileState(s => ({ ...s, name: e.target.value }))}
+                      placeholder="Profile name..."
+                      className="flex-1 text-sm"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') { e.preventDefault(); void handleConfirmSaveProfile(); }
+                        if (e.key === 'Escape') setSaveProfileState({ open: false, name: '' });
+                      }}
+                      aria-label="New profile name"
+                    />
+                    <Button type="button" size="sm" variant="primary" onClick={() => void handleConfirmSaveProfile()} disabled={!saveProfileState.name.trim()}>
+                      Save
+                    </Button>
+                    <Button type="button" size="sm" variant="secondary" onClick={() => setSaveProfileState({ open: false, name: '' })}>
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-sm text-pf-text-muted italic">
-                {isMachineProfilesLoading ? 'Loading machine profiles...' : 
+                {isMachineProfilesLoading ? 'Loading machine profiles...' :
                  selectedMachineProfileId && isProcessProfilesLoading ? 'Loading process profiles...' :
                  !selectedMachineProfileId ? 'Select a machine profile to see process options' :
                  'No process profiles available'}
@@ -1090,7 +1350,7 @@ export const NewSliceJobPage: React.FC = () => {
           </div>
 
           {/* MODEL SELECTION - Inline, not collapsible */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             <label className="block text-sm font-semibold text-pf-text-primary">Model</label>
 
             <FormField
@@ -1281,37 +1541,52 @@ export const NewSliceJobPage: React.FC = () => {
           </div>
         </div>
 
-        {/* RIGHT SIDE: 3D Model Preview */}
+        {/* RIGHT SIDE: 3D Workspace */}
         <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-screen">
-          <div className="card bg-pf-panel border border-pf-border flex-1 overflow-hidden flex flex-col">
-            <div className="card-header shrink-0">
-              <h3 className="font-semibold text-pf-text-primary">
-                {modelFileName ? `Preview: ${modelFileName}` : 'Model Preview'}
-              </h3>
-            </div>
-            <div className="card-body p-0 flex-1 overflow-hidden">
-              {modelFileUrl ? (
-                <Suspense fallback={<ViewerSkeleton variant="model" className="h-full w-full" />}>
-                  <ModelViewer3D
-                    modelUrl={modelFileUrl}
-                    fileType={getFileType()}
-                    showGrid={true}
-                    showAxes={true}
-                    autoRotate={false}
-                    className="h-full w-full"
-                    bedDimensions={bedDimensions}
-                    bedTextureUrl={bedTextureInfo.url}
-                    bedTextureFormat={bedTextureInfo.format}
-                  />
-                </Suspense>
-              ) : (
-                <div className="h-full w-full flex items-center justify-center text-pf-text-muted">
-                  <div className="text-center">
-                    <p className="text-sm">Select a model to view 3D preview</p>
-                  </div>
+          <div className="bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-180">
+            {modelFileUrl && previewFileType === 'stl' ? (
+              <SlicerWorkspace
+                bedConfig={workspaceBedConfig}
+                models={workspaceModels}
+                selectedModelId={workspaceModels[0]?.id}
+                onModelSelect={() => undefined}
+                onAddModel={handleWorkspaceAddModel}
+                onSettingsProfiles={handleWorkspaceSettingsProfiles}
+                onSlice={submitSliceJob}
+                slicing={submitMutation.isPending}
+                canSlice={!submittedJobId}
+                className="h-full"
+              />
+            ) : modelFileUrl ? (
+              <div className="card bg-pf-panel flex-1 overflow-hidden flex flex-col">
+                <div className="card-header shrink-0">
+                  <h3 className="font-semibold text-pf-text-primary">
+                    {modelFileName ? `Preview: ${modelFileName}` : 'Model Preview'}
+                  </h3>
                 </div>
-              )}
-            </div>
+                <div className="card-body p-0 flex-1 overflow-hidden">
+                  <Suspense fallback={<ViewerSkeleton variant="model" className="h-full w-full" />}>
+                    <ModelViewer3D
+                      modelUrl={modelFileUrl}
+                      fileType={previewFileType}
+                      showGrid={true}
+                      showAxes={true}
+                      autoRotate={false}
+                      className="h-full w-full"
+                      bedDimensions={bedDimensions}
+                      bedTextureUrl={bedTextureInfo.url}
+                      bedTextureFormat={bedTextureInfo.format}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            ) : (
+              <div className="h-full w-full flex items-center justify-center text-pf-text-muted bg-pf-bg-0">
+                <div className="text-center">
+                  <p className="text-sm">Select a model to open the slicer workspace</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </form>

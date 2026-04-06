@@ -132,7 +132,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
   };
 
   return (
-    <div className={`py-4 ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`py-2 ${disabled ? 'opacity-50' : ''}`}>
       {/* Header row with icon, label, reset button, and help */}
       <div className="flex items-center gap-2 mb-1">
         <span className="text-pf-accent-2">{icon}</span>
@@ -179,7 +179,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
       
       {/* Description */}
       {description && (
-        <p className="text-sm text-pf-text-muted mb-3">{description}</p>
+        <p className="text-xs text-pf-text-muted mb-1.5">{description}</p>
       )}
       
       {/* Control */}
@@ -213,7 +213,7 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
   return (
     <div className="relative">
       {/* Slider track with custom styling */}
-      <div className="relative h-8 flex items-center">
+      <div className="relative h-6 flex items-center">
         <input
           id={id}
           type="range"
@@ -248,7 +248,7 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
         
         {/* Current value indicator below thumb */}
         <div 
-          className="absolute top-6 transform -translate-x-1/2 text-sm font-bold text-pf-text"
+          className="absolute top-5 transform -translate-x-1/2 text-xs font-bold text-pf-text"
           style={{ left: `${percentage}%` }}
         >
           {value}{unit}
@@ -257,7 +257,7 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
       
       {/* Tick marks and labels */}
       {showTicks && (
-        <div className="flex justify-between mt-4 px-1">
+        <div className="flex justify-between mt-3 px-1">
           {tickPositions.map((tickValue, i) => (
             <div key={i} className="flex flex-col items-center">
               <div className="w-px h-2 bg-pf-border-light" />
