@@ -59,9 +59,9 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
   hasSelection = false,
 }) => {
   return (
-    <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10">
+    <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10 pointer-events-none">
       {/* Manipulation tools group */}
-      <div className="flex flex-col gap-1.5 p-1.5 bg-pf-bg-1/90 backdrop-blur-xs rounded-xl border border-pf-border shadow-lg">
+      <div className="flex flex-col gap-1.5 p-1.5 bg-pf-bg-1/90 backdrop-blur-xs rounded-xl border border-pf-border shadow-lg pointer-events-auto">
         <ToolButton
           icon={<MoveToolIcon />}
           title="Move (T)"
@@ -86,7 +86,7 @@ export const SlicerLeftTools: React.FC<SlicerLeftToolsProps> = ({
       </div>
 
       {/* Layers toggle - separate group */}
-      <div className="flex flex-col gap-1.5 p-1.5 bg-pf-bg-1/90 backdrop-blur-xs rounded-xl border border-pf-border shadow-lg">
+      <div className="flex flex-col gap-1.5 p-1.5 bg-pf-bg-1/90 backdrop-blur-xs rounded-xl border border-pf-border shadow-lg pointer-events-auto">
         <ToolButton
           icon={<LayersViewIcon />}
           title="Layer View (L)"
