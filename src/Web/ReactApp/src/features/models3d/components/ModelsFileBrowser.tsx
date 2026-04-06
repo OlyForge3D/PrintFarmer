@@ -170,6 +170,7 @@ export const ModelsFileBrowser = ({
     try {
       await apiClient.deleteModel3dFile(file.id);
       toast.success('Model deleted successfully');
+      await fileBrowserRef.current?.refetch();
     } catch (error) {
       toast.error('Failed to delete model');
       console.error('Delete error:', error);
