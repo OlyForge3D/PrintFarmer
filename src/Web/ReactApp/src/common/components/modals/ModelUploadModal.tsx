@@ -133,8 +133,9 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   const handleClose = async () => {
     setIsClosing(true);
     try {
-      // Invalidate models-search query to refresh the models list
-      await queryClient.invalidateQueries({ queryKey: ['models-search'] });
+      // Invalidate file-browser queries to refresh the models list.
+      // useFileBrowser keys are ['file-browser', ...] — prefix match invalidates all.
+      await queryClient.invalidateQueries({ queryKey: ['file-browser'] });
       
       // Call onUploadSuccess callback if provided and wait for it to complete
       if (onUploadSuccess) {
