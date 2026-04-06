@@ -4,7 +4,7 @@
  */
 import React, { Component, Suspense, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode, ErrorInfo } from 'react';
-import { Canvas, useThree, useLoader } from '@react-three/fiber';
+import { Canvas, useThree, useLoader, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, TransformControls } from '@react-three/drei';
 import { STLLoader } from 'three-stdlib';
 import * as THREE from 'three';
@@ -484,10 +484,15 @@ function ModelTransformControls({
   const transformRef = useRef<React.ComponentRef<typeof TransformControls>>(null);
   const [mesh, setMesh] = useState<THREE.Mesh | null>(null);
 
-  // Sync ref → state so we re-render when the mesh appears
-  useEffect(() => {
-    setMesh(meshRef.current);
-  }, [meshRef]);
+  // Sync ref → state via animation frame: the mesh ref is set by STLModel
+  // after Suspense resolves, which may be after this component mounts.
+  // useEffect([meshRef]) never re-fires because ref identity is stable.
+  useFrame(() => {
+    const current = meshRef.current;
+    if (current !== mesh) {
+      setMesh(current);
+    }
+  });
 
   // Disable orbit while dragging
   useEffect(() => {
