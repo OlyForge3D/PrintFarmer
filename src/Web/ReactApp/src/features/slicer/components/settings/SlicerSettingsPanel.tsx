@@ -567,6 +567,135 @@ const AdvancedSettings: React.FC<{
               disabled={disabled}
             />
           </SettingSection>
+
+          {/* Wall Generator Section */}
+          <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Wall generator">
+            <div className="space-y-3">
+              <p className="text-xs text-pf-text-muted px-3 py-1">
+                Advanced wall generation for structural integrity
+              </p>
+              <CompactSettingRow
+                type="number"
+                label="Min wall thickness"
+                value={settings.minWallThickness ?? 0.8}
+                onChange={(v) => onUpdate('minWallThickness', v)}
+                min={0.4}
+                max={2}
+                step={0.1}
+                unit="mm"
+                disabled={disabled}
+              />
+            </div>
+          </SettingSection>
+
+          {/* Walls & Surfaces Section */}
+          <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Walls & surfaces">
+            <div className="space-y-3">
+              <p className="text-xs text-pf-text-muted px-3 py-1">
+                Refine wall and surface appearance and strength
+              </p>
+              <CompactSettingRow
+                type="checkbox"
+                label="Precise outer wall"
+                checked={settings.preciseWall ?? false}
+                onChange={(v) => onUpdate('preciseWall', v)}
+                disabled={disabled}
+              />
+            </div>
+          </SettingSection>
+
+          {/* Flow Ratio Section */}
+          <SettingSection icon={<InfillDensityIcon className="w-4 h-4" />} title="Flow ratio">
+            <div className="space-y-3">
+              <p className="text-xs text-pf-text-muted px-3 py-1">
+                Control extrusion rate per feature type
+              </p>
+              <CompactSettingRow
+                type="number"
+                label="Outer wall flow ratio"
+                value={settings.outerWallFlowRatio ?? 100}
+                onChange={(v) => onUpdate('outerWallFlowRatio', v)}
+                min={50}
+                max={150}
+                step={5}
+                unit="%"
+                disabled={disabled}
+              />
+              <CompactSettingRow
+                type="number"
+                label="Inner wall flow ratio"
+                value={settings.innerWallFlowRatio ?? 100}
+                onChange={(v) => onUpdate('innerWallFlowRatio', v)}
+                min={50}
+                max={150}
+                step={5}
+                unit="%"
+                disabled={disabled}
+              />
+            </div>
+          </SettingSection>
+
+          {/* Bridging Section */}
+          <SettingSection icon={<SpeedIcon className="w-4 h-4" />} title="Bridging">
+            <div className="space-y-3">
+              <p className="text-xs text-pf-text-muted px-3 py-1">
+                Improve unsupported span handling
+              </p>
+              <CompactSettingRow
+                type="number"
+                label="Max bridge length"
+                value={settings.maxBridgeLength ?? 10}
+                onChange={(v) => onUpdate('maxBridgeLength', v)}
+                min={5}
+                max={50}
+                step={1}
+                unit="mm"
+                disabled={disabled}
+              />
+              <CompactSettingRow
+                type="number"
+                label="Bridge speed reduction"
+                value={settings.bridgeSpeedReduction ?? 50}
+                onChange={(v) => onUpdate('bridgeSpeedReduction', v)}
+                min={10}
+                max={90}
+                step={5}
+                unit="%"
+                disabled={disabled}
+              />
+            </div>
+          </SettingSection>
+
+          {/* Overhangs Section */}
+          <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Overhangs">
+            <div className="space-y-3">
+              <p className="text-xs text-pf-text-muted px-3 py-1">
+                Fine-tune overhang handling without supports
+              </p>
+              <CompactSettingRow
+                type="number"
+                label="Overhang angle threshold"
+                value={settings.overhangAngle ?? 45}
+                onChange={(v) => onUpdate('overhangAngle', v)}
+                min={0}
+                max={90}
+                step={5}
+                unit="°"
+                disabled={disabled}
+              />
+              <CompactSettingRow
+                type="number"
+                label="Overhang perimeter speed"
+                value={settings.overhangPerimeterSpeed ?? 50}
+                onChange={(v) => onUpdate('overhangPerimeterSpeed', v)}
+                min={10}
+                max={100}
+                step={5}
+                unit="%"
+                disabled={disabled}
+              />
+            </div>
+          </SettingSection>
         </div>
       );
 
@@ -899,8 +1028,100 @@ const AdvancedSettings: React.FC<{
 
     case 'multimaterial':
       return (
-        <div className="py-8 text-center text-pf-text-muted">
-          <p>Multimaterial settings coming soon</p>
+        <div className="space-y-4">
+          {/* Filament Lanes Section */}
+          <SettingSection icon={<LineWidthIcon className="w-4 h-4" />} title="Filament lanes">
+            <div className="space-y-3">
+              <p className="text-xs text-pf-text-muted px-3 py-1">
+                Select filament profiles for each extruder. Use None for unused extruders.
+              </p>
+              <CompactSettingRow
+                type="select"
+                label="Extruder 1 (Primary)"
+                value={settings.filament1ProfileId ?? ''}
+                onChange={(v) => onUpdate('filament1ProfileId', v || undefined)}
+                options={[
+                  { value: '', label: 'Select filament profile...' },
+                  { value: 'pla-standard', label: 'PLA - Standard' },
+                  { value: 'petg-standard', label: 'PETG - Durable' },
+                  { value: 'tpu-flexible', label: 'TPU - Flexible' },
+                  { value: 'abs-engineering', label: 'ABS - Engineering' },
+                  { value: 'nylon-tough', label: 'Nylon - Tough' },
+                  { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' },
+                ]}
+                disabled={disabled}
+              />
+              <CompactSettingRow
+                type="select"
+                label="Extruder 2"
+                value={settings.filament2ProfileId ?? ''}
+                onChange={(v) => onUpdate('filament2ProfileId', v || undefined)}
+                options={[
+                  { value: '', label: 'None (not used)' },
+                  { value: 'pla-standard', label: 'PLA - Standard' },
+                  { value: 'petg-standard', label: 'PETG - Durable' },
+                  { value: 'tpu-flexible', label: 'TPU - Flexible' },
+                  { value: 'abs-engineering', label: 'ABS - Engineering' },
+                  { value: 'nylon-tough', label: 'Nylon - Tough' },
+                  { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' },
+                ]}
+                disabled={disabled}
+              />
+              <CompactSettingRow
+                type="select"
+                label="Extruder 3"
+                value={settings.filament3ProfileId ?? ''}
+                onChange={(v) => onUpdate('filament3ProfileId', v || undefined)}
+                options={[
+                  { value: '', label: 'None (not used)' },
+                  { value: 'pla-standard', label: 'PLA - Standard' },
+                  { value: 'petg-standard', label: 'PETG - Durable' },
+                  { value: 'tpu-flexible', label: 'TPU - Flexible' },
+                  { value: 'abs-engineering', label: 'ABS - Engineering' },
+                  { value: 'nylon-tough', label: 'Nylon - Tough' },
+                  { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' },
+                ]}
+                disabled={disabled}
+              />
+            </div>
+          </SettingSection>
+
+          {/* Purge & Wipe Tower Section */}
+          <SettingSection icon={<TemperatureIcon className="w-4 h-4" />} title="Purge & wipe tower">
+            <CompactSettingRow
+              type="checkbox"
+              label="Purge on layer change"
+              checked={settings.purgeOnLayerChange ?? true}
+              onChange={(v) => onUpdate('purgeOnLayerChange', v)}
+              disabled={disabled}
+            />
+            {settings.purgeOnLayerChange && (
+              <>
+                <CompactSettingRow
+                  type="number"
+                  label="Purge tower volume"
+                  value={settings.purgeTowerVolume ?? 50}
+                  onChange={(v) => onUpdate('purgeTowerVolume', v)}
+                  min={10}
+                  max={500}
+                  step={10}
+                  unit="mm³"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Wipe tower width"
+                  value={settings.wipeTowerWidth ?? 30}
+                  onChange={(v) => onUpdate('wipeTowerWidth', v)}
+                  min={10}
+                  max={100}
+                  step={5}
+                  unit="mm"
+                  disabled={disabled}
+                />
+              </>
+            )}
+          </SettingSection>
         </div>
       );
 
