@@ -62,6 +62,14 @@ const ColorIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) 
   </svg>
 );
 
+const GcodeIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <polyline points="16 18 22 12 16 6" />
+    <polyline points="8 6 2 12 8 18" />
+    <line x1="10" y1="3" x2="14" y2="21" opacity="0.5" />
+  </svg>
+);
+
 /**
  * FilamentProfileEditor - Full OrcaSlicer-style filament settings panel
  */
@@ -104,6 +112,8 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
     { id: 'flow', label: 'Flow' },
     { id: 'cooling', label: 'Cooling' },
     { id: 'retraction', label: 'Retraction' },
+    { id: 'physical', label: 'Physical' },
+    { id: 'gcode', label: 'G-code' },
     { id: 'other', label: 'Other' },
   ];
 
@@ -650,6 +660,62 @@ const AdvancedFilamentSettingsPanel: React.FC<{
         </div>
       );
 
+    case 'physical':
+      return (
+        <div className="divide-y divide-pf-border">
+          <SettingRow
+            type="number"
+            icon={<FilamentIcon />}
+            label="Density"
+            description="Material density for cost calculation"
+            value={settings.density ?? 1.24}
+            onChange={(v) => onUpdate('density', v)}
+            min={0.5}
+            max={3}
+            step={0.01}
+            unit="g/cm³"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<FilamentIcon />}
+            label="Cost per kg"
+            description="Filament cost per kilogram"
+            value={settings.cost ?? 20}
+            onChange={(v) => onUpdate('cost', v)}
+            min={0}
+            max={500}
+            step={1}
+            unit="$"
+            disabled={disabled}
+          />
+        </div>
+      );
+
+    case 'gcode':
+      return (
+        <div className="divide-y divide-pf-border">
+          <SettingRow
+            type="text"
+            icon={<GcodeIcon />}
+            label="Start G-code"
+            description="Filament-specific start G-code"
+            value={settings.startGcode ?? ''}
+            onChange={(v) => onUpdate('startGcode', v)}
+            disabled={disabled}
+          />
+          <SettingRow
+            type="text"
+            icon={<GcodeIcon />}
+            label="End G-code"
+            description="Filament-specific end G-code"
+            value={settings.endGcode ?? ''}
+            onChange={(v) => onUpdate('endGcode', v)}
+            disabled={disabled}
+          />
+        </div>
+      );
+
     case 'other':
       return (
         <div className="divide-y divide-pf-border">
@@ -676,31 +742,6 @@ const AdvancedFilamentSettingsPanel: React.FC<{
             label="Color"
             value={settings.color ?? '#3B82F6'}
             onChange={(v) => onUpdate('color', v)}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<FilamentIcon />}
-            label="Density"
-            description="Material density for cost calculation"
-            value={settings.density ?? 1.24}
-            onChange={(v) => onUpdate('density', v)}
-            min={0.5}
-            max={3}
-            step={0.01}
-            unit="g/cm³"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<FilamentIcon />}
-            label="Cost per kg"
-            value={settings.cost ?? 20}
-            onChange={(v) => onUpdate('cost', v)}
-            min={0}
-            max={500}
-            step={1}
-            unit="$"
             disabled={disabled}
           />
           <SettingRow
