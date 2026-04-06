@@ -1,5 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.FeatureFlags;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -11,9 +13,11 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/system")]
 public class SystemCapabilitiesController(
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    IFeatureFlagService featureFlagService) : ControllerBase
 {
     private readonly IConfiguration _configuration = configuration;
+    private readonly IFeatureFlagService _featureFlagService = featureFlagService;
 
     /// <summary>
     /// Returns the current platform capabilities, auto-detecting ARM64 to disable
@@ -60,5 +64,19 @@ public class SystemCapabilitiesController(
         };
 
         return Ok(dto);
+    }
+
+    /// <summary>
+    /// Returns all feature flags for phased rollout control.
+    /// </summary>
+    /// <returns>Dictionary of feature keys and their enabled states.</returns>
+    [HttpGet("feature-flags")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 300)]
+    [ProducesResponseType(typeof(Dictionary<string, bool>), StatusCodes.Status200OK)]
+    public ActionResult<Dictionary<string, bool>> GetFeatureFlags()
+    {
+        var flags = _featureFlagService.GetAllFlags();
+        return Ok(flags);
     }
 }
