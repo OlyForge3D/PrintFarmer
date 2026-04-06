@@ -25,10 +25,11 @@ import {
   type AdvancedSlicerSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job';
+import { ModelSelector } from '../components/job/ModelSelector';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, FormField, Input, Select, Checkbox } from '@/common/components/ui';
+import { Button, Alert, Select } from '@/common/components/ui';
 import { LayersIcon, EyeIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
@@ -196,6 +197,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [modelFileName, setModelFileName] = useState('');
   const [useModelPicker, setUseModelPicker] = useState(true);
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -956,8 +958,11 @@ export const NewSliceJobPage: React.FC = () => {
   }, [modelFileName, modelFileUrl, previewFileType, selectedModelId]);
 
   const handleWorkspaceAddModel = useCallback(() => {
-    toast.info('Use the Model section in the left panel to choose the model for this slice job.');
-  }, []);
+    if (!useModelPicker) {
+      setUseModelPicker(true);
+    }
+    setModelPickerOpen(true);
+  }, [useModelPicker]);
 
   const handleWorkspaceSettingsProfiles = useCallback(() => {
     const settingsPanel = document.querySelector('[aria-label="Process profile options menu"]');
@@ -1406,81 +1411,42 @@ export const NewSliceJobPage: React.FC = () => {
             />
           </div>
 
-          {/* MODEL SELECTION - Inline, not collapsible */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
-            <label className="block text-sm font-semibold text-pf-text-primary">Model</label>
+          {/* MODEL SELECTION - Uses searchable picker modal */}
+          <ModelSelector
+            useModelPicker={useModelPicker}
+            onToggleMode={() => {
+              setUseModelPicker(v => !v);
+              if (useModelPicker) {
+                setSelectedModelId('');
+                setModelFileUrl('');
+                setModelFileName('');
+              }
+            }}
+            models={models}
+            modelsError={modelsError}
+            selectedModelId={selectedModelId}
+            onModelIdChange={setSelectedModelId}
+            fileUrl={modelFileUrl}
+            onFileUrlChange={setModelFileUrl}
+            fileName={modelFileName}
+            onFileNameChange={setModelFileName}
+            pickerOpen={modelPickerOpen}
+            onPickerOpenChange={setModelPickerOpen}
+          />
 
-            <FormField
-              label="Use Model Picker"
-              helper={useModelPicker ? 'Select from uploaded models' : 'Enter URL manually'}
-              inline
+          {/* STL Preview Button */}
+          {(selectedModelId || modelFileUrl) && (
+            <Button
+              type="button"
+              onClick={() => setIsSTLPreviewOpen(true)}
+              variant="secondary"
+              size="sm"
+              className="w-full"
+              iconLeft={<EyeIcon className="w-4 h-4" />}
             >
-              <Checkbox
-                id="useModelPicker"
-                checked={useModelPicker}
-                onChange={() => {
-                  setUseModelPicker(v => !v);
-                  if (useModelPicker) {
-                    setSelectedModelId('');
-                    setModelFileUrl('');
-                    setModelFileName('');
-                  }
-                }}
-                title="Use Model Picker"
-              />
-            </FormField>
-
-            {useModelPicker ? (
-              <FormField label="Model" error={modelsError ? modelsError.message : undefined}>
-                {models && models.length > 0 ? (
-                  <Select value={selectedModelId} onChange={e => setSelectedModelId(e.target.value)}>
-                    <option value="">-- Select model --</option>
-                    {models.map(m => (
-                      <option key={m.id} value={m.id}>{m.originalFileName}</option>
-                    ))}
-                  </Select>
-                ) : (
-                  <Select disabled className="bg-pf-disabled" title="No models available">
-                    <option>-- No models --</option>
-                  </Select>
-                )}
-              </FormField>
-            ) : (
-              <>
-                <FormField label="File URL" required>
-                  <Input
-                    type="text"
-                    value={modelFileUrl}
-                    onChange={e => setModelFileUrl(e.target.value)}
-                    placeholder="https://... or /storage/..."
-                  />
-                </FormField>
-                <FormField label="File Name" required>
-                  <Input
-                    type="text"
-                    value={modelFileName}
-                    onChange={e => setModelFileName(e.target.value)}
-                    placeholder="model.stl"
-                  />
-                </FormField>
-              </>
-            )}
-
-            {/* STL Preview Button */}
-            {(selectedModelId || modelFileUrl) && (
-              <Button
-                type="button"
-                onClick={() => setIsSTLPreviewOpen(true)}
-                variant="secondary"
-                size="sm"
-                className="w-full"
-                iconLeft={<EyeIcon className="w-4 h-4" />}
-              >
-                Preview 3D Model
-              </Button>
-            )}
-
-          </div>
+              Preview 3D Model
+            </Button>
+          )}
 
           {/* STATUS MESSAGES */}
           {error && <Alert type="error">{error}</Alert>}

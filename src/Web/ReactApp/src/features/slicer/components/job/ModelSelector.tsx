@@ -27,6 +27,10 @@ interface ModelSelectorProps {
   fileName: string;
   /** Callback when file name changes */
   onFileNameChange: (name: string) => void;
+  /** External trigger to open the picker modal (set true to open, reset via onPickerOpenChange) */
+  pickerOpen?: boolean;
+  /** Callback when external picker state changes */
+  onPickerOpenChange?: (open: boolean) => void;
   /** Optional CSS class name */
   className?: string;
 }
@@ -50,9 +54,18 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   onFileUrlChange,
   fileName,
   onFileNameChange,
+  pickerOpen,
+  onPickerOpenChange,
   className,
 }) => {
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+
+  // Support both controlled (pickerOpen prop) and uncontrolled (internal) modes
+  const isPickerOpen = pickerOpen ?? internalOpen;
+  const setIsPickerOpen = useCallback((open: boolean) => {
+    setInternalOpen(open);
+    onPickerOpenChange?.(open);
+  }, [onPickerOpenChange]);
 
   const selectedModel = useMemo(
     () => models?.find((m) => m.id === selectedModelId),
