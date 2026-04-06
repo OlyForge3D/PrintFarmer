@@ -196,6 +196,17 @@ export const NewSliceJobPage: React.FC = () => {
   // Track which model is selected on the 3D bed (for TransformControls)
   const [selectedBedModelId, setSelectedBedModelId] = useState<string | null>(null);
 
+  // ESC key deselects the model on the bed
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedBedModelId != null) {
+        setSelectedBedModelId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedBedModelId]);
+
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isSTLPreviewOpen, setIsSTLPreviewOpen] = useState(false);
@@ -1488,7 +1499,7 @@ export const NewSliceJobPage: React.FC = () => {
               <SlicerWorkspace
                 bedConfig={workspaceBedConfig}
                 models={workspaceModels}
-                selectedModelId={selectedBedModelId ?? workspaceModels[0]?.id}
+                selectedModelId={selectedBedModelId}
                 onModelSelect={handleWorkspaceModelSelect}
                 onModelTransform={handleWorkspaceModelTransform}
                 onAddModel={handleWorkspaceAddModel}
