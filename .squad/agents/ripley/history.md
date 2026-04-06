@@ -131,3 +131,26 @@ When modal success requires data refresh:
 
 **Lesson:** Every mutation that changes the backing data for a `FileBrowser` must call `fileBrowserRef.current?.refetch()` on success. This is the canonical refresh pattern — query invalidation by key prefix also works but the ref-based refetch is what all FileBrowser consumers use. Always verify both success feedback (toast) AND data refresh (refetch) are present in mutation handlers.
 
+
+### Slicer Page E2E Verification (2026-04-06)
+
+**Role:** Frontend E2E Verification
+**Status:** ✅ ALL PASSING — Slicer page fully functional
+
+**Test scope:** Full end-to-end verification of slicer page model selection and toolbar interaction on live deployment at http://10.0.0.20/slicer.
+
+**Findings:**
+- **Login flow:** Redirect to /login works; login with admin credentials succeeds
+- **Page load:** Slicer page renders with 3D bed (300x300x300mm), OrcaSlicer 2.3.1 engine, printer arco1 pre-selected
+- **Model picker modal:** Opens via "Add model" button; shows 3 STL models; selection enables "Select" button; force-click needed to bypass modal overlay
+- **Model loading:** Selected model renders as green 3D mesh on bed; object count updates to "1 object"
+- **Toolbar state management:** All toolbar buttons correctly disabled when no model on bed; all enable after model loaded (except Undo/Redo which stay disabled until action is taken)
+- **Top toolbar buttons all respond:** Add model, Arrange, Orient, Lay flat, Split, Cut, Measure, Support paint, Seam paint, Assembly — each highlights on click with no errors
+- **Left sidebar tools all respond:** Move, Rotate, Scale, Layers — each highlights teal on selection
+- **Utility buttons:** SETTINGS & PROFILES toggles panel; Keyboard Shortcuts activates (no visible modal but marked active)
+- **SVG icon sizing:** All toolbar icons confirmed at 36x36px (natural: 40x40 for most, 150x150 for Undo/Redo)
+- **Icon colors:** Teal (#009688) for active/enabled, gray (#c5cdd0) for disabled — visible against dark bg
+- **Console:** 0 errors, 0 warnings across ~200 messages after full interaction sequence
+- **Slice button:** Enabled after model load (ready for job submission)
+
+**No issues found.** Everything works as expected.
