@@ -19,9 +19,12 @@ import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesMo
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import {
   SlicerSettingsPanel,
+  MachineSettingsPanel,
   DEFAULT_BASIC_SETTINGS,
+  DEFAULT_ADVANCED_MACHINE_SETTINGS,
   type BasicSlicerSettings,
   type AdvancedSlicerSettings,
+  type AdvancedMachineSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
@@ -42,6 +45,26 @@ const ModelViewer3D = React.lazy(() =>
 );
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
+
+/**
+ * Helper function to convert OrcaMachineProfile to AdvancedMachineSettings
+ * Maps profile data to settings structure, using defaults for missing values
+ */
+function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | undefined): AdvancedMachineSettings {
+  if (!profile) return DEFAULT_ADVANCED_MACHINE_SETTINGS;
+
+  // Parse settings from profile if available
+  const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
+
+  return {
+    ...DEFAULT_ADVANCED_MACHINE_SETTINGS,
+    name: profile.name,
+    printerModel: profile.printerModel ?? '',
+    nozzleDiameter: profile.nozzleDiameter ?? DEFAULT_ADVANCED_MACHINE_SETTINGS.nozzleDiameter,
+    // Spread any additional parsed settings from profile.settings
+    ...profileSettings,
+  };
+}
 
 export const NewSliceJobPage: React.FC = () => {
   const { user } = useAuth();
@@ -75,6 +98,9 @@ export const NewSliceJobPage: React.FC = () => {
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<BasicSlicerSettings>(DEFAULT_BASIC_SETTINGS);
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
+  
+  // === Machine Settings Panel ===
+  const [machineSettings, setMachineSettings] = useState<AdvancedMachineSettings>(DEFAULT_ADVANCED_MACHINE_SETTINGS);
 
   // === Process Profile Management state ===
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -505,6 +531,14 @@ export const NewSliceJobPage: React.FC = () => {
       setSelectedProcessPresetId('');
     });
   }, [selectedMachineProfileId]);
+
+  // Update machine settings when selected machine profile changes
+  // Synchronizing state with selectedMachineProfile changes is the intended use case here
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const settings = selectedMachineProfile ? convertOrcaMachineProfileToSettings(selectedMachineProfile) : DEFAULT_ADVANCED_MACHINE_SETTINGS;
+    setMachineSettings(settings);
+  }, [selectedMachineProfile]);
 
   // Check if printer has no profiles - show clone suggestion
   // IMPORTANT: Only suggest clone AFTER machine profiles have loaded and we know there are none
@@ -997,6 +1031,21 @@ export const NewSliceJobPage: React.FC = () => {
               </p>
             )}
           </div>
+
+          {/* MACHINE SETTINGS PANEL - Display and edit machine profile settings */}
+          {selectedMachineProfileId && selectedMachineProfile && (
+            <div className="bg-pf-panel border border-pf-border rounded-lg p-3">
+              <label className="block text-sm font-semibold text-pf-text-primary mb-3">
+                Machine Settings
+              </label>
+              <MachineSettingsPanel
+                settings={machineSettings}
+                onChange={(settings) => setMachineSettings(settings as AdvancedMachineSettings)}
+                initialViewMode="basic"
+                disabled={false}
+              />
+            </div>
+          )}
 
           {/* FILAMENT PROFILE - two-step selection: material type then profile */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
