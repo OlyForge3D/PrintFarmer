@@ -19,6 +19,12 @@ public interface IModel3DFileRepository
     /// <param name="ct">Cancellation token.</param>
     Task<Model3D?> GetByIdAsync(Guid id, CancellationToken ct);
 
+    /// <summary>Retrieves a model by its unique identifier without filtering by IsValid status.</summary>
+    /// <param name="id">The model identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>Used for file download operations where physical file access is needed regardless of validation status.</remarks>
+    Task<Model3D?> GetByIdUnfilteredAsync(Guid id, CancellationToken ct);
+
     /// <summary>Retrieves a model by its SHA-256 file hash (deduplication).</summary>
     /// <param name="fileHash">The SHA-256 hash of the model file.</param>
     /// <param name="ct">Cancellation token.</param>

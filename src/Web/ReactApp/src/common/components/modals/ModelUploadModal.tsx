@@ -28,14 +28,17 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   const queryClient = useQueryClient();
   const [dragOver, setDragOver] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
+  const [isClosing, setIsClosing] = useState(false);
 
   // Upload mutation with progress tracking
   const uploadMutation = useMutation({
     mutationFn: (file: File) => {
       return new Promise<{ id: string; url: string }>((resolve, reject) => {
         slicerService.uploadModel(file, (progress) => {
+          // Cap progress at 95% during upload to show backend is still processing
+          const displayProgress = Math.min(95, progress);
           setUploadQueue(prev => prev.map(item =>
-            item.file === file ? { ...item, progress } : item
+            item.file === file ? { ...item, progress: displayProgress } : item
           ));
         }).then(resolve).catch(reject);
       });
@@ -104,8 +107,10 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
           it.id === item.id ? { ...it, status: 'uploading', progress: 0 } : it
         ));
 
+        // Wait for backend to fully complete upload + processing (includes thumbnail generation)
         await uploadMutation.mutateAsync(item.file);
 
+        // Only mark as done and show toast after backend confirms completion
         setUploadQueue(prev => prev.map(it =>
           it.id === item.id ? { ...it, progress: 100, status: 'done' } : it
         ));
@@ -126,19 +131,26 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   };
 
   const handleClose = async () => {
-    // Invalidate models-search query to refresh the models list
-    queryClient.invalidateQueries({ queryKey: ['models-search'] });
-    
-    // Call onUploadSuccess callback if provided
-    if (onUploadSuccess) {
-      try {
-        await onUploadSuccess();
-      } catch (error) {
-        console.error('Error calling onUploadSuccess:', error);
+    setIsClosing(true);
+    try {
+      // Invalidate models-search query to refresh the models list
+      await queryClient.invalidateQueries({ queryKey: ['models-search'] });
+      
+      // Call onUploadSuccess callback if provided and wait for it to complete
+      if (onUploadSuccess) {
+        try {
+          await onUploadSuccess();
+        } catch (error) {
+          console.error('Error calling onUploadSuccess:', error);
+        }
       }
+      
+      // Reset upload queue when closing
+      setUploadQueue([]);
+      onClose();
+    } finally {
+      setIsClosing(false);
     }
-    
-    onClose();
   };
 
   if (!isOpen) return null;
@@ -148,7 +160,13 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   const completedCount = uploadQueue.filter(item => item.status === 'done').length;
 
   const modalFooter = (
-    <Button onClick={handleClose} variant="secondary" size="sm">
+    <Button 
+      onClick={handleClose} 
+      variant="secondary" 
+      size="sm"
+      loading={isClosing}
+      disabled={isClosing}
+    >
       Close
     </Button>
   );

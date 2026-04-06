@@ -334,6 +334,67 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         result.Should().BeNull();
     }
 
+    [Fact]
+    public async Task GetModelThumbnailPathAsync_WithInvalidModel_ReturnsThumbnailPath()
+    {
+        // Arrange - Create a model marked as IsValid = false but with a thumbnail
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        SlicerDbContext dbContext = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        // Create a test model with IsValid = false and a thumbnail
+        var invalidModelId = Guid.NewGuid();
+        string fileName = $"{invalidModelId}.stl";
+        string thumbnailFileName = $"{invalidModelId}_thumb.png";
+        string modelsPath = Path.Combine(Path.GetTempPath(), "test-models-" + Guid.NewGuid());
+        Directory.CreateDirectory(modelsPath);
+        string filePath = Path.Combine(modelsPath, fileName);
+        string thumbnailPath = Path.Combine(modelsPath, thumbnailFileName);
+
+        // Create the physical files
+        await File.WriteAllTextAsync(filePath, "invalid STL content");
+        await File.WriteAllBytesAsync(thumbnailPath, new byte[] { 0x89, 0x50, 0x4E, 0x47 }); // PNG header
+
+        var invalidModel = new Model3D
+        {
+            Id = invalidModelId,
+            Name = "invalid-model-with-thumb.stl",
+            FileName = fileName,
+            ThumbnailFileName = thumbnailFileName,
+            FilePath = modelsPath,
+            FileSizeBytes = 123,
+            FileHash = $"hash-{invalidModelId}",
+            FileFormat = ModelFileFormat.STL,
+            IsValid = false, // CRITICAL: Model marked as invalid
+            FolderId = Guid.NewGuid(),
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _ = await dbContext.Models3D.AddAsync(invalidModel);
+        _ = await dbContext.SaveChangesAsync();
+
+        try
+        {
+            // Act - GetModelThumbnailPathAsync should use GetByIdUnfilteredAsync, not GetByIdAsync
+            string? result = await service.GetModelThumbnailPathAsync(invalidModelId, CancellationToken.None);
+
+            // Assert - REGRESSION: Thumbnail should be accessible even when IsValid = false
+            result.Should().NotBeNull("GetModelThumbnailPathAsync must use unfiltered query to support thumbnail access for invalid models");
+            result.Should().Contain(thumbnailFileName, "returned path should include the thumbnail filename");
+            File.Exists(result).Should().BeTrue("physical thumbnail file must exist at the returned path");
+        }
+        finally
+        {
+            // Cleanup
+            if (Directory.Exists(modelsPath))
+            {
+                Directory.Delete(modelsPath, true);
+            }
+        }
+    }
+
     #endregion
 
     #region DeleteModelAsync Tests

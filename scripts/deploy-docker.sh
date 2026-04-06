@@ -5532,7 +5532,7 @@ prepare_external_storage_directories() {
             if ! mkdir -p "$parent_dir" 2>/dev/null; then
                 print_error "Failed to create parent directory: $parent_dir"
                 print_info "  Reason: Permission denied or invalid path"
-                print_info "  Try: mkdir -p '$parent_dir' && chmod 755 '$parent_dir'"
+                print_info "  Try: mkdir -p '$parent_dir' && chmod 775 '$parent_dir'"
                 ((paths_failed++))
                 continue
             fi
@@ -5552,9 +5552,9 @@ prepare_external_storage_directories() {
             print_info "Directory already exists: [$desc] $path"
         fi
         
-        # Fix permissions to 755 (rwxr-xr-x) so appuser (any process) can read/write
-        # This is critical: if directory is 700 (rwx------), processes from other UIDs cannot access it
-        if ! chmod 755 "$path" 2>/dev/null; then
+        # Fix permissions to 775 (rwxrwxr-x) so both the host user and container appuser
+        # can write when they share a common group (for example gid 1001 / docker).
+        if ! chmod 775 "$path" 2>/dev/null; then
             print_warning "Could not set permissions on $path - may have restricted access"
             ((paths_failed++))
             continue
@@ -5564,13 +5564,13 @@ prepare_external_storage_directories() {
         local current_owner
         current_owner=$(ls -ld "$path" | awk '{print $3":"$4}')
         print_info "  Current ownership: $current_owner"
-        print_info "  Permissions set to: 755 (rwxr-xr-x)"
+        print_info "  Permissions set to: 775 (rwxrwxr-x)"
         
         # Verify permissions are now correct
         local perms
         perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%A' "$path" 2>/dev/null || echo "unknown")
-        if [ "$perms" != "755" ] && [ "$perms" != "unknown" ]; then
-            print_warning "Permission verification returned: $perms (expected 755)"
+        if [ "$perms" != "775" ] && [ "$perms" != "unknown" ]; then
+            print_warning "Permission verification returned: $perms (expected 775)"
         else
             print_success "  Permissions verified ✓"
         fi
@@ -5584,7 +5584,7 @@ prepare_external_storage_directories() {
         print_warning "Failed to create/prepare: $paths_failed directories"
         print_warning "⚠️  Some storage directories may not be accessible. Docker will attempt to create them as root."
         print_info "If containers fail to start or report permission errors:"
-        echo "  1. Fix the paths manually: mkdir -p <path> && chmod 755 <path>"
+        echo "  1. Fix the paths manually: mkdir -p <path> && chmod 775 <path>"
         echo "  2. Or re-run: ./scripts/deploy-docker.sh (will retry pre-creation)"
         return 1
     else
@@ -5597,7 +5597,7 @@ prepare_external_storage_directories() {
             if [ -d "$path" ]; then
                 local owner
                 owner=$(ls -ld "$path" 2>/dev/null | awk '{print $3}')
-                echo "  [$desc] $path - owned by $owner, perms 755 ✓"
+                echo "  [$desc] $path - owned by $owner, perms 775 ✓"
             fi
         done
         return 0
@@ -5782,7 +5782,7 @@ validate_external_storage_permissions() {
         
         if [ ! -w "$path" ]; then
             print_error "✗ [$desc] Directory not writable: $path"
-            print_info "   Run: sudo chmod 755 '$path' to fix permissions"
+            print_info "   Run: sudo chmod 775 '$path' to fix permissions"
             ((invalid_dirs++))
             validation_passed=false
             continue
@@ -5792,7 +5792,7 @@ validate_external_storage_permissions() {
         local perms
         perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%A' "$path" 2>/dev/null || echo "unknown")
         
-        # Acceptable permissions: 755 (optimal), 777 (permissive), 775 (group-writable)
+        # Acceptable permissions: 775 (optimal), 755 (owner-only write), 777 (permissive)
         if [[ "$perms" =~ ^(755|777|775)$ ]]; then
             local owner
             owner=$(ls -ld "$path" 2>/dev/null | awk '{print $3}')
@@ -5801,11 +5801,11 @@ validate_external_storage_permissions() {
             ((valid_dirs++))
         else
             print_warning "⚠ [$desc] Unexpected permissions: $path"
-            echo "    Expected: 755, 775, or 777 (at least rw-r--r--)"
+            echo "    Expected: 775, 755, or 777"
             local perms_octal
             perms_octal=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%OLp' "$path" 2>/dev/null | tail -c 4 || echo "unknown")
             echo "    Current: $perms_octal"
-            print_info "   Run: sudo chmod 755 '$path' to fix permissions"
+            print_info "   Run: sudo chmod 775 '$path' to fix permissions"
             ((invalid_dirs++))
             validation_passed=false
         fi
@@ -5824,8 +5824,8 @@ validate_external_storage_permissions() {
         print_error "✗ Some external storage directories have permission issues"
         echo
         print_warning "Fix permission issues before deployment:"
-        echo "  • For user-owned directories: chmod 755 <path>"
-        echo "  • For root-owned directories: sudo chmod 755 <path>"
+        echo "  • For user-owned directories: chmod 775 <path>"
+        echo "  • For root-owned directories: sudo chmod 775 <path>"
         echo "  • Or re-run: ./scripts/deploy-docker.sh (will attempt to fix)"
         return 1
     fi
