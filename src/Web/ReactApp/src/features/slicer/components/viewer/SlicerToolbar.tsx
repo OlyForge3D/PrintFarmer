@@ -41,7 +41,7 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
 }) => {
   const sizedIcon = React.isValidElement<{ className?: string }>(icon)
     ? React.cloneElement(icon, {
-        className: clsx('w-6 h-6', icon.props.className),
+        className: clsx('w-8 h-8', icon.props.className),
       })
     : icon;
 
