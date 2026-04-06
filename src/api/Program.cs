@@ -6,6 +6,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services.FeatureFlags;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -92,6 +93,9 @@ builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Envir
 
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
+
+// Feature flag service for phased rollout control
+builder.Services.AddSingleton<IFeatureFlagService, FeatureFlagService>();
 
 // Slicer integration shim: loads Farm.Slicer.Module + Farm.Slicer.Module.Api DLLs at runtime
 // from Slicer:PluginsPath. No compile-time reference to EF Core, SignalR hubs, or OrcaSlicer.

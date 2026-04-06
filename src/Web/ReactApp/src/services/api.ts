@@ -2119,6 +2119,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async getFeatureFlags(): Promise<Record<string, boolean>> {
+    const response = await this.client.get<Record<string, boolean>>('/system/feature-flags');
+    return response.data;
+  }
+
   // ============ Authentication API methods ============
 
   async login(credentials: LoginRequest): Promise<AuthenticationResult> {
