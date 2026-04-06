@@ -1,17 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <!-- OrcaSlicer logo - stylized orca whale fin with slicer lines -->
   <defs>
-    <linearGradient id="orca-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#00AE42;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#009639;stop-opacity:1" />
+    <radialGradient id="bg" cx="36%" cy="28%" r="72%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#e8ecf2" />
+    </radialGradient>
+    <linearGradient id="orcaAccent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2bd08a" />
+      <stop offset="100%" stop-color="#10a36a" />
     </linearGradient>
   </defs>
-  <!-- Main fin shape -->
-  <path d="M32 4C28 4 20 12 16 24C12 36 14 48 20 56C24 60 30 60 34 58C40 54 46 44 48 32C50 20 44 8 38 4C36 4 34 4 32 4Z" fill="url(#orca-grad)"/>
-  <!-- Slicer layer lines -->
-  <path d="M18 36H46" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.9"/>
-  <path d="M20 42H44" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
-  <path d="M22 48H40" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
-  <!-- Eye dot -->
-  <circle cx="30" cy="20" r="3" fill="white"/>
+
+  <circle cx="32" cy="32" r="30" fill="url(#bg)" />
+
+  <!-- Main orca body -->
+  <path d="M49 21c-4-4-11-6-17-5-9 2-14 8-16 16-1 5 1 10 6 13 5 3 11 2 16-1 4-2 8-5 11-10 2-4 2-9 0-13z" fill="#101820"/>
+
+  <!-- White jaw / belly cut -->
+  <path d="M26 36c5 1 11-1 15-5-2 5-6 8-11 10-4 1-8 1-11-1 2-3 4-4 7-4z" fill="#ffffff"/>
+
+  <!-- Eye patch -->
+  <ellipse cx="35" cy="25" rx="3.4" ry="2.2" fill="#ffffff"/>
+
+  <!-- Accent fin stroke -->
+  <path d="M41 14c2 4 1 7-2 10" stroke="url(#orcaAccent)" stroke-width="2.6" stroke-linecap="round"/>
+
+  <!-- Slicer slash accent -->
+  <path d="M18 45l28-24" stroke="#1e293b" stroke-width="1.4" stroke-linecap="round" opacity="0.35"/>
 </svg>
