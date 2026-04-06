@@ -2,7 +2,8 @@
  * Slicer 3D Bed Visualization Component
  * A Three.js canvas showing the print bed similar to OrcaSlicer
  */
-import React, { Suspense, useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { Component, Suspense, useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import type { ReactNode, ErrorInfo } from 'react';
 import { Canvas, useThree, useLoader } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, TransformControls } from '@react-three/drei';
 import { STLLoader } from 'three-stdlib';
@@ -125,6 +126,31 @@ function PlainPrintBed({
 }
 
 /**
+ * Error boundary that catches texture load failures and falls back to plain bed.
+ * Required because useLoader(TextureLoader, url) throws when the file is missing (404).
+ */
+interface TextureFallbackBoundaryProps {
+  children: ReactNode;
+  fallback: ReactNode;
+}
+interface TextureFallbackBoundaryState {
+  hasError: boolean;
+}
+class TextureFallbackBoundary extends Component<TextureFallbackBoundaryProps, TextureFallbackBoundaryState> {
+  state: TextureFallbackBoundaryState = { hasError: false };
+  static getDerivedStateFromError(): TextureFallbackBoundaryState {
+    return { hasError: true };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    // eslint-disable-next-line no-console
+    console.warn('[SlicerBed] Bed texture load failed, using plain bed:', error.message, info.componentStack);
+  }
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
+
+/**
  * Line-based grid overlay for the bed surface.
  * Uses actual line geometry so the bed texture is fully visible between lines.
  */
@@ -209,9 +235,11 @@ function PrintBedPlatform({
     <group>
       {/* Main bed surface */}
       {shouldUsePngTexture ? (
-        <Suspense fallback={<PlainPrintBed width={width} depth={depth} />}>
-          <TexturedPrintBed width={width} depth={depth} textureUrl={textureUrl} />
-        </Suspense>
+        <TextureFallbackBoundary fallback={<PlainPrintBed width={width} depth={depth} />}>
+          <Suspense fallback={<PlainPrintBed width={width} depth={depth} />}>
+            <TexturedPrintBed width={width} depth={depth} textureUrl={textureUrl} />
+          </Suspense>
+        </TextureFallbackBoundary>
       ) : (
         <PlainPrintBed width={width} depth={depth} />
       )}
