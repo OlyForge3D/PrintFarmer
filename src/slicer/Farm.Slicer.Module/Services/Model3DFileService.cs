@@ -193,7 +193,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             catch
             {
                 // Path doesn't exist — return empty results
-                return new Model3DListResponse([], 0, 0, page, pageSize, 0, 0);
+                return new Model3DListResponse(Models: [], TotalCount: 0, TotalSize: 0, Page: page, PageSize: pageSize, TotalPages: 0, TotalItems: 0);
             }
         }
 
@@ -222,8 +222,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         int totalPages = totalCount > 0 ? (int)Math.Ceiling((double)totalCount / pageSize) : 0;
 
         return new Model3DListResponse(
-            Files: entries,
-            TotalFiles: totalCount,
+            Models: entries,
+            TotalCount: totalCount,
             TotalSize: totalSize,
             Page: page,
             PageSize: pageSize,

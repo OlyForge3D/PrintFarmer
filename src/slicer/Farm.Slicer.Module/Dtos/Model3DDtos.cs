@@ -76,8 +76,8 @@ public record Model3DEntryDto(
 /// Response envelope for hierarchical model file listing.
 /// </summary>
 public record Model3DListResponse(
-    IReadOnlyList<Model3DEntryDto> Files,
-    int TotalFiles,
+    IReadOnlyList<Model3DEntryDto> Models,
+    int TotalCount,
     long TotalSize,
     int Page,
     int PageSize,
