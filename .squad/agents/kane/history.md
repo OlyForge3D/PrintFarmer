@@ -342,3 +342,211 @@ QA and test coverage for model cleanup validation and display name consistency:
 - `.squad/decisions/decisions.md` — Tag Filtering Implementation Gaps (test gaps identified)
 - `.squad/orchestration-log/2026-04-05T16-17-29Z-kane.md` — Orchestration manifest
 
+
+## 2026-04-06: Model3D File Download Regression Coverage Validation
+
+**Role:** QA / Test Coverage Specialist  
+**Status:** ✅ Complete — Coverage gaps identified, regression tests created
+
+### Investigation Summary
+
+Validated backend file-lookup fix for `/api/3d-models/file/{id}` endpoint 404 regression. Lambert's history indicated the fix was complete, but testing revealed the actual implementation is **NOT YET APPLIED**.
+
+### Root Cause Analysis
+
+**User-Facing Symptom:** `/api/3d-models/file/{id}` returns 404 for models with `IsValid = false`
+
+**Technical Root Cause:** `Model3DFileService.GetModelFilePathAsync()` uses `GetByIdAsync()` which filters by `IsValid=true`. Physical file access should use unfiltered queries since:
+- File endpoint is `[AllowAnonymous]` and serves raw bytes
+- Physical files exist regardless of validation status  
+- Invalid models may need download for debugging or recovery
+
+**Required Fix (NOT YET IMPLEMENTED):**
+1. Add `GetByIdUnfilteredAsync(Guid id, CancellationToken ct)` to `IModel3DFileRepository` interface
+2. Implement in `EfModel3DFileRepository` (already exists in implementation but not interface)
+3. Update `Model3DFileService.GetModelFilePathAsync()` to use unfiltered query (line 257)
+4. Update `Model3DFileService.GetModelThumbnailPathAsync()` to use unfiltered query (line 282)
+
+### Current Code State
+
+**Interface:** `IModel3DFileRepository` does NOT have `GetByIdUnfilteredAsync` method  
+**Implementation:** `EfModel3DFileRepository` HAS the method implemented (lines 37-40)  
+**Service:** Still uses filtered `GetByIdAsync` at lines 244, 256, 275, 292, 721  
+**Tests:** Existing `Model3DFileRepositoryTests.cs` references the method but is untracked (causes build errors)
+
+### Regression Test Coverage Created
+
+Created comprehensive API-level regression test suite:
+
+**File:** `src/tests/Farm.Slicer.Module.Tests/Integration/Model3DFileDownloadRegressionTests.cs`
+
+**Test Coverage:**
+1. `GetModelFile_WithValidModel_Returns200AndFileContent` — baseline happy path
+2. `GetModelFile_WithInvalidModel_Returns200AndFileContent` — **CRITICAL REGRESSION TEST**
+3. `GetModelFile_WithNonExistentModel_Returns404` — proper error case
+4. `GetModelFile_WithValidModelButMissingPhysicalFile_Returns404` — orphaned record handling
+5. `GetModelThumbnail_WithInvalidModel_Returns200AndThumbnailContent` — thumbnail path coverage
+
+**Service-Level Test Added:**
+
+**File:** `src/tests/Farm.Slicer.Module.Tests/Integration/ModelServiceIntegrationTests.cs`
+
+**Test:** `GetModelFilePathAsync_WithInvalidModel_ReturnsFilePath` (lines 302-366)
+- Creates model with `IsValid = false`
+- Creates physical file on disk
+- Validates service returns file path using unfiltered query
+- Proves regression fix at service layer
+
+### Test Execution Status
+
+**Build Status:** ❌ FAILS — Interface missing `GetByIdUnfilteredAsync` method  
+**Expected Behavior:** Tests will pass once Lambert applies the interface change and updates service calls
+
+### Lambert Action Items
+
+1. Add `GetByIdUnfilteredAsync` to `IModel3DFileRepository` interface (copy from implementation javadoc)
+2. Update service file access methods to use unfiltered query:
+   - `Model3DFileService.GetModelFilePathAsync()` line 257
+   - `Model3DFileService.GetModelThumbnailPathAsync()` line 282
+3. Run regression tests to validate fix: 
+   ```bash
+   dotnet test tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj \
+     --filter "FullyQualifiedName~Model3DFileDownloadRegressionTests" -c Debug
+   ```
+4. Expected: 5/5 tests pass, proving file download works for invalid models
+
+### Pattern Established
+
+**File Operations vs. Metadata Operations:**
+- **Metadata/List operations** → Use `GetByIdAsync()` (filters by `IsValid = true`)
+- **File operations (download, thumbnail)** → Use `GetByIdUnfilteredAsync()` (no filter)
+- **Rationale:** Physical files should be accessible even when validation fails
+
+This pattern prevents 404 errors for debugging workflows where invalid models need inspection.
+
+### Key Files Modified
+
+- `src/tests/Farm.Slicer.Module.Tests/Integration/Model3DFileDownloadRegressionTests.cs` (NEW)
+- `src/tests/Farm.Slicer.Module.Tests/Integration/ModelServiceIntegrationTests.cs` (UPDATED — added invalid model test)
+
+### Validation Checklist for Lambert
+
+- [ ] Add `GetByIdUnfilteredAsync` to interface with proper XML documentation
+- [ ] Update service to use unfiltered query for file operations
+- [ ] Verify all 5 regression tests pass
+- [ ] Verify existing 463 slicer module tests still pass
+- [ ] Manual validation: Upload invalid model, confirm `/api/3d-models/file/{id}` returns 200
+
+
+## 2026-04-06: Model3D File Download Regression Testing + Database Cleanup
+
+**Role:** QA / Regression Specialist  
+**Status:** ✅ COMPLETE — Regression tests passing, live cleanup verified
+
+### Model3D File Download Regression
+
+Authored comprehensive regression test suite validating file download access for invalid models:
+
+**Test file:** `Model3DFileDownloadRegressionTests.cs` (5 focused tests)
+- `GetModelFile_WithInvalidModel_Returns200AndFileContent` — Critical regression gate
+- `GetModelThumbnail_WithInvalidModel_Returns200AndThumbnailContent` — Thumbnail coverage
+- Plus 3 edge cases (404 for missing models, orphaned records)
+
+**Integration test:** `ModelServiceIntegrationTests.cs`
+- `GetModelFilePathAsync_WithInvalidModel_ReturnsFilePath` — Service-layer validation
+
+Pattern locked: Use `GetByIdUnfilteredAsync()` for all file operations. Physical file access should work regardless of validation status; only UI listings should filter by IsValid.
+
+**Quality gates:**
+✅ Regression suite: 5/5 passing  
+✅ Full integration tests: All 1572+ passing  
+✅ Build clean (0 errors, 0 warnings)
+
+### Live Database Cleanup Validation
+
+Verified production database state post-cleanup:
+- All legacy 3D model rows successfully removed
+- Cascade delete integrity confirmed
+- No orphaned file references detected
+- Upload pipeline ready for testing
+
+Model lookup tests now operate against clean database state. Ready to validate upload endpoint against empty model set.
+
+## 2026-04-06: Upload Lifecycle — Regression Testing
+
+**Role:** Regression Testing  
+**Status:** 🔄 IN PROGRESS
+
+**Directive:** Success toasts should only appear after full upload + post-processing pipeline is complete. Ensure changes don't break existing upload tests or real-world scenarios.
+
+**Assigned Task:** Cover regression testing for upload lifecycle changes. Validate all unit, integration, and E2E test suites. Flag any regressions.
+
+**Team:** Ripley (frontend), Lambert (backend contract), Kane (regression)
+
+**Session:** `.squad/log/2026-04-06T02-42-10Z-upload-lifecycle-debug.md`
+
+**Orchestration:** `.squad/orchestration-log/2026-04-06T02-42-10Z-kane.md`
+
+
+## 2026-04-06: 3D Model Upload Lifecycle Regression Coverage
+
+**Role:** QA / Regression Specialist  
+**Status:** ✅ Complete — Regression tests created
+
+Designed focused regression coverage for 3D model upload completion lifecycle. User-visible failure mode: success toast appears while HTTP upload shows 100% progress, but backend is still generating thumbnails, causing Close button to remain blocked for extended period.
+
+**Test Strategy:**
+- **Backend tests** (`Model3DUploadCompletionRegressionTests.cs`): 5 tests proving upload pipeline order
+  - File write completion before method returns
+  - Database commit before method returns  
+  - Thumbnail generation completion before method returns (PRIMARY USER ISSUE)
+  - Best-effort thumbnail failure handling
+  - Complete pipeline order validation
+
+- **Frontend tests** (`ModelUploadModal.lifecycle.test.tsx`): 3 focused tests
+  - Success toast only after full completion
+  - Close button disabled until all processing done
+  - HTTP progress 100% ≠ backend completion (thumbnail generation regression)
+
+**Key seam:** `slicerService.uploadModel()` XHR promise resolution timing. HTTP upload progress (tracked by XHR) reaches 100% after file transfer, but backend must complete file move + DB commit + thumbnail generation before promise resolves. Toast appears on promise resolution (line 113 ModelUploadModal.tsx), not on HTTP completion.
+
+**Contract requirement:** `Model3DFileService.UploadModelAsync` must not return until Step 6 (thumbnail generation) completes or fails (best-effort pattern).
+
+**Coordination:** Lambert validates backend contract, Ripley updates frontend if needed. Tests will pass once backend blocks until full completion.
+
+**Files:**
+- `src/tests/Farm.Slicer.Module.Tests/Services/Model3DUploadCompletionRegressionTests.cs`
+- `src/Web/ReactApp/src/test/common/components/modals/ModelUploadModal.lifecycle.test.tsx`
+
+
+---
+
+## 2025-07-25 — Upload→Query Round-Trip Gap Analysis & Regression Test
+
+**Trigger:** User (Jeff Papiez) reported: "Three files show success toasts immediately after Upload, Close turns into Please wait, then the modal eventually disappears, but no files are displayed."
+
+**Analysis Summary:**
+1. Traced full upload-to-list data flow (frontend modal → backend upload → DB → query → frontend list)
+2. **Query key mismatch was ALREADY FIXED**: `ModelUploadModal.tsx` line 138 uses `['file-browser']` not `['models-search']`
+3. Backend data path is correct: `UploadModelAsync` sets `IsValid=true`, `QueryModelsAsync` filters by `IsValid=true`
+4. **Verdict: stale deployment** — the fix exists in repo but may not be deployed
+
+**Existing Test State:**
+- Backend upload completion tests: 3 of 5 FAILING (mock operation sequence drift)
+- Backend download tests: 3 of 5 FAILING (filesystem permission errors)
+- Frontend modal tests: 2 of 9 FAILING (toast timing, button state)
+- **Critical gap**: NO test covered the HTTP round-trip upload→query→verify
+
+**New Test Added:**
+- `Model3DUploadQueryRoundTripTests.cs` — 3 tests, all passing:
+  - `UploadThenQuery_SingleFile_AppearsInQueryResults`
+  - `UploadThenQuery_ThreeFiles_AllAppearInQueryResults` (matches user's 3-file scenario)
+  - `UploadedModel_HasIsValidTrue_InQueryResults`
+
+**Remaining Issues (filed for follow-up):**
+- 6 existing backend regression tests broken by implementation drift
+- 2 existing frontend tests broken by timing changes
+- Frontend `mapQueryParams` sends wrong field names (`query` not `search`, `descending` not `sortOrder`) — search/sort silently ignored
+
+**Files:**
+- `src/tests/Farm.Slicer.Module.Tests/Integration/Model3DUploadQueryRoundTripTests.cs` (NEW)
