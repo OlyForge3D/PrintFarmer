@@ -142,7 +142,6 @@ class TextureFallbackBoundary extends Component<TextureFallbackBoundaryProps, Te
     return { hasError: true };
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // eslint-disable-next-line no-console
     console.warn('[SlicerBed] Bed texture load failed, using plain bed:', error.message, info.componentStack);
   }
   render() {
@@ -320,7 +319,46 @@ function AxisIndicators({ size = 30 }: { size?: number }) {
 }
 
 /**
- * STL Model loader component
+ * Wireframe bounding box rendered around the selected model.
+ * Positioned in the mesh's local coordinate space so it inherits
+ * all parent transforms (position, rotation, scale) automatically.
+ */
+function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) {
+  const PADDING = 1; // 1 mm visual padding around the model
+  const { size, center } = useMemo(() => {
+    const box = new THREE.Box3();
+    geometry.computeBoundingBox();
+    if (geometry.boundingBox) {
+      box.copy(geometry.boundingBox);
+    }
+    const s = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    box.getSize(s);
+    box.getCenter(c);
+    return {
+      size: [s.x + PADDING * 2, s.y + PADDING * 2, s.z + PADDING * 2] as [number, number, number],
+      center: [c.x, c.y, c.z] as [number, number, number],
+    };
+  }, [geometry]);
+
+  return (
+    <lineSegments position={center}>
+      <edgesGeometry attach="geometry">
+        <boxGeometry args={size} />
+      </edgesGeometry>
+      <lineBasicMaterial color="#00bcd4" transparent opacity={0.85} />
+    </lineSegments>
+  );
+}
+
+/**
+ * STL Model loader component.
+ *
+ * Selection uses onPointerDown so the hit registers immediately on press,
+ * before OrbitControls can interpret the gesture as an orbit drag.  The
+ * companion onClick handler is kept so R3F still considers the mesh
+ * "interactive" for its click bookkeeping (prevents onPointerMissed from
+ * firing when a mesh was actually pressed).
  */
 function STLModel({ 
   url, 
@@ -367,6 +405,10 @@ function STLModel({
       position={position}
       rotation={rotation}
       scale={scale}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onClick?.();
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onClick?.();
@@ -380,6 +422,7 @@ function STLModel({
         roughness={0.45}
         emissive={selected ? "#003d19" : "#002b26"}
       />
+      {selected && <SelectionBoundingBox geometry={geometry} />}
     </mesh>
   );
 }
@@ -408,6 +451,7 @@ function CameraController({
   return (
     <OrbitControls
       ref={orbitRef}
+      makeDefault
       enablePan={true}
       enableRotate={true}
       enableZoom={true}
