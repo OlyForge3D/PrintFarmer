@@ -114,12 +114,12 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         {viewModes.map((mode) => (
           <Button
             key={mode.id}
-            variant={viewMode === mode.id ? 'tab' : 'subtle'}
+            variant="tab"
+            active={viewMode === mode.id}
             type="button"
             onClick={() => setViewMode(mode.id)}
             disabled={disabled}
-            className={`flex-1 px-4 py-3 text-sm font-medium rounded-none
-                       ${viewMode === mode.id ? 'rounded-t-lg' : ''}`}
+            className="flex-1 px-4 py-2 text-sm font-medium rounded-none"
           >
             {mode.label}
           </Button>
@@ -127,7 +127,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       </div>
 
       {/* Settings Content */}
-      <div className="p-4">
+      <div className="p-3">
         {viewMode === 'basic' && (
           <BasicSettings
             settings={settings}
@@ -150,19 +150,25 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
         {viewMode === 'advanced' && (
           <>
-            {/* Category Tabs */}
-            <div className="flex gap-1 mb-4 overflow-x-auto pb-2">
+            {/* Category Tabs - pill style with filled active state */}
+            <div className="flex gap-1 mb-3 overflow-x-auto">
               {categories.map((cat) => {
                 const isDirty = isCategoryDirty?.(cat.id) ?? false;
+                const isActive = activeCategory === cat.id;
                 return (
                   <Button
                     key={cat.id}
-                    variant={activeCategory === cat.id ? 'tab' : 'subtle'}
+                    variant="unstyled"
                     type="button"
                     onClick={() => setActiveCategory(cat.id)}
                     disabled={disabled}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
-                               ${isDirty ? 'ring-1 ring-pf-accent-orange ring-offset-1 ring-offset-pf-surface' : ''}`}
+                    className={`px-3 py-1 text-xs font-medium rounded-full whitespace-nowrap relative
+                               transition-colors duration-150 cursor-pointer disabled:opacity-50
+                               ${isActive
+                                 ? 'bg-pf-accent text-white'
+                                 : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                               }
+                               ${isDirty ? 'ring-1 ring-pf-accent-orange' : ''}`}
                   >
                     {cat.label}
                     {isDirty && (

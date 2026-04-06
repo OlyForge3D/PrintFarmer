@@ -1,0 +1,16 @@
+{
+  "url": "https://simplyprint.io/panel/slicer",
+  "canvases": [
+    {
+      "index": 0,
+      "width": 1460,
+      "height": 1518,
+      "clientWidth": 730,
+      "clientHeight": 759,
+      "parentTag": "DIV",
+      "parentClass": "slicer-three-canvas-wrapper svelte-1y14rll",
+      "style": "width: 730px; height: 759px; touch-action: none;"
+    }
+  ],
+  "webgl": true
+}
