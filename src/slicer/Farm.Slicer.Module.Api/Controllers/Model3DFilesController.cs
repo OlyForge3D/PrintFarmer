@@ -38,9 +38,13 @@ public class Model3DFilesController(
             return BadRequest("No file uploaded or file is empty.");
         }
 
+        _logger.LogInformation("Upload request received: {FileName} ({FileSize} bytes)", modelFile.FileName, modelFile.Length);
+
         try
         {
             Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
+
+            _logger.LogInformation("Upload complete, returning response: {ModelId}", result.Id);
             return Created($"/api/models/{result.Id}", result);
         }
         catch (ArgumentException ex)
