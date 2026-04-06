@@ -4,7 +4,7 @@
  */
 import React, { Suspense, useRef, useEffect } from 'react';
 import { Canvas, useThree, useLoader } from '@react-three/fiber';
-import { OrbitControls, Grid, Environment, Html } from '@react-three/drei';
+import { OrbitControls, Environment, Html } from '@react-three/drei';
 import { STLLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
@@ -121,6 +121,71 @@ function PlainPrintBed({
 }
 
 /**
+ * Line-based grid overlay for the bed surface.
+ * Uses actual line geometry so the bed texture is fully visible between lines.
+ */
+function BedGridLines({
+  width,
+  depth,
+  cellSize = 10,
+  sectionSize = 50,
+}: {
+  width: number;
+  depth: number;
+  cellSize?: number;
+  sectionSize?: number;
+}) {
+  const gridRef = useRef<THREE.Group>(null);
+
+  const { cellLines, sectionLines } = React.useMemo(() => {
+    const halfW = width / 2;
+    const halfD = depth / 2;
+    const cellVerts: number[] = [];
+    const sectionVerts: number[] = [];
+
+    // Lines parallel to Y axis (varying X)
+    for (let x = -halfW; x <= halfW + 0.01; x += cellSize) {
+      const rounded = Math.round(x / cellSize) * cellSize;
+      const isSection = Math.abs(rounded % sectionSize) < 0.01;
+      const target = isSection ? sectionVerts : cellVerts;
+      target.push(rounded, -halfD, 0, rounded, halfD, 0);
+    }
+
+    // Lines parallel to X axis (varying Y)
+    for (let y = -halfD; y <= halfD + 0.01; y += cellSize) {
+      const rounded = Math.round(y / cellSize) * cellSize;
+      const isSection = Math.abs(rounded % sectionSize) < 0.01;
+      const target = isSection ? sectionVerts : cellVerts;
+      target.push(-halfW, rounded, 0, halfW, rounded, 0);
+    }
+
+    return {
+      cellLines: new Float32Array(cellVerts),
+      sectionLines: new Float32Array(sectionVerts),
+    };
+  }, [width, depth, cellSize, sectionSize]);
+
+  return (
+    <group ref={gridRef} position={[0, 0, 0.05]}>
+      {/* Fine cell lines */}
+      <lineSegments>
+        <bufferGeometry>
+          <float32BufferAttribute attach="attributes-position" args={[cellLines, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color="#555577" transparent opacity={0.5} />
+      </lineSegments>
+      {/* Major section lines */}
+      <lineSegments>
+        <bufferGeometry>
+          <float32BufferAttribute attach="attributes-position" args={[sectionLines, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color="#7777aa" transparent opacity={0.7} />
+      </lineSegments>
+    </group>
+  );
+}
+
+/**
  * Print bed platform with optional texture
  */
 function PrintBedPlatform({ 
@@ -155,20 +220,8 @@ function PrintBedPlatform({
         <lineBasicMaterial color="#4a4a6a" linewidth={2} />
       </lineSegments>
 
-      {/* Grid lines on bed surface */}
-      <Grid
-        position={[0, 0, 0.02]}
-        args={[width, depth]}
-        cellSize={10}
-        cellThickness={0.5}
-        cellColor="#2a2a4a"
-        sectionSize={50}
-        sectionThickness={1}
-        sectionColor="#3a3a5a"
-        fadeDistance={1000}
-        fadeStrength={0}
-        infiniteGrid={false}
-      />
+      {/* Grid lines on bed surface — line-based so texture shows through */}
+      <BedGridLines width={width} depth={depth} cellSize={10} sectionSize={50} />
     </group>
   );
 }
@@ -303,6 +356,7 @@ function CameraController({ bedWidth, bedDepth, bedHeight }: { bedWidth: number;
 
     // Position camera at isometric-ish angle
     camera.position.set(distance * 0.7, -distance * 0.7, distance * 0.6);
+    camera.up.set(0, 0, 1); // Enforce Z-up for 3D printing convention
     camera.lookAt(0, 0, bedHeight / 4);
     camera.updateProjectionMatrix();
   }, [camera, bedWidth, bedDepth, bedHeight]);
@@ -397,7 +451,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   selectedModelId,
   onModelSelect,
   showAxes = true,
-  backgroundColor = '#0f0f14',
+  backgroundColor = '#2a2a2e',
   className = '',
 }) => {
   return (
@@ -415,11 +469,13 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
           fov: 45, 
           near: 0.1, 
           far: 10000,
-          position: [300, -300, 250]
+          position: [300, -300, 250],
+          up: [0, 0, 1] // Z-up: standard 3D printing convention
         }}
-        onCreated={({ gl }) => {
+        onCreated={({ gl, scene }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 1;
+          scene.background = new THREE.Color('#2a2a2e');
         }}
       >
         <Suspense fallback={null}>
