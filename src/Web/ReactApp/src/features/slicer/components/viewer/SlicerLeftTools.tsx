@@ -36,7 +36,7 @@ const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, on
     `}
   >
     {React.isValidElement<{ className?: string }>(icon)
-      ? React.cloneElement(icon, { className: clsx('w-6 h-6', icon.props.className) })
+      ? React.cloneElement(icon, { className: clsx('w-8 h-8', icon.props.className) })
       : icon}
   </Button>
 );

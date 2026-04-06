@@ -25,7 +25,7 @@ interface IconProps {
   className?: string;
 }
 
-function OrcaIcon({ src, alt, className = 'w-5 h-5' }: { src: string; alt: string; className?: string }) {
+function OrcaIcon({ src, alt, className = 'w-8 h-8' }: { src: string; alt: string; className?: string }) {
   return <img src={src} alt={alt} className={className} draggable={false} />;
 }
 
@@ -69,7 +69,7 @@ export const UndoIcon: React.FC<IconProps> = ({ className }) => (
   <OrcaIcon src={undoToolbarSvg} alt="Undo" className={className} />
 );
 
-export const RedoIcon: React.FC<IconProps> = ({ className = 'w-5 h-5' }) => (
+export const RedoIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
   <img src={undoToolbarSvg} alt="Redo" className={className} draggable={false} style={{ transform: 'scaleX(-1)' }} />
 );
 
@@ -81,7 +81,7 @@ export const SettingsProfilesIcon: React.FC<IconProps> = ({ className }) => (
   <OrcaIcon src={toolbarSettingsSvg} alt="Settings" className={className} />
 );
 
-export const KeyboardIcon: React.FC<IconProps> = ({ className = 'w-5 h-5' }) => (
+export const KeyboardIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none">
     <rect x="2" y="4" width="20" height="16" rx="2" fill="#009688" fillOpacity="0.08" stroke="#009688" strokeWidth="1.5" />
     <rect x="5" y="7" width="2" height="2" rx="0.5" fill="#009688" fillOpacity="0.4" />
@@ -112,7 +112,7 @@ export const LayersViewIcon: React.FC<IconProps> = ({ className }) => (
   <OrcaIcon src={toolbarLayerHeightSvg} alt="Layers" className={className} />
 );
 
-export const InfoIcon: React.FC<IconProps> = ({ className = 'w-5 h-5' }) => (
+export const InfoIcon: React.FC<IconProps> = ({ className = 'w-8 h-8' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none">
     <circle cx="12" cy="12" r="9" fill="#009688" fillOpacity="0.1" stroke="#009688" strokeWidth="1.5" />
     <line x1="12" y1="16" x2="12" y2="12" stroke="#009688" strokeWidth="2" strokeLinecap="round" />
