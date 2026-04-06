@@ -178,8 +178,8 @@ describe('ModelUploadModal', () => {
         expect(screen.getByText('✓ Done')).toBeInTheDocument();
       });
 
-      // Click close
-      const closeButton = screen.getByRole('button', { name: /close/i });
+      // Click the footer Close button (not the modal X button which has aria-label="Close modal")
+      const closeButton = screen.getByRole('button', { name: /^close$/i });
       fireEvent.click(closeButton);
 
       // Close button should show loading state
@@ -194,6 +194,25 @@ describe('ModelUploadModal', () => {
         expect(mockOnClose).toHaveBeenCalled();
         expect(mockOnUploadSuccess).toHaveBeenCalled();
       }, { timeout: 2000 });
+    });
+
+    it('should invalidate file-browser queries on close, not models-search', async () => {
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      renderModal();
+
+      // Click the footer Close button (not the modal X button)
+      const closeButton = screen.getByRole('button', { name: /^close$/i });
+      fireEvent.click(closeButton);
+
+      await waitFor(() => {
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['file-browser'] });
+      });
+
+      // Verify the old incorrect key is NOT used
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['models-search'] });
+
+      invalidateSpy.mockRestore();
     });
   });
 
