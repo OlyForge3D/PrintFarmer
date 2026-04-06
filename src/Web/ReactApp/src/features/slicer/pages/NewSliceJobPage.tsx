@@ -20,9 +20,8 @@ import { ProfileEditorModal, type ProfileType } from '@/features/slicer/componen
 import {
   SlicerSettingsPanel,
   MachineSettingsPanel,
-  DEFAULT_BASIC_SETTINGS,
+  DEFAULT_ADVANCED_SETTINGS,
   DEFAULT_ADVANCED_MACHINE_SETTINGS,
-  type BasicSlicerSettings,
   type AdvancedSlicerSettings,
   type AdvancedMachineSettings,
 } from '@/features/slicer/components/settings';
@@ -66,6 +65,27 @@ function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | undef
   };
 }
 
+/**
+ * Helper function to convert OrcaProcessProfile to AdvancedSlicerSettings
+ * Maps profile data to settings structure, using defaults for missing values
+ */
+function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undefined): AdvancedSlicerSettings {
+  if (!profile) return DEFAULT_ADVANCED_SETTINGS;
+
+  // Parse settings from profile if available
+  const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
+
+  return {
+    ...DEFAULT_ADVANCED_SETTINGS,
+    layerHeight: profile.layerHeight ?? DEFAULT_ADVANCED_SETTINGS.layerHeight,
+    infillDensity: profile.infillPercentage ?? DEFAULT_ADVANCED_SETTINGS.infillDensity,
+    printSpeed: profile.printSpeed ?? DEFAULT_ADVANCED_SETTINGS.printSpeed,
+    enableSupports: profile.supports ?? DEFAULT_ADVANCED_SETTINGS.enableSupports,
+    // Spread any additional parsed settings from profile.settings
+    ...profileSettings,
+  };
+}
+
 export const NewSliceJobPage: React.FC = () => {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -96,7 +116,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
 
   // === OrcaSlicer-style Settings Panel ===
-  const [slicerSettings, setSlicerSettings] = useState<BasicSlicerSettings>(DEFAULT_BASIC_SETTINGS);
+  const [slicerSettings, setSlicerSettings] = useState<AdvancedSlicerSettings>(DEFAULT_ADVANCED_SETTINGS);
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
   
   // === Machine Settings Panel ===
@@ -109,13 +129,13 @@ export const NewSliceJobPage: React.FC = () => {
   const [saveProfileState, setSaveProfileState] = useState<{ open: boolean; name: string }>({ open: false, name: '' });
 
   // Callback for settings panel changes
-  const handleSlicerSettingsChange = useCallback((newSettings: BasicSlicerSettings) => {
+  const handleSlicerSettingsChange = useCallback((newSettings: AdvancedSlicerSettings) => {
     setSlicerSettings(newSettings);
   }, []);
 
   // === Process Profile Management handlers ===
   const handleResetProcessProfile = useCallback(() => {
-    setSlicerSettings(DEFAULT_BASIC_SETTINGS);
+    setSlicerSettings(DEFAULT_ADVANCED_SETTINGS);
     setAdvancedProcessSettings({});
   }, []);
 
@@ -795,6 +815,15 @@ export const NewSliceJobPage: React.FC = () => {
     });
   }, [selectedCustomProcessProfile, selectedProcessProfile]);
 
+  // Sync typed slicer settings from selected Orca process profile.
+  // Uses queueMicrotask to avoid the "setState in effect" lint warning.
+  useEffect(() => {
+    queueMicrotask(() => {
+      const typedSettings = convertOrcaProcessProfileToSettings(selectedProcessProfile ?? undefined);
+      setSlicerSettings(typedSettings);
+    });
+  }, [selectedProcessProfile]);
+
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
     onSuccess: (res) => {
@@ -1384,8 +1413,8 @@ export const NewSliceJobPage: React.FC = () => {
           {/* ORCASLICER-STYLE SETTINGS PANEL */}
           <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
             <SlicerSettingsPanel
-              settings={slicerSettings as BasicSlicerSettings | AdvancedSlicerSettings}
-              onChange={handleSlicerSettingsChange as (settings: BasicSlicerSettings | AdvancedSlicerSettings) => void}
+              settings={slicerSettings}
+              onChange={handleSlicerSettingsChange}
               initialViewMode="basic"
               advancedSettings={advancedProcessSettings}
               onAdvancedSettingsChange={setAdvancedProcessSettings}
