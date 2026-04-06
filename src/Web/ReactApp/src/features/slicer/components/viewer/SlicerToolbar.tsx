@@ -88,6 +88,7 @@ export interface SlicerToolbarProps {
   canUndo?: boolean;
   canRedo?: boolean;
   hasModels?: boolean;
+  hasSelection?: boolean;
 }
 
 export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
@@ -108,6 +109,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   canUndo = false,
   canRedo = false,
   hasModels = false,
+  hasSelection = false,
 }) => {
   return (
     <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border overflow-x-auto">
@@ -131,13 +133,13 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         icon={<OrientIcon />}
         title="Orient Model"
         onClick={onOrient}
-        disabled={!hasModels}
+        disabled={!hasSelection}
       />
       <ToolbarButton
         icon={<LayFlatIcon />}
         title="Lay Flat (F)"
         onClick={onLayFlat}
-        disabled={!hasModels}
+        disabled={!hasSelection}
       />
 
       <ToolbarDivider />
@@ -147,13 +149,13 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         icon={<SplitIcon />}
         title="Split Model"
         onClick={onSplit}
-        disabled={!hasModels}
+        disabled={!hasSelection}
       />
       <ToolbarButton
         icon={<CutIcon />}
         title="Cut Model (C)"
         onClick={onCut}
-        disabled={!hasModels}
+        disabled={!hasSelection}
       />
 
       <ToolbarDivider />
@@ -163,7 +165,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         icon={<MeasureIcon />}
         title="Measure (M)"
         onClick={onMeasure}
-        disabled={!hasModels}
+        disabled={!hasSelection}
       />
 
       <ToolbarDivider />
@@ -173,13 +175,13 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         icon={<SupportPaintIcon />}
         title="Support Painting"
         onClick={onSupportPaint}
-        disabled={!hasModels}
+        disabled={!hasSelection}
       />
       <ToolbarButton
         icon={<SeamPaintIcon />}
         title="Seam Painting"
         onClick={onSeamPaint}
-        disabled={!hasModels}
+        disabled={!hasSelection}
       />
 
       <ToolbarDivider />

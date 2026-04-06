@@ -59,6 +59,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [redoStack, setRedoStack] = useState<unknown[]>([]);
 
   const hasModels = models.length > 0;
+  const hasSelection = selectedModelId != null && models.some(m => m.id === selectedModelId);
 
   // Toolbar action handlers (placeholders for now)
   const handleArrange = useCallback(() => {
@@ -151,6 +152,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         canUndo={undoStack.length > 0}
         canRedo={redoStack.length > 0}
         hasModels={hasModels}
+        hasSelection={hasSelection}
       />
 
       {/* Main content area with 3D bed and left tools */}
