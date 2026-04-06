@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -195,7 +195,7 @@ public class Model3DDisplayNameRegressionTests
         var searchRequest = new Model3DSearchRequestDto { Search = "test", Page = 1, PageSize = 10 };
 
         var queryResult = new Model3DListResponse(
-            Files: new List<Model3DEntryDto>
+            Models: new List<Model3DEntryDto>
             {
                 new Model3DEntryDto(
                     Path: "/models/test1.stl",
@@ -222,7 +222,7 @@ public class Model3DDisplayNameRegressionTests
                     FileType: "stl"
                 )
             },
-            TotalFiles: 2,
+            TotalCount: 2,
             TotalSize: 3072,
             Page: 1,
             PageSize: 10,
@@ -250,11 +250,68 @@ public class Model3DDisplayNameRegressionTests
         var okResult = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<Model3DListResponse>(okResult.Value);
 
-        Assert.All(response.Files, entry =>
+        Assert.All(response.Models, entry =>
         {
             Assert.NotNull(entry.Name);
             Assert.NotEqual(entry.FileName, entry.Name);
             Assert.StartsWith("test-print-", entry.Name);
         });
+    }
+
+    [Fact]
+    public async Task QueryModelsAsync_ResponseUsesModelsAndTotalCountForFrontendContract()
+    {
+        // Regression: The frontend Model3DSearchResponse expects "models" and "totalCount",
+        // not "files" and "totalFiles". A mismatch causes the Models page to show nothing.
+        var mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
+        var searchRequest = new Model3DSearchRequestDto { Page = 1, PageSize = 20 };
+
+        var queryResult = new Model3DListResponse(
+            Models: new List<Model3DEntryDto>
+            {
+                new Model3DEntryDto(
+                    Path: "abc.stl",
+                    FileName: "abc.stl",
+                    FileSize: 512,
+                    UploadedAt: DateTime.UtcNow,
+                    IsDirectory: false,
+                    Id: Guid.NewGuid().ToString(),
+                    Name: "my-model.stl",
+                    FileType: "stl")
+            },
+            TotalCount: 1,
+            TotalSize: 512,
+            Page: 1,
+            PageSize: 20,
+            TotalPages: 1,
+            TotalItems: 1
+        );
+
+        mockService.Setup(s => s.QueryAsync(
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(),
+            It.IsAny<Guid[]?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(queryResult);
+
+        var controller = CreateController(mockService);
+
+        // Act
+        var result = await controller.QueryModelsAsync(searchRequest, CancellationToken.None);
+
+        // Assert: Response record properties serialize as the frontend expects
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<Model3DListResponse>(okResult.Value);
+
+        // "models" (not "files") — the frontend reads searchResponse.models
+        Assert.NotNull(response.Models);
+        Assert.Single(response.Models);
+
+        // "totalCount" (not "totalFiles") — the frontend reads searchResponse.totalCount
+        Assert.Equal(1, response.TotalCount);
+
+        // Standard pagination fields
+        Assert.Equal(1, response.Page);
+        Assert.Equal(20, response.PageSize);
+        Assert.Equal(1, response.TotalPages);
     }
 }
