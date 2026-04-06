@@ -302,7 +302,7 @@ function MockPrintBed({ modelDimensions }: { modelDimensions: ModelDimensions | 
   );
 }
 
-function STLModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChange }: { 
+function STLModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChange }: { 
   url: string; 
   color?: string;
   viewMode?: ViewMode;
@@ -445,7 +445,7 @@ function CameraFitter() {
 
   return null;
 }
-function PLYModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChange }: { 
+function PLYModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChange }: { 
   url: string; 
   color?: string;
   viewMode?: ViewMode;
