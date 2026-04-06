@@ -19,12 +19,10 @@ import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesMo
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import {
   SlicerSettingsPanel,
-  MachineSettingsPanel,
-  DEFAULT_BASIC_SETTINGS,
-  DEFAULT_ADVANCED_MACHINE_SETTINGS,
+  DEFAULT_ADVANCED_SETTINGS,
   type BasicSlicerSettings,
+  type SimpleSlicerSettings,
   type AdvancedSlicerSettings,
-  type AdvancedMachineSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
@@ -47,26 +45,34 @@ const ModelViewer3D = React.lazy(() =>
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
 /**
- * Helper function to convert OrcaMachineProfile to AdvancedMachineSettings
+ * Helper function to convert OrcaProcessProfile to AdvancedSlicerSettings
  * Maps profile data to settings structure, using defaults for missing values
  */
-function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | undefined): AdvancedMachineSettings {
-  if (!profile) return DEFAULT_ADVANCED_MACHINE_SETTINGS;
+function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undefined): AdvancedSlicerSettings {
+  if (!profile) return DEFAULT_ADVANCED_SETTINGS;
 
   // Parse settings from profile if available
   const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
 
   return {
-    ...DEFAULT_ADVANCED_MACHINE_SETTINGS,
-    name: profile.name,
-    printerModel: profile.printerModel ?? '',
-    nozzleDiameter: profile.nozzleDiameter ?? DEFAULT_ADVANCED_MACHINE_SETTINGS.nozzleDiameter,
+    ...DEFAULT_ADVANCED_SETTINGS,
+    layerHeight: profile.layerHeight ?? DEFAULT_ADVANCED_SETTINGS.layerHeight,
+    infillDensity: profile.infillPercentage ?? DEFAULT_ADVANCED_SETTINGS.infillDensity,
+    printSpeed: profile.printSpeed ?? DEFAULT_ADVANCED_SETTINGS.printSpeed,
+    enableSupports: profile.supports ?? DEFAULT_ADVANCED_SETTINGS.enableSupports,
     // Spread any additional parsed settings from profile.settings
     ...profileSettings,
   };
 }
 
 export const NewSliceJobPage: React.FC = () => {
+  const STORAGE_KEYS = {
+    printerId: 'sliceJob.selectedPrinterId',
+    machineProfileId: 'sliceJob.selectedMachineProfileId',
+    filamentProfileId: 'sliceJob.selectedFilamentProfileId',
+    processProfileId: 'sliceJob.selectedProcessProfileId',
+  } as const;
+
   const { user } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -96,12 +102,8 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
 
   // === OrcaSlicer-style Settings Panel ===
-  const [slicerSettings, setSlicerSettings] = useState<BasicSlicerSettings>(DEFAULT_BASIC_SETTINGS);
+  const [slicerSettings, setSlicerSettings] = useState<AdvancedSlicerSettings>(DEFAULT_ADVANCED_SETTINGS);
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
-  
-  // === Machine Settings Panel ===
-  // User's editable machine settings (initialized to defaults, updated when machine profile changes)
-  const [machineSettings, setMachineSettings] = useState<AdvancedMachineSettings>(DEFAULT_ADVANCED_MACHINE_SETTINGS);
   
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = React.useRef<HTMLDivElement>(null);
@@ -109,13 +111,13 @@ export const NewSliceJobPage: React.FC = () => {
   const [saveProfileState, setSaveProfileState] = useState<{ open: boolean; name: string }>({ open: false, name: '' });
 
   // Callback for settings panel changes
-  const handleSlicerSettingsChange = useCallback((newSettings: BasicSlicerSettings) => {
-    setSlicerSettings(newSettings);
+  const handleSlicerSettingsChange = useCallback((newSettings: BasicSlicerSettings | SimpleSlicerSettings | AdvancedSlicerSettings) => {
+    setSlicerSettings((prev) => ({ ...prev, ...newSettings }));
   }, []);
 
   // === Process Profile Management handlers ===
   const handleResetProcessProfile = useCallback(() => {
-    setSlicerSettings(DEFAULT_BASIC_SETTINGS);
+    setSlicerSettings(DEFAULT_ADVANCED_SETTINGS);
     setAdvancedProcessSettings({});
   }, []);
 
@@ -382,15 +384,6 @@ export const NewSliceJobPage: React.FC = () => {
     return machineProfilesData.find(p => p.name === selectedMachineProfileId) || null;
   }, [selectedMachineProfileId, machineProfilesData]);
 
-  // Update machine settings when selected machine profile changes
-  // Uses queueMicrotask to avoid the "setState in effect" lint warning
-  useEffect(() => {
-    queueMicrotask(() => {
-      const settings = selectedMachineProfile ? convertOrcaMachineProfileToSettings(selectedMachineProfile) : DEFAULT_ADVANCED_MACHINE_SETTINGS;
-      setMachineSettings(settings);
-    });
-  }, [selectedMachineProfile]);
-
   // Machine names for filament/process queries (just the selected machine)
   const selectedMachineNames = useMemo(() => {
     if (!selectedMachineProfile?.name) return [];
@@ -480,12 +473,19 @@ export const NewSliceJobPage: React.FC = () => {
   }, [processProfilesData]);
 
   // Auto-select machine profile when printer is selected and machine profiles are loaded
+  // Keep the current selection if it is still valid (restored from previous session).
   // This effect uses nozzle diameter matching when available
   useEffect(() => {
     if (!selectedPrinterForSlicing || !machineProfilesData?.length) return;
 
     // Defer all setState calls to avoid synchronous updates in effect body
     queueMicrotask(() => {
+      // Keep current selection if valid for this printer model
+      const hasCurrent = !!selectedMachineProfileId && machineProfilesData.some((p) => p.name === selectedMachineProfileId);
+      if (hasCurrent) {
+        return;
+      }
+
       // Set manufacturer/model from printer for display purposes
       const mfgName = selectedPrinterForSlicing.manufacturerName;
       const modelName = selectedPrinterForSlicing.modelName;
@@ -516,30 +516,58 @@ export const NewSliceJobPage: React.FC = () => {
         setSelectedMachineProfileId(machineProfilesData[0].name);
       }
     });
-  }, [selectedPrinterForSlicing, machineProfilesData]);
+  }, [selectedPrinterForSlicing, machineProfilesData, selectedMachineProfileId]);
 
-  // Cascade reset: when machine profile changes, validate filament/process selections
-  // If the currently selected profiles are no longer compatible, reset them
+  // When machine profile changes, keep compatible selections and clear invalid ones.
+  // This lets us restore last-used filament/process values on re-entry.
   useEffect(() => {
-    // Defer all setState calls to avoid synchronous updates in effect body
     queueMicrotask(() => {
       if (!selectedMachineProfileId) {
-        // No machine selected - clear dependent selections
         setSelectedFilamentProfileId('');
         setSelectedFilamentMaterial('');
         setSelectedProcessPresetId('');
         return;
       }
-      
-      // When machine profile changes, reset filament and process selections
-      // This ensures users always select compatible profiles for the new machine
-      // Note: We could validate if current selections are still compatible,
-      // but resetting is cleaner and avoids edge cases with stale data
-      setSelectedFilamentProfileId('');
-      setSelectedFilamentMaterial('');
-      setSelectedProcessPresetId('');
+
+      if (selectedFilamentProfileId) {
+        const selectedFilament = (filamentProfilesData ?? []).find((p) => p.name === selectedFilamentProfileId);
+        const customFilamentExists = customFilamentProfiles.some((p) => p.name === selectedFilamentProfileId);
+
+        if (selectedFilament) {
+          setSelectedFilamentMaterial(selectedFilament.material || '');
+        } else if (customFilamentExists) {
+          // Keep custom selection; material may not be derivable from custom profile metadata.
+          if (!selectedFilamentMaterial) {
+            setSelectedFilamentMaterial('');
+          }
+        } else {
+          setSelectedFilamentProfileId('');
+          setSelectedFilamentMaterial('');
+        }
+      }
+
+      if (selectedProcessPresetId) {
+        const processIsValid = selectedProcessPresetId.startsWith('system:')
+          ? (processProfilesData ?? []).some((p) => `system:${p.name}` === selectedProcessPresetId)
+          : selectedProcessPresetId.startsWith('custom:')
+            ? customProcessProfiles.some((p) => `custom:${p.id}` === selectedProcessPresetId)
+            : false;
+
+        if (!processIsValid) {
+          setSelectedProcessPresetId('');
+        }
+      }
     });
-  }, [selectedMachineProfileId]);
+  }, [
+    selectedMachineProfileId,
+    selectedFilamentProfileId,
+    selectedFilamentMaterial,
+    selectedProcessPresetId,
+    filamentProfilesData,
+    customFilamentProfiles,
+    processProfilesData,
+    customProcessProfiles,
+  ]);
 
   // Check if printer has no profiles - show clone suggestion
   // IMPORTANT: Only suggest clone AFTER machine profiles have loaded and we know there are none
@@ -689,8 +717,62 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, [qc]);
 
-  // Persist selections
+  // Restore persisted selections
+  useEffect(() => {
+    try {
+      const savedPrinterId = localStorage.getItem(STORAGE_KEYS.printerId);
+      const savedMachineProfileId = localStorage.getItem(STORAGE_KEYS.machineProfileId);
+      const savedFilamentProfileId = localStorage.getItem(STORAGE_KEYS.filamentProfileId);
+      const savedProcessProfileId = localStorage.getItem(STORAGE_KEYS.processProfileId);
 
+      queueMicrotask(() => {
+        if (savedPrinterId) setSelectedPrinterId(savedPrinterId);
+        if (savedMachineProfileId) setSelectedMachineProfileId(savedMachineProfileId);
+        if (savedFilamentProfileId) setSelectedFilamentProfileId(savedFilamentProfileId);
+        if (savedProcessProfileId) setSelectedProcessPresetId(savedProcessProfileId);
+      });
+    } catch { /* ignore */ }
+  }, [STORAGE_KEYS.filamentProfileId, STORAGE_KEYS.machineProfileId, STORAGE_KEYS.printerId, STORAGE_KEYS.processProfileId]);
+
+  // First use fallback: default to first available printer.
+  useEffect(() => {
+    if (!printers.length) return;
+
+    queueMicrotask(() => {
+      const hasSelectedPrinter = !!selectedPrinterId && printers.some((p) => p.id === selectedPrinterId);
+      if (!hasSelectedPrinter) {
+        setSelectedPrinterId(printers[0].id);
+      }
+    });
+  }, [printers, selectedPrinterId]);
+
+  useEffect(() => {
+    try {
+      if (selectedPrinterId) localStorage.setItem(STORAGE_KEYS.printerId, selectedPrinterId);
+      else localStorage.removeItem(STORAGE_KEYS.printerId);
+    } catch { /* ignore */ }
+  }, [STORAGE_KEYS.printerId, selectedPrinterId]);
+
+  useEffect(() => {
+    try {
+      if (selectedMachineProfileId) localStorage.setItem(STORAGE_KEYS.machineProfileId, selectedMachineProfileId);
+      else localStorage.removeItem(STORAGE_KEYS.machineProfileId);
+    } catch { /* ignore */ }
+  }, [STORAGE_KEYS.machineProfileId, selectedMachineProfileId]);
+
+  useEffect(() => {
+    try {
+      if (selectedFilamentProfileId) localStorage.setItem(STORAGE_KEYS.filamentProfileId, selectedFilamentProfileId);
+      else localStorage.removeItem(STORAGE_KEYS.filamentProfileId);
+    } catch { /* ignore */ }
+  }, [STORAGE_KEYS.filamentProfileId, selectedFilamentProfileId]);
+
+  useEffect(() => {
+    try {
+      if (selectedProcessPresetId) localStorage.setItem(STORAGE_KEYS.processProfileId, selectedProcessPresetId);
+      else localStorage.removeItem(STORAGE_KEYS.processProfileId);
+    } catch { /* ignore */ }
+  }, [STORAGE_KEYS.processProfileId, selectedProcessPresetId]);
 
   // Derive model file URL when selected
   useEffect(() => {
@@ -738,6 +820,15 @@ export const NewSliceJobPage: React.FC = () => {
       setAdvancedProcessSettings({});
     });
   }, [selectedCustomProcessProfile, selectedProcessProfile]);
+
+  // Sync typed slicer settings from selected Orca process profile.
+  // Uses queueMicrotask to avoid the "setState in effect" lint warning.
+  useEffect(() => {
+    queueMicrotask(() => {
+      const typedSettings = convertOrcaProcessProfileToSettings(selectedProcessProfile ?? undefined);
+      setSlicerSettings(typedSettings);
+    });
+  }, [selectedProcessProfile]);
 
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
@@ -1033,21 +1124,6 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* MACHINE SETTINGS PANEL - Display and edit machine profile settings */}
-          {selectedMachineProfileId && selectedMachineProfile && (
-            <div className="bg-pf-panel border border-pf-border rounded-lg p-3">
-              <label className="block text-sm font-semibold text-pf-text-primary mb-3">
-                Machine Settings
-              </label>
-              <MachineSettingsPanel
-                settings={machineSettings}
-                onChange={(settings) => setMachineSettings(settings as AdvancedMachineSettings)}
-                initialViewMode="basic"
-                disabled={false}
-              />
-            </div>
-          )}
-
           {/* FILAMENT PROFILE - two-step selection: material type then profile */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">
@@ -1305,8 +1381,8 @@ export const NewSliceJobPage: React.FC = () => {
           {/* ORCASLICER-STYLE SETTINGS PANEL */}
           <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
             <SlicerSettingsPanel
-              settings={slicerSettings as BasicSlicerSettings | AdvancedSlicerSettings}
-              onChange={handleSlicerSettingsChange as (settings: BasicSlicerSettings | AdvancedSlicerSettings) => void}
+              settings={slicerSettings}
+              onChange={handleSlicerSettingsChange}
               initialViewMode="basic"
               advancedSettings={advancedProcessSettings}
               onAdvancedSettingsChange={setAdvancedProcessSettings}
@@ -1525,6 +1601,7 @@ export const NewSliceJobPage: React.FC = () => {
         isOpen={profileEditorOpen}
         onClose={() => setProfileEditorOpen(false)}
         profileType={profileEditorType}
+        initialViewMode={profileEditorType === 'machine' ? 'advanced' : 'basic'}
         originalProfile={
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
           (selectedFilamentProfile ?? null)
