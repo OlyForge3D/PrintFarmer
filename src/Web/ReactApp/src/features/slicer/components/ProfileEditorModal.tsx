@@ -26,12 +26,13 @@ import {
 } from '@/features/slicer/components/settings/filamentSettingsTypes';
 import { MachineProfileEditor } from '@/features/slicer/components/settings/MachineProfileEditor';
 import { 
-  DEFAULT_BASIC_MACHINE_SETTINGS, 
+  DEFAULT_ADVANCED_MACHINE_SETTINGS,
   type BasicMachineSettings, 
   type AdvancedMachineSettings 
 } from '@/features/slicer/components/settings/machineSettingsTypes';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import type { OrcaMachineProfile, OrcaFilamentProfile } from '@/services/slicerProfilesService';
+import type { MachineSettingsViewMode } from '@/features/slicer/components/settings/machineSettingsTypes';
 
 export type ProfileType = 'machine' | 'filament';
 
@@ -46,6 +47,8 @@ interface ProfileEditorModalProps {
   originalProfile: OrcaMachineProfile | OrcaFilamentProfile | null;
   /** Callback when custom profile is saved successfully */
   onSaveSuccess?: (profileId: string, profileName: string) => void;
+  /** Initial view mode for the editor panel */
+  initialViewMode?: MachineSettingsViewMode;
 }
 
 /**
@@ -56,12 +59,27 @@ function getDefaultProfileName(profileType: ProfileType, originalName: string | 
   return `${baseName} (Custom)`;
 }
 
+function convertOrcaMachineProfileToSettings(profile: OrcaMachineProfile | null): AdvancedMachineSettings {
+  if (!profile) return DEFAULT_ADVANCED_MACHINE_SETTINGS;
+
+  const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
+
+  return {
+    ...DEFAULT_ADVANCED_MACHINE_SETTINGS,
+    name: profile.name,
+    printerModel: profile.printerModel ?? '',
+    nozzleDiameter: profile.nozzleDiameter ?? DEFAULT_ADVANCED_MACHINE_SETTINGS.nozzleDiameter,
+    ...profileSettings,
+  };
+}
+
 export function ProfileEditorModal({
   isOpen,
   onClose,
   profileType,
   originalProfile,
   onSaveSuccess,
+  initialViewMode = 'basic',
 }: ProfileEditorModalProps) {
   const queryClient = useQueryClient();
   
@@ -71,7 +89,7 @@ export function ProfileEditorModal({
   const [saveError, setSaveError] = useState<string | null>(null);
   
   // Settings state for each profile type
-  const [machineSettings, setMachineSettings] = useState<BasicMachineSettings | AdvancedMachineSettings>(DEFAULT_BASIC_MACHINE_SETTINGS);
+  const [machineSettings, setMachineSettings] = useState<BasicMachineSettings | AdvancedMachineSettings>(DEFAULT_ADVANCED_MACHINE_SETTINGS);
   const [filamentSettings, setFilamentSettings] = useState<BasicFilamentSettings | AdvancedFilamentSettings>(DEFAULT_BASIC_FILAMENT_SETTINGS);
   
   // Track if settings have been modified
@@ -84,8 +102,14 @@ export function ProfileEditorModal({
       setShowSaveForm(false);
       setSaveError(null);
       setHasChanges(false);
-      // Reset settings to defaults
-      setMachineSettings(DEFAULT_BASIC_MACHINE_SETTINGS);
+
+      // Prefill editor with selected profile values when available
+      if (profileType === 'machine') {
+        setMachineSettings(convertOrcaMachineProfileToSettings(originalProfile as OrcaMachineProfile | null));
+      } else {
+        setMachineSettings(DEFAULT_ADVANCED_MACHINE_SETTINGS);
+      }
+
       setFilamentSettings(DEFAULT_BASIC_FILAMENT_SETTINGS);
     }
   }, [isOpen, profileType, originalProfile]);
@@ -227,7 +251,7 @@ export function ProfileEditorModal({
       )}
       
       {/* Profile Editor Content */}
-      <div className="min-h-[400px]">
+      <div className="min-h-100">
         {profileType === 'machine' && (
           <MachineProfileEditor
             settings={machineSettings}
@@ -235,7 +259,7 @@ export function ProfileEditorModal({
               setMachineSettings(settings);
               setHasChanges(true);
             }}
-            initialViewMode="basic"
+            initialViewMode={initialViewMode}
           />
         )}
         
