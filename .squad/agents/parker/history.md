@@ -338,3 +338,52 @@ Docker compose configuration (correct):
 - Service methods must return **absolute paths** when callers use `File.Exists()` checks
 - The `FilePath` column storing `"/"` was a red herring — the real issue was path construction logic
 
+## 2026-04-05: Slicer-Host Deployment Gap — Stale Container + Missing Volume Mount
+
+**Role:** DevOps & Deployment Engineer  
+**Status:** ✅ Complete — Template fixed, code patched, redeployed, verified
+
+### Problem
+
+User redeployed API + frontend after commit `826e98ae` (slicer upload/retrieval fixes), but 3D model uploads still appeared "immediately successful" with nothing showing on the Models page.
+
+### Root Causes Found (Two)
+
+1. **Stale slicer-host container** — User rebuilt `printfarmer-api` and `printfarmer-frontend` but NOT `printfarmer-slicer-host`. Since nginx routes `/api/3d-models/` to slicer-host (port 5246), the slicer-host was still running DLLs from 02:11 UTC while API had 03:12 UTC code. The slicer module code changes never reached the running slicer-host.
+
+2. **Missing volume mount + env var on slicer-host** — The compose template for slicer-host had NO `MODEL_UPLOAD_PATH` environment variable and NO volume mount for model storage. The slicer-host defaulted to `/app/uploads` (container-internal writable layer), meaning:
+   - Every container rebuild would **destroy all uploaded model files**
+   - The worker couldn't access uploaded models (it mounts `/app/models` read-only)
+   - Path inconsistency between API (`/app/models`) and slicer-host (`/app/uploads`)
+
+3. **Application code bug (still present)** — `GetModelFilePathAsync` in `Model3DFileService.cs` stripped `_modelsPath` and returned a relative path. The controller calls `File.Exists(relativePath)` which resolves against CWD `/app`, not the models directory. File existed at `/app/models/guid.stl` but check looked at `/app/guid.stl`. Fixed to return `Path.Combine(_modelsPath, model.FileName)`.
+
+### Fixes Applied
+
+**Template fix** (`scripts/docker/compose-templates/docker-compose.slicer-host.yml`):
+- Added `MODEL_UPLOAD_PATH=/app/models` to environment
+- Added `${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models` volume mount
+- Both changes also applied to runtime `docker-compose.yml`
+
+**Code fix** (`src/slicer/Farm.Slicer.Module/Services/Model3DFileService.cs`):
+- `GetModelFilePathAsync`: Changed from relative path to `Path.Combine(_modelsPath, model.FileName)`
+- `GetModelThumbnailPathAsync`: Changed from `Path.Combine(model.FilePath, ...)` to `Path.Combine(_modelsPath, ...)`
+
+**Data rescue**: Copied 6 files from container's `/app/uploads/` to host volume `/home/pi/.printfarmer/models/` before rebuild.
+
+### Verification
+
+- Slicer-host rebuilt and healthy
+- `MODEL_UPLOAD_PATH=/app/models` confirmed in container env
+- Volume mount verified: 6 model files visible at `/app/models/`
+- File download endpoint: HTTP 200 (was 404)
+- All three access paths verified: container-internal, host port 5246, nginx proxy port 80
+
+### Learnings
+
+- **Redeploying "api + frontend" does NOT cover slicer-host** — the slicer module routes (`/api/3d-models/`, `/api/slice/`, etc.) run in a separate container. This is the most common deployment gap in microservices mode.
+- **Every service that handles file uploads MUST have a volume mount** — ephemeral container storage means data loss on rebuild. The slicer-host template was missing this critical mount.
+- **`MODEL_UPLOAD_PATH` must be set on EVERY service that reads/writes model files** — without it, services fall back to different default paths and can't share storage.
+- **Path construction must return absolute paths** when downstream code uses `File.Exists()` — relative paths depend on CWD which varies between dev and container environments.
+
+

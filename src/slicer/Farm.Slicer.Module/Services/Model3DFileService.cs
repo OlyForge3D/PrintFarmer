@@ -260,9 +260,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             return null;
         }
 
-        // Return relative path by combining FilePath (directory) with FileName (GUID filename)
-        // FilePath is the storage directory, FileName is the GUID-based filename
-        return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, string.Empty).TrimStart(Path.DirectorySeparatorChar, '/');
+        // Return absolute path using the configured storage directory
+        return Path.Combine(_modelsPath, model.FileName);
     }
 
     /// <summary>
@@ -275,7 +274,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     {
         // Use unfiltered query for file operations - thumbnails should be accessible regardless of validation status
         Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(id, ct);
-        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(model.FilePath, model.ThumbnailFileName));
+        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(_modelsPath, model.ThumbnailFileName));
     }
 
     /// <summary>
