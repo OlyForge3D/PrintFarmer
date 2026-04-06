@@ -27,7 +27,7 @@ import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea } from '@/common/components/ui';
+import { Button, Alert, FormField, Input, Select, Checkbox } from '@/common/components/ui';
 import { LayersIcon, EyeIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
@@ -166,13 +166,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [modelFileName, setModelFileName] = useState('');
   const [useModelPicker, setUseModelPicker] = useState(true);
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
-  const [useProfile, setUseProfile] = useState(true);
-  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
-  const [rawProfileJson, setRawProfileJson] = useState('');
-  const [requiredCapabilitiesJson, setRequiredCapabilitiesJson] = useState('[]');
-  const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
-  const [parsedCapabilities, setParsedCapabilities] = useState<string[]>([]);
-  const [priority, setPriority] = useState(1);
+
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isSTLPreviewOpen, setIsSTLPreviewOpen] = useState(false);
@@ -548,10 +542,6 @@ export const NewSliceJobPage: React.FC = () => {
   }, [selectedPrinterId]);
 
   // Machine profiles for profile selection - use incremental machine profiles
-  const machineProfiles = useMemo(() => {
-    return machineProfilesData ?? [];
-  }, [machineProfilesData]);
-
   // Filament profiles grouped by material type for display
   const filamentProfilesByMaterial = useMemo(() => {
     // Use filament profiles from incremental query (already filtered by machine)
@@ -665,27 +655,7 @@ export const NewSliceJobPage: React.FC = () => {
   }, [qc]);
 
   // Persist selections
-  useEffect(() => {
-    try {
-      const savedCaps = localStorage.getItem('sliceJob.requiredCapabilities');
-      const savedProfileId = localStorage.getItem('sliceJob.selectedProfileId');
-      queueMicrotask(() => {
-        if (savedCaps) setRequiredCapabilitiesJson(savedCaps);
-        if (savedProfileId) setSelectedProfileId(savedProfileId);
-      });
-    } catch { /* ignore */ }
-  }, []);
 
-  useEffect(() => {
-    try { localStorage.setItem('sliceJob.requiredCapabilities', requiredCapabilitiesJson); } catch { /* ignore */ }
-  }, [requiredCapabilitiesJson]);
-
-  useEffect(() => {
-    try {
-      if (selectedProfileId) localStorage.setItem('sliceJob.selectedProfileId', selectedProfileId);
-      else localStorage.removeItem('sliceJob.selectedProfileId');
-    } catch { /* ignore */ }
-  }, [selectedProfileId]);
 
   // Derive model file URL when selected
   useEffect(() => {
@@ -701,33 +671,7 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, [useModelPicker, selectedModelId, models]);
 
-  // Capabilities JSON validation
-  useEffect(() => {
-    const text = requiredCapabilitiesJson.trim();
-    queueMicrotask(() => {
-      if (!text) {
-        setParsedCapabilities([]);
-        setCapabilitiesError(null);
-        return;
-      }
-      try {
-        const parsed = JSON.parse(text);
-        if (!Array.isArray(parsed)) {
-          setCapabilitiesError('Capabilities JSON must be an array');
-          setParsedCapabilities([]);
-        } else if (!parsed.every(x => typeof x === 'string')) {
-          setCapabilitiesError('All capability entries must be strings');
-          setParsedCapabilities([]);
-        } else {
-          setCapabilitiesError(null);
-          setParsedCapabilities(parsed as string[]);
-        }
-      } catch {
-        setCapabilitiesError('Invalid JSON syntax');
-        setParsedCapabilities([]);
-      }
-    });
-  }, [requiredCapabilitiesJson]);
+
 
   // Get selected filament profile details for display
   const selectedFilamentProfile = useMemo(() => {
@@ -793,21 +737,10 @@ export const NewSliceJobPage: React.FC = () => {
       }
     }
 
-    if (useProfile && !selectedProfileId && !selectedProcessPresetId) {
-      setError('Select a profile or switch to raw JSON mode');
+    if (!selectedProcessPresetId) {
+      setError('Select a process profile');
       return;
     }
-    if (!useProfile && !rawProfileJson.trim()) {
-      setError('Provide raw profile JSON or switch to profile mode');
-      return;
-    }
-
-    if (capabilitiesError) {
-      setError('Fix capabilities JSON errors before submitting');
-      return;
-    }
-
-    const capabilities = parsedCapabilities.length > 0 ? JSON.stringify(parsedCapabilities) : '[]';
 
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
@@ -815,39 +748,27 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileUrl: modelFileUrl,
       modelFileName: modelFileName,
       slicerEngine: slicerInfo.engine,
-      slicerProfileJson: useProfile
-        ? JSON.stringify({
+      slicerProfileJson: JSON.stringify({
             ...slicerSettings,
             ...advancedProcessSettings,
-          })
-        : rawProfileJson,
-      slicerProfileId: useProfile
-        ? (
-          selectedProcessPresetId.startsWith('custom:')
+          }),
+      slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
-            : (selectedProfileId || undefined)
-        )
-        : undefined,
-      requiredCapabilitiesJson: capabilities,
-      priority
+            : undefined,
+      requiredCapabilitiesJson: '[]',
+      priority: 1
     };
 
     submitMutation.mutate(request);
   }, [
     advancedProcessSettings,
-    capabilitiesError,
     modelFileName,
     modelFileUrl,
-    parsedCapabilities,
-    priority,
-    rawProfileJson,
     selectedProcessPresetId,
-    selectedProfileId,
     slicerInfo.engine,
     slicerSettings,
     submitMutation,
     useModelPicker,
-    useProfile,
     user?.id,
     selectedModelId,
   ]);
@@ -1416,73 +1337,6 @@ export const NewSliceJobPage: React.FC = () => {
               </Button>
             )}
 
-            {/* Profile Selection */}
-            <div className="border-t border-pf-border pt-3">
-              <div className="flex gap-3 mb-2">
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <Radio
-                    name="mode"
-                    checked={useProfile}
-                    onChange={() => setUseProfile(true)}
-                    title="Use Profile Mode"
-                  />
-                  <span>Profile</span>
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <Radio
-                    name="mode"
-                    checked={!useProfile}
-                    onChange={() => setUseProfile(false)}
-                    title="Use JSON Mode"
-                  />
-                  <span>JSON</span>
-                </label>
-              </div>
-
-              {useProfile ? (
-                <FormField label="Profile">
-                  {machineProfiles && machineProfiles.length > 0 ? (
-                    <Select value={selectedProfileId} onChange={e => setSelectedProfileId(e.target.value)}>
-                      <option value="">-- Select --</option>
-                      {machineProfiles.map(p => (
-                        <option key={p.name} value={p.name}>{p.name} ({p.manufacturer})</option>
-                      ))}
-                    </Select>
-                  ) : (
-                    <Select disabled className="bg-pf-disabled" title="No profiles available">
-                      <option>-- No profiles --</option>
-                    </Select>
-                  )}
-                </FormField>
-              ) : (
-                <FormField label="Raw JSON">
-                  <Textarea
-                    value={rawProfileJson}
-                    onChange={e => setRawProfileJson(e.target.value)}
-                    rows={4}
-                    placeholder='{"layer_height": 0.2}'
-                  />
-                </FormField>
-              )}
-
-              <FormField label="Priority">
-                <Select value={priority} onChange={e => setPriority(Number(e.target.value))}>
-                  <option value={0}>Low</option>
-                  <option value={1}>Normal</option>
-                  <option value={2}>High</option>
-                  <option value={3}>Critical</option>
-                </Select>
-              </FormField>
-
-              <FormField label="Capabilities" error={capabilitiesError || undefined}>
-                <Textarea
-                  value={requiredCapabilitiesJson}
-                  onChange={e => setRequiredCapabilitiesJson(e.target.value)}
-                  rows={3}
-                  placeholder='["orcaslicer"]'
-                />
-              </FormField>
-            </div>
           </div>
 
           {/* STATUS MESSAGES */}
@@ -1499,8 +1353,6 @@ export const NewSliceJobPage: React.FC = () => {
                 setMessage(null);
                 setModelFileUrl('');
                 setModelFileName('');
-                setRawProfileJson('');
-                setSelectedProfileId('');
               }}
               onRetry={() => {
                 setSubmittedJobId(null);
@@ -1522,8 +1374,6 @@ export const NewSliceJobPage: React.FC = () => {
               onClick={() => {
                 setModelFileUrl('');
                 setModelFileName('');
-                setRawProfileJson('');
-                setSelectedProfileId('');
                 setError(null);
                 setMessage(null);
                 setSubmittedJobId(null);
