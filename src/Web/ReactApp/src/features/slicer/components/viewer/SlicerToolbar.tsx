@@ -3,6 +3,7 @@
  * Top toolbar matching OrcaSlicer's interface style
  */
 import React from 'react';
+import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import {
   AddModelIcon,
@@ -37,21 +38,29 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
   active = false,
   disabled = false,
   title
-}) => (
-  <Button
-    variant={active ? 'primary' : 'subtle'}
-    onClick={onClick}
-    disabled={disabled}
-    title={title || label}
-    className={`
-      flex items-center justify-center p-2 rounded-md
-      ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
-    `}
-    iconLeft={label ? icon : undefined}
-  >
-    {label ? <span className="text-sm hidden xl:inline">{label}</span> : icon}
-  </Button>
-);
+}) => {
+  const sizedIcon = React.isValidElement<{ className?: string }>(icon)
+    ? React.cloneElement(icon, {
+        className: clsx('w-6 h-6', icon.props.className),
+      })
+    : icon;
+
+  return (
+    <Button
+      variant={active ? 'primary' : 'subtle'}
+      onClick={onClick}
+      disabled={disabled}
+      title={title || label}
+      className={`
+        flex items-center justify-center p-2.5 rounded-md
+        ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
+      `}
+      iconLeft={label ? sizedIcon : undefined}
+    >
+      {label ? <span className="text-sm hidden xl:inline">{label}</span> : sizedIcon}
+    </Button>
+  );
+};
 
 const ToolbarDivider: React.FC = () => (
   <div className="w-px h-6 bg-pf-border mx-1" />

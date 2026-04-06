@@ -51,7 +51,7 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
               onClick={() => onSlicerChange(opt.value)}
               aria-pressed={isSelected}
               className={clsx(
-                'flex w-full items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all cursor-pointer',
+                'w-full px-4 py-3 rounded-lg border-2 transition-all cursor-pointer',
                 'hover:border-pf-accent hover:bg-pf-accent-bg/10',
                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent',
                 isSelected
@@ -59,33 +59,30 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
                   : 'border-pf-border bg-pf-bg-1',
               )}
             >
-              {iconSrc ? (
-                <img
-                  src={iconSrc}
-                  alt=""
-                  className="h-10 w-10 shrink-0 rounded"
-                />
-              ) : (
-                <span className="h-10 w-10 shrink-0 flex items-center justify-center text-2xl" role="img" aria-hidden="true">
-                  🔪
-                </span>
-              )}
-              <div className="text-left min-w-0">
-                <span className={clsx(
-                  'block text-sm font-semibold truncate',
-                  isSelected ? 'text-pf-accent' : 'text-pf-text-primary',
-                )}>
-                  {name}
-                </span>
-                {version && (
-                  <span className="block text-xs text-pf-text-muted truncate">{version}</span>
+              <span className="flex w-full items-center gap-4 text-left">
+                {iconSrc ? (
+                  <img
+                    src={iconSrc}
+                    alt=""
+                    className="h-14 w-14 shrink-0 rounded-xl object-contain"
+                  />
+                ) : (
+                  <span className="h-14 w-14 shrink-0 flex items-center justify-center text-2xl" role="img" aria-hidden="true">
+                    🔪
+                  </span>
                 )}
-              </div>
-              {isSelected && (
-                <svg className="h-5 w-5 shrink-0 text-pf-accent ml-auto" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
-                </svg>
-              )}
+                <span className="min-w-0">
+                  <span className={clsx(
+                    'block text-2xl leading-tight font-semibold truncate',
+                    isSelected ? 'text-pf-accent' : 'text-pf-text-primary',
+                  )}>
+                    {name}
+                  </span>
+                  {version && (
+                    <span className="block text-xl leading-tight text-pf-text-muted truncate mt-0.5">{version}</span>
+                  )}
+                </span>
+              </span>
             </Button>
           );
         })}
