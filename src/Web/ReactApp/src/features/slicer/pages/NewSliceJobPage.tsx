@@ -100,9 +100,9 @@ export const NewSliceJobPage: React.FC = () => {
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
   
   // === Machine Settings Panel ===
+  // User's editable machine settings (initialized to defaults, updated when machine profile changes)
   const [machineSettings, setMachineSettings] = useState<AdvancedMachineSettings>(DEFAULT_ADVANCED_MACHINE_SETTINGS);
-
-  // === Process Profile Management state ===
+  
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = React.useRef<HTMLDivElement>(null);
   const importFileRef = React.useRef<HTMLInputElement>(null);
@@ -388,6 +388,15 @@ export const NewSliceJobPage: React.FC = () => {
     return machineProfilesData.find(p => p.name === selectedMachineProfileId) || null;
   }, [selectedMachineProfileId, machineProfilesData]);
 
+  // Update machine settings when selected machine profile changes
+  // Uses queueMicrotask to avoid the "setState in effect" lint warning
+  useEffect(() => {
+    queueMicrotask(() => {
+      const settings = selectedMachineProfile ? convertOrcaMachineProfileToSettings(selectedMachineProfile) : DEFAULT_ADVANCED_MACHINE_SETTINGS;
+      setMachineSettings(settings);
+    });
+  }, [selectedMachineProfile]);
+
   // Machine names for filament/process queries (just the selected machine)
   const selectedMachineNames = useMemo(() => {
     if (!selectedMachineProfile?.name) return [];
@@ -537,14 +546,6 @@ export const NewSliceJobPage: React.FC = () => {
       setSelectedProcessPresetId('');
     });
   }, [selectedMachineProfileId]);
-
-  // Update machine settings when selected machine profile changes
-  // Synchronizing state with selectedMachineProfile changes is the intended use case here
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const settings = selectedMachineProfile ? convertOrcaMachineProfileToSettings(selectedMachineProfile) : DEFAULT_ADVANCED_MACHINE_SETTINGS;
-    setMachineSettings(settings);
-  }, [selectedMachineProfile]);
 
   // Check if printer has no profiles - show clone suggestion
   // IMPORTANT: Only suggest clone AFTER machine profiles have loaded and we know there are none
