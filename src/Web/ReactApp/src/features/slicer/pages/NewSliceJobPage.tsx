@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -14,7 +14,6 @@ import { assetService } from '@/services/assetService';
 import { apiClient } from '@/services/api';
 import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
-import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import {
@@ -37,11 +36,6 @@ import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
-
-// Lazy load the 3D model viewer for better performance
-const ModelViewer3D = React.lazy(() =>
-  import('@/features/models3d/components/3d/ModelViewer3D').then(mod => ({ default: mod.ModelViewer }))
-);
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
@@ -1496,7 +1490,7 @@ export const NewSliceJobPage: React.FC = () => {
         {/* RIGHT SIDE: 3D Workspace */}
         <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-screen">
           <div className="bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-180">
-            {modelFileUrl && previewFileType === 'stl' ? (
+            {selectedPrinterId ? (
               <SlicerWorkspace
                 bedConfig={workspaceBedConfig}
                 models={workspaceModels}
@@ -1506,36 +1500,13 @@ export const NewSliceJobPage: React.FC = () => {
                 onSettingsProfiles={handleWorkspaceSettingsProfiles}
                 onSlice={submitSliceJob}
                 slicing={submitMutation.isPending}
-                canSlice={!submittedJobId}
+                canSlice={!submittedJobId && workspaceModels.length > 0}
                 className="h-full"
               />
-            ) : modelFileUrl ? (
-              <div className="card bg-pf-panel flex-1 overflow-hidden flex flex-col">
-                <div className="card-header shrink-0">
-                  <h3 className="font-semibold text-pf-text-primary">
-                    {modelFileName ? `Preview: ${modelFileName}` : 'Model Preview'}
-                  </h3>
-                </div>
-                <div className="card-body p-0 flex-1 overflow-hidden">
-                  <Suspense fallback={<ViewerSkeleton variant="model" className="h-full w-full" />}>
-                    <ModelViewer3D
-                      modelUrl={modelFileUrl}
-                      fileType={previewFileType}
-                      showGrid={true}
-                      showAxes={true}
-                      autoRotate={false}
-                      className="h-full w-full"
-                      bedDimensions={bedDimensions}
-                      bedTextureUrl={bedTextureInfo.url}
-                      bedTextureFormat={bedTextureInfo.format}
-                    />
-                  </Suspense>
-                </div>
-              </div>
             ) : (
               <div className="h-full w-full flex items-center justify-center text-pf-text-muted bg-pf-bg-0">
                 <div className="text-center">
-                  <p className="text-sm">Select a model to open the slicer workspace</p>
+                  <p className="text-sm">Select a printer to open the slicer workspace</p>
                 </div>
               </div>
             )}
