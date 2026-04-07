@@ -558,11 +558,13 @@ function ModelTransformControls({
   meshRef,
   mode,
   orbitRef,
+  onTransform,
   onTransformEnd,
 }: {
   meshRef: React.RefObject<THREE.Mesh | null>;
   mode: 'translate' | 'rotate' | 'scale';
   orbitRef: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
+  onTransform?: () => void;
   onTransformEnd?: () => void;
 }) {
   const transformRef = useRef<React.ComponentRef<typeof TransformControls>>(null);
@@ -582,6 +584,10 @@ function ModelTransformControls({
   useEffect(() => {
     const controls = transformRef.current;
     if (!controls) return;
+    const controlsAny = controls as unknown as {
+      addEventListener: (type: string, listener: EventListener) => void;
+      removeEventListener: (type: string, listener: EventListener) => void;
+    };
 
     const handler = (event: { value: boolean }) => {
       if (orbitRef.current) {
@@ -592,11 +598,29 @@ function ModelTransformControls({
       }
     };
 
-    controls.addEventListener('dragging-changed', handler as unknown as EventListener);
+    controlsAny.addEventListener('dragging-changed', handler as unknown as EventListener);
     return () => {
-      controls.removeEventListener('dragging-changed', handler as unknown as EventListener);
+      controlsAny.removeEventListener('dragging-changed', handler as unknown as EventListener);
     };
   }, [orbitRef, onTransformEnd]);
+
+  useEffect(() => {
+    const controls = transformRef.current;
+    if (!controls) return;
+    const controlsAny = controls as unknown as {
+      addEventListener: (type: string, listener: EventListener) => void;
+      removeEventListener: (type: string, listener: EventListener) => void;
+    };
+
+    const handler = () => {
+      onTransform?.();
+    };
+
+    controlsAny.addEventListener('objectChange', handler as unknown as EventListener);
+    return () => {
+      controlsAny.removeEventListener('objectChange', handler as unknown as EventListener);
+    };
+  }, [onTransform]);
 
   if (!mesh) return null;
 
@@ -631,6 +655,17 @@ function BedScene({
   const selectedMeshRef = useRef<THREE.Mesh>(null);
 
   const handleTransformEnd = useCallback(() => {
+    if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
+    const mesh = selectedMeshRef.current;
+    onModelTransform(
+      selectedModelId,
+      mesh.position.toArray() as [number, number, number],
+      [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+      mesh.scale.toArray() as [number, number, number],
+    );
+  }, [selectedModelId, onModelTransform]);
+
+  const handleTransformChange = useCallback(() => {
     if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
     const mesh = selectedMeshRef.current;
     onModelTransform(
@@ -717,6 +752,7 @@ function BedScene({
           meshRef={selectedMeshRef}
           mode={transformMode}
           orbitRef={orbitRef}
+          onTransform={handleTransformChange}
           onTransformEnd={handleTransformEnd}
         />
       )}
