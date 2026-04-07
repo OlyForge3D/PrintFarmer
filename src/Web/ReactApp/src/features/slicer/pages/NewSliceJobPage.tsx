@@ -1471,7 +1471,7 @@ export const NewSliceJobPage: React.FC = () => {
         </div>
 
         {/* RIGHT SIDE: 3D Workspace */}
-        <div className="flex-1 hidden lg:flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col min-h-0">
           <div className="bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-0">
             {selectedPrinterId ? (
               <SlicerWorkspace
