@@ -1054,16 +1054,10 @@ export const NewSliceJobPage: React.FC = () => {
   }
 
   return (
-    <PageTemplate
-      title="New Slice Job"
-      subtitle="OrcaSlicer-style distributed slicing"
-      icon={LayersIcon}
-      showHeader={false}
-      padding="p-2"
-    >
-      <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-6 h-full">
+    <div className="h-full p-2 bg-pf-bg-2">
+      <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-2 h-full">
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}
-        <div className="w-full lg:w-96 space-y-2 shrink-0 pb-4 max-h-screen overflow-y-auto">
+        <div className="w-full lg:w-96 space-y-2 shrink-0 pb-4 max-h-full overflow-y-auto">
 
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
           <SlicerSelector
@@ -1491,32 +1485,11 @@ export const NewSliceJobPage: React.FC = () => {
             />
           )}
 
-          {/* ACTION BUTTONS */}
-          <div className="flex flex-col gap-2 sticky bottom-0 bg-pf-background pt-2 border-t border-pf-border">
-            <Button type="submit" loading={submitMutation.isPending} variant="primary" className="w-full" disabled={!!submittedJobId}>
-              Submit Job
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              className="w-full"
-              onClick={() => {
-                setModelFileUrl('');
-                setModelFileName('');
-                setBedModels([]);
-                setError(null);
-                setMessage(null);
-                setSubmittedJobId(null);
-              }}
-            >
-              Reset
-            </Button>
-          </div>
         </div>
 
         {/* RIGHT SIDE: 3D Workspace */}
-        <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-screen">
-          <div className="bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-180">
+        <div className="flex-1 hidden lg:flex flex-col min-h-0">
+          <div className="bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-0">
             {selectedPrinterId ? (
               <SlicerWorkspace
                 bedConfig={workspaceBedConfig}
@@ -1528,7 +1501,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onSettingsProfiles={handleWorkspaceSettingsProfiles}
                 onSlice={submitSliceJob}
                 slicing={submitMutation.isPending}
-                canSlice={!submittedJobId && workspaceModels.length > 0}
+                canSlice={!submittedJobId && workspaceModels.length > 0 && !!selectedMachineProfileId && !!selectedFilamentProfileId && !!selectedProcessPresetId}
                 className="h-full"
               />
             ) : (
@@ -1595,7 +1568,7 @@ export const NewSliceJobPage: React.FC = () => {
           setMessage(`Custom profile "${profileName}" saved successfully`);
         }}
       />
-    </PageTemplate>
+    </div>
   );
 };
 
