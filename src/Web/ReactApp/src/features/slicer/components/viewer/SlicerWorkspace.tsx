@@ -255,6 +255,35 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setActiveTool(tool);
   }, [hasSelection, selectedModelId, models, selectedModelMetrics]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!hasSelection) return;
+
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target?.isContentEditable) {
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      const key = event.key.toLowerCase();
+      if (key === 't') {
+        event.preventDefault();
+        handleToolChange('move');
+      } else if (key === 'r') {
+        event.preventDefault();
+        handleToolChange('rotate');
+      } else if (key === 's') {
+        event.preventDefault();
+        handleToolChange('scale');
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleToolChange, hasSelection]);
+
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);
   }, []);
@@ -402,29 +431,29 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
         {/* Non-modal transform panel: can be used alongside gizmo controls */}
         {hasSelection && activeTool && activeTool !== 'layers' && (
-          <div className="absolute left-20 top-4 z-20 w-190 max-w-[calc(100%-6rem)] rounded-lg border border-pf-border bg-pf-bg-1/95 backdrop-blur-xs shadow-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-xl font-semibold text-pf-text-primary">
-                {activeTool === 'move' ? 'Move [T]' : activeTool === 'rotate' ? 'Rotate [R]' : 'Scale [S]'}
+          <div className="absolute right-4 bottom-24 z-20 w-[min(560px,calc(100%-2rem))] rounded-md border border-pf-border bg-pf-bg-1/95 backdrop-blur-xs shadow-lg p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-semibold text-pf-text-primary">
+                {activeTool === 'move' ? 'Move' : activeTool === 'rotate' ? 'Rotate' : 'Scale'}
               </div>
               <Button variant="subtle" size="sm" onClick={() => setActiveTool(null)}>Close</Button>
             </div>
 
             {activeTool === 'move' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-[280px_1fr] items-center gap-4">
+              <div className="space-y-2">
+                <div className="grid grid-cols-[180px_1fr] items-center gap-2">
                   <Select value="world" onChange={() => {}}>
                     <option value="world">World coordinates</option>
                   </Select>
-                  <div className="grid grid-cols-3 gap-3 text-center">
-                    <span className="text-2xl text-red-500">X</span>
-                    <span className="text-2xl text-green-500">Y</span>
-                    <span className="text-2xl text-sky-500">Z</span>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <span className="text-sm text-red-500 font-medium">X</span>
+                    <span className="text-sm text-green-500 font-medium">Y</span>
+                    <span className="text-sm text-sky-500 font-medium">Z</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-[220px_1fr_60px] items-center gap-4">
-                  <div className="text-4xl text-pf-text-primary">Position</div>
-                  <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-[110px_1fr_34px] items-center gap-2">
+                  <div className="text-sm text-pf-text-primary">Position</div>
+                  <div className="grid grid-cols-3 gap-2">
                     <Input
                       type="number"
                       step="0.01"
@@ -453,7 +482,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                       }}
                     />
                   </div>
-                  <div className="text-4xl text-pf-text-primary">mm</div>
+                  <div className="text-xs text-pf-text-primary">mm</div>
                 </div>
                 <div className="flex justify-end">
                   <Button variant="primary" onClick={handleMoveApply}>Apply</Button>
@@ -462,36 +491,36 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
             )}
 
             {activeTool === 'rotate' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-[280px_1fr] items-center gap-4">
+              <div className="space-y-2">
+                <div className="grid grid-cols-[180px_1fr] items-center gap-2">
                   <Select value="world" onChange={() => {}}>
                     <option value="world">World coordinates</option>
                   </Select>
-                  <div className="grid grid-cols-3 gap-3 text-center">
-                    <span className="text-2xl text-red-500">X</span>
-                    <span className="text-2xl text-green-500">Y</span>
-                    <span className="text-2xl text-sky-500">Z</span>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <span className="text-sm text-red-500 font-medium">X</span>
+                    <span className="text-sm text-green-500 font-medium">Y</span>
+                    <span className="text-sm text-sky-500 font-medium">Z</span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-[220px_1fr_30px] items-center gap-4">
-                  <div className="text-4xl text-pf-text-primary">Rotate (relative)</div>
-                  <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-[110px_1fr_20px] items-center gap-2">
+                  <div className="text-sm text-pf-text-primary">Relative</div>
+                  <div className="grid grid-cols-3 gap-2">
                     <Input type="number" step="0.01" value={String(rotateRelativeInput[0])} onChange={(e) => setRotateRelativeAxis(0, Number(e.target.value || 0))} />
                     <Input type="number" step="0.01" value={String(rotateRelativeInput[1])} onChange={(e) => setRotateRelativeAxis(1, Number(e.target.value || 0))} />
                     <Input type="number" step="0.01" value={String(rotateRelativeInput[2])} onChange={(e) => setRotateRelativeAxis(2, Number(e.target.value || 0))} />
                   </div>
-                  <div className="text-4xl text-pf-text-primary">°</div>
+                  <div className="text-xs text-pf-text-primary">°</div>
                 </div>
 
-                <div className="grid grid-cols-[220px_1fr_30px_auto] items-center gap-4">
-                  <div className="text-4xl text-pf-text-primary">Rotate (absolute)</div>
-                  <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-[110px_1fr_20px_auto] items-center gap-2">
+                  <div className="text-sm text-pf-text-primary">Absolute</div>
+                  <div className="grid grid-cols-3 gap-2">
                     <Input type="number" step="0.01" value={String(rotateAbsoluteInput[0])} onChange={(e) => setRotateAbsoluteAxis(0, Number(e.target.value || 0))} />
                     <Input type="number" step="0.01" value={String(rotateAbsoluteInput[1])} onChange={(e) => setRotateAbsoluteAxis(1, Number(e.target.value || 0))} />
                     <Input type="number" step="0.01" value={String(rotateAbsoluteInput[2])} onChange={(e) => setRotateAbsoluteAxis(2, Number(e.target.value || 0))} />
                   </div>
-                  <div className="text-4xl text-pf-text-primary">°</div>
+                  <div className="text-xs text-pf-text-primary">°</div>
                   <Button
                     variant="subtle"
                     size="sm"
@@ -512,10 +541,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
             )}
 
             {activeTool === 'scale' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-[220px_220px_1fr] items-center gap-4">
+              <div className="space-y-2">
+                <div className="grid grid-cols-[180px_160px_1fr] items-center gap-2">
                   <div>
-                    <div className="text-sm text-pf-text-muted mb-1">Scale mode</div>
+                    <div className="text-xs text-pf-text-muted mb-1">Scale mode</div>
                     <Select
                       value={scaleMode}
                       onChange={(e) => setScaleMode(e.target.value === 'mm' ? 'mm' : 'percent')}
@@ -524,23 +553,23 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                       <option value="mm">Absolute size (mm)</option>
                     </Select>
                   </div>
-                  <div className="pt-5">
+                  <div className="pt-4">
                     <Checkbox
                       label="Uniform scale"
                       checked={uniformScale}
                       onChange={(e) => setUniformScale(e.target.checked)}
                     />
                   </div>
-                  <div className="grid grid-cols-3 gap-3 text-center">
-                    <span className="text-2xl text-red-500">X</span>
-                    <span className="text-2xl text-green-500">Y</span>
-                    <span className="text-2xl text-sky-500">Z</span>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <span className="text-sm text-red-500 font-medium">X</span>
+                    <span className="text-sm text-green-500 font-medium">Y</span>
+                    <span className="text-sm text-sky-500 font-medium">Z</span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-[220px_1fr_70px] items-center gap-4">
-                  <div className="text-4xl text-pf-text-primary">Size</div>
-                  <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-[110px_1fr_50px] items-center gap-2">
+                  <div className="text-sm text-pf-text-primary">Size</div>
+                  <div className="grid grid-cols-3 gap-2">
                     <Input
                       type="number"
                       step="0.01"
@@ -591,11 +620,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                       }}
                     />
                   </div>
-                  <div className="text-3xl text-pf-text-primary">{scaleMode === 'percent' ? '%' : 'mm'}</div>
+                  <div className="text-xs text-pf-text-primary">{scaleMode === 'percent' ? '%' : 'mm'}</div>
                 </div>
 
                 {selectedModelMetrics && (
-                  <div className="text-sm text-pf-text-muted border-t border-pf-border pt-2">
+                  <div className="text-xs text-pf-text-muted border-t border-pf-border pt-2">
                     Current size: X {formatValue(selectedModelMetrics.currentSize[0])} mm, Y {formatValue(selectedModelMetrics.currentSize[1])} mm, Z {formatValue(selectedModelMetrics.currentSize[2])} mm
                   </div>
                 )}
