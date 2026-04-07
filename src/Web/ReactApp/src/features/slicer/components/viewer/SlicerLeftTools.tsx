@@ -44,7 +44,7 @@ const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, di
 );
 
 export interface SlicerLeftToolsProps {
-  activeTool: ToolType;
+  activeTool: ToolType | null;
   onToolChange: (tool: ToolType) => void;
   onLayersToggle?: () => void;
   showLayers?: boolean;

@@ -35,9 +35,16 @@ export interface SlicerBedVisualizationProps {
   selectedModelId?: string;
   onModelSelect?: (modelId: string | null) => void;
   /** Active transform tool: 'translate' | 'rotate' | 'scale' */
-  transformMode?: 'translate' | 'rotate' | 'scale';
+  transformMode?: 'translate' | 'rotate' | 'scale' | null;
   /** Called when a model is moved/rotated/scaled via TransformControls */
   onModelTransform?: (modelId: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
+  /** Called with current selected model sizing information for scale UI */
+  onSelectedModelMetricsChange?: (metrics: {
+    modelId: string;
+    baseSize: [number, number, number];
+    currentSize: [number, number, number];
+    currentScale: [number, number, number];
+  } | null) => void;
   showGrid?: boolean;
   showAxes?: boolean;
   gridDivisions?: number;
@@ -346,7 +353,7 @@ function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) 
       <edgesGeometry attach="geometry">
         <boxGeometry args={size} />
       </edgesGeometry>
-      <lineBasicMaterial color="#00bcd4" transparent opacity={0.85} />
+      <lineBasicMaterial color="#ffffff" transparent opacity={0.95} />
     </lineSegments>
   );
 }
@@ -368,6 +375,7 @@ function STLModel({
   selected = false,
   onClick,
   meshRef,
+  onSelectedMetrics,
 }: { 
   url: string;
   position?: [number, number, number];
@@ -376,6 +384,11 @@ function STLModel({
   selected?: boolean;
   onClick?: () => void;
   meshRef?: React.RefObject<THREE.Mesh | null>;
+  onSelectedMetrics?: (metrics: {
+    baseSize: [number, number, number];
+    currentSize: [number, number, number];
+    currentScale: [number, number, number];
+  }) => void;
 }) {
   const rawGeometry = useLoader(STLLoader, url);
   const internalRef = useRef<THREE.Mesh>(null);
@@ -397,6 +410,31 @@ function STLModel({
     geo.computeBoundingSphere();
     return geo;
   }, [rawGeometry]);
+
+  const baseSize = useMemo<[number, number, number]>(() => {
+    geometry.computeBoundingBox();
+    if (!geometry.boundingBox) {
+      return [0, 0, 0];
+    }
+
+    const size = new THREE.Vector3();
+    geometry.boundingBox.getSize(size);
+    return [size.x, size.y, size.z];
+  }, [geometry]);
+
+  useEffect(() => {
+    if (!selected || !onSelectedMetrics) return;
+
+    onSelectedMetrics({
+      baseSize,
+      currentSize: [
+        baseSize[0] * scale[0],
+        baseSize[1] * scale[1],
+        baseSize[2] * scale[2],
+      ],
+      currentScale: scale,
+    });
+  }, [baseSize, onSelectedMetrics, scale, selected]);
 
   return (
     <mesh
@@ -537,8 +575,9 @@ function BedScene({
   models = [],
   selectedModelId,
   onModelSelect,
-  transformMode = 'translate',
+  transformMode,
   onModelTransform,
+  onSelectedModelMetricsChange,
   showAxes = true,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
@@ -559,7 +598,14 @@ function BedScene({
   // Deselect when clicking the bed/background
   const handlePointerMissed = useCallback(() => {
     onModelSelect?.(null);
-  }, [onModelSelect]);
+    onSelectedModelMetricsChange?.(null);
+  }, [onModelSelect, onSelectedModelMetricsChange]);
+
+  useEffect(() => {
+    if (!selectedModelId) {
+      onSelectedModelMetricsChange?.(null);
+    }
+  }, [onSelectedModelMetricsChange, selectedModelId]);
 
   return (
     <>
@@ -605,6 +651,14 @@ function BedScene({
                 selected={model.id === selectedModelId}
                 onClick={() => onModelSelect?.(model.id)}
                 meshRef={model.id === selectedModelId ? selectedMeshRef : undefined}
+                onSelectedMetrics={model.id === selectedModelId
+                  ? (metrics) => onSelectedModelMetricsChange?.({
+                    modelId: model.id,
+                    baseSize: metrics.baseSize,
+                    currentSize: metrics.currentSize,
+                    currentScale: metrics.currentScale,
+                  })
+                  : undefined}
               />
             )}
           </Suspense>
@@ -612,7 +666,7 @@ function BedScene({
       </group>
 
       {/* TransformControls for the selected model */}
-      {selectedModelId && (
+      {selectedModelId && transformMode && (
         <ModelTransformControls
           meshRef={selectedMeshRef}
           mode={transformMode}
@@ -635,8 +689,9 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   models = [],
   selectedModelId,
   onModelSelect,
-  transformMode = 'translate',
+  transformMode = null,
   onModelTransform,
+  onSelectedModelMetricsChange,
   showAxes = true,
   backgroundColor = '#2a2a2e',
   className = '',
@@ -673,6 +728,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             onModelSelect={onModelSelect}
             transformMode={transformMode}
             onModelTransform={onModelTransform}
+            onSelectedModelMetricsChange={onSelectedModelMetricsChange}
             showAxes={showAxes}
           />
         </Suspense>
