@@ -349,11 +349,11 @@ function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) 
   }, [geometry]);
 
   return (
-    <lineSegments position={center}>
+    <lineSegments position={center} renderOrder={1000}>
       <edgesGeometry attach="geometry">
         <boxGeometry args={size} />
       </edgesGeometry>
-      <lineBasicMaterial color="#ffffff" transparent opacity={0.95} />
+      <lineBasicMaterial color="#ffffff" transparent opacity={1} depthTest={false} toneMapped={false} />
     </lineSegments>
   );
 }
