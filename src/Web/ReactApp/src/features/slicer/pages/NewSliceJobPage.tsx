@@ -960,11 +960,16 @@ export const NewSliceJobPage: React.FC = () => {
     rotation: [number, number, number],
     scale: [number, number, number],
   ) => {
-    // Update the workspace model's transform — currently single-model, but ready for multi-model
-    void modelId;
-    void position;
-    void rotation;
-    void scale;
+    setBedModels((prev) => prev.map((model) =>
+      model.id === modelId
+        ? {
+          ...model,
+          position,
+          rotation,
+          scale,
+        }
+        : model,
+    ));
   }, []);
 
   const handleWorkspaceSettingsProfiles = useCallback(() => {
@@ -1499,7 +1504,7 @@ export const NewSliceJobPage: React.FC = () => {
               <SlicerWorkspace
                 bedConfig={workspaceBedConfig}
                 models={workspaceModels}
-                selectedModelId={selectedBedModelId}
+                selectedModelId={selectedBedModelId ?? undefined}
                 onModelSelect={handleWorkspaceModelSelect}
                 onModelTransform={handleWorkspaceModelTransform}
                 onAddModel={handleWorkspaceAddModel}
