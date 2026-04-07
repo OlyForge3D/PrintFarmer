@@ -8,7 +8,8 @@ import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
 import { SlicerBedVisualization, type LoadedModel, type BedConfig } from './SlicerBedVisualization';
-import { Button, Checkbox, Input, Select } from '@/common/components/ui';
+import { Checkbox, Input, Select } from '@/common/components/ui';
+import { RotateCcw } from 'lucide-react';
 
 export interface SlicerWorkspaceProps {
   /** Bed configuration including dimensions */
@@ -86,7 +87,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
   const isApplyingHistoryRef = useRef(false);
-  const [scaleMode, setScaleMode] = useState<'percent' | 'mm'>('percent');
   const [uniformScale, setUniformScale] = useState(true);
   const [scalePercentInput, setScalePercentInput] = useState<[number, number, number]>([100, 100, 100]);
   const [scaleMmInput, setScaleMmInput] = useState<[number, number, number]>([0, 0, 0]);
@@ -142,7 +142,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     queueMicrotask(() => setActiveTool(null));
   }, [selectedModelId]);
 
-  const formatValue = (value: number) => Number.isFinite(value) ? value.toFixed(2) : '0.00';
 
   const applyUniformTriple = useCallback((triple: [number, number, number], value: number): [number, number, number] => {
     if (!uniformScale) return triple;
@@ -432,7 +431,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         setScalePercentInput([100, 100, 100]);
         setScaleMmInput(selectedModelMetrics.currentSize);
       }
-      setScaleMode('percent');
       setUniformScale(true);
       setActiveTool('scale');
       return;
@@ -490,66 +488,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);
   }, []);
-
-  const handleScaleApply = useCallback(() => {
-    if (!selectedModelMetrics || !onModelTransform) {
-      return;
-    }
-
-    const model = models.find((m) => m.id === selectedModelMetrics.modelId);
-    if (!model) {
-      return;
-    }
-
-    let newScale: [number, number, number];
-
-    if (scaleMode === 'percent') {
-      const source = uniformScale
-        ? [scalePercentInput[0], scalePercentInput[0], scalePercentInput[0]] as [number, number, number]
-        : scalePercentInput;
-
-      newScale = [
-        selectedModelMetrics.currentScale[0] * (source[0] / 100),
-        selectedModelMetrics.currentScale[1] * (source[1] / 100),
-        selectedModelMetrics.currentScale[2] * (source[2] / 100),
-      ];
-    } else {
-      const source = uniformScale
-        ? [scaleMmInput[0], scaleMmInput[0], scaleMmInput[0]] as [number, number, number]
-        : scaleMmInput;
-
-      if (uniformScale) {
-        const currentX = selectedModelMetrics.currentSize[0] || 1;
-        const ratio = source[0] / currentX;
-        newScale = [
-          selectedModelMetrics.currentScale[0] * ratio,
-          selectedModelMetrics.currentScale[1] * ratio,
-          selectedModelMetrics.currentScale[2] * ratio,
-        ];
-      } else {
-        newScale = [
-          source[0] / (selectedModelMetrics.baseSize[0] || 1),
-          source[1] / (selectedModelMetrics.baseSize[1] || 1),
-          source[2] / (selectedModelMetrics.baseSize[2] || 1),
-        ];
-      }
-    }
-
-    handleModelTransform(model.id, model.position, model.rotation, newScale, { actionLabel: 'Scale Model' });
-  }, [handleModelTransform, models, onModelTransform, scaleMmInput, scaleMode, scalePercentInput, selectedModelMetrics, uniformScale]);
-
-  const handleMoveApply = useCallback(() => {
-    if (!selectedModelId || !onModelTransform) {
-      return;
-    }
-
-    const model = models.find((m) => m.id === selectedModelId);
-    if (!model) {
-      return;
-    }
-
-    handleModelTransform(model.id, movePositionInput, model.rotation, model.scale, { actionLabel: 'Move Model' });
-  }, [selectedModelId, handleModelTransform, onModelTransform, models, movePositionInput]);
 
   const handleRotateApply = useCallback(() => {
     if (!selectedModelId || !onModelTransform) {
@@ -634,247 +572,87 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
         {/* Non-modal transform panel: can be used alongside gizmo controls */}
         {hasSelection && activeTool && activeTool !== 'layers' && (
-          <div className="absolute right-4 bottom-24 z-20 w-[min(560px,calc(100%-2rem))] rounded-md border border-pf-border bg-pf-bg-1/95 backdrop-blur-xs shadow-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-semibold text-pf-text-primary">
-                {activeTool === 'move' ? 'Move' : activeTool === 'rotate' ? 'Rotate' : 'Scale'}
-              </div>
-              <Button variant="subtle" size="sm" onClick={() => setActiveTool(null)}>Close</Button>
+          <div className="absolute right-4 bottom-24 z-20 w-80 rounded-md border border-pf-border bg-pf-bg-1/95 backdrop-blur-xs shadow-lg p-3">
+            <div className="text-sm font-semibold text-pf-text-primary mb-2">
+              {activeTool === 'move' ? 'Move' : activeTool === 'rotate' ? 'Rotate' : 'Scale'}
             </div>
 
             {activeTool === 'move' && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-[200px_1fr] items-center gap-2">
-                  <Select 
-                    value={moveCoordinateMode} 
-                    onChange={(e) => setMoveCoordinateMode(e.target.value === 'object' ? 'object' : 'world')}
-                  >
-                    <option value="world">World coordinates</option>
-                    <option value="object">Object coordinates</option>
+              <div className="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-x-2 gap-y-1.5">
+                {/* Row 1: header */}
+                <div />
+                <div className="text-xs text-red-500 font-medium text-center">X</div>
+                <div className="text-xs text-green-500 font-medium text-center">Y</div>
+                <div className="text-xs text-sky-500 font-medium text-center">Z</div>
+                {/* Row 2: Position */}
+                <div className="text-xs text-pf-text-primary whitespace-nowrap">Position</div>
+                <Input type="number" step="0.01" value={String(movePositionInput[0])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [v, movePositionInput[1], movePositionInput[2]]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, next, m.rotation, m.scale, { actionLabel: 'Move Model' }); } }} />
+                <Input type="number" step="0.01" value={String(movePositionInput[1])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [movePositionInput[0], v, movePositionInput[2]]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, next, m.rotation, m.scale, { actionLabel: 'Move Model' }); } }} />
+                <Input type="number" step="0.01" value={String(movePositionInput[2])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [movePositionInput[0], movePositionInput[1], v]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, next, m.rotation, m.scale, { actionLabel: 'Move Model' }); } }} />
+                {/* Row 3: coordinate mode */}
+                <div className="col-span-3">
+                  <Select value={moveCoordinateMode} onChange={(e) => setMoveCoordinateMode(e.target.value === 'object' ? 'object' : 'world')}>
+                    <option value="world">World (absolute)</option>
+                    <option value="object">Object (relative)</option>
                   </Select>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <span className="text-sm text-red-500 font-medium">X</span>
-                    <span className="text-sm text-green-500 font-medium">Y</span>
-                    <span className="text-sm text-sky-500 font-medium">Z</span>
-                  </div>
                 </div>
-                <div className="grid grid-cols-[110px_1fr_34px] items-center gap-2">
-                  <div className="text-sm text-pf-text-primary">Position</div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={String(movePositionInput[0])}
-                      onChange={(e) => {
-                        const value = Number(e.target.value || 0);
-                        setMovePositionInput((prev) => [value, prev[1], prev[2]]);
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={String(movePositionInput[1])}
-                      onChange={(e) => {
-                        const value = Number(e.target.value || 0);
-                        setMovePositionInput((prev) => [prev[0], value, prev[2]]);
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={String(movePositionInput[2])}
-                      onChange={(e) => {
-                        const value = Number(e.target.value || 0);
-                        setMovePositionInput((prev) => [prev[0], prev[1], value]);
-                      }}
-                    />
-                  </div>
-                  <div className="text-xs text-pf-text-primary">mm</div>
-                </div>
-                <div className="flex justify-end">
-                  <Button variant="primary" onClick={handleMoveApply}>Apply</Button>
-                </div>
+                <div />
+                {/* Row 4: Reset */}
+                <button type="button" className="p-1 rounded hover:bg-pf-bg-2 text-pf-text-muted hover:text-pf-text-primary transition-colors" title="Reset position" onClick={() => { const zero: [number, number, number] = [0, 0, 0]; setMovePositionInput(zero); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, zero, m.rotation, m.scale, { actionLabel: 'Reset Position' }); } }}>
+                  <RotateCcw size={14} />
+                </button>
+                <div /><div /><div />
               </div>
             )}
 
             {activeTool === 'rotate' && (
-              <div className="space-y-2">
-                {/* Header row */}
-                <div className="grid grid-cols-[180px_1fr] items-center gap-2">
-                  <div className="text-sm text-pf-text-primary">World coordinates</div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <span className="text-sm text-red-500 font-medium">X</span>
-                    <span className="text-sm text-green-500 font-medium">Y</span>
-                    <span className="text-sm text-sky-500 font-medium">Z</span>
-                  </div>
-                </div>
-
-                {/* Rotate (relative) row */}
-                <div className="grid grid-cols-[180px_1fr_20px] items-center gap-2">
-                  <div className="text-sm text-pf-text-primary">Rotate (relative)</div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input type="number" step="0.01" value={String(rotateRelativeInput[0])} onChange={(e) => setRotateRelativeAxis(0, Number(e.target.value || 0))} />
-                    <Input type="number" step="0.01" value={String(rotateRelativeInput[1])} onChange={(e) => setRotateRelativeAxis(1, Number(e.target.value || 0))} />
-                    <Input type="number" step="0.01" value={String(rotateRelativeInput[2])} onChange={(e) => setRotateRelativeAxis(2, Number(e.target.value || 0))} />
-                  </div>
-                  <div className="text-xs text-pf-text-primary">°</div>
-                </div>
-
-                {/* Rotate (absolute) row */}
-                <div className="grid grid-cols-[180px_1fr_20px_auto] items-center gap-2">
-                  <div className="text-sm text-pf-text-primary">Rotate (absolute)</div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input type="number" step="0.01" value={String(rotateAbsoluteInput[0])} onChange={(e) => setRotateAbsoluteAxis(0, Number(e.target.value || 0))} />
-                    <Input type="number" step="0.01" value={String(rotateAbsoluteInput[1])} onChange={(e) => setRotateAbsoluteAxis(1, Number(e.target.value || 0))} />
-                    <Input type="number" step="0.01" value={String(rotateAbsoluteInput[2])} onChange={(e) => setRotateAbsoluteAxis(2, Number(e.target.value || 0))} />
-                  </div>
-                  <div className="text-xs text-pf-text-primary">°</div>
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    onClick={() => {
-                      setRotateBaseAbsoluteInput([0, 0, 0]);
-                      setRotateRelativeInput([0, 0, 0]);
-                      setRotateAbsoluteInput([0, 0, 0]);
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </div>
-
-                <div className="flex justify-end">
-                  <Button variant="primary" onClick={handleRotateApply}>Apply</Button>
-                </div>
+              <div className="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-x-2 gap-y-1.5">
+                {/* Row 1: header */}
+                <div />
+                <div className="text-xs text-red-500 font-medium text-center">X</div>
+                <div className="text-xs text-green-500 font-medium text-center">Y</div>
+                <div className="text-xs text-sky-500 font-medium text-center">Z</div>
+                {/* Row 2: Relative */}
+                <div className="text-xs text-pf-text-primary whitespace-nowrap">Relative</div>
+                <Input type="number" step="0.01" value={String(rotateRelativeInput[0])} onChange={(e) => setRotateRelativeAxis(0, Number(e.target.value || 0))} />
+                <Input type="number" step="0.01" value={String(rotateRelativeInput[1])} onChange={(e) => setRotateRelativeAxis(1, Number(e.target.value || 0))} />
+                <Input type="number" step="0.01" value={String(rotateRelativeInput[2])} onChange={(e) => setRotateRelativeAxis(2, Number(e.target.value || 0))} />
+                {/* Row 3: Absolute */}
+                <div className="text-xs text-pf-text-primary whitespace-nowrap">Absolute</div>
+                <Input type="number" step="0.01" value={String(rotateAbsoluteInput[0])} onChange={(e) => setRotateAbsoluteAxis(0, Number(e.target.value || 0))} />
+                <Input type="number" step="0.01" value={String(rotateAbsoluteInput[1])} onChange={(e) => setRotateAbsoluteAxis(1, Number(e.target.value || 0))} />
+                <Input type="number" step="0.01" value={String(rotateAbsoluteInput[2])} onChange={(e) => setRotateAbsoluteAxis(2, Number(e.target.value || 0))} />
+                {/* Row 4: Reset */}
+                <button type="button" className="p-1 rounded hover:bg-pf-bg-2 text-pf-text-muted hover:text-pf-text-primary transition-colors" title="Reset rotation" onClick={() => { setRotateBaseAbsoluteInput([0, 0, 0]); setRotateRelativeInput([0, 0, 0]); setRotateAbsoluteInput([0, 0, 0]); handleRotateApply(); }}>
+                  <RotateCcw size={14} />
+                </button>
+                <div /><div /><div />
               </div>
             )}
 
             {activeTool === 'scale' && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-[180px_160px_1fr] items-center gap-2">
-                  <div>
-                    <div className="text-xs text-pf-text-muted mb-1">Scale mode</div>
-                    <Select
-                      value={scaleMode}
-                      onChange={(e) => setScaleMode(e.target.value === 'mm' ? 'mm' : 'percent')}
-                    >
-                      <option value="percent">Percent of current (%)</option>
-                      <option value="mm">Absolute size (mm)</option>
-                    </Select>
-                  </div>
-                  <div className="pt-4">
-                    <Checkbox
-                      label="Uniform scale"
-                      checked={uniformScale}
-                      onChange={(e) => setUniformScale(e.target.checked)}
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <span className="text-sm text-red-500 font-medium">X</span>
-                    <span className="text-sm text-green-500 font-medium">Y</span>
-                    <span className="text-sm text-sky-500 font-medium">Z</span>
-                  </div>
-                </div>
-
-                {/* Primary input row with current mode */}
-                <div className="grid grid-cols-[110px_1fr_50px] items-center gap-2">
-                  <div className="text-sm text-pf-text-primary">{scaleMode === 'percent' ? 'Scale' : 'Size'}</div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={scaleMode === 'percent' ? String(scalePercentInput[0]) : String(scaleMmInput[0])}
-                      onChange={(e) => {
-                        const value = Number(e.target.value || 0);
-                        if (scaleMode === 'percent') {
-                          setScalePercentInput((prev) => applyUniformTriple([
-                            value,
-                            prev[1],
-                            prev[2],
-                          ] as [number, number, number], value));
-                        } else {
-                          setScaleMmInput((prev) => applyUniformTriple([
-                            value,
-                            prev[1],
-                            prev[2],
-                          ] as [number, number, number], value));
-                        }
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      disabled={uniformScale}
-                      value={scaleMode === 'percent' ? String(scalePercentInput[1]) : String(scaleMmInput[1])}
-                      onChange={(e) => {
-                        const value = Number(e.target.value || 0);
-                        if (scaleMode === 'percent') {
-                          setScalePercentInput((prev) => [prev[0], value, prev[2]]);
-                        } else {
-                          setScaleMmInput((prev) => [prev[0], value, prev[2]]);
-                        }
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      disabled={uniformScale}
-                      value={scaleMode === 'percent' ? String(scalePercentInput[2]) : String(scaleMmInput[2])}
-                      onChange={(e) => {
-                        const value = Number(e.target.value || 0);
-                        if (scaleMode === 'percent') {
-                          setScalePercentInput((prev) => [prev[0], prev[1], value]);
-                        } else {
-                          setScaleMmInput((prev) => [prev[0], prev[1], value]);
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="text-xs text-pf-text-primary">{scaleMode === 'percent' ? '%' : 'mm'}</div>
-                </div>
-
-                {/* Reference row showing the alternative format */}
-                {selectedModelMetrics && (
-                  <div className="grid grid-cols-[110px_1fr_50px] items-center gap-2">
-                    <div className="text-xs text-pf-text-muted">{scaleMode === 'percent' ? 'Size' : 'Scale'}</div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {scaleMode === 'percent' ? (
-                        <>
-                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
-                            {formatValue((selectedModelMetrics.baseSize[0] * scalePercentInput[0]) / 100)}
-                          </div>
-                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
-                            {formatValue((selectedModelMetrics.baseSize[1] * scalePercentInput[1]) / 100)}
-                          </div>
-                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
-                            {formatValue((selectedModelMetrics.baseSize[2] * scalePercentInput[2]) / 100)}
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
-                            {formatValue((scaleMmInput[0] / selectedModelMetrics.baseSize[0]) * 100)}
-                          </div>
-                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
-                            {formatValue((scaleMmInput[1] / selectedModelMetrics.baseSize[1]) * 100)}
-                          </div>
-                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
-                            {formatValue((scaleMmInput[2] / selectedModelMetrics.baseSize[2]) * 100)}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-xs text-pf-text-muted">{scaleMode === 'percent' ? 'mm' : '%'}</div>
-                  </div>
-                )}
-
-                {selectedModelMetrics && (
-                  <div className="text-xs text-pf-text-muted border-t border-pf-border pt-2">
-                    Base size: X {formatValue(selectedModelMetrics.baseSize[0])} mm, Y {formatValue(selectedModelMetrics.baseSize[1])} mm, Z {formatValue(selectedModelMetrics.baseSize[2])} mm
-                  </div>
-                )}
-
-                <div className="flex justify-end">
-                  <Button variant="primary" onClick={handleScaleApply}>Apply</Button>
+              <div className="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-x-2 gap-y-1.5">
+                {/* Row 1: header */}
+                <div />
+                <div className="text-xs text-red-500 font-medium text-center">X</div>
+                <div className="text-xs text-green-500 font-medium text-center">Y</div>
+                <div className="text-xs text-sky-500 font-medium text-center">Z</div>
+                {/* Row 2: Scale % */}
+                <div className="text-xs text-pf-text-primary whitespace-nowrap">Scale %</div>
+                <Input type="number" step="0.01" value={String(scalePercentInput[0])} onChange={(e) => { const v = Number(e.target.value || 0); const next = applyUniformTriple([v, scalePercentInput[1], scalePercentInput[2]], v); setScalePercentInput(next); if (selectedModelMetrics) { setScaleMmInput([(selectedModelMetrics.baseSize[0] * next[0]) / 100, (selectedModelMetrics.baseSize[1] * next[1]) / 100, (selectedModelMetrics.baseSize[2] * next[2]) / 100]); } applyScaleFromPercent(next); }} />
+                <Input type="number" step="0.01" disabled={uniformScale} value={String(scalePercentInput[1])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [scalePercentInput[0], v, scalePercentInput[2]]; setScalePercentInput(next); if (selectedModelMetrics) { setScaleMmInput([(selectedModelMetrics.baseSize[0] * next[0]) / 100, (selectedModelMetrics.baseSize[1] * next[1]) / 100, (selectedModelMetrics.baseSize[2] * next[2]) / 100]); } applyScaleFromPercent(next); }} />
+                <Input type="number" step="0.01" disabled={uniformScale} value={String(scalePercentInput[2])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [scalePercentInput[0], scalePercentInput[1], v]; setScalePercentInput(next); if (selectedModelMetrics) { setScaleMmInput([(selectedModelMetrics.baseSize[0] * next[0]) / 100, (selectedModelMetrics.baseSize[1] * next[1]) / 100, (selectedModelMetrics.baseSize[2] * next[2]) / 100]); } applyScaleFromPercent(next); }} />
+                {/* Row 3: Size mm */}
+                <div className="text-xs text-pf-text-primary whitespace-nowrap">Size mm</div>
+                <Input type="number" step="0.01" value={String(scaleMmInput[0])} onChange={(e) => { const v = Number(e.target.value || 0); let next: [number, number, number]; if (uniformScale && selectedModelMetrics) { const ratio = v / (selectedModelMetrics.currentSize[0] || 1); next = [v, selectedModelMetrics.currentSize[1] * ratio, selectedModelMetrics.currentSize[2] * ratio]; } else { next = [v, scaleMmInput[1], scaleMmInput[2]]; } setScaleMmInput(next); if (selectedModelMetrics) { setScalePercentInput([(next[0] / selectedModelMetrics.baseSize[0]) * 100, (next[1] / selectedModelMetrics.baseSize[1]) * 100, (next[2] / selectedModelMetrics.baseSize[2]) * 100]); } applyScaleFromMm(next); }} />
+                <Input type="number" step="0.01" disabled={uniformScale} value={String(scaleMmInput[1])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [scaleMmInput[0], v, scaleMmInput[2]]; setScaleMmInput(next); if (selectedModelMetrics) { setScalePercentInput([(next[0] / selectedModelMetrics.baseSize[0]) * 100, (next[1] / selectedModelMetrics.baseSize[1]) * 100, (next[2] / selectedModelMetrics.baseSize[2]) * 100]); } applyScaleFromMm(next); }} />
+                <Input type="number" step="0.01" disabled={uniformScale} value={String(scaleMmInput[2])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [scaleMmInput[0], scaleMmInput[1], v]; setScaleMmInput(next); if (selectedModelMetrics) { setScalePercentInput([(next[0] / selectedModelMetrics.baseSize[0]) * 100, (next[1] / selectedModelMetrics.baseSize[1]) * 100, (next[2] / selectedModelMetrics.baseSize[2]) * 100]); } applyScaleFromMm(next); }} />
+                {/* Row 4: Reset + Uniform checkbox */}
+                <button type="button" className="p-1 rounded hover:bg-pf-bg-2 text-pf-text-muted hover:text-pf-text-primary transition-colors" title="Reset scale" onClick={() => { setScalePercentInput([100, 100, 100]); if (selectedModelMetrics) { setScaleMmInput([...selectedModelMetrics.baseSize]); } applyScaleFromPercent([100, 100, 100]); }}>
+                  <RotateCcw size={14} />
+                </button>
+                <div className="col-span-3">
+                  <Checkbox label="Uniform" checked={uniformScale} onChange={(e) => setUniformScale(e.target.checked)} />
                 </div>
               </div>
             )}
