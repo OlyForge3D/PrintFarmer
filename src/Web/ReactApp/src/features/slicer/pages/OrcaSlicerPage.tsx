@@ -267,6 +267,19 @@ export const OrcaSlicerPage: React.FC = () => {
     setSelectedLoadedModelId(modelId);
   }, []);
 
+  const handleModelTransform = useCallback(
+    (modelId: string, newPosition: [number, number, number], newRotation: [number, number, number], newScale: [number, number, number]) => {
+      setLoadedModels(prev =>
+        prev.map(model =>
+          model.id === modelId
+            ? { ...model, position: newPosition, rotation: newRotation, scale: newScale }
+            : model
+        )
+      );
+    },
+    []
+  );
+
   const handleSettingsProfiles = useCallback(() => {
     setShowSettingsPanel(prev => !prev);
   }, []);
@@ -441,6 +454,7 @@ export const OrcaSlicerPage: React.FC = () => {
             models={loadedModels}
             selectedModelId={selectedLoadedModelId || undefined}
             onModelSelect={handleModelSelect}
+            onModelTransform={handleModelTransform}
             onAddModel={handleAddModel}
             onSettingsProfiles={handleSettingsProfiles}
             onSlice={handleSlice}
