@@ -1038,7 +1038,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   return (
     <div className="overflow-hidden p-2 bg-pf-bg-2">
-      <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-2 min-h-[calc(100vh-280px)] overflow-hidden">
+      <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-2 h-[calc(100vh-280px)] overflow-hidden">
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}
         <div className="w-full lg:w-96 space-y-2 shrink-0 min-h-0 overflow-y-auto">
 
