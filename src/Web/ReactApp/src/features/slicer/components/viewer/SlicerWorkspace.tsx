@@ -3,7 +3,7 @@
  * Main container combining toolbar, 3D bed visualization, left tools, and status bar
  * Matches OrcaSlicer's interface layout
  */
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
@@ -39,6 +39,23 @@ export interface SlicerWorkspaceProps {
   className?: string;
 }
 
+type TransformSnapshot = {
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+};
+
+type TransformDelta = {
+  modelId: string;
+  before: TransformSnapshot;
+  after: TransformSnapshot;
+};
+
+type TransformHistoryEntry = {
+  action: string;
+  deltas: TransformDelta[];
+};
+
 export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   bedConfig,
   models = [],
@@ -56,8 +73,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 }) => {
   const [activeTool, setActiveTool] = useState<ToolType | null>(null);
   const [showLayers, setShowLayers] = useState(false);
-  const [undoStack, setUndoStack] = useState<unknown[]>([]);
-  const [redoStack, setRedoStack] = useState<unknown[]>([]);
+  const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
+  const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
+  const isApplyingHistoryRef = useRef(false);
   const [scaleMode, setScaleMode] = useState<'percent' | 'mm'>('percent');
   const [uniformScale, setUniformScale] = useState(true);
   const [scalePercentInput, setScalePercentInput] = useState<[number, number, number]>([100, 100, 100]);
@@ -120,6 +138,15 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     return [value, value, value];
   }, [uniformScale]);
 
+  const triplesEqual = useCallback((a: [number, number, number], b: [number, number, number]) => (
+    a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
+  ), []);
+
+  const pushHistoryEntry = useCallback((entry: TransformHistoryEntry) => {
+    setUndoStack((prev) => [...prev, entry]);
+    setRedoStack([]);
+  }, []);
+
   const getSelectedModel = useCallback(() => {
     if (!selectedModelId) return undefined;
     return models.find((m) => m.id === selectedModelId);
@@ -131,9 +158,44 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       position: [number, number, number],
       rotation: [number, number, number],
       scale: [number, number, number],
+      options?: { recordHistory?: boolean; actionLabel?: string },
     ) => {
       if (!onModelTransform) {
         return;
+      }
+
+      const recordHistory = options?.recordHistory ?? true;
+      const actionLabel = options?.actionLabel ?? 'Transform';
+      const currentModel = models.find((model) => model.id === modelId);
+
+      if (currentModel) {
+        const noChange =
+          triplesEqual(currentModel.position, position) &&
+          triplesEqual(currentModel.rotation, rotation) &&
+          triplesEqual(currentModel.scale, scale);
+
+        if (noChange) {
+          return;
+        }
+
+        if (recordHistory && !isApplyingHistoryRef.current) {
+          pushHistoryEntry({
+            action: actionLabel,
+            deltas: [{
+              modelId,
+              before: {
+                position: currentModel.position,
+                rotation: currentModel.rotation,
+                scale: currentModel.scale,
+              },
+              after: {
+                position,
+                rotation,
+                scale,
+              },
+            }],
+          });
+        }
       }
 
       onModelTransform(modelId, position, rotation, scale);
@@ -171,8 +233,21 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         }
       }
     },
-    [activeTool, onModelTransform, selectedModelId, selectedModelMetrics],
+    [activeTool, models, onModelTransform, pushHistoryEntry, selectedModelId, selectedModelMetrics, triplesEqual],
   );
+
+  const applyHistoryEntry = useCallback((entry: TransformHistoryEntry, direction: 'before' | 'after') => {
+    entry.deltas.forEach((delta) => {
+      const target = delta[direction];
+      handleModelTransform(
+        delta.modelId,
+        target.position,
+        target.rotation,
+        target.scale,
+        { recordHistory: false },
+      );
+    });
+  }, [handleModelTransform]);
 
   // Toolbar action handlers
   const handleArrange = useCallback(() => {
@@ -183,6 +258,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     const stepX = bedConfig.width / (cols + 1);
     const stepY = bedConfig.depth / (rows + 1);
 
+    const deltas: TransformDelta[] = [];
+
     models.forEach((model, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
@@ -190,9 +267,31 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       const x = -bedConfig.width / 2 + stepX * (col + 1);
       const y = -bedConfig.depth / 2 + stepY * (row + 1);
 
-      handleModelTransform(model.id, [x, y, model.position[2]], model.rotation, model.scale);
+      const nextPosition: [number, number, number] = [x, y, model.position[2]];
+
+      if (!triplesEqual(model.position, nextPosition)) {
+        deltas.push({
+          modelId: model.id,
+          before: {
+            position: model.position,
+            rotation: model.rotation,
+            scale: model.scale,
+          },
+          after: {
+            position: nextPosition,
+            rotation: model.rotation,
+            scale: model.scale,
+          },
+        });
+      }
+
+      handleModelTransform(model.id, nextPosition, model.rotation, model.scale, { recordHistory: false });
     });
-  }, [bedConfig.depth, bedConfig.width, handleModelTransform, models, onModelTransform]);
+
+    if (deltas.length > 0) {
+      pushHistoryEntry({ action: 'Auto Arrange', deltas });
+    }
+  }, [bedConfig.depth, bedConfig.width, handleModelTransform, models, onModelTransform, pushHistoryEntry, triplesEqual]);
 
   const handleOrient = useCallback(() => {
     if (!onModelTransform) return;
@@ -200,7 +299,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (!selected) return;
 
     // Reset orientation to canonical axes.
-    handleModelTransform(selected.id, selected.position, [0, 0, 0], selected.scale);
+    handleModelTransform(selected.id, selected.position, [0, 0, 0], selected.scale, { actionLabel: 'Orient Model' });
   }, [getSelectedModel, handleModelTransform, onModelTransform]);
 
   const handleLayFlat = useCallback(() => {
@@ -214,52 +313,73 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       selected.position,
       [0, 0, selected.rotation[2]],
       selected.scale,
+      { actionLabel: 'Lay Flat' },
     );
   }, [getSelectedModel, handleModelTransform, onModelTransform]);
 
   const handleSplit = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Split model'); }
-  }, []);
+    // Placeholder history marker until split operation state is implemented.
+    pushHistoryEntry({ action: 'Split Model', deltas: [] });
+  }, [pushHistoryEntry]);
 
   const handleCut = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Cut model'); }
-  }, []);
+    // Placeholder history marker until cut operation state is implemented.
+    pushHistoryEntry({ action: 'Cut Model', deltas: [] });
+  }, [pushHistoryEntry]);
 
   const handleMeasure = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Measure tool'); }
-  }, []);
+    // Placeholder history marker until measure state is implemented.
+    pushHistoryEntry({ action: 'Measure Tool', deltas: [] });
+  }, [pushHistoryEntry]);
 
   const handleSupportPaint = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Support paint mode'); }
-  }, []);
+    // Placeholder history marker until support painting state is implemented.
+    pushHistoryEntry({ action: 'Support Painting', deltas: [] });
+  }, [pushHistoryEntry]);
 
   const handleSeamPaint = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Seam paint mode'); }
-  }, []);
+    // Placeholder history marker until seam painting state is implemented.
+    pushHistoryEntry({ action: 'Seam Painting', deltas: [] });
+  }, [pushHistoryEntry]);
 
   const handleUndo = useCallback(() => {
     if (undoStack.length > 0) {
       const lastAction = undoStack[undoStack.length - 1];
+      isApplyingHistoryRef.current = true;
+      applyHistoryEntry(lastAction, 'before');
+      isApplyingHistoryRef.current = false;
       setUndoStack(prev => prev.slice(0, -1));
       setRedoStack(prev => [...prev, lastAction]);
     }
-  }, [undoStack]);
+  }, [applyHistoryEntry, undoStack]);
 
   const handleRedo = useCallback(() => {
     if (redoStack.length > 0) {
       const lastRedo = redoStack[redoStack.length - 1];
+      isApplyingHistoryRef.current = true;
+      applyHistoryEntry(lastRedo, 'after');
+      isApplyingHistoryRef.current = false;
       setRedoStack(prev => prev.slice(0, -1));
       setUndoStack(prev => [...prev, lastRedo]);
     }
-  }, [redoStack]);
+  }, [applyHistoryEntry, redoStack]);
 
   const handleAssemblyView = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Assembly view'); }
-  }, []);
+    // Placeholder history marker until assembly view state is implemented.
+    pushHistoryEntry({ action: 'Assembly View', deltas: [] });
+  }, [pushHistoryEntry]);
 
   const handleKeyboardShortcuts = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Show keyboard shortcuts'); }
-  }, []);
+    // Placeholder history marker until shortcut dialog state is implemented.
+    pushHistoryEntry({ action: 'Keyboard Shortcuts', deltas: [] });
+  }, [pushHistoryEntry]);
 
   const handleToolChange = useCallback((tool: ToolType) => {
     if (!hasSelection && tool !== 'layers') return;
@@ -381,7 +501,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
     }
 
-    handleModelTransform(model.id, model.position, model.rotation, newScale);
+    handleModelTransform(model.id, model.position, model.rotation, newScale, { actionLabel: 'Scale Model' });
   }, [handleModelTransform, models, onModelTransform, scaleMmInput, scaleMode, scalePercentInput, selectedModelMetrics, uniformScale]);
 
   const handleMoveApply = useCallback(() => {
@@ -394,7 +514,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       return;
     }
 
-    handleModelTransform(model.id, movePositionInput, model.rotation, model.scale);
+    handleModelTransform(model.id, movePositionInput, model.rotation, model.scale, { actionLabel: 'Move Model' });
   }, [selectedModelId, handleModelTransform, onModelTransform, models, movePositionInput]);
 
   const handleRotateApply = useCallback(() => {
@@ -413,7 +533,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       degToRad(rotateAbsoluteInput[2]),
     ];
 
-    handleModelTransform(model.id, model.position, nextRotation, model.scale);
+    handleModelTransform(model.id, model.position, nextRotation, model.scale, { actionLabel: 'Rotate Model' });
 
     // After applying absolute rotation, treat the new absolute as baseline.
     setRotateBaseAbsoluteInput(rotateAbsoluteInput);
