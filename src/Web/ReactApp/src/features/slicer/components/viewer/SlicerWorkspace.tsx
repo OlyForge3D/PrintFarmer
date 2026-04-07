@@ -120,18 +120,53 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     return [value, value, value];
   }, [uniformScale]);
 
-  // Toolbar action handlers (placeholders for now)
+  const getSelectedModel = useCallback(() => {
+    if (!selectedModelId) return undefined;
+    return models.find((m) => m.id === selectedModelId);
+  }, [models, selectedModelId]);
+
+  // Toolbar action handlers
   const handleArrange = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Auto-arrange models'); }
-  }, []);
+    if (!onModelTransform || models.length === 0) return;
+
+    const cols = Math.max(1, Math.ceil(Math.sqrt(models.length)));
+    const rows = Math.max(1, Math.ceil(models.length / cols));
+    const stepX = bedConfig.width / (cols + 1);
+    const stepY = bedConfig.depth / (rows + 1);
+
+    models.forEach((model, index) => {
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+
+      const x = -bedConfig.width / 2 + stepX * (col + 1);
+      const y = -bedConfig.depth / 2 + stepY * (row + 1);
+
+      onModelTransform(model.id, [x, y, model.position[2]], model.rotation, model.scale);
+    });
+  }, [bedConfig.depth, bedConfig.width, models, onModelTransform]);
 
   const handleOrient = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Orient model'); }
-  }, []);
+    if (!onModelTransform) return;
+    const selected = getSelectedModel();
+    if (!selected) return;
+
+    // Reset orientation to canonical axes.
+    onModelTransform(selected.id, selected.position, [0, 0, 0], selected.scale);
+  }, [getSelectedModel, onModelTransform]);
 
   const handleLayFlat = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Lay model flat'); }
-  }, []);
+    if (!onModelTransform) return;
+    const selected = getSelectedModel();
+    if (!selected) return;
+
+    // Keep current Z yaw while removing tilt on X/Y.
+    onModelTransform(
+      selected.id,
+      selected.position,
+      [0, 0, selected.rotation[2]],
+      selected.scale,
+    );
+  }, [getSelectedModel, onModelTransform]);
 
   const handleSplit = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Split model'); }
