@@ -37,7 +37,21 @@ export interface SlicerBedVisualizationProps {
   /** Active transform tool: 'translate' | 'rotate' | 'scale' */
   transformMode?: 'translate' | 'rotate' | 'scale' | null;
   /** Called when a model is moved/rotated/scaled via TransformControls */
-  onModelTransform?: (modelId: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
+  onModelTransform?: (
+    modelId: string,
+    position: [number, number, number],
+    rotation: [number, number, number],
+    scale: [number, number, number],
+    options?: {
+      recordHistory?: boolean;
+      actionLabel?: string;
+      historyBefore?: {
+        position: [number, number, number];
+        rotation: [number, number, number];
+        scale: [number, number, number];
+      };
+    },
+  ) => void;
   /** Called with current selected model sizing information for scale UI */
   onSelectedModelMetricsChange?: (metrics: {
     modelId: string;
@@ -559,12 +573,14 @@ function ModelTransformControls({
   mode,
   orbitRef,
   onTransform,
+  onTransformStart,
   onTransformEnd,
 }: {
   meshRef: React.RefObject<THREE.Mesh | null>;
   mode: 'translate' | 'rotate' | 'scale';
   orbitRef: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
   onTransform?: () => void;
+  onTransformStart?: () => void;
   onTransformEnd?: () => void;
 }) {
   const transformRef = useRef<React.ComponentRef<typeof TransformControls>>(null);
@@ -593,7 +609,9 @@ function ModelTransformControls({
       if (orbitRef.current) {
         orbitRef.current.enabled = !event.value;
       }
-      if (!event.value) {
+      if (event.value) {
+        onTransformStart?.();
+      } else {
         onTransformEnd?.();
       }
     };
@@ -602,7 +620,7 @@ function ModelTransformControls({
     return () => {
       controlsAny.removeEventListener('dragging-changed', handler as unknown as EventListener);
     };
-  }, [orbitRef, onTransformEnd]);
+  }, [onTransformEnd, onTransformStart, orbitRef]);
 
   useEffect(() => {
     const controls = transformRef.current;
@@ -654,6 +672,28 @@ function BedScene({
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const selectedMeshRef = useRef<THREE.Mesh>(null);
 
+  const dragStartTransformRef = useRef<{
+    position: [number, number, number];
+    rotation: [number, number, number];
+    scale: [number, number, number];
+  } | null>(null);
+
+  const transformActionLabel = transformMode === 'translate'
+    ? 'Move Model'
+    : transformMode === 'rotate'
+      ? 'Rotate Model'
+      : 'Scale Model';
+
+  const handleTransformStart = useCallback(() => {
+    if (!selectedMeshRef.current) return;
+    const mesh = selectedMeshRef.current;
+    dragStartTransformRef.current = {
+      position: mesh.position.toArray() as [number, number, number],
+      rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+      scale: mesh.scale.toArray() as [number, number, number],
+    };
+  }, []);
+
   const handleTransformEnd = useCallback(() => {
     if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
     const mesh = selectedMeshRef.current;
@@ -662,8 +702,14 @@ function BedScene({
       mesh.position.toArray() as [number, number, number],
       [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
       mesh.scale.toArray() as [number, number, number],
+      {
+        recordHistory: true,
+        actionLabel: transformActionLabel,
+        historyBefore: dragStartTransformRef.current ?? undefined,
+      },
     );
-  }, [selectedModelId, onModelTransform]);
+    dragStartTransformRef.current = null;
+  }, [onModelTransform, selectedModelId, transformActionLabel]);
 
   const handleTransformChange = useCallback(() => {
     if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
@@ -673,8 +719,9 @@ function BedScene({
       mesh.position.toArray() as [number, number, number],
       [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
       mesh.scale.toArray() as [number, number, number],
+      { recordHistory: false, actionLabel: transformActionLabel },
     );
-  }, [selectedModelId, onModelTransform]);
+  }, [onModelTransform, selectedModelId, transformActionLabel]);
 
   // Deselect when clicking the bed/background
   const handlePointerMissed = useCallback(() => {
@@ -753,6 +800,7 @@ function BedScene({
           mode={transformMode}
           orbitRef={orbitRef}
           onTransform={handleTransformChange}
+          onTransformStart={handleTransformStart}
           onTransformEnd={handleTransformEnd}
         />
       )}
