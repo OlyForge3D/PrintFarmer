@@ -455,10 +455,10 @@ function STLModel({
       receiveShadow
     >
       <meshStandardMaterial 
-        color={selected ? "#00c853" : "#009688"}
+        color="#009688"
         metalness={0.15}
         roughness={0.45}
-        emissive={selected ? "#003d19" : "#002b26"}
+        emissive="#002b26"
       />
       {selected && <SelectionBoundingBox geometry={geometry} />}
     </mesh>
