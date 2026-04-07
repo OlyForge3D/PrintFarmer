@@ -599,10 +599,14 @@ function FaceSwatches({
 }
 
 /**
- * Compute the data-model position Z that places the rotated model on the bed (z=0).
+ * Compute the data-model position Z that places the transformed model on the bed (z=0).
  * STLModel offsets by halfZ internally, so we account for that.
  */
-function computeZForBedPlacement(geometry: THREE.BufferGeometry, q: THREE.Quaternion): number {
+function computeZForBedPlacement(
+  geometry: THREE.BufferGeometry,
+  q: THREE.Quaternion,
+  scale: THREE.Vector3 = new THREE.Vector3(1, 1, 1),
+): number {
   const posAttr = geometry.getAttribute('position');
   if (!posAttr) return 0;
 
@@ -610,14 +614,14 @@ function computeZForBedPlacement(geometry: THREE.BufferGeometry, q: THREE.Quater
   let minRotatedZ = Infinity;
   for (let i = 0; i < posAttr.count; i++) {
     v.fromBufferAttribute(posAttr, i);
-    v.applyQuaternion(q);
+    v.multiply(scale).applyQuaternion(q);
     if (v.z < minRotatedZ) minRotatedZ = v.z;
   }
 
   // The centered geometry has halfZ = (max.z - min.z) / 2.
   // STLModel group position.z = data_pz + halfZ.
-  // World Z of lowest vertex = data_pz + halfZ + minRotatedZ.
-  // For bed placement (lowest at 0): data_pz = -halfZ - minRotatedZ.
+  // World Z of lowest vertex = data_pz + halfZ + minScaledRotatedZ.
+  // For bed placement (lowest at 0): data_pz = -halfZ - minScaledRotatedZ.
   geometry.computeBoundingBox();
   const halfZ = geometry.boundingBox
     ? (geometry.boundingBox.max.z - geometry.boundingBox.min.z) / 2
@@ -933,9 +937,14 @@ function BedScene({
     if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
     const obj = selectedMeshRef.current;
     const halfZ: number = obj.userData.halfZ || 0;
+    const geo: THREE.BufferGeometry | undefined = obj.userData.geometry;
+    const scaleVec = new THREE.Vector3(obj.scale.x, obj.scale.y, obj.scale.z);
+    const positionZ = (transformMode === 'rotate' || transformMode === 'scale') && geo
+      ? computeZForBedPlacement(geo, obj.quaternion, scaleVec)
+      : obj.position.z - halfZ;
     onModelTransform(
       selectedModelId,
-      [obj.position.x, obj.position.y, obj.position.z - halfZ] as [number, number, number],
+      [obj.position.x, obj.position.y, positionZ] as [number, number, number],
       [obj.rotation.x, obj.rotation.y, obj.rotation.z],
       obj.scale.toArray() as [number, number, number],
       {
@@ -945,20 +954,25 @@ function BedScene({
       },
     );
     dragStartTransformRef.current = null;
-  }, [onModelTransform, selectedModelId, transformActionLabel]);
+  }, [onModelTransform, selectedModelId, transformActionLabel, transformMode]);
 
   const handleTransformChange = useCallback(() => {
     if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
     const obj = selectedMeshRef.current;
     const halfZ: number = obj.userData.halfZ || 0;
+    const geo: THREE.BufferGeometry | undefined = obj.userData.geometry;
+    const scaleVec = new THREE.Vector3(obj.scale.x, obj.scale.y, obj.scale.z);
+    const positionZ = (transformMode === 'rotate' || transformMode === 'scale') && geo
+      ? computeZForBedPlacement(geo, obj.quaternion, scaleVec)
+      : obj.position.z - halfZ;
     onModelTransform(
       selectedModelId,
-      [obj.position.x, obj.position.y, obj.position.z - halfZ] as [number, number, number],
+      [obj.position.x, obj.position.y, positionZ] as [number, number, number],
       [obj.rotation.x, obj.rotation.y, obj.rotation.z],
       obj.scale.toArray() as [number, number, number],
       { recordHistory: false, actionLabel: transformActionLabel },
     );
-  }, [onModelTransform, selectedModelId, transformActionLabel]);
+  }, [onModelTransform, selectedModelId, transformActionLabel, transformMode]);
 
   // Deselect when clicking the bed/background
   const handlePointerMissed = useCallback(() => {
@@ -981,7 +995,8 @@ function BedScene({
 
     const q = new THREE.Quaternion().setFromUnitVectors(normal, new THREE.Vector3(0, 0, -1));
     const euler = new THREE.Euler().setFromQuaternion(q);
-    const dataZ = computeZForBedPlacement(geo, q);
+    const scaleVec = new THREE.Vector3(obj.scale.x, obj.scale.y, obj.scale.z);
+    const dataZ = computeZForBedPlacement(geo, q, scaleVec);
 
     onModelTransform(
       selectedModelId,
@@ -1025,6 +1040,7 @@ function BedScene({
     const triCount = index ? index.count / 3 : posAttr.count / 3;
     const triNormals: THREE.Vector3[] = [];
     const triAreas: number[] = [];
+    const triCentroids: THREE.Vector3[] = [];
     let totalArea = 0;
     const tA = new THREE.Vector3(), tB = new THREE.Vector3(), tC = new THREE.Vector3();
     const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), tn = new THREE.Vector3();
@@ -1045,17 +1061,23 @@ function BedScene({
       if (area < 1e-6) {
         triNormals.push(new THREE.Vector3(0, 0, 1));
         triAreas.push(0);
+        triCentroids.push(new THREE.Vector3());
         continue;
       }
       triNormals.push(tn.clone().normalize());
       triAreas.push(area);
+      triCentroids.push(new THREE.Vector3().addVectors(tA, tB).add(tC).multiplyScalar(1 / 3));
       totalArea += area;
     }
 
-    // Evaluate each candidate: score by height + overhang penalty
+    // Evaluate each candidate: score by height + unsupported-overhang penalty
     const OVERHANG_THRESH = -0.5; // ~60° from horizontal
+    const OVERHANG_WEIGHT = 2.0;
+    const SUPPORT_Z_TOL_MM = 0.8;
     const v = new THREE.Vector3();
     const rn = new THREE.Vector3();
+    const rc = new THREE.Vector3();
+    const scaleVec = new THREE.Vector3(obj.scale.x, obj.scale.y, obj.scale.z);
     let bestQ: THREE.Quaternion | null = null;
     let bestScore = Infinity;
 
@@ -1065,30 +1087,33 @@ function BedScene({
         new THREE.Vector3(0, 0, -1),
       );
 
-      // Height from vertices
+      // Height from scaled + rotated vertices
       let minZ = Infinity;
       let maxZ = -Infinity;
       for (let i = 0; i < posAttr.count; i++) {
         v.fromBufferAttribute(posAttr, i);
-        v.applyQuaternion(candidateQ);
+        v.multiply(scaleVec).applyQuaternion(candidateQ);
         if (v.z < minZ) minZ = v.z;
         if (v.z > maxZ) maxZ = v.z;
       }
       const height = maxZ - minZ;
 
-      // Overhang area from triangles
+      // Overhang area from triangles, excluding surfaces effectively supported by the bed.
       let overhangArea = 0;
       for (let i = 0; i < triCount; i++) {
         rn.copy(triNormals[i]).applyQuaternion(candidateQ);
-        if (rn.z < OVERHANG_THRESH) {
+        if (rn.z >= OVERHANG_THRESH) continue;
+
+        rc.copy(triCentroids[i]).multiply(scaleVec).applyQuaternion(candidateQ);
+        const isBedSupported = rc.z <= minZ + SUPPORT_Z_TOL_MM;
+        if (!isBedSupported) {
           overhangArea += triAreas[i];
         }
       }
       const overhangRatio = totalArea > 0 ? overhangArea / totalArea : 0;
 
-      // Combined score: normalised height + overhang penalty
-      // Height is primary (weight 1.0), overhang is secondary (weight 0.4 * max_height)
-      const score = height + 0.4 * (maxZ - minZ > 0 ? height : 1) * overhangRatio;
+      // Keep height as a first-order term, but strongly penalize unsupported overhang.
+      const score = height * (1 + OVERHANG_WEIGHT * overhangRatio);
       if (score < bestScore) {
         bestScore = score;
         bestQ = candidateQ;
@@ -1097,7 +1122,7 @@ function BedScene({
 
     if (!bestQ) return;
     const euler = new THREE.Euler().setFromQuaternion(bestQ);
-    const dataZ = computeZForBedPlacement(geo, bestQ);
+    const dataZ = computeZForBedPlacement(geo, bestQ, scaleVec);
 
     onModelTransform(
       selectedModelId,

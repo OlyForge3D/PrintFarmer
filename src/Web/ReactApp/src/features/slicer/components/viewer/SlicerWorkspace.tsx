@@ -152,10 +152,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       // STLModel renders at world Z = pz + halfZ_raw (unscaled geometry half-height).
       // The rotated AABB center is at (px, py, pz + halfZ_raw) with half-extents (hx, hy, hz).
       const halfZRaw = selectedModelMetrics.baseSize[2] / 2;
+      const epsilon = 0.75; // Avoid warning flicker from tiny floating-point boundary jitter.
       if (
-        px - hx < -halfW || px + hx > halfW ||
-        py - hy < -halfD || py + hy > halfD ||
-        pz + halfZRaw - hz < 0 || pz + halfZRaw + hz > maxZ
+        px - hx < -halfW - epsilon || px + hx > halfW + epsilon ||
+        py - hy < -halfD - epsilon || py + hy > halfD + epsilon ||
+        pz + halfZRaw - hz < -epsilon || pz + halfZRaw + hz > maxZ + epsilon
       ) {
         ids.add(model.id);
       }
