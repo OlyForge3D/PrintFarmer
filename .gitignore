@@ -119,3 +119,6 @@ tools/installer/dist/
 # C# Language Server cache
 *.csproj.lscache
 *.png
+
+# C# devkit generated cache files
+*.lscache 
