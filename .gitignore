@@ -116,3 +116,6 @@ tools/installer/dist/
 .dolt/
 .beads-credential-key
 *.png
+
+# C# devkit generated cache files
+*.lscache 
