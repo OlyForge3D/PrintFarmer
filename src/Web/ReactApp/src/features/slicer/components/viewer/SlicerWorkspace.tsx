@@ -694,10 +694,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
             {activeTool === 'rotate' && (
               <div className="space-y-2">
+                {/* Header row */}
                 <div className="grid grid-cols-[180px_1fr] items-center gap-2">
-                  <Select value="world" onChange={() => {}}>
-                    <option value="world">World coordinates</option>
-                  </Select>
+                  <div className="text-sm text-pf-text-primary">World coordinates</div>
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <span className="text-sm text-red-500 font-medium">X</span>
                     <span className="text-sm text-green-500 font-medium">Y</span>
@@ -705,8 +704,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-[110px_1fr_20px] items-center gap-2">
-                  <div className="text-sm text-pf-text-primary">Relative</div>
+                {/* Rotate (relative) row */}
+                <div className="grid grid-cols-[180px_1fr_20px] items-center gap-2">
+                  <div className="text-sm text-pf-text-primary">Rotate (relative)</div>
                   <div className="grid grid-cols-3 gap-2">
                     <Input type="number" step="0.01" value={String(rotateRelativeInput[0])} onChange={(e) => setRotateRelativeAxis(0, Number(e.target.value || 0))} />
                     <Input type="number" step="0.01" value={String(rotateRelativeInput[1])} onChange={(e) => setRotateRelativeAxis(1, Number(e.target.value || 0))} />
@@ -715,8 +715,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   <div className="text-xs text-pf-text-primary">°</div>
                 </div>
 
-                <div className="grid grid-cols-[110px_1fr_20px_auto] items-center gap-2">
-                  <div className="text-sm text-pf-text-primary">Absolute</div>
+                {/* Rotate (absolute) row */}
+                <div className="grid grid-cols-[180px_1fr_20px_auto] items-center gap-2">
+                  <div className="text-sm text-pf-text-primary">Rotate (absolute)</div>
                   <div className="grid grid-cols-3 gap-2">
                     <Input type="number" step="0.01" value={String(rotateAbsoluteInput[0])} onChange={(e) => setRotateAbsoluteAxis(0, Number(e.target.value || 0))} />
                     <Input type="number" step="0.01" value={String(rotateAbsoluteInput[1])} onChange={(e) => setRotateAbsoluteAxis(1, Number(e.target.value || 0))} />
