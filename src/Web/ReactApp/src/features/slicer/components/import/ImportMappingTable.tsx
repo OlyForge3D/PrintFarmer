@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import clsx from 'clsx';
-import { Badge, Input, Card } from '@/common/components/ui';
+import { Badge, Button, Checkbox, Input, Card } from '@/common/components/ui';
 import { ChevronDownIcon, ChevronRightIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
 
 export interface FieldMapping {
@@ -106,7 +106,8 @@ export function ImportMappingTable({
 
             {/* Status filter */}
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                variant="unstyled"
                 onClick={() => setStatusFilter('all')}
                 className={clsx(
                   'px-3 py-1.5 text-sm rounded transition-colors',
@@ -116,10 +117,11 @@ export function ImportMappingTable({
                 )}
               >
                 All ({mappings.length})
-              </button>
+              </Button>
               {Object.entries(statusCounts).map(([status, count]) => (
-                <button
+                <Button
                   key={status}
+                  variant="unstyled"
                   onClick={() => setStatusFilter(status)}
                   className={clsx(
                     'px-3 py-1.5 text-sm rounded transition-colors',
@@ -129,20 +131,16 @@ export function ImportMappingTable({
                   )}
                 >
                   {statusConfig[status as keyof typeof statusConfig].label} ({count})
-                </button>
+                </Button>
               ))}
             </div>
 
             {/* Show unmapped toggle */}
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showUnmapped}
-                onChange={(e) => setShowUnmapped(e.target.checked)}
-                className="rounded"
-              />
-              <span className="text-sm text-pf-text-secondary">Show unmapped</span>
-            </label>
+            <Checkbox
+              label="Show unmapped"
+              checked={showUnmapped}
+              onChange={(e) => setShowUnmapped(e.target.checked)}
+            />
           </div>
         </Card.Body>
       </Card>
@@ -196,13 +194,13 @@ export function ImportMappingTable({
                       >
                         <td className="px-4 py-3">
                           {hasNote && (
-                            <button className="text-pf-text-secondary hover:text-pf-text-primary">
+                            <Button variant="ghost" size="sm" className="!p-0 text-pf-text-secondary hover:text-pf-text-primary">
                               {isExpanded ? (
                                 <ChevronDownIcon className="w-4 h-4" />
                               ) : (
                                 <ChevronRightIcon className="w-4 h-4" />
                               )}
-                            </button>
+                            </Button>
                           )}
                         </td>
                         <td className="px-4 py-3 text-sm font-mono text-pf-text-primary">

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Badge, Tabs } from '@/common/components/ui';
+import { Badge, Button, Tabs } from '@/common/components/ui';
 
 export interface CompatibilityMatrixProps {
   machines: Array<{ 
@@ -206,8 +206,8 @@ export function CompatibilityMatrix({
                           key={profile.id}
                           className="px-3 py-3 text-center"
                         >
-                          <button
-                            type="button"
+                          <Button
+                            variant="unstyled"
                             onClick={() => onCellClick?.(machine.id, profile.id, mode)}
                             className={clsx(
                               'inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium transition-colors',
@@ -224,7 +224,7 @@ export function CompatibilityMatrix({
                             }
                           >
                             {icon}
-                          </button>
+                          </Button>
                         </td>
                       );
                     })}

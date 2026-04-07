@@ -3,13 +3,13 @@
  * Main container combining toolbar, 3D bed visualization, left tools, and status bar
  * Matches OrcaSlicer's interface layout
  */
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
 import { SlicerBedVisualization, type LoadedModel, type BedConfig } from './SlicerBedVisualization';
-import { Checkbox, Input, Select } from '@/common/components/ui';
-import { RotateCcw } from 'lucide-react';
+import { Button, Checkbox, Input, Select } from '@/common/components/ui';
+import { RotateCcw, AlertTriangle } from 'lucide-react';
 
 export interface SlicerWorkspaceProps {
   /** Bed configuration including dimensions */
@@ -104,6 +104,52 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   const hasModels = models.length > 0;
   const hasSelection = selectedModelId != null && models.some(m => m.id === selectedModelId);
+
+  // Compute which models exceed the build volume.
+  // For each model we approximate the axis-aligned bounding box from
+  // baseSize * scale + position.  Rotation makes the true AABB larger;
+  // we use the bounding-sphere radius of the scaled size as a
+  // conservative estimate when any rotation is non-zero.
+  const outOfBoundsModelIds = useMemo(() => {
+    const halfW = bedConfig.width / 2;
+    const halfD = bedConfig.depth / 2;
+    const maxZ = bedConfig.height;
+    const ids = new Set<string>();
+
+    for (const model of models) {
+      // We only know baseSize for the selected model via metrics.
+      // For others, approximate using scale (baseSize unknown → skip).
+      let bx: number, by: number, bz: number;
+      if (selectedModelMetrics && selectedModelMetrics.modelId === model.id) {
+        bx = selectedModelMetrics.baseSize[0] * model.scale[0];
+        by = selectedModelMetrics.baseSize[1] * model.scale[1];
+        bz = selectedModelMetrics.baseSize[2] * model.scale[2];
+      } else {
+        // Without baseSize we can't check — skip non-selected models for now.
+        continue;
+      }
+
+      const hasRotation = model.rotation[0] !== 0 || model.rotation[1] !== 0 || model.rotation[2] !== 0;
+      let hx: number, hy: number, hz: number;
+      if (hasRotation) {
+        // Conservative: bounding sphere radius of the scaled box
+        const r = Math.sqrt(bx * bx + by * by + bz * bz) / 2;
+        hx = r; hy = r; hz = r;
+      } else {
+        hx = bx / 2; hy = by / 2; hz = bz / 2;
+      }
+
+      const [px, py, pz] = model.position;
+      if (
+        px - hx < -halfW || px + hx > halfW ||
+        py - hy < -halfD || py + hy > halfD ||
+        pz < 0 || pz + hz * 2 > maxZ  // z starts at bed surface
+      ) {
+        ids.add(model.id);
+      }
+    }
+    return ids;
+  }, [bedConfig.depth, bedConfig.height, bedConfig.width, models, selectedModelMetrics]);
   const radToDeg = (radians: number) => radians * (180 / Math.PI);
   const degToRad = (degrees: number) => degrees * (Math.PI / 180);
 
@@ -238,7 +284,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
 
       if (activeTool === 'move') {
-        setMovePositionInput(position);
+        setMovePositionInput(moveCoordinateMode === 'world' ? position : [0, 0, 0]);
         return;
       }
 
@@ -266,7 +312,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         }
       }
     },
-    [activeTool, models, onModelTransform, pushHistoryEntry, selectedModelId, selectedModelMetrics, triplesEqual, uniformScale],
+    [activeTool, models, moveCoordinateMode, onModelTransform, pushHistoryEntry, selectedModelId, selectedModelMetrics, triplesEqual, uniformScale],
   );
 
   const applyHistoryEntry = useCallback((entry: TransformHistoryEntry, direction: 'before' | 'after') => {
@@ -420,7 +466,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (tool === 'move') {
       const selectedModel = selectedModelId ? models.find((m) => m.id === selectedModelId) : undefined;
       if (selectedModel) {
-        setMovePositionInput(selectedModel.position);
+        setMovePositionInput(moveCoordinateMode === 'world' ? selectedModel.position : [0, 0, 0]);
       }
       setActiveTool('move');
       return;
@@ -454,7 +500,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     }
 
     setActiveTool(tool);
-  }, [hasSelection, selectedModelId, models, selectedModelMetrics]);
+  }, [hasSelection, moveCoordinateMode, selectedModelId, models, selectedModelMetrics]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -512,6 +558,26 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     setRotateRelativeInput([0, 0, 0]);
   }, [selectedModelId, handleModelTransform, onModelTransform, models, rotateAbsoluteInput]);
 
+  const applyScaleFromPercent = useCallback((percent: [number, number, number]) => {
+    if (!selectedModelId || !selectedModelMetrics) return;
+    const model = models.find((m) => m.id === selectedModelId);
+    if (!model) return;
+    const nextScale: [number, number, number] = [percent[0] / 100, percent[1] / 100, percent[2] / 100];
+    handleModelTransform(model.id, model.position, model.rotation, nextScale, { actionLabel: 'Scale Model' });
+  }, [selectedModelId, selectedModelMetrics, models, handleModelTransform]);
+
+  const applyScaleFromMm = useCallback((mm: [number, number, number]) => {
+    if (!selectedModelId || !selectedModelMetrics) return;
+    const model = models.find((m) => m.id === selectedModelId);
+    if (!model) return;
+    const nextScale: [number, number, number] = [
+      mm[0] / selectedModelMetrics.baseSize[0],
+      mm[1] / selectedModelMetrics.baseSize[1],
+      mm[2] / selectedModelMetrics.baseSize[2],
+    ];
+    handleModelTransform(model.id, model.position, model.rotation, nextScale, { actionLabel: 'Scale Model' });
+  }, [selectedModelId, selectedModelMetrics, models, handleModelTransform]);
+
   // Map left-tool type to Three.js TransformControls mode
   const transformMode = activeTool === 'move'
     ? 'translate'
@@ -556,10 +622,19 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           transformMode={transformMode}
           onModelTransform={handleModelTransform}
           onSelectedModelMetricsChange={setSelectedModelMetrics}
+          outOfBoundsModelIds={outOfBoundsModelIds}
           showGrid={true}
           showAxes={true}
           className="w-full h-full"
         />
+
+        {/* Out-of-bounds warning banner */}
+        {outOfBoundsModelIds.size > 0 && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-md bg-amber-900/90 border border-amber-600 px-3 py-1.5 text-amber-200 text-xs shadow-lg backdrop-blur-xs">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span>Object outside build volume</span>
+          </div>
+        )}
 
         {/* Left manipulation tools */}
         <SlicerLeftTools
@@ -572,86 +647,76 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
         {/* Non-modal transform panel: can be used alongside gizmo controls */}
         {hasSelection && activeTool && activeTool !== 'layers' && (
-          <div className="absolute right-4 bottom-24 z-20 w-80 rounded-md border border-pf-border bg-pf-bg-1/95 backdrop-blur-xs shadow-lg p-3">
+          <div className="absolute right-4 bottom-8 z-20 w-80 rounded-md border border-pf-border bg-pf-bg-1/95 backdrop-blur-xs shadow-lg p-3">
             <div className="text-sm font-semibold text-pf-text-primary mb-2">
               {activeTool === 'move' ? 'Move' : activeTool === 'rotate' ? 'Rotate' : 'Scale'}
             </div>
 
             {activeTool === 'move' && (
-              <div className="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-x-2 gap-y-1.5">
-                {/* Row 1: header */}
-                <div />
-                <div className="text-xs text-red-500 font-medium text-center">X</div>
-                <div className="text-xs text-green-500 font-medium text-center">Y</div>
-                <div className="text-xs text-sky-500 font-medium text-center">Z</div>
-                {/* Row 2: Position */}
-                <div className="text-xs text-pf-text-primary whitespace-nowrap">Position</div>
-                <Input type="number" step="0.01" value={String(movePositionInput[0])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [v, movePositionInput[1], movePositionInput[2]]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, next, m.rotation, m.scale, { actionLabel: 'Move Model' }); } }} />
-                <Input type="number" step="0.01" value={String(movePositionInput[1])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [movePositionInput[0], v, movePositionInput[2]]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, next, m.rotation, m.scale, { actionLabel: 'Move Model' }); } }} />
-                <Input type="number" step="0.01" value={String(movePositionInput[2])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [movePositionInput[0], movePositionInput[1], v]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, next, m.rotation, m.scale, { actionLabel: 'Move Model' }); } }} />
-                {/* Row 3: coordinate mode */}
-                <div className="col-span-3">
-                  <Select value={moveCoordinateMode} onChange={(e) => setMoveCoordinateMode(e.target.value === 'object' ? 'object' : 'world')}>
-                    <option value="world">World (absolute)</option>
-                    <option value="object">Object (relative)</option>
-                  </Select>
+              <div className="space-y-2">
+                <Select value={moveCoordinateMode} onChange={(e) => { const mode = e.target.value === 'object' ? 'object' as const : 'world' as const; setMoveCoordinateMode(mode); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) { setMovePositionInput(mode === 'world' ? m.position : [0, 0, 0]); } } }}>
+                  <option value="world">World (absolute)</option>
+                  <option value="object">Object (relative)</option>
+                </Select>
+                <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] items-center gap-x-2 gap-y-1.5">
+                  <div />
+                  <div className="text-xs text-red-500 font-medium text-center">X</div>
+                  <div className="text-xs text-green-500 font-medium text-center">Y</div>
+                  <div className="text-xs text-sky-500 font-medium text-center">Z</div>
+                  <div />
+                  <div className="text-xs text-pf-text-primary whitespace-nowrap">{moveCoordinateMode === 'world' ? 'Position' : 'Offset'}</div>
+                  <Input type="number" step="0.01" value={String(movePositionInput[0])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [v, movePositionInput[1], movePositionInput[2]]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) { const pos: [number, number, number] = moveCoordinateMode === 'world' ? next : [m.position[0] + next[0], m.position[1] + next[1], m.position[2] + next[2]]; handleModelTransform(m.id, pos, m.rotation, m.scale, { actionLabel: 'Move Model' }); } } }} />
+                  <Input type="number" step="0.01" value={String(movePositionInput[1])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [movePositionInput[0], v, movePositionInput[2]]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) { const pos: [number, number, number] = moveCoordinateMode === 'world' ? next : [m.position[0] + next[0], m.position[1] + next[1], m.position[2] + next[2]]; handleModelTransform(m.id, pos, m.rotation, m.scale, { actionLabel: 'Move Model' }); } } }} />
+                  <Input type="number" step="0.01" value={String(movePositionInput[2])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [movePositionInput[0], movePositionInput[1], v]; setMovePositionInput(next); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) { const pos: [number, number, number] = moveCoordinateMode === 'world' ? next : [m.position[0] + next[0], m.position[1] + next[1], m.position[2] + next[2]]; handleModelTransform(m.id, pos, m.rotation, m.scale, { actionLabel: 'Move Model' }); } } }} />
+                  <Button variant="ghost" size="sm" className="!p-1" title="Reset position" onClick={() => { const zero: [number, number, number] = [0, 0, 0]; setMovePositionInput(zero); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, zero, m.rotation, m.scale, { actionLabel: 'Reset Position' }); } }}>
+                    <RotateCcw size={14} />
+                  </Button>
                 </div>
-                <div />
-                {/* Row 4: Reset */}
-                <button type="button" className="p-1 rounded hover:bg-pf-bg-2 text-pf-text-muted hover:text-pf-text-primary transition-colors" title="Reset position" onClick={() => { const zero: [number, number, number] = [0, 0, 0]; setMovePositionInput(zero); if (selectedModelId) { const m = models.find((x) => x.id === selectedModelId); if (m) handleModelTransform(m.id, zero, m.rotation, m.scale, { actionLabel: 'Reset Position' }); } }}>
-                  <RotateCcw size={14} />
-                </button>
-                <div /><div /><div />
               </div>
             )}
 
             {activeTool === 'rotate' && (
-              <div className="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-x-2 gap-y-1.5">
-                {/* Row 1: header */}
+              <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] items-center gap-x-2 gap-y-1.5">
                 <div />
                 <div className="text-xs text-red-500 font-medium text-center">X</div>
                 <div className="text-xs text-green-500 font-medium text-center">Y</div>
                 <div className="text-xs text-sky-500 font-medium text-center">Z</div>
-                {/* Row 2: Relative */}
+                <div />
                 <div className="text-xs text-pf-text-primary whitespace-nowrap">Relative</div>
                 <Input type="number" step="0.01" value={String(rotateRelativeInput[0])} onChange={(e) => setRotateRelativeAxis(0, Number(e.target.value || 0))} />
                 <Input type="number" step="0.01" value={String(rotateRelativeInput[1])} onChange={(e) => setRotateRelativeAxis(1, Number(e.target.value || 0))} />
                 <Input type="number" step="0.01" value={String(rotateRelativeInput[2])} onChange={(e) => setRotateRelativeAxis(2, Number(e.target.value || 0))} />
-                {/* Row 3: Absolute */}
+                <div />
                 <div className="text-xs text-pf-text-primary whitespace-nowrap">Absolute</div>
                 <Input type="number" step="0.01" value={String(rotateAbsoluteInput[0])} onChange={(e) => setRotateAbsoluteAxis(0, Number(e.target.value || 0))} />
                 <Input type="number" step="0.01" value={String(rotateAbsoluteInput[1])} onChange={(e) => setRotateAbsoluteAxis(1, Number(e.target.value || 0))} />
                 <Input type="number" step="0.01" value={String(rotateAbsoluteInput[2])} onChange={(e) => setRotateAbsoluteAxis(2, Number(e.target.value || 0))} />
-                {/* Row 4: Reset */}
-                <button type="button" className="p-1 rounded hover:bg-pf-bg-2 text-pf-text-muted hover:text-pf-text-primary transition-colors" title="Reset rotation" onClick={() => { setRotateBaseAbsoluteInput([0, 0, 0]); setRotateRelativeInput([0, 0, 0]); setRotateAbsoluteInput([0, 0, 0]); handleRotateApply(); }}>
+                <Button variant="ghost" size="sm" className="!p-1" title="Reset rotation" onClick={() => { setRotateBaseAbsoluteInput([0, 0, 0]); setRotateRelativeInput([0, 0, 0]); setRotateAbsoluteInput([0, 0, 0]); handleRotateApply(); }}>
                   <RotateCcw size={14} />
-                </button>
-                <div /><div /><div />
+                </Button>
               </div>
             )}
 
             {activeTool === 'scale' && (
-              <div className="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-x-2 gap-y-1.5">
-                {/* Row 1: header */}
+              <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] items-center gap-x-2 gap-y-1.5">
                 <div />
                 <div className="text-xs text-red-500 font-medium text-center">X</div>
                 <div className="text-xs text-green-500 font-medium text-center">Y</div>
                 <div className="text-xs text-sky-500 font-medium text-center">Z</div>
-                {/* Row 2: Scale % */}
+                <div />
                 <div className="text-xs text-pf-text-primary whitespace-nowrap">Scale %</div>
                 <Input type="number" step="0.01" value={String(scalePercentInput[0])} onChange={(e) => { const v = Number(e.target.value || 0); const next = applyUniformTriple([v, scalePercentInput[1], scalePercentInput[2]], v); setScalePercentInput(next); if (selectedModelMetrics) { setScaleMmInput([(selectedModelMetrics.baseSize[0] * next[0]) / 100, (selectedModelMetrics.baseSize[1] * next[1]) / 100, (selectedModelMetrics.baseSize[2] * next[2]) / 100]); } applyScaleFromPercent(next); }} />
                 <Input type="number" step="0.01" disabled={uniformScale} value={String(scalePercentInput[1])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [scalePercentInput[0], v, scalePercentInput[2]]; setScalePercentInput(next); if (selectedModelMetrics) { setScaleMmInput([(selectedModelMetrics.baseSize[0] * next[0]) / 100, (selectedModelMetrics.baseSize[1] * next[1]) / 100, (selectedModelMetrics.baseSize[2] * next[2]) / 100]); } applyScaleFromPercent(next); }} />
                 <Input type="number" step="0.01" disabled={uniformScale} value={String(scalePercentInput[2])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [scalePercentInput[0], scalePercentInput[1], v]; setScalePercentInput(next); if (selectedModelMetrics) { setScaleMmInput([(selectedModelMetrics.baseSize[0] * next[0]) / 100, (selectedModelMetrics.baseSize[1] * next[1]) / 100, (selectedModelMetrics.baseSize[2] * next[2]) / 100]); } applyScaleFromPercent(next); }} />
-                {/* Row 3: Size mm */}
+                <div />
                 <div className="text-xs text-pf-text-primary whitespace-nowrap">Size mm</div>
                 <Input type="number" step="0.01" value={String(scaleMmInput[0])} onChange={(e) => { const v = Number(e.target.value || 0); let next: [number, number, number]; if (uniformScale && selectedModelMetrics) { const ratio = v / (selectedModelMetrics.currentSize[0] || 1); next = [v, selectedModelMetrics.currentSize[1] * ratio, selectedModelMetrics.currentSize[2] * ratio]; } else { next = [v, scaleMmInput[1], scaleMmInput[2]]; } setScaleMmInput(next); if (selectedModelMetrics) { setScalePercentInput([(next[0] / selectedModelMetrics.baseSize[0]) * 100, (next[1] / selectedModelMetrics.baseSize[1]) * 100, (next[2] / selectedModelMetrics.baseSize[2]) * 100]); } applyScaleFromMm(next); }} />
                 <Input type="number" step="0.01" disabled={uniformScale} value={String(scaleMmInput[1])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [scaleMmInput[0], v, scaleMmInput[2]]; setScaleMmInput(next); if (selectedModelMetrics) { setScalePercentInput([(next[0] / selectedModelMetrics.baseSize[0]) * 100, (next[1] / selectedModelMetrics.baseSize[1]) * 100, (next[2] / selectedModelMetrics.baseSize[2]) * 100]); } applyScaleFromMm(next); }} />
                 <Input type="number" step="0.01" disabled={uniformScale} value={String(scaleMmInput[2])} onChange={(e) => { const v = Number(e.target.value || 0); const next: [number, number, number] = [scaleMmInput[0], scaleMmInput[1], v]; setScaleMmInput(next); if (selectedModelMetrics) { setScalePercentInput([(next[0] / selectedModelMetrics.baseSize[0]) * 100, (next[1] / selectedModelMetrics.baseSize[1]) * 100, (next[2] / selectedModelMetrics.baseSize[2]) * 100]); } applyScaleFromMm(next); }} />
-                {/* Row 4: Reset + Uniform checkbox */}
-                <button type="button" className="p-1 rounded hover:bg-pf-bg-2 text-pf-text-muted hover:text-pf-text-primary transition-colors" title="Reset scale" onClick={() => { setScalePercentInput([100, 100, 100]); if (selectedModelMetrics) { setScaleMmInput([...selectedModelMetrics.baseSize]); } applyScaleFromPercent([100, 100, 100]); }}>
+                <Button variant="ghost" size="sm" className="!p-1" title="Reset scale" onClick={() => { setScalePercentInput([100, 100, 100]); if (selectedModelMetrics) { setScaleMmInput([...selectedModelMetrics.baseSize]); } applyScaleFromPercent([100, 100, 100]); }}>
                   <RotateCcw size={14} />
-                </button>
-                <div className="col-span-3">
+                </Button>
+                <div className="col-span-5 pt-1">
                   <Checkbox label="Uniform" checked={uniformScale} onChange={(e) => setUniformScale(e.target.checked)} />
                 </div>
               </div>
