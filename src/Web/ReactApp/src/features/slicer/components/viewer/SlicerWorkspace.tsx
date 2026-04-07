@@ -20,7 +20,17 @@ export interface SlicerWorkspaceProps {
   /** Callback when a model is selected */
   onModelSelect?: (modelId: string | null) => void;
   /** Callback when a model is moved/rotated/scaled */
-  onModelTransform?: (modelId: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
+  onModelTransform?: (
+    modelId: string,
+    position: [number, number, number],
+    rotation: [number, number, number],
+    scale: [number, number, number],
+    options?: {
+      recordHistory?: boolean;
+      actionLabel?: string;
+      historyBefore?: TransformSnapshot;
+    },
+  ) => void;
   /** Callback when Add Model is clicked */
   onAddModel?: () => void;
   /** Callback when Settings & Profiles is clicked */
@@ -158,7 +168,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       position: [number, number, number],
       rotation: [number, number, number],
       scale: [number, number, number],
-      options?: { recordHistory?: boolean; actionLabel?: string },
+      options?: { recordHistory?: boolean; actionLabel?: string; historyBefore?: TransformSnapshot },
     ) => {
       if (!onModelTransform) {
         return;
@@ -166,39 +176,62 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
       const recordHistory = options?.recordHistory ?? true;
       const actionLabel = options?.actionLabel ?? 'Transform';
+      const historyBefore = options?.historyBefore;
       const currentModel = models.find((model) => model.id === modelId);
+
+      let nextScale: [number, number, number] = scale;
+      if (currentModel && activeTool === 'scale' && uniformScale && selectedModelId === modelId) {
+        const deltas: [number, number, number] = [
+          Math.abs(scale[0] - currentModel.scale[0]),
+          Math.abs(scale[1] - currentModel.scale[1]),
+          Math.abs(scale[2] - currentModel.scale[2]),
+        ];
+        const dominantAxis = deltas[1] > deltas[0] ? (deltas[2] > deltas[1] ? 2 : 1) : (deltas[2] > deltas[0] ? 2 : 0);
+        const master = scale[dominantAxis];
+        nextScale = [master, master, master];
+      }
 
       if (currentModel) {
         const noChange =
           triplesEqual(currentModel.position, position) &&
           triplesEqual(currentModel.rotation, rotation) &&
-          triplesEqual(currentModel.scale, scale);
+          triplesEqual(currentModel.scale, nextScale);
 
-        if (noChange) {
+        const shouldCreateHistoryFromSnapshot =
+          recordHistory &&
+          !isApplyingHistoryRef.current &&
+          historyBefore != null &&
+          (!triplesEqual(historyBefore.position, position) ||
+            !triplesEqual(historyBefore.rotation, rotation) ||
+            !triplesEqual(historyBefore.scale, nextScale));
+
+        if (noChange && !shouldCreateHistoryFromSnapshot) {
           return;
         }
 
         if (recordHistory && !isApplyingHistoryRef.current) {
+          const before = historyBefore ?? {
+            position: currentModel.position,
+            rotation: currentModel.rotation,
+            scale: currentModel.scale,
+          };
+
           pushHistoryEntry({
             action: actionLabel,
             deltas: [{
               modelId,
-              before: {
-                position: currentModel.position,
-                rotation: currentModel.rotation,
-                scale: currentModel.scale,
-              },
+              before,
               after: {
                 position,
                 rotation,
-                scale,
+                scale: nextScale,
               },
             }],
           });
         }
       }
 
-      onModelTransform(modelId, position, rotation, scale);
+      onModelTransform(modelId, position, rotation, nextScale, options);
 
       if (selectedModelId !== modelId || !activeTool) {
         return;
@@ -226,14 +259,14 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
         if (selectedModelMetrics && selectedModelMetrics.modelId === modelId) {
           setScaleMmInput([
-            selectedModelMetrics.baseSize[0] * scale[0],
-            selectedModelMetrics.baseSize[1] * scale[1],
-            selectedModelMetrics.baseSize[2] * scale[2],
+            selectedModelMetrics.baseSize[0] * nextScale[0],
+            selectedModelMetrics.baseSize[1] * nextScale[1],
+            selectedModelMetrics.baseSize[2] * nextScale[2],
           ]);
         }
       }
     },
-    [activeTool, models, onModelTransform, pushHistoryEntry, selectedModelId, selectedModelMetrics, triplesEqual],
+    [activeTool, models, onModelTransform, pushHistoryEntry, selectedModelId, selectedModelMetrics, triplesEqual, uniformScale],
   );
 
   const applyHistoryEntry = useCallback((entry: TransformHistoryEntry, direction: 'before' | 'after') => {
@@ -736,8 +769,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   </div>
                 </div>
 
+                {/* Primary input row with current mode */}
                 <div className="grid grid-cols-[110px_1fr_50px] items-center gap-2">
-                  <div className="text-sm text-pf-text-primary">Size</div>
+                  <div className="text-sm text-pf-text-primary">{scaleMode === 'percent' ? 'Scale' : 'Size'}</div>
                   <div className="grid grid-cols-3 gap-2">
                     <Input
                       type="number"
@@ -792,9 +826,44 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   <div className="text-xs text-pf-text-primary">{scaleMode === 'percent' ? '%' : 'mm'}</div>
                 </div>
 
+                {/* Reference row showing the alternative format */}
+                {selectedModelMetrics && (
+                  <div className="grid grid-cols-[110px_1fr_50px] items-center gap-2">
+                    <div className="text-xs text-pf-text-muted">{scaleMode === 'percent' ? 'Size' : 'Scale'}</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {scaleMode === 'percent' ? (
+                        <>
+                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
+                            {formatValue((selectedModelMetrics.baseSize[0] * scalePercentInput[0]) / 100)}
+                          </div>
+                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
+                            {formatValue((selectedModelMetrics.baseSize[1] * scalePercentInput[1]) / 100)}
+                          </div>
+                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
+                            {formatValue((selectedModelMetrics.baseSize[2] * scalePercentInput[2]) / 100)}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
+                            {formatValue((scaleMmInput[0] / selectedModelMetrics.baseSize[0]) * 100)}
+                          </div>
+                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
+                            {formatValue((scaleMmInput[1] / selectedModelMetrics.baseSize[1]) * 100)}
+                          </div>
+                          <div className="text-xs text-pf-text-muted bg-pf-bg-secondary rounded px-2 py-1 text-center">
+                            {formatValue((scaleMmInput[2] / selectedModelMetrics.baseSize[2]) * 100)}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="text-xs text-pf-text-muted">{scaleMode === 'percent' ? 'mm' : '%'}</div>
+                  </div>
+                )}
+
                 {selectedModelMetrics && (
                   <div className="text-xs text-pf-text-muted border-t border-pf-border pt-2">
-                    Current size: X {formatValue(selectedModelMetrics.currentSize[0])} mm, Y {formatValue(selectedModelMetrics.currentSize[1])} mm, Z {formatValue(selectedModelMetrics.currentSize[2])} mm
+                    Base size: X {formatValue(selectedModelMetrics.baseSize[0])} mm, Y {formatValue(selectedModelMetrics.baseSize[1])} mm, Z {formatValue(selectedModelMetrics.baseSize[2])} mm
                   </div>
                 )}
 
