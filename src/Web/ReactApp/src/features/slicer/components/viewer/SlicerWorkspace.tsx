@@ -67,6 +67,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [scalePercentInput, setScalePercentInput] = useState<[number, number, number]>([100, 100, 100]);
   const [scaleMmInput, setScaleMmInput] = useState<[number, number, number]>([0, 0, 0]);
   const [movePositionInput, setMovePositionInput] = useState<[number, number, number]>([0, 0, 0]);
+  const [rotateBaseAbsoluteInput, setRotateBaseAbsoluteInput] = useState<[number, number, number]>([0, 0, 0]);
   const [rotateRelativeInput, setRotateRelativeInput] = useState<[number, number, number]>([0, 0, 0]);
   const [rotateAbsoluteInput, setRotateAbsoluteInput] = useState<[number, number, number]>([0, 0, 0]);
   const [selectedModelMetrics, setSelectedModelMetrics] = useState<{
@@ -80,6 +81,36 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const hasSelection = selectedModelId != null && models.some(m => m.id === selectedModelId);
   const radToDeg = (radians: number) => radians * (180 / Math.PI);
   const degToRad = (degrees: number) => degrees * (Math.PI / 180);
+
+  const setRotateAbsoluteAxis = useCallback((axis: 0 | 1 | 2, value: number) => {
+    setRotateAbsoluteInput((prevAbsolute) => {
+      const nextAbsolute: [number, number, number] = [...prevAbsolute] as [number, number, number];
+      nextAbsolute[axis] = value;
+
+      setRotateRelativeInput((prevRelative) => {
+        const nextRelative: [number, number, number] = [...prevRelative] as [number, number, number];
+        nextRelative[axis] = nextAbsolute[axis] - rotateBaseAbsoluteInput[axis];
+        return nextRelative;
+      });
+
+      return nextAbsolute;
+    });
+  }, [rotateBaseAbsoluteInput]);
+
+  const setRotateRelativeAxis = useCallback((axis: 0 | 1 | 2, value: number) => {
+    setRotateRelativeInput((prevRelative) => {
+      const nextRelative: [number, number, number] = [...prevRelative] as [number, number, number];
+      nextRelative[axis] = value;
+
+      setRotateAbsoluteInput((prevAbsolute) => {
+        const nextAbsolute: [number, number, number] = [...prevAbsolute] as [number, number, number];
+        nextAbsolute[axis] = rotateBaseAbsoluteInput[axis] + value;
+        return nextAbsolute;
+      });
+
+      return nextRelative;
+    });
+  }, [rotateBaseAbsoluteInput]);
 
   useEffect(() => {
     // Keep tool state neutral when selection changes; user must explicitly choose a tool.
@@ -178,12 +209,15 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (tool === 'rotate') {
       const selectedModel = selectedModelId ? models.find((m) => m.id === selectedModelId) : undefined;
       if (selectedModel) {
-        setRotateRelativeInput([0, 0, 0]);
-        setRotateAbsoluteInput([
+        const baseAbsolute: [number, number, number] = [
           radToDeg(selectedModel.rotation[0]),
           radToDeg(selectedModel.rotation[1]),
           radToDeg(selectedModel.rotation[2]),
-        ]);
+        ];
+
+        setRotateBaseAbsoluteInput(baseAbsolute);
+        setRotateRelativeInput([0, 0, 0]);
+        setRotateAbsoluteInput(baseAbsolute);
         setIsRotateDialogOpen(true);
       }
       setActiveTool(null);
@@ -276,14 +310,14 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     }
 
     const nextRotation: [number, number, number] = [
-      degToRad(rotateAbsoluteInput[0] + rotateRelativeInput[0]),
-      degToRad(rotateAbsoluteInput[1] + rotateRelativeInput[1]),
-      degToRad(rotateAbsoluteInput[2] + rotateRelativeInput[2]),
+      degToRad(rotateAbsoluteInput[0]),
+      degToRad(rotateAbsoluteInput[1]),
+      degToRad(rotateAbsoluteInput[2]),
     ];
 
     onModelTransform(model.id, model.position, nextRotation, model.scale);
     setIsRotateDialogOpen(false);
-  }, [selectedModelId, onModelTransform, models, rotateAbsoluteInput, rotateRelativeInput]);
+  }, [selectedModelId, onModelTransform, models, rotateAbsoluteInput]);
 
   // Map left-tool type to Three.js TransformControls mode
   const transformMode = activeTool === 'move'
@@ -430,7 +464,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   value={String(rotateRelativeInput[0])}
                   onChange={(e) => {
                     const value = Number(e.target.value || 0);
-                    setRotateRelativeInput((prev) => [value, prev[1], prev[2]]);
+                    setRotateRelativeAxis(0, value);
                   }}
                 />
                 <Input
@@ -440,7 +474,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   value={String(rotateRelativeInput[1])}
                   onChange={(e) => {
                     const value = Number(e.target.value || 0);
-                    setRotateRelativeInput((prev) => [prev[0], value, prev[2]]);
+                    setRotateRelativeAxis(1, value);
                   }}
                 />
                 <Input
@@ -450,7 +484,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   value={String(rotateRelativeInput[2])}
                   onChange={(e) => {
                     const value = Number(e.target.value || 0);
-                    setRotateRelativeInput((prev) => [prev[0], prev[1], value]);
+                    setRotateRelativeAxis(2, value);
                   }}
                 />
               </div>
@@ -463,6 +497,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   variant="subtle"
                   size="sm"
                   onClick={() => {
+                    setRotateBaseAbsoluteInput([0, 0, 0]);
                     setRotateRelativeInput([0, 0, 0]);
                     setRotateAbsoluteInput([0, 0, 0]);
                   }}
@@ -478,7 +513,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   value={String(rotateAbsoluteInput[0])}
                   onChange={(e) => {
                     const value = Number(e.target.value || 0);
-                    setRotateAbsoluteInput((prev) => [value, prev[1], prev[2]]);
+                    setRotateAbsoluteAxis(0, value);
                   }}
                 />
                 <Input
@@ -488,7 +523,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   value={String(rotateAbsoluteInput[1])}
                   onChange={(e) => {
                     const value = Number(e.target.value || 0);
-                    setRotateAbsoluteInput((prev) => [prev[0], value, prev[2]]);
+                    setRotateAbsoluteAxis(1, value);
                   }}
                 />
                 <Input
@@ -498,7 +533,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
                   value={String(rotateAbsoluteInput[2])}
                   onChange={(e) => {
                     const value = Number(e.target.value || 0);
-                    setRotateAbsoluteInput((prev) => [prev[0], prev[1], value]);
+                    setRotateAbsoluteAxis(2, value);
                   }}
                 />
               </div>
