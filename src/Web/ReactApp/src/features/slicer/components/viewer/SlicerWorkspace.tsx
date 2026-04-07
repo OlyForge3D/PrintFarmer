@@ -90,6 +90,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [uniformScale, setUniformScale] = useState(true);
   const [scalePercentInput, setScalePercentInput] = useState<[number, number, number]>([100, 100, 100]);
   const [scaleMmInput, setScaleMmInput] = useState<[number, number, number]>([0, 0, 0]);
+  const [moveCoordinateMode, setMoveCoordinateMode] = useState<'world' | 'object'>('world');
   const [movePositionInput, setMovePositionInput] = useState<[number, number, number]>([0, 0, 0]);
   const [rotateBaseAbsoluteInput, setRotateBaseAbsoluteInput] = useState<[number, number, number]>([0, 0, 0]);
   const [rotateRelativeInput, setRotateRelativeInput] = useState<[number, number, number]>([0, 0, 0]);
@@ -643,9 +644,13 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
             {activeTool === 'move' && (
               <div className="space-y-2">
-                <div className="grid grid-cols-[180px_1fr] items-center gap-2">
-                  <Select value="world" onChange={() => {}}>
+                <div className="grid grid-cols-[200px_1fr] items-center gap-2">
+                  <Select 
+                    value={moveCoordinateMode} 
+                    onChange={(e) => setMoveCoordinateMode(e.target.value === 'object' ? 'object' : 'world')}
+                  >
                     <option value="world">World coordinates</option>
+                    <option value="object">Object coordinates</option>
                   </Select>
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <span className="text-sm text-red-500 font-medium">X</span>
