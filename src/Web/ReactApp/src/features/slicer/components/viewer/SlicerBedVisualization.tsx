@@ -331,7 +331,7 @@ function AxisIndicators({ size = 30 }: { size?: number }) {
  * all parent transforms (position, rotation, scale) automatically.
  */
 function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) {
-  const PADDING = 1; // 1 mm visual padding around the model
+  const PADDING = 2; // visual padding around the model so the box is clearly outside surfaces
   const { size, center } = useMemo(() => {
     const box = new THREE.Box3();
     geometry.computeBoundingBox();
@@ -349,12 +349,17 @@ function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) 
   }, [geometry]);
 
   return (
-    <lineSegments position={center} renderOrder={1000}>
-      <edgesGeometry attach="geometry">
-        <boxGeometry args={size} />
-      </edgesGeometry>
-      <lineBasicMaterial color="#ffffff" transparent opacity={1} depthTest={false} toneMapped={false} />
-    </lineSegments>
+    <mesh position={center} renderOrder={1000}>
+      <boxGeometry args={size} />
+      <meshBasicMaterial
+        color="#ffffff"
+        wireframe
+        transparent
+        opacity={1}
+        depthTest={false}
+        toneMapped={false}
+      />
+    </mesh>
   );
 }
 
