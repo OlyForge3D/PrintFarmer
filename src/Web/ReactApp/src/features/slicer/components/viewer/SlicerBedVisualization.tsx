@@ -332,7 +332,9 @@ function AxisIndicators({ size = 30 }: { size?: number }) {
  */
 function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) {
   const PADDING = 2; // visual padding around the model so the box is clearly outside surfaces
-  const { size, center } = useMemo(() => {
+  const CORNER_LENGTH = 10; // length of corner indicator lines
+  
+  const { center, cornerLines } = useMemo(() => {
     const box = new THREE.Box3();
     geometry.computeBoundingBox();
     if (geometry.boundingBox) {
@@ -342,24 +344,63 @@ function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) 
     const c = new THREE.Vector3();
     box.getSize(s);
     box.getCenter(c);
+    
+    // Calculate padded dimensions
+    const hsX = (s.x + PADDING * 2) / 2;
+    const hsY = (s.y + PADDING * 2) / 2;
+    const hsZ = (s.z + PADDING * 2) / 2;
+    
+    // 8 corners of the bounding box (in local coords)
+    const corners: [number, number, number][] = [
+      [-hsX, -hsY, -hsZ], [hsX, -hsY, -hsZ], [hsX, hsY, -hsZ], [-hsX, hsY, -hsZ],  // bottom 4
+      [-hsX, -hsY, hsZ], [hsX, -hsY, hsZ], [hsX, hsY, hsZ], [-hsX, hsY, hsZ],    // top 4
+    ];
+    
+    // Create line segments (corner brackets): 3 lines per corner
+    const lines: [number, number, number, number, number, number][] = [];
+    
+    corners.forEach(([x, y, z]) => {
+      // Line along X axis (inward)
+      lines.push([x, y, z, x + (x > 0 ? -CORNER_LENGTH : CORNER_LENGTH), y, z]);
+      // Line along Y axis (inward)
+      lines.push([x, y, z, x, y + (y > 0 ? -CORNER_LENGTH : CORNER_LENGTH), z]);
+      // Line along Z axis (inward)
+      lines.push([x, y, z, x, y, z + (z > 0 ? -CORNER_LENGTH : CORNER_LENGTH)]);
+    });
+    
     return {
-      size: [s.x + PADDING * 2, s.y + PADDING * 2, s.z + PADDING * 2] as [number, number, number],
       center: [c.x, c.y, c.z] as [number, number, number],
+      cornerLines: lines,
     };
   }, [geometry]);
 
+  const lineSegmentsRef = useRef<THREE.LineSegments>(null);
+  
+  // Build geometry from corner lines
+  useEffect(() => {
+    if (!lineSegmentsRef.current) return;
+    
+    const positions: number[] = [];
+    cornerLines.forEach(([x1, y1, z1, x2, y2, z2]) => {
+      positions.push(x1, y1, z1, x2, y2, z2);
+    });
+    
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    lineSegmentsRef.current.geometry = geom;
+  }, [cornerLines]);
+
   return (
-    <mesh position={center} renderOrder={1000}>
-      <boxGeometry args={size} />
-      <meshBasicMaterial
+    <lineSegments ref={lineSegmentsRef} position={center} renderOrder={1000}>
+      <lineBasicMaterial
         color="#ffffff"
-        wireframe
+        linewidth={1}
         transparent
         opacity={1}
         depthTest={false}
         toneMapped={false}
       />
-    </mesh>
+    </lineSegments>
   );
 }
 
