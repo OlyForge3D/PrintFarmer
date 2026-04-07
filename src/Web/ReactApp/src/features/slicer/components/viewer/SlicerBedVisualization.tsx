@@ -64,6 +64,8 @@ export interface SlicerBedVisualizationProps {
   gridDivisions?: number;
   backgroundColor?: string;
   className?: string;
+  /** Set of model IDs that are currently outside the build volume */
+  outOfBoundsModelIds?: Set<string>;
 }
 
 /**
@@ -344,7 +346,7 @@ function AxisIndicators({ size = 30 }: { size?: number }) {
  * Positioned in the mesh's local coordinate space so it inherits
  * all parent transforms (position, rotation, scale) automatically.
  */
-function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) {
+function SelectionBoundingBox({ geometry, outOfBounds = false }: { geometry: THREE.BufferGeometry; outOfBounds?: boolean }) {
   const PADDING = 2; // visual padding around the model so the box is clearly outside surfaces
   const CORNER_LENGTH = 10; // length of corner indicator lines
   
@@ -407,7 +409,7 @@ function SelectionBoundingBox({ geometry }: { geometry: THREE.BufferGeometry }) 
   return (
     <lineSegments ref={lineSegmentsRef} position={center} renderOrder={1000}>
       <lineBasicMaterial
-        color="#ffffff"
+        color={outOfBounds ? '#ff4444' : '#ffffff'}
         linewidth={1}
         transparent
         opacity={1}
@@ -433,6 +435,7 @@ function STLModel({
   rotation = [0, 0, 0], 
   scale = [1, 1, 1],
   selected = false,
+  outOfBounds = false,
   onClick,
   meshRef,
   onSelectedMetrics,
@@ -442,8 +445,9 @@ function STLModel({
   rotation?: [number, number, number];
   scale?: [number, number, number];
   selected?: boolean;
+  outOfBounds?: boolean;
   onClick?: () => void;
-  meshRef?: React.RefObject<THREE.Mesh | null>;
+  meshRef?: React.RefObject<THREE.Object3D | null>;
   onSelectedMetrics?: (metrics: {
     baseSize: [number, number, number];
     currentSize: [number, number, number];
@@ -451,24 +455,26 @@ function STLModel({
   }) => void;
 }) {
   const rawGeometry = useLoader(STLLoader, url);
-  const internalRef = useRef<THREE.Mesh>(null);
+  const internalRef = useRef<THREE.Group>(null);
   const ref = meshRef || internalRef;
 
-  // Clone geometry so we don't mutate the useLoader cache, center it on the
-  // bed, and recompute bounding sphere so raycasting (click-to-select) works.
-  const geometry = useMemo(() => {
+  // Clone geometry so we don't mutate the useLoader cache, center it on ALL
+  // axes so the pivot / gizmo sits at the volumetric center of the model.
+  const { geometry, halfZ } = useMemo(() => {
     const geo = rawGeometry.clone();
     geo.computeBoundingBox();
+    let hz = 0;
     if (geo.boundingBox) {
       const centerX = (geo.boundingBox.min.x + geo.boundingBox.max.x) / 2;
       const centerY = (geo.boundingBox.min.y + geo.boundingBox.max.y) / 2;
-      const minZ = geo.boundingBox.min.z;
-      geo.translate(-centerX, -centerY, -minZ);
+      const centerZ = (geo.boundingBox.min.z + geo.boundingBox.max.z) / 2;
+      hz = (geo.boundingBox.max.z - geo.boundingBox.min.z) / 2;
+      geo.translate(-centerX, -centerY, -centerZ);
     }
     geo.computeVertexNormals();
     geo.computeBoundingBox();
     geo.computeBoundingSphere();
-    return geo;
+    return { geometry: geo, halfZ: hz };
   }, [rawGeometry]);
 
   const baseSize = useMemo<[number, number, number]>(() => {
@@ -496,32 +502,44 @@ function STLModel({
     });
   }, [baseSize, onSelectedMetrics, scale, selected]);
 
+  // Store halfZ on the group so BedScene can compensate when reading transforms
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.userData.halfZ = halfZ;
+    }
+  }, [halfZ, ref]);
+
+  // Group origin = volumetric center. Position Z is offset by halfZ so the
+  // data-model position.z=0 means "sitting on the bed".
   return (
-    <mesh
-      ref={ref}
-      geometry={geometry}
-      position={position}
+    <group
+      ref={ref as React.RefObject<THREE.Group | null>}
+      position={[position[0], position[1], position[2] + halfZ]}
       rotation={rotation}
       scale={scale}
-      onPointerDown={(e) => {
-        e.stopPropagation();
-        onClick?.();
-      }}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick?.();
-      }}
-      castShadow
-      receiveShadow
     >
-      <meshStandardMaterial 
-        color="#009688"
-        metalness={0.15}
-        roughness={0.45}
-        emissive="#002b26"
-      />
-      {selected && <SelectionBoundingBox geometry={geometry} />}
-    </mesh>
+      <mesh
+        geometry={geometry}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial 
+          color="#009688"
+          metalness={0.15}
+          roughness={0.45}
+          emissive="#002b26"
+        />
+        {selected && <SelectionBoundingBox geometry={geometry} outOfBounds={outOfBounds} />}
+      </mesh>
+    </group>
   );
 }
 
@@ -576,7 +594,7 @@ function ModelTransformControls({
   onTransformStart,
   onTransformEnd,
 }: {
-  meshRef: React.RefObject<THREE.Mesh | null>;
+  meshRef: React.RefObject<THREE.Object3D | null>;
   mode: 'translate' | 'rotate' | 'scale';
   orbitRef: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
   onTransform?: () => void;
@@ -584,7 +602,7 @@ function ModelTransformControls({
   onTransformEnd?: () => void;
 }) {
   const transformRef = useRef<React.ComponentRef<typeof TransformControls>>(null);
-  const [mesh, setMesh] = useState<THREE.Mesh | null>(null);
+  const [mesh, setMesh] = useState<THREE.Object3D | null>(null);
 
   // Sync ref → state via animation frame: the mesh ref is set by STLModel
   // after Suspense resolves, which may be after this component mounts.
@@ -667,10 +685,11 @@ function BedScene({
   onModelTransform,
   onSelectedModelMetricsChange,
   showAxes = true,
+  outOfBoundsModelIds,
 }: Omit<SlicerBedVisualizationProps, 'className' | 'backgroundColor' | 'showGrid' | 'gridDivisions'>) {
   const { width, depth, height, textureUrl, textureFormat } = bedConfig;
   const orbitRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
-  const selectedMeshRef = useRef<THREE.Mesh>(null);
+  const selectedMeshRef = useRef<THREE.Object3D>(null);
 
   const dragStartTransformRef = useRef<{
     position: [number, number, number];
@@ -686,22 +705,24 @@ function BedScene({
 
   const handleTransformStart = useCallback(() => {
     if (!selectedMeshRef.current) return;
-    const mesh = selectedMeshRef.current;
+    const obj = selectedMeshRef.current;
+    const halfZ: number = obj.userData.halfZ || 0;
     dragStartTransformRef.current = {
-      position: mesh.position.toArray() as [number, number, number],
-      rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
-      scale: mesh.scale.toArray() as [number, number, number],
+      position: [obj.position.x, obj.position.y, obj.position.z - halfZ] as [number, number, number],
+      rotation: [obj.rotation.x, obj.rotation.y, obj.rotation.z],
+      scale: obj.scale.toArray() as [number, number, number],
     };
   }, []);
 
   const handleTransformEnd = useCallback(() => {
     if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
-    const mesh = selectedMeshRef.current;
+    const obj = selectedMeshRef.current;
+    const halfZ: number = obj.userData.halfZ || 0;
     onModelTransform(
       selectedModelId,
-      mesh.position.toArray() as [number, number, number],
-      [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
-      mesh.scale.toArray() as [number, number, number],
+      [obj.position.x, obj.position.y, obj.position.z - halfZ] as [number, number, number],
+      [obj.rotation.x, obj.rotation.y, obj.rotation.z],
+      obj.scale.toArray() as [number, number, number],
       {
         recordHistory: true,
         actionLabel: transformActionLabel,
@@ -713,12 +734,13 @@ function BedScene({
 
   const handleTransformChange = useCallback(() => {
     if (!selectedModelId || !selectedMeshRef.current || !onModelTransform) return;
-    const mesh = selectedMeshRef.current;
+    const obj = selectedMeshRef.current;
+    const halfZ: number = obj.userData.halfZ || 0;
     onModelTransform(
       selectedModelId,
-      mesh.position.toArray() as [number, number, number],
-      [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
-      mesh.scale.toArray() as [number, number, number],
+      [obj.position.x, obj.position.y, obj.position.z - halfZ] as [number, number, number],
+      [obj.rotation.x, obj.rotation.y, obj.rotation.z],
+      obj.scale.toArray() as [number, number, number],
       { recordHistory: false, actionLabel: transformActionLabel },
     );
   }, [onModelTransform, selectedModelId, transformActionLabel]);
@@ -777,8 +799,9 @@ function BedScene({
                 rotation={model.rotation}
                 scale={model.scale}
                 selected={model.id === selectedModelId}
+                outOfBounds={outOfBoundsModelIds?.has(model.id)}
                 onClick={() => onModelSelect?.(model.id)}
-                meshRef={model.id === selectedModelId ? selectedMeshRef : undefined}
+                meshRef={model.id === selectedModelId ? selectedMeshRef as React.RefObject<THREE.Object3D | null> : undefined}
                 onSelectedMetrics={model.id === selectedModelId
                   ? (metrics) => onSelectedModelMetricsChange?.({
                     modelId: model.id,
@@ -825,6 +848,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   showAxes = true,
   backgroundColor = '#2a2a2e',
   className = '',
+  outOfBoundsModelIds,
 }) => {
   return (
     <div className={`w-full h-full ${className}`}>
@@ -859,6 +883,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
             transformMode={transformMode}
             onModelTransform={onModelTransform}
             onSelectedModelMetricsChange={onSelectedModelMetricsChange}
+            outOfBoundsModelIds={outOfBoundsModelIds}
             showAxes={showAxes}
           />
         </Suspense>

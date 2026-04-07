@@ -1,6 +1,6 @@
 import clsx from 'clsx';
-import { Card, Badge, Checkbox } from '@/common/components/ui';
-import { AlertTriangleIcon, EyeIcon } from '@/common/components/icons/MdiIcons';
+import { Card, Badge, Button, Checkbox } from '@/common/components/ui';
+import { AlertIcon, EyeIcon } from '@/common/components/icons/MdiIcons';
 
 export interface ImportPreviewCardProps {
   name: string;
@@ -81,7 +81,7 @@ export function ImportPreviewCard({
                       className="flex items-center gap-1 text-pf-warning"
                       title="This profile has naming conflicts"
                     >
-                      <AlertTriangleIcon className="w-4 h-4" />
+                      <AlertIcon className="w-4 h-4" />
                     </div>
                   )}
                 </div>
@@ -110,7 +110,8 @@ export function ImportPreviewCard({
 
               {/* View details button */}
               {onViewDetails && (
-                <button
+                <Button
+                  variant="unstyled"
                   onClick={(e) => {
                     e.stopPropagation();
                     onViewDetails();
@@ -125,7 +126,7 @@ export function ImportPreviewCard({
                 >
                   <EyeIcon className="w-4 h-4" />
                   <span>Details</span>
-                </button>
+                </Button>
               )}
             </div>
           </div>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
-import { Button, Select, Input, Card, Badge, Alert } from '@/common/components/ui';
-import { AlertTriangleIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Select, Input, Card, Badge, Alert, Radio } from '@/common/components/ui';
+import { AlertIcon } from '@/common/components/icons/MdiIcons';
 
 export interface ImportConflict {
   importedName: string;
@@ -139,7 +139,7 @@ export function ImportConflictResolver({
                   </div>
                   {conflict.resolution === 'overwrite' && (
                     <div className="flex items-center gap-1 text-pf-warning">
-                      <AlertTriangleIcon className="w-4 h-4" />
+                      <AlertIcon className="w-4 h-4" />
                       <span className="text-xs font-medium">Warning</span>
                     </div>
                   )}
@@ -162,8 +162,7 @@ export function ImportConflictResolver({
                           disabled && 'opacity-50 cursor-not-allowed'
                         )}
                       >
-                        <input
-                          type="radio"
+                        <Radio
                           name={`resolution-${index}`}
                           value={option}
                           checked={conflict.resolution === option}
@@ -171,7 +170,6 @@ export function ImportConflictResolver({
                             updateConflict(index, { resolution: e.target.value as ImportConflict['resolution'] })
                           }
                           disabled={disabled}
-                          className="text-pf-accent"
                         />
                         <span className="text-sm font-medium">
                           {resolutionLabels[option]}
@@ -198,14 +196,14 @@ export function ImportConflictResolver({
 
                 {/* Keep both explanation */}
                 {conflict.resolution === 'keep_both' && (
-                  <Alert variant="default" className="text-xs">
+                  <Alert type="info" className="text-xs">
                     Profile will be imported as "{conflict.importedName}-imported"
                   </Alert>
                 )}
 
                 {/* Overwrite warning */}
                 {conflict.resolution === 'overwrite' && (
-                  <Alert variant="warning" className="text-xs">
+                  <Alert type="warning" className="text-xs">
                     The existing profile will be permanently replaced. This action cannot be undone.
                   </Alert>
                 )}
