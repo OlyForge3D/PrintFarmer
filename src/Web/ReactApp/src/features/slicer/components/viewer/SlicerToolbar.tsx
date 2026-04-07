@@ -131,7 +131,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
       {/* Orient group */}
       <ToolbarButton
         icon={<OrientIcon />}
-        title="Orient Model"
+        title="Auto-Orient"
         onClick={onOrient}
         disabled={!hasSelection}
       />

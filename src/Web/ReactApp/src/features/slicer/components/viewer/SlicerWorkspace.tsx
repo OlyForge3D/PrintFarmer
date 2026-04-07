@@ -4,6 +4,7 @@
  * Matches OrcaSlicer's interface layout
  */
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import * as THREE from 'three';
 import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
@@ -84,6 +85,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 }) => {
   const [activeTool, setActiveTool] = useState<ToolType | null>(null);
   const [showLayers, setShowLayers] = useState(false);
+  const [layFlatMode, setLayFlatMode] = useState(false);
+  const [autoOrientTrigger, setAutoOrientTrigger] = useState(0);
   const [undoStack, setUndoStack] = useState<TransformHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
   const isApplyingHistoryRef = useRef(false);
@@ -129,21 +132,30 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         continue;
       }
 
-      const hasRotation = model.rotation[0] !== 0 || model.rotation[1] !== 0 || model.rotation[2] !== 0;
       let hx: number, hy: number, hz: number;
+      const hasRotation = model.rotation[0] !== 0 || model.rotation[1] !== 0 || model.rotation[2] !== 0;
       if (hasRotation) {
-        // Conservative: bounding sphere radius of the scaled box
-        const r = Math.sqrt(bx * bx + by * by + bz * bz) / 2;
-        hx = r; hy = r; hz = r;
+        // Compute exact rotated AABB from rotation matrix absolute values
+        const m = new THREE.Matrix4().makeRotationFromEuler(
+          new THREE.Euler(model.rotation[0], model.rotation[1], model.rotation[2]),
+        );
+        const e = m.elements;
+        const ox = bx / 2, oy = by / 2, oz = bz / 2;
+        hx = Math.abs(e[0]) * ox + Math.abs(e[4]) * oy + Math.abs(e[8]) * oz;
+        hy = Math.abs(e[1]) * ox + Math.abs(e[5]) * oy + Math.abs(e[9]) * oz;
+        hz = Math.abs(e[2]) * ox + Math.abs(e[6]) * oy + Math.abs(e[10]) * oz;
       } else {
         hx = bx / 2; hy = by / 2; hz = bz / 2;
       }
 
       const [px, py, pz] = model.position;
+      // STLModel renders at world Z = pz + halfZ_raw (unscaled geometry half-height).
+      // The rotated AABB center is at (px, py, pz + halfZ_raw) with half-extents (hx, hy, hz).
+      const halfZRaw = selectedModelMetrics.baseSize[2] / 2;
       if (
         px - hx < -halfW || px + hx > halfW ||
         py - hy < -halfD || py + hy > halfD ||
-        pz < 0 || pz + hz * 2 > maxZ  // z starts at bed surface
+        pz + halfZRaw - hz < 0 || pz + halfZRaw + hz > maxZ
       ) {
         ids.add(model.id);
       }
@@ -185,7 +197,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   useEffect(() => {
     // Keep tool state neutral when selection changes; user must explicitly choose a tool.
-    queueMicrotask(() => setActiveTool(null));
+    queueMicrotask(() => {
+      setActiveTool(null);
+      setLayFlatMode(false);
+    });
   }, [selectedModelId]);
 
 
@@ -377,24 +392,17 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     const selected = getSelectedModel();
     if (!selected) return;
 
-    // Reset orientation to canonical axes.
-    handleModelTransform(selected.id, selected.position, [0, 0, 0], selected.scale, { actionLabel: 'Orient Model' });
-  }, [getSelectedModel, handleModelTransform, onModelTransform]);
+    // Trigger auto-orient inside the 3D scene (needs geometry access)
+    setAutoOrientTrigger((prev) => prev + 1);
+  }, [getSelectedModel, onModelTransform]);
 
   const handleLayFlat = useCallback(() => {
     if (!onModelTransform) return;
     const selected = getSelectedModel();
     if (!selected) return;
-
-    // Keep current Z yaw while removing tilt on X/Y.
-    handleModelTransform(
-      selected.id,
-      selected.position,
-      [0, 0, selected.rotation[2]],
-      selected.scale,
-      { actionLabel: 'Lay Flat' },
-    );
-  }, [getSelectedModel, handleModelTransform, onModelTransform]);
+    // Toggle lay-flat face-picking mode
+    setLayFlatMode((prev) => !prev);
+  }, [getSelectedModel, onModelTransform]);
 
   const handleSplit = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Split model'); }
@@ -462,6 +470,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   const handleToolChange = useCallback((tool: ToolType) => {
     if (!hasSelection && tool !== 'layers') return;
+    setLayFlatMode(false);
 
     if (tool === 'move') {
       const selectedModel = selectedModelId ? models.find((m) => m.id === selectedModelId) : undefined;
@@ -623,6 +632,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           onModelTransform={handleModelTransform}
           onSelectedModelMetricsChange={setSelectedModelMetrics}
           outOfBoundsModelIds={outOfBoundsModelIds}
+          layFlatMode={layFlatMode}
+          onLayFlatComplete={() => setLayFlatMode(false)}
+          autoOrientTrigger={autoOrientTrigger}
           showGrid={true}
           showAxes={true}
           className="w-full h-full"
