@@ -125,6 +125,55 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     return models.find((m) => m.id === selectedModelId);
   }, [models, selectedModelId]);
 
+  const handleModelTransform = useCallback(
+    (
+      modelId: string,
+      position: [number, number, number],
+      rotation: [number, number, number],
+      scale: [number, number, number],
+    ) => {
+      if (!onModelTransform) {
+        return;
+      }
+
+      onModelTransform(modelId, position, rotation, scale);
+
+      if (selectedModelId !== modelId || !activeTool) {
+        return;
+      }
+
+      if (activeTool === 'move') {
+        setMovePositionInput(position);
+        return;
+      }
+
+      if (activeTool === 'rotate') {
+        const absolute: [number, number, number] = [
+          radToDeg(rotation[0]),
+          radToDeg(rotation[1]),
+          radToDeg(rotation[2]),
+        ];
+        setRotateBaseAbsoluteInput(absolute);
+        setRotateRelativeInput([0, 0, 0]);
+        setRotateAbsoluteInput(absolute);
+        return;
+      }
+
+      if (activeTool === 'scale') {
+        setScalePercentInput([100, 100, 100]);
+
+        if (selectedModelMetrics && selectedModelMetrics.modelId === modelId) {
+          setScaleMmInput([
+            selectedModelMetrics.baseSize[0] * scale[0],
+            selectedModelMetrics.baseSize[1] * scale[1],
+            selectedModelMetrics.baseSize[2] * scale[2],
+          ]);
+        }
+      }
+    },
+    [activeTool, onModelTransform, selectedModelId, selectedModelMetrics],
+  );
+
   // Toolbar action handlers
   const handleArrange = useCallback(() => {
     if (!onModelTransform || models.length === 0) return;
@@ -141,9 +190,9 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       const x = -bedConfig.width / 2 + stepX * (col + 1);
       const y = -bedConfig.depth / 2 + stepY * (row + 1);
 
-      onModelTransform(model.id, [x, y, model.position[2]], model.rotation, model.scale);
+      handleModelTransform(model.id, [x, y, model.position[2]], model.rotation, model.scale);
     });
-  }, [bedConfig.depth, bedConfig.width, models, onModelTransform]);
+  }, [bedConfig.depth, bedConfig.width, handleModelTransform, models, onModelTransform]);
 
   const handleOrient = useCallback(() => {
     if (!onModelTransform) return;
@@ -151,8 +200,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (!selected) return;
 
     // Reset orientation to canonical axes.
-    onModelTransform(selected.id, selected.position, [0, 0, 0], selected.scale);
-  }, [getSelectedModel, onModelTransform]);
+    handleModelTransform(selected.id, selected.position, [0, 0, 0], selected.scale);
+  }, [getSelectedModel, handleModelTransform, onModelTransform]);
 
   const handleLayFlat = useCallback(() => {
     if (!onModelTransform) return;
@@ -160,13 +209,13 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     if (!selected) return;
 
     // Keep current Z yaw while removing tilt on X/Y.
-    onModelTransform(
+    handleModelTransform(
       selected.id,
       selected.position,
       [0, 0, selected.rotation[2]],
       selected.scale,
     );
-  }, [getSelectedModel, onModelTransform]);
+  }, [getSelectedModel, handleModelTransform, onModelTransform]);
 
   const handleSplit = useCallback(() => {
     if (window.PrintFarmerDebug?.slicer) { console.log('Split model'); }
@@ -332,8 +381,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
     }
 
-    onModelTransform(model.id, model.position, model.rotation, newScale);
-  }, [models, onModelTransform, scaleMmInput, scaleMode, scalePercentInput, selectedModelMetrics, uniformScale]);
+    handleModelTransform(model.id, model.position, model.rotation, newScale);
+  }, [handleModelTransform, models, onModelTransform, scaleMmInput, scaleMode, scalePercentInput, selectedModelMetrics, uniformScale]);
 
   const handleMoveApply = useCallback(() => {
     if (!selectedModelId || !onModelTransform) {
@@ -345,8 +394,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       return;
     }
 
-    onModelTransform(model.id, movePositionInput, model.rotation, model.scale);
-  }, [selectedModelId, onModelTransform, models, movePositionInput]);
+    handleModelTransform(model.id, movePositionInput, model.rotation, model.scale);
+  }, [selectedModelId, handleModelTransform, onModelTransform, models, movePositionInput]);
 
   const handleRotateApply = useCallback(() => {
     if (!selectedModelId || !onModelTransform) {
@@ -364,12 +413,12 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       degToRad(rotateAbsoluteInput[2]),
     ];
 
-    onModelTransform(model.id, model.position, nextRotation, model.scale);
+    handleModelTransform(model.id, model.position, nextRotation, model.scale);
 
     // After applying absolute rotation, treat the new absolute as baseline.
     setRotateBaseAbsoluteInput(rotateAbsoluteInput);
     setRotateRelativeInput([0, 0, 0]);
-  }, [selectedModelId, onModelTransform, models, rotateAbsoluteInput]);
+  }, [selectedModelId, handleModelTransform, onModelTransform, models, rotateAbsoluteInput]);
 
   // Map left-tool type to Three.js TransformControls mode
   const transformMode = activeTool === 'move'
@@ -413,7 +462,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           selectedModelId={selectedModelId}
           onModelSelect={onModelSelect}
           transformMode={transformMode}
-          onModelTransform={onModelTransform}
+          onModelTransform={handleModelTransform}
           onSelectedModelMetricsChange={setSelectedModelMetrics}
           showGrid={true}
           showAxes={true}
