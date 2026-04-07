@@ -1037,10 +1037,10 @@ export const NewSliceJobPage: React.FC = () => {
   }
 
   return (
-    <div className="h-full p-2 bg-pf-bg-2">
-      <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-2 h-full">
+    <div className="h-full overflow-hidden p-2 bg-pf-bg-2">
+      <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-2 h-full overflow-hidden">
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}
-        <div className="w-full lg:w-96 space-y-2 shrink-0 pb-4 max-h-full overflow-y-auto">
+        <div className="w-full lg:w-96 space-y-2 shrink-0 min-h-0 overflow-y-auto">
 
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
           <SlicerSelector
