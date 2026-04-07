@@ -8,7 +8,6 @@ import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
 import { SlicerBedVisualization, type LoadedModel, type BedConfig } from './SlicerBedVisualization';
-import { Modal } from '@/common/components/modals/Modal';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
 
 export interface SlicerWorkspaceProps {
@@ -59,9 +58,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [showLayers, setShowLayers] = useState(false);
   const [undoStack, setUndoStack] = useState<unknown[]>([]);
   const [redoStack, setRedoStack] = useState<unknown[]>([]);
-  const [isScaleDialogOpen, setIsScaleDialogOpen] = useState(false);
-  const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
-  const [isRotateDialogOpen, setIsRotateDialogOpen] = useState(false);
   const [scaleMode, setScaleMode] = useState<'percent' | 'mm'>('percent');
   const [uniformScale, setUniformScale] = useState(true);
   const [scalePercentInput, setScalePercentInput] = useState<[number, number, number]>([100, 100, 100]);
@@ -188,9 +184,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       const selectedModel = selectedModelId ? models.find((m) => m.id === selectedModelId) : undefined;
       if (selectedModel) {
         setMovePositionInput(selectedModel.position);
-        setIsMoveDialogOpen(true);
       }
-      setActiveTool(null);
+      setActiveTool('move');
       return;
     }
 
@@ -201,8 +196,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
       setScaleMode('percent');
       setUniformScale(true);
-      setIsScaleDialogOpen(true);
-      setActiveTool(null);
+      setActiveTool('scale');
       return;
     }
 
@@ -218,9 +212,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         setRotateBaseAbsoluteInput(baseAbsolute);
         setRotateRelativeInput([0, 0, 0]);
         setRotateAbsoluteInput(baseAbsolute);
-        setIsRotateDialogOpen(true);
       }
-      setActiveTool(null);
+      setActiveTool('rotate');
       return;
     }
 
@@ -233,13 +226,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   const handleScaleApply = useCallback(() => {
     if (!selectedModelMetrics || !onModelTransform) {
-      setIsScaleDialogOpen(false);
       return;
     }
 
     const model = models.find((m) => m.id === selectedModelMetrics.modelId);
     if (!model) {
-      setIsScaleDialogOpen(false);
       return;
     }
 
@@ -278,34 +269,28 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     }
 
     onModelTransform(model.id, model.position, model.rotation, newScale);
-    setIsScaleDialogOpen(false);
   }, [models, onModelTransform, scaleMmInput, scaleMode, scalePercentInput, selectedModelMetrics, uniformScale]);
 
   const handleMoveApply = useCallback(() => {
     if (!selectedModelId || !onModelTransform) {
-      setIsMoveDialogOpen(false);
       return;
     }
 
     const model = models.find((m) => m.id === selectedModelId);
     if (!model) {
-      setIsMoveDialogOpen(false);
       return;
     }
 
     onModelTransform(model.id, movePositionInput, model.rotation, model.scale);
-    setIsMoveDialogOpen(false);
   }, [selectedModelId, onModelTransform, models, movePositionInput]);
 
   const handleRotateApply = useCallback(() => {
     if (!selectedModelId || !onModelTransform) {
-      setIsRotateDialogOpen(false);
       return;
     }
 
     const model = models.find((m) => m.id === selectedModelId);
     if (!model) {
-      setIsRotateDialogOpen(false);
       return;
     }
 
@@ -316,7 +301,10 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     ];
 
     onModelTransform(model.id, model.position, nextRotation, model.scale);
-    setIsRotateDialogOpen(false);
+
+    // After applying absolute rotation, treat the new absolute as baseline.
+    setRotateBaseAbsoluteInput(rotateAbsoluteInput);
+    setRotateRelativeInput([0, 0, 0]);
   }, [selectedModelId, onModelTransform, models, rotateAbsoluteInput]);
 
   // Map left-tool type to Three.js TransformControls mode
@@ -376,266 +364,215 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           showLayers={showLayers}
           hasSelection={hasSelection}
         />
+
+        {/* Non-modal transform panel: can be used alongside gizmo controls */}
+        {hasSelection && activeTool && activeTool !== 'layers' && (
+          <div className="absolute left-20 top-4 z-20 w-190 max-w-[calc(100%-6rem)] rounded-lg border border-pf-border bg-pf-bg-1/95 backdrop-blur-xs shadow-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xl font-semibold text-pf-text-primary">
+                {activeTool === 'move' ? 'Move [T]' : activeTool === 'rotate' ? 'Rotate [R]' : 'Scale [S]'}
+              </div>
+              <Button variant="subtle" size="sm" onClick={() => setActiveTool(null)}>Close</Button>
+            </div>
+
+            {activeTool === 'move' && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-[280px_1fr] items-center gap-4">
+                  <Select value="world" onChange={() => {}}>
+                    <option value="world">World coordinates</option>
+                  </Select>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <span className="text-2xl text-red-500">X</span>
+                    <span className="text-2xl text-green-500">Y</span>
+                    <span className="text-2xl text-sky-500">Z</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-[220px_1fr_60px] items-center gap-4">
+                  <div className="text-4xl text-pf-text-primary">Position</div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={String(movePositionInput[0])}
+                      onChange={(e) => {
+                        const value = Number(e.target.value || 0);
+                        setMovePositionInput((prev) => [value, prev[1], prev[2]]);
+                      }}
+                    />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={String(movePositionInput[1])}
+                      onChange={(e) => {
+                        const value = Number(e.target.value || 0);
+                        setMovePositionInput((prev) => [prev[0], value, prev[2]]);
+                      }}
+                    />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={String(movePositionInput[2])}
+                      onChange={(e) => {
+                        const value = Number(e.target.value || 0);
+                        setMovePositionInput((prev) => [prev[0], prev[1], value]);
+                      }}
+                    />
+                  </div>
+                  <div className="text-4xl text-pf-text-primary">mm</div>
+                </div>
+                <div className="flex justify-end">
+                  <Button variant="primary" onClick={handleMoveApply}>Apply</Button>
+                </div>
+              </div>
+            )}
+
+            {activeTool === 'rotate' && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-[280px_1fr] items-center gap-4">
+                  <Select value="world" onChange={() => {}}>
+                    <option value="world">World coordinates</option>
+                  </Select>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <span className="text-2xl text-red-500">X</span>
+                    <span className="text-2xl text-green-500">Y</span>
+                    <span className="text-2xl text-sky-500">Z</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[220px_1fr_30px] items-center gap-4">
+                  <div className="text-4xl text-pf-text-primary">Rotate (relative)</div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <Input type="number" step="0.01" value={String(rotateRelativeInput[0])} onChange={(e) => setRotateRelativeAxis(0, Number(e.target.value || 0))} />
+                    <Input type="number" step="0.01" value={String(rotateRelativeInput[1])} onChange={(e) => setRotateRelativeAxis(1, Number(e.target.value || 0))} />
+                    <Input type="number" step="0.01" value={String(rotateRelativeInput[2])} onChange={(e) => setRotateRelativeAxis(2, Number(e.target.value || 0))} />
+                  </div>
+                  <div className="text-4xl text-pf-text-primary">°</div>
+                </div>
+
+                <div className="grid grid-cols-[220px_1fr_30px_auto] items-center gap-4">
+                  <div className="text-4xl text-pf-text-primary">Rotate (absolute)</div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <Input type="number" step="0.01" value={String(rotateAbsoluteInput[0])} onChange={(e) => setRotateAbsoluteAxis(0, Number(e.target.value || 0))} />
+                    <Input type="number" step="0.01" value={String(rotateAbsoluteInput[1])} onChange={(e) => setRotateAbsoluteAxis(1, Number(e.target.value || 0))} />
+                    <Input type="number" step="0.01" value={String(rotateAbsoluteInput[2])} onChange={(e) => setRotateAbsoluteAxis(2, Number(e.target.value || 0))} />
+                  </div>
+                  <div className="text-4xl text-pf-text-primary">°</div>
+                  <Button
+                    variant="subtle"
+                    size="sm"
+                    onClick={() => {
+                      setRotateBaseAbsoluteInput([0, 0, 0]);
+                      setRotateRelativeInput([0, 0, 0]);
+                      setRotateAbsoluteInput([0, 0, 0]);
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button variant="primary" onClick={handleRotateApply}>Apply</Button>
+                </div>
+              </div>
+            )}
+
+            {activeTool === 'scale' && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-[220px_220px_1fr] items-center gap-4">
+                  <div>
+                    <div className="text-sm text-pf-text-muted mb-1">Scale mode</div>
+                    <Select
+                      value={scaleMode}
+                      onChange={(e) => setScaleMode(e.target.value === 'mm' ? 'mm' : 'percent')}
+                    >
+                      <option value="percent">Percent of current (%)</option>
+                      <option value="mm">Absolute size (mm)</option>
+                    </Select>
+                  </div>
+                  <div className="pt-5">
+                    <Checkbox
+                      label="Uniform scale"
+                      checked={uniformScale}
+                      onChange={(e) => setUniformScale(e.target.checked)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <span className="text-2xl text-red-500">X</span>
+                    <span className="text-2xl text-green-500">Y</span>
+                    <span className="text-2xl text-sky-500">Z</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[220px_1fr_70px] items-center gap-4">
+                  <div className="text-4xl text-pf-text-primary">Size</div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={scaleMode === 'percent' ? String(scalePercentInput[0]) : String(scaleMmInput[0])}
+                      onChange={(e) => {
+                        const value = Number(e.target.value || 0);
+                        if (scaleMode === 'percent') {
+                          setScalePercentInput((prev) => applyUniformTriple([
+                            value,
+                            prev[1],
+                            prev[2],
+                          ] as [number, number, number], value));
+                        } else {
+                          setScaleMmInput((prev) => applyUniformTriple([
+                            value,
+                            prev[1],
+                            prev[2],
+                          ] as [number, number, number], value));
+                        }
+                      }}
+                    />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      disabled={uniformScale}
+                      value={scaleMode === 'percent' ? String(scalePercentInput[1]) : String(scaleMmInput[1])}
+                      onChange={(e) => {
+                        const value = Number(e.target.value || 0);
+                        if (scaleMode === 'percent') {
+                          setScalePercentInput((prev) => [prev[0], value, prev[2]]);
+                        } else {
+                          setScaleMmInput((prev) => [prev[0], value, prev[2]]);
+                        }
+                      }}
+                    />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      disabled={uniformScale}
+                      value={scaleMode === 'percent' ? String(scalePercentInput[2]) : String(scaleMmInput[2])}
+                      onChange={(e) => {
+                        const value = Number(e.target.value || 0);
+                        if (scaleMode === 'percent') {
+                          setScalePercentInput((prev) => [prev[0], prev[1], value]);
+                        } else {
+                          setScaleMmInput((prev) => [prev[0], prev[1], value]);
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="text-3xl text-pf-text-primary">{scaleMode === 'percent' ? '%' : 'mm'}</div>
+                </div>
+
+                {selectedModelMetrics && (
+                  <div className="text-sm text-pf-text-muted border-t border-pf-border pt-2">
+                    Current size: X {formatValue(selectedModelMetrics.currentSize[0])} mm, Y {formatValue(selectedModelMetrics.currentSize[1])} mm, Z {formatValue(selectedModelMetrics.currentSize[2])} mm
+                  </div>
+                )}
+
+                <div className="flex justify-end">
+                  <Button variant="primary" onClick={handleScaleApply}>Apply</Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
-
-      <Modal
-        isOpen={isMoveDialogOpen}
-        onClose={() => setIsMoveDialogOpen(false)}
-        title="Move Model"
-        size="md"
-        footer={(
-          <>
-            <Button variant="secondary" onClick={() => setIsMoveDialogOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleMoveApply}>Apply</Button>
-          </>
-        )}
-      >
-        <div className="space-y-4">
-          <Select
-            label="Coordinates"
-            value="world"
-            onChange={() => {}}
-            options={[{ label: 'World coordinates', value: 'world' }]}
-          />
-          <div className="grid grid-cols-3 gap-3">
-            <Input
-              label="X"
-              type="number"
-              step="0.01"
-              value={String(movePositionInput[0])}
-              onChange={(e) => {
-                const value = Number(e.target.value || 0);
-                setMovePositionInput((prev) => [value, prev[1], prev[2]]);
-              }}
-            />
-            <Input
-              label="Y"
-              type="number"
-              step="0.01"
-              value={String(movePositionInput[1])}
-              onChange={(e) => {
-                const value = Number(e.target.value || 0);
-                setMovePositionInput((prev) => [prev[0], value, prev[2]]);
-              }}
-            />
-            <Input
-              label="Z"
-              type="number"
-              step="0.01"
-              value={String(movePositionInput[2])}
-              onChange={(e) => {
-                const value = Number(e.target.value || 0);
-                setMovePositionInput((prev) => [prev[0], prev[1], value]);
-              }}
-            />
-          </div>
-          <div className="text-sm text-pf-text-muted border-t border-pf-border pt-3">Values are in millimeters (mm).</div>
-        </div>
-      </Modal>
-
-      <Modal
-        isOpen={isRotateDialogOpen}
-        onClose={() => setIsRotateDialogOpen(false)}
-        title="Rotate [R]"
-        size="md"
-        footer={(
-          <>
-            <Button variant="secondary" onClick={() => setIsRotateDialogOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleRotateApply}>Apply</Button>
-          </>
-        )}
-      >
-        <div className="space-y-4">
-          <Select
-            label="Coordinates"
-            value="world"
-            onChange={() => {}}
-            options={[{ label: 'World coordinates', value: 'world' }]}
-          />
-
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm text-pf-text-muted mb-2">Rotate (relative)</div>
-              <div className="grid grid-cols-3 gap-3">
-                <Input
-                  label="X"
-                  type="number"
-                  step="0.01"
-                  value={String(rotateRelativeInput[0])}
-                  onChange={(e) => {
-                    const value = Number(e.target.value || 0);
-                    setRotateRelativeAxis(0, value);
-                  }}
-                />
-                <Input
-                  label="Y"
-                  type="number"
-                  step="0.01"
-                  value={String(rotateRelativeInput[1])}
-                  onChange={(e) => {
-                    const value = Number(e.target.value || 0);
-                    setRotateRelativeAxis(1, value);
-                  }}
-                />
-                <Input
-                  label="Z"
-                  type="number"
-                  step="0.01"
-                  value={String(rotateRelativeInput[2])}
-                  onChange={(e) => {
-                    const value = Number(e.target.value || 0);
-                    setRotateRelativeAxis(2, value);
-                  }}
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm text-pf-text-muted">Rotate (absolute)</div>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => {
-                    setRotateBaseAbsoluteInput([0, 0, 0]);
-                    setRotateRelativeInput([0, 0, 0]);
-                    setRotateAbsoluteInput([0, 0, 0]);
-                  }}
-                >
-                  Reset
-                </Button>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <Input
-                  label="X"
-                  type="number"
-                  step="0.01"
-                  value={String(rotateAbsoluteInput[0])}
-                  onChange={(e) => {
-                    const value = Number(e.target.value || 0);
-                    setRotateAbsoluteAxis(0, value);
-                  }}
-                />
-                <Input
-                  label="Y"
-                  type="number"
-                  step="0.01"
-                  value={String(rotateAbsoluteInput[1])}
-                  onChange={(e) => {
-                    const value = Number(e.target.value || 0);
-                    setRotateAbsoluteAxis(1, value);
-                  }}
-                />
-                <Input
-                  label="Z"
-                  type="number"
-                  step="0.01"
-                  value={String(rotateAbsoluteInput[2])}
-                  onChange={(e) => {
-                    const value = Number(e.target.value || 0);
-                    setRotateAbsoluteAxis(2, value);
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="text-sm text-pf-text-muted border-t border-pf-border pt-3">Angles are in degrees (°).</div>
-        </div>
-      </Modal>
-
-      <Modal
-        isOpen={isScaleDialogOpen}
-        onClose={() => setIsScaleDialogOpen(false)}
-        title="Scale Model"
-        size="md"
-        footer={(
-          <>
-            <Button variant="secondary" onClick={() => setIsScaleDialogOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleScaleApply}>Apply</Button>
-          </>
-        )}
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <Select
-              label="Scale mode"
-              value={scaleMode}
-              onChange={(value) => setScaleMode((value === 'mm' ? 'mm' : 'percent'))}
-              options={[
-                { label: 'Percent of current (%)', value: 'percent' },
-                { label: 'Absolute size (mm)', value: 'mm' },
-              ]}
-            />
-            <Checkbox
-              label="Uniform scale"
-              checked={uniformScale}
-              onChange={(e) => setUniformScale(e.target.checked)}
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <Input
-              label="X"
-              type="number"
-              step="0.01"
-              value={scaleMode === 'percent' ? String(scalePercentInput[0]) : String(scaleMmInput[0])}
-              onChange={(e) => {
-                const value = Number(e.target.value || 0);
-                if (scaleMode === 'percent') {
-                  setScalePercentInput((prev) => applyUniformTriple([
-                    value,
-                    prev[1],
-                    prev[2],
-                  ] as [number, number, number], value));
-                } else {
-                  setScaleMmInput((prev) => applyUniformTriple([
-                    value,
-                    prev[1],
-                    prev[2],
-                  ] as [number, number, number], value));
-                }
-              }}
-            />
-            <Input
-              label="Y"
-              type="number"
-              step="0.01"
-              disabled={uniformScale}
-              value={scaleMode === 'percent' ? String(scalePercentInput[1]) : String(scaleMmInput[1])}
-              onChange={(e) => {
-                const value = Number(e.target.value || 0);
-                if (scaleMode === 'percent') {
-                  setScalePercentInput((prev) => [prev[0], value, prev[2]]);
-                } else {
-                  setScaleMmInput((prev) => [prev[0], value, prev[2]]);
-                }
-              }}
-            />
-            <Input
-              label="Z"
-              type="number"
-              step="0.01"
-              disabled={uniformScale}
-              value={scaleMode === 'percent' ? String(scalePercentInput[2]) : String(scaleMmInput[2])}
-              onChange={(e) => {
-                const value = Number(e.target.value || 0);
-                if (scaleMode === 'percent') {
-                  setScalePercentInput((prev) => [prev[0], prev[1], value]);
-                } else {
-                  setScaleMmInput((prev) => [prev[0], prev[1], value]);
-                }
-              }}
-            />
-          </div>
-
-          {selectedModelMetrics && (
-            <div className="text-sm text-pf-text-muted border-t border-pf-border pt-3">
-              Current size: X {formatValue(selectedModelMetrics.currentSize[0])} mm, Y {formatValue(selectedModelMetrics.currentSize[1])} mm, Z {formatValue(selectedModelMetrics.currentSize[2])} mm
-            </div>
-          )}
-        </div>
-      </Modal>
 
       {/* Bottom Status Bar */}
       <SlicerStatusBar
