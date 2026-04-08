@@ -165,8 +165,8 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         disabled={!hasSelection}
       />
 
-      {/* Less-essential buttons — hidden on narrow viewports */}
-      <div className="hidden xl:contents">
+      {/* Less-essential buttons — hidden on very narrow viewports */}
+      <div className="hidden md:contents">
         <ToolbarDivider />
 
         {/* Split/Cut group */}
@@ -226,7 +226,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         disabled={!canRedo}
       />
 
-      <div className="hidden xl:contents">
+      <div className="hidden md:contents">
         <ToolbarDivider />
 
         {/* Assembly view */}
