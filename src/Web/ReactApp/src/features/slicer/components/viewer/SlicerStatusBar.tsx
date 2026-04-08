@@ -51,6 +51,7 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
               {slicesRemaining} / {slicesTotal} left
             </span>
             <Button
+              type="button"
               variant="subtle"
               title="Slice information"
               className="p-1"
@@ -61,6 +62,7 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
         )}
         
         <Button
+          type="button"
           variant="primary"
           onClick={onSlice}
           disabled={!canSlice || slicing}

@@ -24,6 +24,7 @@ interface ToolButtonProps {
 
 const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, disabled = false, onClick }) => (
   <Button
+    type="button"
     onClick={onClick}
     title={title}
     disabled={disabled}

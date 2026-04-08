@@ -495,17 +495,17 @@ export const NewSliceJobPage: React.FC = () => {
 
     // Defer all setState calls to avoid synchronous updates in effect body
     queueMicrotask(() => {
-      // Keep current selection if valid for this printer model
-      const hasCurrent = !!selectedMachineProfileId && machineProfilesData.some((p) => p.name === selectedMachineProfileId);
-      if (hasCurrent) {
-        return;
-      }
-
       // Set manufacturer/model from printer for display purposes
       const mfgName = selectedPrinterForSlicing.manufacturerName;
       const modelName = selectedPrinterForSlicing.modelName;
       setSelectedManufacturer(mfgName || '');
       setSelectedPrinterModel(modelName || '');
+
+      // Keep current selection if valid for this printer model
+      const hasCurrent = !!selectedMachineProfileId && machineProfilesData.some((p) => p.name === selectedMachineProfileId);
+      if (hasCurrent) {
+        return;
+      }
       
       // Get nozzle diameter from printer's primary toolhead
       const nozzle = getPrimaryNozzleDiameter(selectedPrinterForSlicing);

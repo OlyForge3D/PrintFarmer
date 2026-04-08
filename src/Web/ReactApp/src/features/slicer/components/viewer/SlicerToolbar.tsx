@@ -47,6 +47,7 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
 
   return (
     <Button
+      type="button"
       variant="unstyled"
       onClick={onClick}
       disabled={disabled}
