@@ -34,6 +34,9 @@ public abstract class HttpJobPollerService(
     private readonly IWorkerStateService _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     private readonly Guid _workerId = Guid.NewGuid();
+    private readonly string? _workerApiKey = configuration["WorkerAuth:SharedApiKey"]
+                                              ?? configuration["WorkerAuth:SharedKey"]
+                                              ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
 
     /// <summary>
     /// Derived classes implement this to execute the slicing pipeline.
@@ -72,6 +75,11 @@ public abstract class HttpJobPollerService(
                 using HttpClient httpClient = _httpClientFactory.CreateClient();
                 httpClient.BaseAddress = new Uri(apiBaseUrl);
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+                if (!string.IsNullOrWhiteSpace(_workerApiKey))
+                {
+                    httpClient.DefaultRequestHeaders.Add("X-Worker-Key", _workerApiKey);
+                }
 
                 // Attempt to claim a job
                 ClaimJobRequest claimRequest = new ClaimJobRequest
