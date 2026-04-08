@@ -28,7 +28,7 @@ import { ModelSelector } from '../components/job/ModelSelector';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Select } from '@/common/components/ui';
+import { Button, Alert, Input, Select } from '@/common/components/ui';
 import { LayersIcon, EyeIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
@@ -1398,11 +1398,11 @@ export const NewSliceJobPage: React.FC = () => {
                     <Input
                       type="text"
                       value={saveProfileState.name}
-                      onChange={e => setSaveProfileState(s => ({ ...s, name: e.target.value }))}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSaveProfileState(s => ({ ...s, name: e.target.value }))}
                       placeholder="Profile name..."
                       className="flex-1 text-sm"
                       autoFocus
-                      onKeyDown={e => {
+                      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                         if (e.key === 'Enter') { e.preventDefault(); void handleConfirmSaveProfile(); }
                         if (e.key === 'Escape') setSaveProfileState({ open: false, name: '' });
                       }}
