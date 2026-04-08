@@ -43,10 +43,42 @@ public abstract class HttpJobPollerService(
         string? instanceId = configuration["Worker:InstanceId"];
         if (!string.IsNullOrWhiteSpace(instanceId) && Guid.TryParse(instanceId, out Guid parsed))
         {
+            // For multi-worker deployments: combine instance ID with hostname
+            // so replicas sharing the same config get unique but deterministic IDs.
+            string hostname = Environment.MachineName;
+            string? workerId = configuration["Worker:WorkerId"];
+            if (!string.IsNullOrWhiteSpace(workerId) && workerId != "orcaslicer-worker-1")
+            {
+                // Worker has a distinct WorkerId — derive a unique GUID from base + discriminator
+                return DeriveGuid(parsed, workerId);
+            }
+
+            // Single worker or first replica — suffix with hostname for safety
+            string containerHostname = hostname ?? string.Empty;
+            if (!string.IsNullOrEmpty(containerHostname) && containerHostname.Length >= 8)
+            {
+                return DeriveGuid(parsed, containerHostname);
+            }
+
             return parsed;
         }
 
         return Guid.NewGuid();
+    }
+
+    /// <summary>
+    /// Creates a deterministic GUID by hashing the base GUID with a discriminator string.
+    /// Ensures each replica gets a unique but stable ID across restarts.
+    /// </summary>
+    private static Guid DeriveGuid(Guid baseId, string discriminator)
+    {
+        byte[] input = [..baseId.ToByteArray(), ..System.Text.Encoding.UTF8.GetBytes(discriminator)];
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(input);
+
+        // Use first 16 bytes of SHA256 as a v4-like GUID
+        hash[6] = (byte)((hash[6] & 0x0F) | 0x40); // version 4
+        hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // variant 1
+        return new Guid(hash.AsSpan(0, 16));
     }
 
     /// <summary>

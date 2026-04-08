@@ -40,7 +40,6 @@ public class SliceJobController(
     private readonly SliceJobMetrics _metrics = metrics;
     private readonly IWorkerAuthService _workerAuth = workerAuth;
     private readonly IWorkerRepository _workerRepository = workerRepository;
-    private readonly Farm.Slicer.Module.Settings.SlicerSettings _slicerSettings = slicerOptions.Value;
     private readonly IWorkerCircuitBreakerService? _circuitBreaker = circuitBreaker;
 
     /// <summary>
