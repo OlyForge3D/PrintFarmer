@@ -579,7 +579,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
                          disabled:opacity-50 disabled:cursor-not-allowed"
             />
             {props.unit && (
-              <span className="text-xs text-pf-text-muted px-1.5 py-1 bg-pf-border/50 rounded-sm min-w-[40px] text-center">
+              <span className="text-xs text-pf-text-muted px-1.5 py-1 bg-pf-border/50 rounded-sm min-w-10 text-center">
                 {props.unit}
               </span>
             )}
