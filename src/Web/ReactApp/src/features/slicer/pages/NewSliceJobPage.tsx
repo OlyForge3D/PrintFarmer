@@ -216,6 +216,7 @@ export const NewSliceJobPage: React.FC = () => {
   // Profile Editor Modal State
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileEditorType, setProfileEditorType] = useState<ProfileType>('machine');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Post-submission progress tracking
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
@@ -1039,7 +1040,8 @@ export const NewSliceJobPage: React.FC = () => {
   return (
     <div className="overflow-hidden p-2 bg-pf-bg-2">
       <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-2 h-[calc(100dvh-72px)] overflow-hidden">
-        {/* LEFT SIDEBAR: OrcaSlicer Menu */}
+        {/* LEFT SIDEBAR: OrcaSlicer Menu — hidden when sidebarOpen is false */}
+        {sidebarOpen && (
         <div className="w-full lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto">
 
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
@@ -1469,6 +1471,7 @@ export const NewSliceJobPage: React.FC = () => {
           )}
 
         </div>
+        )}
 
         {/* RIGHT SIDE: 3D Workspace */}
         <div className="flex-1 flex flex-col min-h-0">
@@ -1485,6 +1488,8 @@ export const NewSliceJobPage: React.FC = () => {
                 onSlice={submitSliceJob}
                 slicing={submitMutation.isPending}
                 canSlice={!submittedJobId && workspaceModels.length > 0 && !!selectedMachineProfileId && !!selectedFilamentProfileId && !!selectedProcessPresetId}
+                onToggleSidebar={() => setSidebarOpen(v => !v)}
+                sidebarOpen={sidebarOpen}
                 className="h-full"
               />
             ) : (

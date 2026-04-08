@@ -47,6 +47,10 @@ export interface SlicerWorkspaceProps {
   slicesRemaining?: number;
   /** Total number of slices allowed (optional) */
   slicesTotal?: number;
+  /** Callback to toggle sidebar visibility */
+  onToggleSidebar?: () => void;
+  /** Whether sidebar is currently open */
+  sidebarOpen?: boolean;
   /** Additional CSS class */
   className?: string;
 }
@@ -81,6 +85,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   canSlice = true,
   slicesRemaining,
   slicesTotal,
+  onToggleSidebar,
+  sidebarOpen = true,
   className = '',
 }) => {
   const [activeTool, setActiveTool] = useState<ToolType | null>(null);
@@ -615,6 +621,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         onAssemblyView={handleAssemblyView}
         onSettingsProfiles={onSettingsProfiles}
         onKeyboardShortcuts={handleKeyboardShortcuts}
+        onToggleSidebar={onToggleSidebar}
+        sidebarOpen={sidebarOpen}
         canUndo={undoStack.length > 0}
         canRedo={redoStack.length > 0}
         hasModels={hasModels}

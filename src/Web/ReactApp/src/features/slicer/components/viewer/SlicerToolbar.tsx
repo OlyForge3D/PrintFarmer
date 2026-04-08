@@ -85,11 +85,22 @@ export interface SlicerToolbarProps {
   onAssemblyView?: () => void;
   onSettingsProfiles?: () => void;
   onKeyboardShortcuts?: () => void;
+  onToggleSidebar?: () => void;
+  sidebarOpen?: boolean;
   canUndo?: boolean;
   canRedo?: boolean;
   hasModels?: boolean;
   hasSelection?: boolean;
 }
+
+/** Hamburger icon for sidebar toggle */
+const HamburgerIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="3" y1="6" x2="21" y2="6" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+    <line x1="3" y1="18" x2="21" y2="18" />
+  </svg>
+);
 
 export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   onAddModel,
@@ -106,6 +117,8 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   onAssemblyView,
   onSettingsProfiles,
   onKeyboardShortcuts,
+  onToggleSidebar,
+  sidebarOpen = true,
   canUndo = false,
   canRedo = false,
   hasModels = false,
@@ -113,6 +126,16 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
 }) => {
   return (
     <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border overflow-x-auto">
+      {/* Hamburger toggle — visible only when sidebar is hidden (narrow viewport) */}
+      {onToggleSidebar && (
+        <ToolbarButton
+          icon={<HamburgerIcon />}
+          title={sidebarOpen ? 'Hide Settings' : 'Show Settings'}
+          onClick={onToggleSidebar}
+          active={sidebarOpen}
+        />
+      )}
+
       {/* Add/Arrange group */}
       <ToolbarButton
         icon={<AddModelIcon />}
