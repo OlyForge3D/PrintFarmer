@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Slicer.Host;
@@ -7,7 +7,9 @@ using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -42,16 +44,44 @@ builder.Services.AddUnimplementedSlicerServiceStubs();
 // ── Infrastructure services shared with the main API ──────────────────────────
 // ILogger<T> is automatically provided by the DI container
 
-// ── Authentication (transitional — allow all for standalone mode) ──────────────
-// When the host is deployed behind an API gateway, this will be replaced with
-// proper JWT/API-key authentication forwarded from the gateway.
-builder.Services
-    .AddAuthentication("StandaloneScheme")
-    .AddScheme<AuthenticationSchemeOptions, StandaloneAuthHandler>(
-        "StandaloneScheme", null);
+// ── Authentication ────────────────────────────────────────────────────────────
+// Use real JWT Bearer validation when Jwt__Key is provided (deployed behind the
+// same gateway as the main API). Fall back to the pass-through StandaloneAuth
+// handler for local development without a gateway.
+string? jwtKey = builder.Configuration["Jwt:Key"];
+if (!string.IsNullOrWhiteSpace(jwtKey))
+{
+    string issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
+    string audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
+
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+                ValidateIssuer = true,
+                ValidIssuer = issuer,
+                ValidateAudience = true,
+                ValidAudience = audience,
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero,
+            };
+        });
+}
+else
+{
+    builder.Services
+        .AddAuthentication("StandaloneScheme")
+        .AddScheme<AuthenticationSchemeOptions, StandaloneAuthHandler>(
+            "StandaloneScheme", null);
+}
+
 builder.Services.AddAuthorization(opts =>
 {
-    opts.AddPolicy("farm_admin", policy => policy.RequireAssertion(_ => true));
+    opts.AddPolicy("farm_admin", policy => policy.RequireRole("farm_admin"));
 });
 
 // ── JSON serialisation ────────────────────────────────────────────────────────
