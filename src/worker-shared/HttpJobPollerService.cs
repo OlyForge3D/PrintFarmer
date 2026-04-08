@@ -33,10 +33,21 @@ public abstract class HttpJobPollerService(
     private readonly ILogger<HttpJobPollerService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IWorkerStateService _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-    private readonly Guid _workerId = Guid.NewGuid();
+    private readonly Guid _workerId = ResolveWorkerId(configuration);
     private readonly string? _workerApiKey = configuration["WorkerAuth:SharedApiKey"]
                                               ?? configuration["WorkerAuth:SharedKey"]
                                               ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
+
+    private static Guid ResolveWorkerId(IConfiguration configuration)
+    {
+        string? instanceId = configuration["Worker:InstanceId"];
+        if (!string.IsNullOrWhiteSpace(instanceId) && Guid.TryParse(instanceId, out Guid parsed))
+        {
+            return parsed;
+        }
+
+        return Guid.NewGuid();
+    }
 
     /// <summary>
     /// Derived classes implement this to execute the slicing pipeline.
