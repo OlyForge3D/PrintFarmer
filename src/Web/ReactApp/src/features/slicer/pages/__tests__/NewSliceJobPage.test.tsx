@@ -221,7 +221,7 @@ vi.mock('../../components/job', () => ({
   ),
   SlicerSelector: ({ onSlicerChange }: { selectedSlicerId: string; onSlicerChange: (id: string) => void }) => (
     <div data-testid="slicer-selector">
-      <select data-testid="slicer-select" onChange={(e) => onSlicerChange(e.target.value)}>
+      <select data-testid="slicer-select" aria-label="Select slicer" onChange={(e) => onSlicerChange(e.target.value)}>
         <option value="orcaslicer">OrcaSlicer</option>
       </select>
     </div>
@@ -249,13 +249,10 @@ vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
 }));
 
 // Mock SlicerSettingsPanel
-vi.mock('@/features/slicer/components/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/slicer/components/settings')>();
-  return {
-    ...actual,
-    SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
-  };
-});
+vi.mock('@/features/slicer/components/settings', () => ({
+  SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
+  DEFAULT_ADVANCED_SETTINGS: {},
+}));
 
 // Mock useSTLFile hook
 vi.mock('@/common/hooks/useSTLFile', () => ({
