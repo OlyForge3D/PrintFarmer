@@ -384,6 +384,9 @@ RUN set -e; \
     # Create cache directory for SQLite profile cache \
     mkdir -p /app/cache && \
     chown appuser:appuser /app/cache && \
+    # Ensure temp working directory is writable by appuser \
+    mkdir -p /app/temp && \
+    chown appuser:appuser /app/temp && \
     # Verify profile directories exist \
     PROFILES_DIR="/opt/orcaslicer/resources/profiles"; \
     if [ -d "$PROFILES_DIR" ]; then \
