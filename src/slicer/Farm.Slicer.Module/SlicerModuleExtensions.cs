@@ -186,7 +186,14 @@ public static class SlicerModuleExtensions
         _ = services.AddHostedService<SlicerDbInitializationHostedService>();
 
         _ = services.AddHostedService<WorkerHealthMonitorService>();
-        _ = services.AddHostedService<JobDispatchingService>();
+
+        // Push-based job dispatching: dispatches jobs directly to workers via HTTP POST.
+        // Disabled when workers use claim-based polling (HttpJobPollerService) instead.
+        bool enablePushDispatch = configuration.GetValue("Slicer:EnablePushDispatch", false);
+        if (enablePushDispatch)
+        {
+            _ = services.AddHostedService<JobDispatchingService>();
+        }
 
         // Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
         _ = services.Configure<JobDispatchRetrySettings>(configuration.GetSection("JobDispatchRetry"));
