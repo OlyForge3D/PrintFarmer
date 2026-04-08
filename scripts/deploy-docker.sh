@@ -2729,6 +2729,15 @@ Jwt__Audience=${Jwt__Audience:-PrintFarmer}
 EOF
     fi
 
+    # Save worker shared API key alongside JWT key
+    if [ -n "${WORKER_SHARED_API_KEY:-}" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+# Worker Shared API Key (slicer-host ↔ worker job claim auth)
+WORKER_SHARED_API_KEY=$WORKER_SHARED_API_KEY
+EOF
+    fi
+
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
         cat >> "$CONFIG_FILE" << EOF
 
@@ -4196,7 +4205,27 @@ Jwt__Key=$Jwt__Key
 Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
 Jwt__Audience=${Jwt__Audience:-PrintFarmer}
 EOF
-    
+
+    # Generate Worker Shared API Key for slicer-host ↔ worker job claim auth
+    # Preserved across redeploys so in-flight workers keep working
+    if [ -z "${WORKER_SHARED_API_KEY:-}" ]; then
+        if [ -f "$CONFIG_FILE" ]; then
+            WORKER_SHARED_API_KEY=$(get_kv_from_file "$CONFIG_FILE" "WORKER_SHARED_API_KEY" || true)
+        fi
+        if [ -z "${WORKER_SHARED_API_KEY:-}" ] && [ -f "$ENV_FILE" ]; then
+            WORKER_SHARED_API_KEY=$(get_kv_from_file "$ENV_FILE" "WORKER_SHARED_API_KEY" || true)
+        fi
+        if [ -z "${WORKER_SHARED_API_KEY:-}" ]; then
+            WORKER_SHARED_API_KEY=$(generate_slicer_api_key)
+            print_info "Generated new worker shared API key for job claim auth"
+        else
+            print_info "Using existing worker shared API key (preserved)"
+        fi
+    fi
+    echo "" >> "$ENV_FILE"
+    echo "# Worker Shared API Key (slicer-host ↔ worker job claim/progress/complete auth)" >> "$ENV_FILE"
+    echo "WORKER_SHARED_API_KEY=$WORKER_SHARED_API_KEY" >> "$ENV_FILE"
+
     # Generate and export slicer worker API keys (if workers are enabled)
     # This ensures workers can authenticate with the API during registration
     generate_slicer_worker_api_keys
