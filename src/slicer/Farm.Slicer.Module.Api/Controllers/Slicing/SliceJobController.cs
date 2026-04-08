@@ -429,12 +429,6 @@ public class SliceJobController(
             return BadRequest(new { error = $"Only failed jobs can be retried. Current status: {job.Status}" });
         }
 
-        int maxRetries = _slicerSettings.MaxRetryCount;
-        if (job.RetryCount >= maxRetries)
-        {
-            return BadRequest(new { error = $"Maximum retry count ({maxRetries}) exceeded." });
-        }
-
         await _jobRepository.RetryJobAsync(id, ct);
 
         job = await _jobRepository.GetByIdAsync(id, ct);

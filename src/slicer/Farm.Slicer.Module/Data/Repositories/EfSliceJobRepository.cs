@@ -391,7 +391,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.CompletedAt = null;
         job.ProgressPercent = 0;
         job.ProgressMessage = null;
-        job.RetryCount += 1;
+        job.RetryCount = 0;
         job.UpdatedAt = DateTime.UtcNow;
         await SaveChangesAsync(ct);
     }
