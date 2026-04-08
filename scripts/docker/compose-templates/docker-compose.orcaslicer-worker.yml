@@ -61,6 +61,7 @@ services:
       - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
+      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
     volumes: *worker-volumes
     depends_on:
       api:
