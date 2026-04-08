@@ -1056,11 +1056,11 @@ export const NewSliceJobPage: React.FC = () => {
 
   return (
     <div className="overflow-hidden p-2 bg-pf-bg-2">
-      <form onSubmit={onSubmit} className="flex lg:flex-row gap-2 h-[calc(100dvh-72px)] overflow-hidden">
+      <form onSubmit={onSubmit} className="relative flex lg:flex-row gap-2 h-[calc(100dvh-72px)] overflow-hidden">
         {/* LEFT SIDEBAR: OrcaSlicer Menu — hidden on narrow viewports, toggled via hamburger.
-             On lg+ screens: always visible unless explicitly toggled off.
-             On narrow screens: only visible when sidebarOpen is true (overlay). */}
-        <div className={`${sidebarOpen ? 'absolute inset-0 z-40 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} w-full lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 lg:bg-transparent`}>
+             On lg+ screens: inline beside visualizer unless explicitly toggled off.
+             On narrow screens: slides over as fixed-width panel when toggled open. */}
+        <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
 
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
           <SlicerSelector
