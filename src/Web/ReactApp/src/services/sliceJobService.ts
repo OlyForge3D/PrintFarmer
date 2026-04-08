@@ -72,7 +72,7 @@ export class SliceJobService {
    */
   async submitJob(request: SubmitSliceJobRequest): Promise<SubmitSliceJobResponse> {
     const response = await apiClient.request<SubmitSliceJobResponse>({
-      url: '/slice',
+      url: '/slice/',
       method: 'POST',
       data: request
     });
