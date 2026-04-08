@@ -38,6 +38,10 @@ services:
       # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
       - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
       - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
+      # JWT configuration — must match the main API so bearer tokens are accepted
+      - Jwt__Key=${Jwt__Key:-dev-super-secret-key-change-this-please-1234567890}
+      - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
+      - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
       - MODEL_UPLOAD_PATH=/app/models
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
