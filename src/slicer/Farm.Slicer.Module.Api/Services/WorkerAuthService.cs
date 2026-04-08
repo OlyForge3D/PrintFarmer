@@ -9,6 +9,7 @@ namespace Farm.Slicer.Module.Api.Services;
 public sealed class WorkerAuthService(IConfiguration configuration, IHostEnvironment env) : IWorkerAuthService
 {
     private readonly string? _sharedKey = configuration.GetSection(WorkerAuthSettings.SectionName)["SharedKey"]
+                     ?? configuration.GetSection(WorkerAuthSettings.SectionName)["SharedApiKey"]
                      ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
 
     private readonly IHostEnvironment _env = env;
