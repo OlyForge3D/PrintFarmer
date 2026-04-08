@@ -120,6 +120,9 @@ public abstract class HttpJobPollerService(
                     StartedAt = DateTime.UtcNow
                 };
 
+                // Resolve profile names from SlicerProfileJson into full SlicerProfileDto
+                job.Profile = await ResolveProfileFromJsonAsync(jobStatus.SlicerProfileJson, stoppingToken);
+
                 _workerState.IncrementActiveJobs();
                 _logger.LogInformation("Claimed job {JobId}, starting processing", job.Id);
 
@@ -341,5 +344,126 @@ public abstract class HttpJobPollerService(
         // Requires ArtifactsController endpoint and SlicingArtifactKeys conventions.
         // See .squad/decisions/inbox/dallas-blocked-items-architecture.md for design.
         return artifactIds;
+    }
+
+    /// <summary>
+    /// Resolves profile names from SlicerProfileJson into a full SlicerProfileDto
+    /// by looking up cached profiles from the ISlicerProfilesService and applying user overrides.
+    ///
+    /// Expected JSON format:
+    /// {
+    ///   "machineProfileName": "Phrozen Arco 0.4 nozzle (0.4mm)",
+    ///   "filamentProfileName": "Generic PLA @System",
+    ///   "processProfileName": "0.20mm Standard @Phrozen Arco",
+    ///   "overrides": { "infillDensity": 30, "printSpeed": 100 }
+    /// }
+    /// </summary>
+    private async Task<SlicerProfileDto?> ResolveProfileFromJsonAsync(string? slicerProfileJson, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(slicerProfileJson))
+        {
+            _logger.LogWarning("SlicerProfileJson is null or empty — cannot resolve profiles");
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(slicerProfileJson);
+            JsonElement root = doc.RootElement;
+
+            string machineProfileName = root.TryGetProperty("machineProfileName", out JsonElement machElem) ? machElem.GetString() ?? string.Empty : string.Empty;
+            string filamentProfileName = root.TryGetProperty("filamentProfileName", out JsonElement filElem) ? filElem.GetString() ?? string.Empty : string.Empty;
+            string processProfileName = root.TryGetProperty("processProfileName", out JsonElement procElem) ? procElem.GetString() ?? string.Empty : string.Empty;
+
+            if (string.IsNullOrEmpty(machineProfileName) && string.IsNullOrEmpty(filamentProfileName) && string.IsNullOrEmpty(processProfileName))
+            {
+                _logger.LogWarning("No profile names found in SlicerProfileJson — cannot resolve profiles");
+                return null;
+            }
+
+            ISlicerProfilesService? profilesService = _serviceProvider.GetService<ISlicerProfilesService>();
+            if (profilesService == null)
+            {
+                _logger.LogWarning("ISlicerProfilesService not available — cannot resolve profiles");
+                return null;
+            }
+
+            SlicerProfileDto profile = new();
+
+            // Resolve machine profile by name
+            if (!string.IsNullOrEmpty(machineProfileName))
+            {
+                IList<MachineProfileDto> machines = await profilesService.ListAvailableMachineProfilesAsync(ct);
+                profile.MachineProfile = machines.FirstOrDefault(m =>
+                    string.Equals(m.Name, machineProfileName, StringComparison.OrdinalIgnoreCase));
+                if (profile.MachineProfile == null)
+                {
+                    _logger.LogWarning("Machine profile '{MachineProfileName}' not found in {MachinesCount} cached profiles", machineProfileName, machines.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("Resolved machine profile: {MachineName}", profile.MachineProfile.Name);
+                }
+            }
+
+            // Resolve filament profile by name
+            if (!string.IsNullOrEmpty(filamentProfileName))
+            {
+                IList<FilamentProfileDto> filaments = await profilesService.ListAvailableFilamentProfilesAsync(ct);
+                profile.FilamentProfile = filaments.FirstOrDefault(f =>
+                    string.Equals(f.Name, filamentProfileName, StringComparison.OrdinalIgnoreCase));
+                if (profile.FilamentProfile == null)
+                {
+                    _logger.LogWarning("Filament profile '{FilamentProfileName}' not found in {FilamentsCount} cached profiles", filamentProfileName, filaments.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("Resolved filament profile: {FilamentName}", profile.FilamentProfile.Name);
+                }
+            }
+
+            // Resolve process profile by name
+            if (!string.IsNullOrEmpty(processProfileName))
+            {
+                IList<ProcessProfileDto> processes = await profilesService.ListAvailableProcessProfilesAsync(ct);
+                profile.ProcessProfile = processes.FirstOrDefault(p =>
+                    string.Equals(p.Name, processProfileName, StringComparison.OrdinalIgnoreCase));
+                if (profile.ProcessProfile == null)
+                {
+                    _logger.LogWarning("Process profile '{ProcessProfileName}' not found in {ProcessesCount} cached profiles", processProfileName, processes.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("Resolved process profile: {ProcessName}", profile.ProcessProfile.Name);
+                }
+            }
+
+            // Apply user overrides to the process profile settings
+            if (profile.ProcessProfile != null && root.TryGetProperty("overrides", out JsonElement overridesElem))
+            {
+                foreach (JsonProperty prop in overridesElem.EnumerateObject())
+                {
+                    object value = prop.Value.ValueKind switch
+                    {
+                        JsonValueKind.Number when prop.Value.TryGetInt32(out int intVal) => intVal,
+                        JsonValueKind.Number => prop.Value.GetDouble(),
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
+                        _ => prop.Value.ToString()
+                    };
+                    profile.ProcessProfile.Settings[prop.Name] = value;
+                }
+
+                _logger.LogInformation("Applied {OverrideCount} user overrides to process profile", overridesElem.EnumerateObject().Count());
+            }
+
+            return profile;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to parse SlicerProfileJson: {SlicerProfileJson}", slicerProfileJson);
+            return null;
+        }
     }
 }

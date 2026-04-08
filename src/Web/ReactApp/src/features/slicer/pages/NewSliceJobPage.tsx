@@ -904,8 +904,17 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileName: modelFileName,
       slicerEngine: slicerInfo.engine,
       slicerProfileJson: JSON.stringify({
-            ...slicerSettings,
-            ...advancedProcessSettings,
+            machineProfileName: selectedMachineProfileId,
+            filamentProfileName: selectedFilamentProfileId,
+            processProfileName: selectedProcessPresetId.startsWith('system:')
+              ? selectedProcessPresetId.slice('system:'.length)
+              : selectedProcessPresetId.startsWith('custom:')
+              ? selectedProcessPresetId.slice('custom:'.length)
+              : selectedProcessPresetId,
+            overrides: {
+              ...slicerSettings,
+              ...advancedProcessSettings,
+            },
           }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
@@ -919,6 +928,8 @@ export const NewSliceJobPage: React.FC = () => {
     advancedProcessSettings,
     modelFileName,
     modelFileUrl,
+    selectedFilamentProfileId,
+    selectedMachineProfileId,
     selectedProcessPresetId,
     slicerInfo.engine,
     slicerSettings,
