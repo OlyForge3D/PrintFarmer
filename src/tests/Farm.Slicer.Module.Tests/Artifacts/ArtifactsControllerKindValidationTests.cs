@@ -3,7 +3,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers;
 using Farm.Slicer.Module.Services.Configuration;
-using Farm.Slicer.Module.Tests.Slicing;
+using Farm.Slicer.Module.Tests.Helpers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -24,7 +24,7 @@ public class ArtifactsControllerKindValidationTests(CustomWebApplicationFactory 
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService svc = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IOptions<SlicerArtifactStorageSettings> opts = Options.Create(new SlicerArtifactStorageSettings());
-        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
+        StubSliceJobRepository jobRepo = new StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(svc, jobRepo, opts);
         TestFormFile file = new TestFormFile(Array.Empty<byte>(), "a.txt", "text/plain");
         IActionResult result = await controller.UploadAsync(Guid.NewGuid(), file, default);
@@ -37,7 +37,7 @@ public class ArtifactsControllerKindValidationTests(CustomWebApplicationFactory 
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService svc = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IOptions<SlicerArtifactStorageSettings> opts = Options.Create(new SlicerArtifactStorageSettings { MaxFileSizeBytes = 10 });
-        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
+        StubSliceJobRepository jobRepo = new StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(svc, jobRepo, opts);
         TestFormFile file = new TestFormFile(new byte[20], "large.gcode", "application/octet-stream");
         IActionResult result = await controller.UploadAsync(Guid.NewGuid(), file, default);

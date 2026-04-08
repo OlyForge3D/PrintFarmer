@@ -63,16 +63,6 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<IArtifactCleanupService, ArtifactCleanupService>();
         _ = services.AddHostedService<ArtifactCleanupHostedService>();
 
-        // Job dispatch
-        _ = services.AddScoped<ISlicerJobDispatcherService, JobDispatcherService>();
-        _ = services.AddSingleton(sp =>
-        {
-            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
-            RetryOptions opts = new RetryOptions();
-            cfg.GetSection("JobDispatchRetry").Bind(opts);
-            return opts;
-        });
-
         // Host-independent adapters (bridge module interfaces → infrastructure services)
         _ = services.AddSingleton<IRateLimitService, ModuleRateLimitAdapter>();
         _ = services.AddScoped<ICatalogServiceAdapter, ModuleCatalogServiceAdapter>();
