@@ -56,7 +56,7 @@ services:
       - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+      - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
       - Worker__MaxConcurrentJobs=1

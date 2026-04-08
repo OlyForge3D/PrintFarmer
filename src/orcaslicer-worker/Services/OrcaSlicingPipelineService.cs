@@ -27,7 +27,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _storageEndpoint = configuration["SlicerApi:BaseUrl"]
                           ?? configuration["Worker:StorageEndpoint"]
                           ?? "http://api:5245";
-        _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/usr/local/bin/orcaslicer";
+        _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/opt/orcaslicer/bin/orca-slicer";
         if (!Directory.Exists(_workingDirectory))
         {
             _ = Directory.CreateDirectory(_workingDirectory);
