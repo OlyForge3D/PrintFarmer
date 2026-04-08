@@ -16,6 +16,7 @@ import {
   CloseIcon,
   LayersIcon,
   PrinterIcon,
+  RefreshIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import {
@@ -123,6 +124,17 @@ export function SliceJobsPage() {
     },
   });
 
+  const retryMutation = useMutation({
+    mutationFn: (jobId: string) => sliceJobService.retryJob(jobId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['slice-jobs'] });
+      toast.success('Job requeued');
+    },
+    onError: (err: Error) => {
+      toast.error(`Failed to retry job: ${err.message}`);
+    },
+  });
+
   const filteredJobs = useMemo(() => {
     if (statusFilter === 'all') return jobs;
     return jobs.filter(j => j.status === statusFilter);
@@ -222,6 +234,7 @@ export function SliceJobsPage() {
           expandedJobId={expandedJobId}
           onToggleExpand={toggleExpand}
           onCancel={(id) => cancelMutation.mutate(id)}
+          onRetry={(id) => retryMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
           onSendToPrinter={(id) => setSendToJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
@@ -230,6 +243,7 @@ export function SliceJobsPage() {
         <JobCardGrid
           jobs={filteredJobs}
           onCancel={(id) => cancelMutation.mutate(id)}
+          onRetry={(id) => retryMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
           onSendToPrinter={(id) => setSendToJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
@@ -252,6 +266,7 @@ function JobTable({
   expandedJobId,
   onToggleExpand,
   onCancel,
+  onRetry,
   onDownload,
   onSendToPrinter,
   cancellingId,
@@ -260,6 +275,7 @@ function JobTable({
   expandedJobId: string | null;
   onToggleExpand: (id: string) => void;
   onCancel: (id: string) => void;
+  onRetry: (id: string) => void;
   onDownload: (id: string) => void;
   onSendToPrinter: (id: string) => void;
   cancellingId: string | null;
@@ -285,6 +301,7 @@ function JobTable({
               isExpanded={expandedJobId === job.id}
               onToggleExpand={() => onToggleExpand(job.id)}
               onCancel={() => onCancel(job.id)}
+              onRetry={() => onRetry(job.id)}
               onDownload={() => onDownload(job.id)}
               onSendToPrinter={() => onSendToPrinter(job.id)}
               isCancelling={cancellingId === job.id}
@@ -301,6 +318,7 @@ function JobTableRow({
   isExpanded,
   onToggleExpand,
   onCancel,
+  onRetry,
   onDownload,
   onSendToPrinter,
   isCancelling,
@@ -309,12 +327,14 @@ function JobTableRow({
   isExpanded: boolean;
   onToggleExpand: () => void;
   onCancel: () => void;
+  onRetry: () => void;
   onDownload: () => void;
   onSendToPrinter: () => void;
   isCancelling: boolean;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
   const canDownload = job.status === SliceJobStatus.Completed;
+  const canRetry = job.status === SliceJobStatus.Failed;
 
   return (
     <>
@@ -340,6 +360,17 @@ function JobTableRow({
         </td>
         <td className="px-4 py-3 text-right">
           <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+            {canRetry && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={onRetry}
+                aria-label="Retry job"
+                title="Retry failed job"
+              >
+                <RefreshIcon className="w-3.5 h-3.5" />
+              </Button>
+            )}
             {canCancel && (
               <Button
                 variant="danger"
@@ -391,12 +422,14 @@ function JobTableRow({
 function JobCardGrid({
   jobs,
   onCancel,
+  onRetry,
   onDownload,
   onSendToPrinter,
   cancellingId,
 }: {
   jobs: SliceJobStatusResponse[];
   onCancel: (id: string) => void;
+  onRetry: (id: string) => void;
   onDownload: (id: string) => void;
   onSendToPrinter: (id: string) => void;
   cancellingId: string | null;
@@ -408,6 +441,7 @@ function JobCardGrid({
           key={job.id}
           job={job}
           onCancel={() => onCancel(job.id)}
+          onRetry={() => onRetry(job.id)}
           onDownload={() => onDownload(job.id)}
           onSendToPrinter={() => onSendToPrinter(job.id)}
           isCancelling={cancellingId === job.id}
@@ -420,18 +454,21 @@ function JobCardGrid({
 function JobCard({
   job,
   onCancel,
+  onRetry,
   onDownload,
   onSendToPrinter,
   isCancelling,
 }: {
   job: SliceJobStatusResponse;
   onCancel: () => void;
+  onRetry: () => void;
   onDownload: () => void;
   onSendToPrinter: () => void;
   isCancelling: boolean;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
   const canDownload = job.status === SliceJobStatus.Completed;
+  const canRetry = job.status === SliceJobStatus.Failed;
 
   return (
     <Card>
@@ -476,12 +513,22 @@ function JobCard({
         </div>
 
         {job.errorMessage && (
-          <p className="text-xs text-pf-error bg-pf-error/10 rounded p-2 break-words">
+          <p className="text-xs text-pf-error bg-pf-error/10 rounded p-2 wrap-break-word">
             {job.errorMessage}
           </p>
         )}
 
         <div className="flex items-center gap-2 pt-1">
+          {canRetry && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onRetry}
+              iconLeft={<RefreshIcon className="w-3.5 h-3.5" />}
+            >
+              Retry
+            </Button>
+          )}
           {canCancel && (
             <Button
               variant="danger"
@@ -611,7 +658,7 @@ function DetailField({
       <span className="text-xs text-pf-text-tertiary">{label}</span>
       <p
         className={clsx(
-          'text-sm break-words',
+          'text-sm wrap-break-word',
           mono && 'font-mono text-xs',
           error ? 'text-pf-error' : 'text-pf-text-primary',
         )}

@@ -113,6 +113,17 @@ export class SliceJobService {
   }
 
   /**
+   * Retry a failed job
+   */
+  async retryJob(jobId: string): Promise<SliceJobStatusResponse> {
+    const response = await apiClient.request<SliceJobStatusResponse>({
+      url: `/slice/${jobId}/retry`,
+      method: 'POST'
+    });
+    return response;
+  }
+
+  /**
    * Get current user's jobs with pagination
    */
   async getMyJobs(limit?: number, offset?: number): Promise<SliceJobStatusResponse[]> {

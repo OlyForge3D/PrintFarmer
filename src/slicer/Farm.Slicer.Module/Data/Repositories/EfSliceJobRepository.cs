@@ -95,6 +95,12 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.Status = status;
         job.UpdatedAt = DateTime.UtcNow;
 
+        // Set CompletedAt for terminal states
+        if (status is SliceJobStatus.Completed or SliceJobStatus.Failed or SliceJobStatus.Cancelled)
+        {
+            job.CompletedAt ??= DateTime.UtcNow;
+        }
+
         if (progressMessage != null)
         {
             job.ProgressMessage = progressMessage;
