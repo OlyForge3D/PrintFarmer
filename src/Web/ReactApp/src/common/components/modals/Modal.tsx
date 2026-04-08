@@ -182,7 +182,7 @@ export function Modal({
                 variant={closeButtonVariant}
                 size="sm"
                 aria-label={closeAriaLabel}
-                className={clsx('!p-1 !h-auto', closeButtonClassName)}
+                className={clsx('p-1! h-auto!', closeButtonClassName)}
               >
                 <CloseIcon className="w-6 h-6" />
               </Button>
