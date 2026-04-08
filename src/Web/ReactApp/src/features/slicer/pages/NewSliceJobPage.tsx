@@ -1040,9 +1040,8 @@ export const NewSliceJobPage: React.FC = () => {
   return (
     <div className="overflow-hidden p-2 bg-pf-bg-2">
       <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-2 h-[calc(100dvh-72px)] overflow-hidden">
-        {/* LEFT SIDEBAR: OrcaSlicer Menu — hidden when sidebarOpen is false */}
-        {sidebarOpen && (
-        <div className="w-full lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto">
+        {/* LEFT SIDEBAR: OrcaSlicer Menu — CSS-hidden when collapsed so modals stay mounted */}
+        <div className={`w-full lg:w-96 space-y-2 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto ${sidebarOpen ? '' : 'hidden'}`}>
 
           {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
           <SlicerSelector
@@ -1471,7 +1470,6 @@ export const NewSliceJobPage: React.FC = () => {
           )}
 
         </div>
-        )}
 
         {/* RIGHT SIDE: 3D Workspace */}
         <div className="flex-1 flex flex-col min-h-0">

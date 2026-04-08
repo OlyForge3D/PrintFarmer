@@ -125,8 +125,8 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   hasSelection = false,
 }) => {
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border overflow-x-auto">
-      {/* Hamburger toggle — visible only when sidebar is hidden (narrow viewport) */}
+    <div className="flex items-center gap-1 px-2 py-1.5 bg-pf-bg-1 border-b border-pf-border shrink-0">
+      {/* Hamburger toggle */}
       {onToggleSidebar && (
         <ToolbarButton
           icon={<HamburgerIcon />}
@@ -165,47 +165,50 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         disabled={!hasSelection}
       />
 
-      <ToolbarDivider />
+      {/* Less-essential buttons — hidden on narrow viewports */}
+      <div className="hidden xl:contents">
+        <ToolbarDivider />
 
-      {/* Split/Cut group */}
-      <ToolbarButton
-        icon={<SplitIcon />}
-        title="Split Model"
-        onClick={onSplit}
-        disabled={!hasSelection}
-      />
-      <ToolbarButton
-        icon={<CutIcon />}
-        title="Cut Model (C)"
-        onClick={onCut}
-        disabled={!hasSelection}
-      />
+        {/* Split/Cut group */}
+        <ToolbarButton
+          icon={<SplitIcon />}
+          title="Split Model"
+          onClick={onSplit}
+          disabled={!hasSelection}
+        />
+        <ToolbarButton
+          icon={<CutIcon />}
+          title="Cut Model (C)"
+          onClick={onCut}
+          disabled={!hasSelection}
+        />
 
-      <ToolbarDivider />
+        <ToolbarDivider />
 
-      {/* Measure */}
-      <ToolbarButton
-        icon={<MeasureIcon />}
-        title="Measure (M)"
-        onClick={onMeasure}
-        disabled={!hasSelection}
-      />
+        {/* Measure */}
+        <ToolbarButton
+          icon={<MeasureIcon />}
+          title="Measure (M)"
+          onClick={onMeasure}
+          disabled={!hasSelection}
+        />
 
-      <ToolbarDivider />
+        <ToolbarDivider />
 
-      {/* Paint group */}
-      <ToolbarButton
-        icon={<SupportPaintIcon />}
-        title="Support Painting"
-        onClick={onSupportPaint}
-        disabled={!hasSelection}
-      />
-      <ToolbarButton
-        icon={<SeamPaintIcon />}
-        title="Seam Painting"
-        onClick={onSeamPaint}
-        disabled={!hasSelection}
-      />
+        {/* Paint group */}
+        <ToolbarButton
+          icon={<SupportPaintIcon />}
+          title="Support Painting"
+          onClick={onSupportPaint}
+          disabled={!hasSelection}
+        />
+        <ToolbarButton
+          icon={<SeamPaintIcon />}
+          title="Seam Painting"
+          onClick={onSeamPaint}
+          disabled={!hasSelection}
+        />
+      </div>
 
       <ToolbarDivider />
 
@@ -223,18 +226,20 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         disabled={!canRedo}
       />
 
-      <ToolbarDivider />
+      <div className="hidden xl:contents">
+        <ToolbarDivider />
 
-      {/* Assembly view */}
-      <ToolbarButton
-        icon={<AssemblyIcon />}
-        title="Assembly View"
-        onClick={onAssemblyView}
-        disabled={!hasModels}
-      />
+        {/* Assembly view */}
+        <ToolbarButton
+          icon={<AssemblyIcon />}
+          title="Assembly View"
+          onClick={onAssemblyView}
+          disabled={!hasModels}
+        />
+      </div>
 
       {/* Spacer to push settings to right */}
-      <div className="flex-1" />
+      <div className="flex-1 min-w-1" />
 
       {/* Settings & Profiles button */}
       <Button
