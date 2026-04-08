@@ -674,11 +674,12 @@ export const NewSliceJobPage: React.FC = () => {
     queryFn: async () => {
       const response = await apiClient.get<unknown[]>('/3d-models');
       return response.data.map(obj => {
-        const m = obj as { id: string; fileName?: string; displayName?: string; originalFileName?: string; fileFormat?: number; uploadedAt?: string; uploadedAtUtc?: string };
+        const m = obj as { id: string; name?: string; fileName?: string; displayName?: string; originalFileName?: string; fileFormat?: number; uploadedAt?: string; uploadedAtUtc?: string };
+        const displayName = m.name || m.originalFileName || m.displayName || m.fileName || 'model';
         return {
           id: m.id,
-          fileName: m.fileName || m.displayName || m.originalFileName || 'model',
-          originalFileName: m.originalFileName || m.fileName || m.displayName || 'model',
+          fileName: m.fileName || displayName,
+          originalFileName: displayName,
           fileFormat: m.fileFormat ?? 0,
           uploadedAt: m.uploadedAt ?? m.uploadedAtUtc ?? ''
         } as ModelListItem;
