@@ -29,7 +29,6 @@ public class SliceJobController(
     SliceJobMetrics metrics,
     IWorkerAuthService workerAuth,
     IWorkerRepository workerRepository,
-    IOptions<Farm.Slicer.Module.Settings.SlicerSettings> slicerOptions,
     IWorkerCircuitBreakerService? circuitBreaker = null) : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository;

@@ -292,7 +292,8 @@ public abstract class HttpJobPollerService(
         {
             _logger.LogError(ex, "Job {JobId} failed: {Message}", job.Id, ex.Message);
 
-            // Job will timeout and be reassigned by the API's error recovery system
+            // Report failure to the API so the job doesn't sit in Processing until lease expires
+            await TryReportFailureAsync(httpClient, job.Id, ex.Message, ct);
         }
         finally
         {
@@ -331,6 +332,25 @@ public abstract class HttpJobPollerService(
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to send progress update for job {JobId}", jobId);
+        }
+    }
+
+    private async Task TryReportFailureAsync(HttpClient client, Guid jobId, string errorMessage, CancellationToken ct)
+    {
+        try
+        {
+            string truncated = errorMessage.Length > 1000 ? errorMessage[..1000] : errorMessage;
+            var failReq = new { errorMessage = truncated };
+
+            HttpResponseMessage resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/fail", failReq, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Fail report for job {JobId} returned {RespStatusCode}", jobId, resp.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to report failure for job {JobId}", jobId);
         }
     }
 
