@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button, type ButtonVariant } from '@/common/components/ui/Button';
 import clsx from 'clsx';
@@ -142,7 +143,7 @@ export function Modal({
 
   const showHeader = title || showCloseButton;
 
-  return (
+  return createPortal(
     <div 
       className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4"
       onClick={handleBackdropClick}
@@ -201,6 +202,7 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
