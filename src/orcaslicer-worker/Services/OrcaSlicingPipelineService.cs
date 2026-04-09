@@ -102,9 +102,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string filamentJsonPath = Path.Combine(workDir, "filament.json");
 
         // Write the profiles directly as JSON - they should already contain complete settings from the database
-        string machineJson = JsonSerializer.Serialize(profile.MachineProfile, new JsonSerializerOptions { WriteIndented = true });
-        string processJson = JsonSerializer.Serialize(profile.ProcessProfile, new JsonSerializerOptions { WriteIndented = true });
-        string filamentJson = JsonSerializer.Serialize(profile.FilamentProfile, new JsonSerializerOptions { WriteIndented = true });
+        // OrcaSlicer expects flat key-value JSON (native settings), not our DTO wrapper.
+        // Serialize the Settings dictionary directly, which contains the actual slicer config keys.
+        JsonSerializerOptions jsonOpts = new() { WriteIndented = true };
+        string machineJson = JsonSerializer.Serialize(profile.MachineProfile?.Settings ?? new Dictionary<string, object>(), jsonOpts);
+        string processJson = JsonSerializer.Serialize(profile.ProcessProfile?.Settings ?? new Dictionary<string, object>(), jsonOpts);
+        string filamentJson = JsonSerializer.Serialize(profile.FilamentProfile?.Settings ?? new Dictionary<string, object>(), jsonOpts);
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
         await File.WriteAllTextAsync(processJsonPath, processJson, cancellationToken);
