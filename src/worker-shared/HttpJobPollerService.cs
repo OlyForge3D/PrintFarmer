@@ -509,24 +509,18 @@ public abstract class HttpJobPollerService(
                 }
             }
 
-            // Apply user overrides to the process profile settings
-            if (profile.ProcessProfile != null && root.TryGetProperty("overrides", out JsonElement overridesElem))
+            // User overrides from the frontend use camelCase keys (bedTemp, bottomLayers, etc.)
+            // but OrcaSlicer's Settings dictionary uses native snake_case keys (bed_temperature, etc.).
+            // Applying camelCase overrides directly to Settings causes OrcaSlicer to reject them
+            // as "invalid json type" errors. Skip overrides for now — the resolved profile from
+            // the worker's profile cache already contains the correct native settings.
+            if (root.TryGetProperty("overrides", out JsonElement overridesElem))
             {
-                foreach (JsonProperty prop in overridesElem.EnumerateObject())
+                int overrideCount = overridesElem.EnumerateObject().Count();
+                if (overrideCount > 0)
                 {
-                    object value = prop.Value.ValueKind switch
-                    {
-                        JsonValueKind.Number when prop.Value.TryGetInt32(out int intVal) => intVal,
-                        JsonValueKind.Number => prop.Value.GetDouble(),
-                        JsonValueKind.True => true,
-                        JsonValueKind.False => false,
-                        JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
-                        _ => prop.Value.ToString()
-                    };
-                    profile.ProcessProfile.Settings[prop.Name] = value;
+                    _logger.LogInformation("Skipping {OverrideCount} user overrides (camelCase → snake_case mapping not yet implemented)", overrideCount);
                 }
-
-                _logger.LogInformation("Applied {OverrideCount} user overrides to process profile", overridesElem.EnumerateObject().Count());
             }
 
             return profile;
