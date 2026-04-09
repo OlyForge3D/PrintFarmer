@@ -346,6 +346,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl wget ca-certificates \
         libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 libegl1 \
+        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
         xvfb fuse squashfs-tools file p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
