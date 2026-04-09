@@ -509,18 +509,26 @@ public abstract class HttpJobPollerService(
                 }
             }
 
-            // User overrides from the frontend use camelCase keys (bedTemp, bottomLayers, etc.)
-            // but OrcaSlicer's Settings dictionary uses native snake_case keys (bed_temperature, etc.).
-            // Applying camelCase overrides directly to Settings causes OrcaSlicer to reject them
-            // as "invalid json type" errors. Skip overrides for now — the resolved profile from
-            // the worker's profile cache already contains the correct native settings.
-            if (root.TryGetProperty("overrides", out JsonElement overridesElem))
+            // Apply user overrides: map camelCase frontend keys to OrcaSlicer native snake_case keys
+            if (profile.ProcessProfile != null && root.TryGetProperty("overrides", out JsonElement overridesElem))
             {
-                int overrideCount = overridesElem.EnumerateObject().Count();
-                if (overrideCount > 0)
+                int applied = 0;
+                int skipped = 0;
+                foreach (JsonProperty prop in overridesElem.EnumerateObject())
                 {
-                    _logger.LogInformation("Skipping {OverrideCount} user overrides (camelCase → snake_case mapping not yet implemented)", overrideCount);
+                    // Map camelCase → native snake_case
+                    string nativeKey = CamelToNativeKeyMap.TryGetValue(prop.Name, out string? mapped)
+                        ? mapped
+                        : prop.Name; // pass through if already snake_case or unknown
+
+                    // Store as raw JSON text to match how Settings dictionary values are stored
+                    // (from GetRawText() in SerializeElementToDict)
+                    string rawValue = prop.Value.GetRawText();
+                    profile.ProcessProfile.Settings[nativeKey] = rawValue;
+                    applied++;
                 }
+
+                _logger.LogInformation("Applied {Applied} overrides to process profile ({Skipped} skipped)", applied, skipped);
             }
 
             return profile;
@@ -531,4 +539,120 @@ public abstract class HttpJobPollerService(
             return null;
         }
     }
+
+    /// <summary>
+    /// Maps camelCase frontend setting names to OrcaSlicer native snake_case parameter names.
+    /// </summary>
+    private static readonly Dictionary<string, string> CamelToNativeKeyMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Layer & line width
+        ["layerHeight"] = "layer_height",
+        ["firstLayerHeight"] = "initial_layer_print_height",
+        ["lineWidthDefault"] = "line_width",
+        ["lineWidthFirstLayer"] = "initial_layer_line_width",
+        ["topLayers"] = "top_shell_layers",
+        ["bottomLayers"] = "bottom_shell_layers",
+        ["lineWidthOuterWall"] = "outer_wall_line_width",
+        ["lineWidthInnerWall"] = "inner_wall_line_width",
+        ["lineWidthTopSurface"] = "top_surface_line_width",
+        ["lineWidthSparseInfill"] = "sparse_infill_line_width",
+        ["lineWidthInternalSolidInfill"] = "internal_solid_infill_line_width",
+        ["lineWidthSupport"] = "support_line_width",
+
+        // Infill & walls
+        ["infillDensity"] = "sparse_infill_density",
+        ["infillPattern"] = "sparse_infill_pattern",
+        ["wallCount"] = "wall_loops",
+        ["enableSupports"] = "enable_support",
+        ["infillOverlap"] = "infill_wall_overlap",
+        ["infillAnchorMaxLength"] = "infill_anchor_max",
+
+        // Seam
+        ["seamPosition"] = "seam_position",
+        ["seamGap"] = "seam_gap",
+        ["scarfJointSeam"] = "seam_slope_type",
+        ["staggeredInnerSeams"] = "staggered_inner_seams",
+        ["conditionalScarfJoint"] = "seam_slope_conditional",
+        ["conditionalAngleThreshold"] = "scarf_angle_threshold",
+        ["conditionalOverhangThreshold"] = "scarf_overhang_threshold",
+        ["scarfJointSpeed"] = "scarf_joint_speed",
+        ["scarfStartHeight"] = "seam_slope_start_height",
+        ["scarfAroundEntireWall"] = "seam_slope_entire_loop",
+        ["scarfLength"] = "seam_slope_min_length",
+        ["scarfSteps"] = "seam_slope_steps",
+        ["scarfJointFlowRatio"] = "scarf_joint_flow_ratio",
+        ["scarfJointForInnerWalls"] = "seam_slope_inner_walls",
+
+        // Wipe
+        ["roleBaseWipeSpeed"] = "role_based_wipe_speed",
+        ["wipeSpeed"] = "wipe_speed",
+        ["wipeOnLoops"] = "wipe_on_loops",
+        ["wipeBeforeExternalLoop"] = "wipe_before_external_loop",
+
+        // Precision
+        ["sliceGapClosingRadius"] = "slice_closing_radius",
+        ["resolution"] = "resolution",
+        ["arcFitting"] = "enable_arc_fitting",
+        ["xyHoleCompensation"] = "xy_hole_compensation",
+        ["xyContourCompensation"] = "xy_contour_compensation",
+        ["elephantFootCompensation"] = "elefant_foot_compensation",
+        ["elephantFootCompensationLayers"] = "elefant_foot_compensation_layers",
+        ["preciseWall"] = "precise_outer_wall",
+        ["preciseZHeight"] = "precise_z_height",
+        ["convertHolesToPolyholes"] = "hole_to_polyhole",
+        ["polyholeDetectionMargin"] = "hole_to_polyhole_threshold",
+
+        // Speed
+        ["outerWallSpeed"] = "outer_wall_speed",
+        ["innerWallSpeed"] = "inner_wall_speed",
+        ["sparseInfillSpeed"] = "sparse_infill_speed",
+        ["solidInfillSpeed"] = "internal_solid_infill_speed",
+        ["topSurfaceSpeed"] = "top_surface_speed",
+        ["travelSpeed"] = "travel_speed",
+        ["firstLayerSpeed"] = "initial_layer_speed",
+
+        // Acceleration
+        ["outerWallAcceleration"] = "outer_wall_acceleration",
+        ["innerWallAcceleration"] = "inner_wall_acceleration",
+        ["topSurfaceAcceleration"] = "top_surface_acceleration",
+        ["travelAcceleration"] = "travel_acceleration",
+        ["defaultAcceleration"] = "default_acceleration",
+
+        // Temperature
+        ["nozzleTemp"] = "nozzle_temperature",
+        ["firstLayerNozzleTemp"] = "nozzle_temperature_initial_layer",
+
+        // Retraction
+        ["retractionLength"] = "filament_retraction_length",
+        ["retractionSpeed"] = "filament_retraction_speed",
+        ["detractionSpeed"] = "filament_deretraction_speed",
+        ["retractionMinimumTravel"] = "filament_retraction_minimum_travel",
+        ["retractOnLayerChange"] = "filament_retract_when_changing_layer",
+        ["wipeBeforeRetract"] = "filament_retract_before_wipe",
+        ["retractionLiftZ"] = "filament_z_hop",
+
+        // Cooling
+        ["minFanSpeed"] = "fan_min_speed",
+        ["maxFanSpeed"] = "fan_max_speed",
+        ["bridgeFanSpeed"] = "overhang_fan_speed",
+        ["fullFanSpeedAtLayer"] = "full_fan_speed_layer",
+        ["slowDownForLayerTime"] = "slow_down_layer_time",
+        ["minPrintSpeed"] = "slow_down_min_speed",
+
+        // Ironing
+        ["ironingPattern"] = "ironing_pattern",
+        ["ironingFlowRate"] = "ironing_flow",
+        ["ironingSpacing"] = "ironing_spacing",
+        ["ironingSpeed"] = "ironing_speed",
+        ["ironingAngle"] = "ironing_angle",
+
+        // Support
+        ["supportType"] = "support_type",
+        ["supportAngle"] = "support_threshold_angle",
+        ["supportTopZDistance"] = "support_top_z_distance",
+        ["supportBottomZDistance"] = "support_bottom_z_distance",
+        ["supportInterfaceLayers"] = "support_interface_top_layers",
+        ["supportXYDistance"] = "support_object_xy_distance",
+        ["supportBaseInterfaceLayers"] = "support_interface_bottom_layers",
+    };
 }
