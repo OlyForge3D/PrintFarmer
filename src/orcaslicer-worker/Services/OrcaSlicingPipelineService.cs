@@ -139,11 +139,20 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Build command line: --slice 0 --load-settings "machine.json;process.json" --load-filaments "filament.json" --allow-newer-file --outputdir "/tmp/slice-XYZ/output" /tmp/slice-XYZ/input/uploaded-file.stl
         string arguments = $"--slice 0 --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
 
+        // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
+        string binaryPath = _orcaSlicerBinaryPath;
+        bool useXvfb = File.Exists("/usr/bin/xvfb-run");
+        if (useXvfb)
+        {
+            arguments = $"-a {_orcaSlicerBinaryPath} {arguments}";
+            binaryPath = "/usr/bin/xvfb-run";
+        }
+
         using Process process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = _orcaSlicerBinaryPath,
+                FileName = binaryPath,
                 Arguments = arguments,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
