@@ -103,7 +103,9 @@ builder.Services.AddSingleton<IFeatureFlagService, FeatureFlagService>();
 // In microservices mode, the slicer module runs in a separate slicer-host process —
 // the API does not load slicer DLLs, but the platform still reports slicing as available
 // so the frontend can route requests to the slicer-host via nginx.
-bool isMicroservices = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") == "microservices";
+string? deployType = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE")
+                   ?? builder.Configuration.GetValue<string>("DEPLOYMENT_TYPE");
+bool isMicroservices = deployType == "microservices";
 bool slicerModuleEnabled = !isMicroservices;
 
 // Platform-aware capability checks: auto-disable native x86-only features on ARM64 (Raspberry Pi)

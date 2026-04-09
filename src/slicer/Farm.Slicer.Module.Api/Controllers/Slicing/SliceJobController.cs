@@ -59,12 +59,21 @@ public class SliceJobController(
             return StatusCode(429, new { error = "Rate limit exceeded.", retryAfterSeconds = rateLimitResult.RetryAfterSeconds });
         }
 
+        // Resolve relative model file URLs to absolute so workers can download them
+        string modelFileUrl = request.ModelFileUrl;
+        if (!string.IsNullOrEmpty(modelFileUrl) && modelFileUrl.StartsWith('/'))
+        {
+            string scheme = HttpContext.Request.Scheme;
+            string host = HttpContext.Request.Host.ToString();
+            modelFileUrl = $"{scheme}://{host}{modelFileUrl}";
+        }
+
         var job = new SliceJob
         {
             Id = Guid.NewGuid(),
             UserId = Guid.TryParse(userId, out Guid uid) ? uid : Guid.Empty,
             PrinterId = request.PrinterId,
-            ModelFileUrl = request.ModelFileUrl,
+            ModelFileUrl = modelFileUrl,
             ModelFileName = request.ModelFileName,
             SlicerEngine = request.SlicerEngine,
             SlicerProfileJson = request.SlicerProfileJson,
