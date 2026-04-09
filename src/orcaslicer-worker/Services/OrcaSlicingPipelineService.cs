@@ -103,11 +103,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         // Write the profiles directly as JSON - they should already contain complete settings from the database
         // OrcaSlicer expects flat key-value JSON (native settings), not our DTO wrapper.
-        // Serialize the Settings dictionary directly, which contains the actual slicer config keys.
-        JsonSerializerOptions jsonOpts = new() { WriteIndented = true };
-        string machineJson = JsonSerializer.Serialize(profile.MachineProfile?.Settings ?? new Dictionary<string, object>(), jsonOpts);
-        string processJson = JsonSerializer.Serialize(profile.ProcessProfile?.Settings ?? new Dictionary<string, object>(), jsonOpts);
-        string filamentJson = JsonSerializer.Serialize(profile.FilamentProfile?.Settings ?? new Dictionary<string, object>(), jsonOpts);
+        // The Settings dictionary stores raw JSON text per key (from GetRawText()),
+        // so we reconstruct proper JSON by writing the raw values directly.
+        string machineJson = SettingsDictToNativeJson(profile.MachineProfile?.Settings);
+        string processJson = SettingsDictToNativeJson(profile.ProcessProfile?.Settings);
+        string filamentJson = SettingsDictToNativeJson(profile.FilamentProfile?.Settings);
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
         await File.WriteAllTextAsync(processJsonPath, processJson, cancellationToken);
@@ -324,4 +324,45 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     [GeneratedRegex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex MyRegex();
+
+    /// <summary>
+    /// Converts a Settings dictionary (where values are raw JSON text strings from GetRawText())
+    /// back into proper JSON with native types. This ensures numbers remain numbers, arrays remain
+    /// arrays, etc. — which OrcaSlicer requires for its --load-settings parser.
+    /// </summary>
+    private static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
+    {
+        if (settings == null || settings.Count == 0)
+        {
+            return "{}";
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+        {
+            writer.WriteStartObject();
+            foreach (KeyValuePair<string, object> kvp in settings)
+            {
+                writer.WritePropertyName(kvp.Key);
+                string rawValue = kvp.Value?.ToString() ?? "null";
+
+                // The value is raw JSON text (from JsonElement.GetRawText()).
+                // Write it directly as raw JSON to preserve original types.
+                try
+                {
+                    using JsonDocument parsed = JsonDocument.Parse(rawValue);
+                    parsed.RootElement.WriteTo(writer);
+                }
+                catch (JsonException)
+                {
+                    // If it's not valid JSON, write it as a string
+                    writer.WriteStringValue(rawValue);
+                }
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
 }
