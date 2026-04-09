@@ -179,7 +179,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         if (!string.IsNullOrWhiteSpace(output))
         {
-            _logger.LogDebug("OrcaSlicer stdout: {Output}", output.Length > 2000 ? output[..2000] : output);
+            _logger.LogInformation("OrcaSlicer stdout: {Output}", output.Length > 2000 ? output[..2000] : output);
         }
 
         if (process.ExitCode != 0)
