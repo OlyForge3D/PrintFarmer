@@ -345,7 +345,7 @@ WORKDIR /app
 # Install OrcaSlicer runtime deps for Ubuntu 24.04 (libgl1-mesa-glx → libgl1-mesa-glx | libglx0)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl wget ca-certificates \
-        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 \
+        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 libegl1 \
         xvfb fuse squashfs-tools file p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
