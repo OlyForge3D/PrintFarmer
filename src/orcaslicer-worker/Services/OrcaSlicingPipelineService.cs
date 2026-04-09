@@ -148,6 +148,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             binaryPath = "/usr/bin/xvfb-run";
         }
 
+        _logger.LogInformation("Launching OrcaSlicer: {BinaryPath} {Arguments}", binaryPath, arguments);
+
         using Process process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -169,9 +171,20 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         await progressTask;
-        string error = await errorTask; // output ignored for brevity
+        string output = await outputTask;
+        string error = await errorTask;
+
+        _logger.LogInformation("OrcaSlicer exited with code {ExitCode}. Stdout length={StdoutLen}, Stderr length={StderrLen}",
+            process.ExitCode, output.Length, error.Length);
+
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            _logger.LogDebug("OrcaSlicer stdout: {Output}", output.Length > 2000 ? output[..2000] : output);
+        }
+
         if (process.ExitCode != 0)
         {
+            _logger.LogError("OrcaSlicer stderr: {Error}", error);
             throw new InvalidOperationException($"OrcaSlicer failed with exit code {process.ExitCode}: {error}");
         }
 
