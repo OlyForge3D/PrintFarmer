@@ -6,7 +6,7 @@
  * settings appear within each tab.
  */
 import React, { useState, useCallback } from 'react';
-import { Button } from '@/common/components/ui';
+import { Button, Select, Checkbox, RadioGroup } from '@/common/components/ui';
 import { CompactSettingRow, SettingSection } from './SettingRow';
 import {
   InfillDensityIcon,
@@ -66,7 +66,7 @@ interface SlicerSettingsPanelProps {
   onAdvancedSettingsChange?: (settings: Record<string, unknown>) => void;
 }
 
-const CATEGORIES: { id: SettingsCategory; label: string }[] = [
+const ALL_CATEGORIES: { id: SettingsCategory; label: string }[] = [
   { id: 'quality', label: 'Quality' },
   { id: 'strength', label: 'Strength' },
   { id: 'speed', label: 'Speed' },
@@ -74,6 +74,14 @@ const CATEGORIES: { id: SettingsCategory; label: string }[] = [
   { id: 'multimaterial', label: 'Multimaterial' },
   { id: 'other', label: 'Other' },
 ];
+
+/** Simple mode hides Speed tab (matches SimplyPrint/OrcaSlicer Simple mode) */
+const SIMPLE_CATEGORIES = ALL_CATEGORIES.filter((c) => c.id !== 'speed');
+
+function getCategoriesForMode(mode: SettingsViewMode) {
+  if (mode === 'advanced') return ALL_CATEGORIES;
+  return SIMPLE_CATEGORIES;
+}
 
 /**
  * SlicerSettingsPanel — OrcaSlicer-style category-first settings panel.
@@ -91,8 +99,18 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   advancedSettings,
   onAdvancedSettingsChange,
 }) => {
-  const [isAdvanced, setIsAdvanced] = useState(initialViewMode === 'advanced');
+  const [viewMode, setViewMode] = useState<SettingsViewMode>(initialViewMode);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('quality');
+
+  const isAdvanced = viewMode === 'advanced';
+  const categories = getCategoriesForMode(viewMode);
+
+  // Reset active category if it's hidden in the current mode (e.g. Speed hidden in Simple)
+  React.useEffect(() => {
+    if (!categories.some((c) => c.id === activeCategory)) {
+      setActiveCategory(categories[0].id);
+    }
+  }, [viewMode, categories, activeCategory]);
 
   const updateSetting = useCallback(<K extends keyof AdvancedSlicerSettings>(
     key: K,
@@ -123,86 +141,207 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
     onAdvancedSettingsChange,
   };
 
+  const modeButtonClass = (mode: SettingsViewMode, pos: 'left' | 'mid' | 'right') => {
+    const roundCls = pos === 'left' ? 'rounded-l-md' : pos === 'right' ? 'rounded-r-md -ml-px' : '-ml-px';
+    const active = viewMode === mode;
+    return `px-2 py-0.5 text-[10px] font-medium ${roundCls} border transition-colors ${
+      active
+        ? 'bg-pf-accent text-white border-pf-accent'
+        : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
+    } disabled:opacity-50`;
+  };
+
   return (
     <div className={`bg-pf-bg-1 rounded-lg ${className}`}>
-      {/* Category Tabs — primary navigation */}
-      <div className="flex gap-1 p-2 border-b border-pf-border overflow-x-auto" role="tablist" aria-label="Settings categories">
-        {CATEGORIES.map((cat) => {
-          const isDirty = isCategoryDirty?.(cat.id) ?? false;
-          const isActive = activeCategory === cat.id;
-          return (
-            <Button
-              key={cat.id}
-              variant="unstyled"
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              aria-controls={`panel-${cat.id}`}
-              onClick={() => setActiveCategory(cat.id)}
-              disabled={disabled}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
-                         transition-colors duration-150 cursor-pointer disabled:opacity-50
-                         ${isActive
-                           ? 'bg-pf-accent text-white'
-                           : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                         }
-                         ${isDirty ? 'ring-1 ring-pf-accent-orange' : ''}`}
-            >
-              {cat.label}
-              {isDirty && (
-                <span
-                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
-                  aria-label="Has modified settings"
-                />
-              )}
-            </Button>
-          );
-        })}
+      {/* Mode toggle: Basic / Simple / Advanced */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-pf-border">
+        {viewMode !== 'basic' && (
+          <span className="text-[10px] text-pf-text-muted">
+            {categories.length} {categories.length === 1 ? 'tab' : 'tabs'}
+          </span>
+        )}
+        {viewMode === 'basic' && <span />}
+        <div className="flex items-center gap-0">
+          <Button variant="unstyled" size="sm" onClick={() => setViewMode('basic')} disabled={disabled} className={modeButtonClass('basic', 'left')}>
+            Basic
+          </Button>
+          <Button variant="unstyled" size="sm" onClick={() => setViewMode('simple')} disabled={disabled} className={modeButtonClass('simple', 'mid')}>
+            Simple
+          </Button>
+          <Button variant="unstyled" size="sm" onClick={() => setViewMode('advanced')} disabled={disabled} className={modeButtonClass('advanced', 'right')}>
+            Advanced
+          </Button>
+        </div>
       </div>
 
-      {/* Simple / Advanced density toggle */}
-      <div className="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-pf-border-light">
-        <span className="text-[10px] text-pf-text-muted mr-1">Show:</span>
-        <Button
-          variant="unstyled"
-          size="sm"
-          onClick={() => setIsAdvanced(false)}
-          disabled={disabled}
-          className={`px-2 py-0.5 text-[10px] font-medium rounded-l-md border transition-colors
-                     ${!isAdvanced
-                       ? 'bg-pf-accent text-white border-pf-accent'
-                       : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
-                     } disabled:opacity-50`}
-        >
-          Simple
-        </Button>
-        <Button
-          variant="unstyled"
-          size="sm"
-          onClick={() => setIsAdvanced(true)}
-          disabled={disabled}
-          className={`px-2 py-0.5 text-[10px] font-medium rounded-r-md border -ml-px transition-colors
-                     ${isAdvanced
-                       ? 'bg-pf-accent text-white border-pf-accent'
-                       : 'bg-pf-bg-2 text-pf-text-secondary border-pf-border hover:text-pf-text-primary'
-                     } disabled:opacity-50`}
-        >
-          Advanced
-        </Button>
-      </div>
+      {/* Basic mode: flat simplified UI, no category tabs */}
+      {viewMode === 'basic' && (
+        <div className="p-4 space-y-5">
+          <BasicModeSettings settings={settings as AdvancedSlicerSettings} onUpdate={updateSetting} disabled={disabled} infillPatternOptions={infillPatternOptions} bedAdhesionOptions={bedAdhesionOptions} />
+        </div>
+      )}
 
-      {/* Category content */}
-      <div className="p-3" id={`panel-${activeCategory}`} role="tabpanel">
-        {activeCategory === 'quality' && <QualitySettings {...categoryProps} />}
-        {activeCategory === 'strength' && <StrengthSettings {...categoryProps} />}
-        {activeCategory === 'speed' && <SpeedSettings {...categoryProps} />}
-        {activeCategory === 'support' && <SupportSettings {...categoryProps} />}
-        {activeCategory === 'multimaterial' && <MultimaterialSettings {...categoryProps} />}
-        {activeCategory === 'other' && <OtherSettings {...categoryProps} />}
-      </div>
+      {/* Simple / Advanced: category tabs + panel */}
+      {viewMode !== 'basic' && (
+        <>
+          <div className="flex gap-1 p-2 border-b border-pf-border overflow-x-auto" role="tablist" aria-label="Settings categories">
+            {categories.map((cat) => {
+              const isDirty = isCategoryDirty?.(cat.id) ?? false;
+              const isActive = activeCategory === cat.id;
+              return (
+                <Button
+                  key={cat.id}
+                  variant="unstyled"
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-controls={`panel-${cat.id}`}
+                  onClick={() => setActiveCategory(cat.id)}
+                  disabled={disabled}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
+                             transition-colors duration-150 cursor-pointer disabled:opacity-50
+                             ${isActive
+                               ? 'bg-pf-accent text-white'
+                               : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                             }
+                             ${isDirty ? 'ring-1 ring-pf-accent-orange' : ''}`}
+                >
+                  {cat.label}
+                  {isDirty && (
+                    <span
+                      className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
+                      aria-label="Has modified settings"
+                    />
+                  )}
+                </Button>
+              );
+            })}
+          </div>
+
+          <div className="p-3" id={`panel-${activeCategory}`} role="tabpanel">
+            {activeCategory === 'quality' && <QualitySettings {...categoryProps} />}
+            {activeCategory === 'strength' && <StrengthSettings {...categoryProps} />}
+            {activeCategory === 'speed' && <SpeedSettings {...categoryProps} />}
+            {activeCategory === 'support' && <SupportSettings {...categoryProps} />}
+            {activeCategory === 'multimaterial' && <MultimaterialSettings {...categoryProps} />}
+            {activeCategory === 'other' && <OtherSettings {...categoryProps} />}
+          </div>
+        </>
+      )}
     </div>
   );
 };
+
+/* ─── Basic Mode — flat simplified UI matching SimplyPrint/OrcaSlicer Basic ─── */
+interface BasicModeProps {
+  settings: AdvancedSlicerSettings;
+  onUpdate: <K extends keyof AdvancedSlicerSettings>(key: K, value: AdvancedSlicerSettings[K]) => void;
+  disabled: boolean;
+  infillPatternOptions: Array<{ value: string; label: string; icon?: React.ReactNode }>;
+  bedAdhesionOptions: Array<{ value: string; label: string }>;
+}
+
+const BasicModeSettings: React.FC<BasicModeProps> = ({ settings, onUpdate, disabled, infillPatternOptions, bedAdhesionOptions }) => (
+  <div className="space-y-6">
+    {/* Infill Density — slider 0-100% */}
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <InfillDensityIcon className="w-5 h-5 text-pf-accent" />
+        <span className="text-sm font-medium text-pf-text-primary">Infill Density</span>
+      </div>
+      <p className="text-xs text-pf-text-muted mb-2">How much material fills the inside of your print</p>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={0} max={100} step={5}
+          value={settings.infillDensity ?? 20}
+          onChange={(e) => onUpdate('infillDensity', Number(e.target.value))}
+          disabled={disabled}
+          className="flex-1 accent-pf-accent"
+        />
+        <span className="text-sm font-semibold text-pf-text-primary w-10 text-right">{settings.infillDensity ?? 20}%</span>
+      </div>
+      <div className="flex justify-between text-[10px] text-pf-text-muted mt-0.5 px-0.5">
+        <span>0%</span><span>20%</span><span>40%</span><span>60%</span><span>80%</span><span>100%</span>
+      </div>
+    </div>
+
+    {/* Infill Pattern — dropdown */}
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <InfillPatternIcon className="w-5 h-5 text-pf-accent" />
+        <span className="text-sm font-medium text-pf-text-primary">Infill Pattern</span>
+      </div>
+      <p className="text-xs text-pf-text-muted mb-2">The shape pattern used to fill your print</p>
+      <Select
+        value={settings.infillPattern ?? 'grid'}
+        onChange={(e) => onUpdate('infillPattern', e.target.value as InfillPattern)}
+        disabled={disabled}
+      >
+        {infillPatternOptions.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </Select>
+    </div>
+
+    {/* Wall Count — slider 1-4 */}
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <WallCountIcon className="w-5 h-5 text-pf-accent" />
+        <span className="text-sm font-medium text-pf-text-primary">Wall Count</span>
+      </div>
+      <p className="text-xs text-pf-text-muted mb-2">The number of outer walls/shells for your print</p>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={1} max={4} step={1}
+          value={settings.wallCount ?? 3}
+          onChange={(e) => onUpdate('wallCount', Number(e.target.value))}
+          disabled={disabled}
+          className="flex-1 accent-pf-accent"
+        />
+        <span className="text-sm font-semibold text-pf-text-primary w-6 text-right">{settings.wallCount ?? 3}</span>
+      </div>
+      <div className="flex justify-between text-[10px] text-pf-text-muted mt-0.5 px-0.5">
+        <span>1</span><span>2</span><span>3</span><span>4</span>
+      </div>
+    </div>
+
+    {/* Bed Adhesion — radio: Skirt / Brim */}
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <BedAdhesionIcon className="w-5 h-5 text-pf-accent" />
+        <span className="text-sm font-medium text-pf-text-primary">Bed Adhesion</span>
+      </div>
+      <p className="text-xs text-pf-text-muted mb-2">Choose between skirt or brim for better print adhesion</p>
+      <RadioGroup
+        name="bedAdhesion"
+        options={bedAdhesionOptions.map((opt) => ({ value: opt.value, label: opt.label }))}
+        value={settings.bedAdhesion ?? 'skirt'}
+        onChange={(v) => onUpdate('bedAdhesion', v as BedAdhesionType)}
+        disabled={disabled}
+      />
+    </div>
+
+    {/* Use Supports — checkbox */}
+    <div>
+      <div className="flex items-center gap-3">
+        <Checkbox
+          checked={settings.enableSupports ?? false}
+          onChange={(e) => onUpdate('enableSupports', e.target.checked)}
+          disabled={disabled}
+        />
+        <div>
+          <div className="flex items-center gap-2">
+            <SupportsIcon className="w-5 h-5 text-pf-accent" />
+            <span className="text-sm font-medium text-pf-text-primary">Use Supports</span>
+          </div>
+          <p className="text-xs text-pf-text-muted mt-0.5">Adds support structures for overhanging parts</p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 /* ─── shared prop shape for every category ─── */
 interface CategorySettingsProps {
