@@ -339,9 +339,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     /// <summary>
     /// Converts a Settings dictionary (where values are raw JSON text strings from GetRawText())
-    /// back into proper JSON. OrcaSlicer expects all scalar values as strings (e.g. "0", "1",
-    /// "50%") and arrays as native JSON arrays (e.g. ["0.4"]). GetRawText() wraps everything
-    /// in quotes, so we unwrap one layer and keep the inner string value as-is.
+    /// back into proper JSON. The values are already valid JSON fragments (e.g. "\"50%\"" for
+    /// a string, "[\"0.4\"]" for an array), so we write them directly using WriteRawValue.
     /// </summary>
     private static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
     {
@@ -360,59 +359,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 string rawValue = kvp.Value?.ToString() ?? "null";
 
                 // The value is raw JSON text from GetRawText().
-                // For a string "50%", GetRawText() returns "\"50%\"" (a JSON string literal).
-                // We parse it to unwrap the extra quoting layer.
+                // It's already a valid JSON fragment: "\"50%\"", "\"0\"", "[\"0.4\"]", etc.
+                // WriteRawValue writes it directly without any escaping.
                 try
                 {
-                    using JsonDocument parsed = JsonDocument.Parse(rawValue);
-                    JsonElement root = parsed.RootElement;
-
-                    if (root.ValueKind == JsonValueKind.String)
-                    {
-                        string inner = root.GetString() ?? string.Empty;
-
-                        // If the inner string looks like a JSON array (e.g. "[\"0.4\"]"),
-                        // parse it as native JSON so arrays remain arrays.
-                        if (inner.Length > 0 && inner[0] == '[')
-                        {
-                            try
-                            {
-                                using JsonDocument arr = JsonDocument.Parse(inner);
-                                arr.RootElement.WriteTo(writer);
-                            }
-                            catch (JsonException)
-                            {
-                                writer.WriteStringValue(inner);
-                            }
-                        }
-                        else
-                        {
-                            // OrcaSlicer expects scalars as strings: "0", "1", "50%", "klipper"
-                            writer.WriteStringValue(inner);
-                        }
-                    }
-                    else if (root.ValueKind == JsonValueKind.Array)
-                    {
-                        // Arrays stay as arrays (e.g. nozzle_diameter: ["0.4"])
-                        root.WriteTo(writer);
-                    }
-                    else if (root.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                    {
-                        // OrcaSlicer uses "1"/"0" strings for booleans
-                        writer.WriteStringValue(root.ValueKind == JsonValueKind.True ? "1" : "0");
-                    }
-                    else if (root.ValueKind == JsonValueKind.Number)
-                    {
-                        // OrcaSlicer expects numbers as strings: "0", "300", "0.4"
-                        writer.WriteStringValue(root.GetRawText());
-                    }
-                    else
-                    {
-                        root.WriteTo(writer);
-                    }
+                    writer.WriteRawValue(rawValue);
                 }
                 catch (JsonException)
                 {
+                    // If the raw value isn't valid JSON, wrap it as a string
                     writer.WriteStringValue(rawValue);
                 }
             }
