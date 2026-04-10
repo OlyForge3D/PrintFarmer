@@ -133,6 +133,73 @@ export interface AdvancedMachineSettings extends BasicMachineSettings {
   printerWidth: number;           // mm (for clearance)
   printerDepth: number;           // mm
   printerHeight: number;          // mm
+
+  // ======== Wipe Tower (Multi-Material) ========
+  wipeTowerType?: 'sparse' | 'dense';
+  wipeTowerWallType?: 'single' | 'double';
+  wipeTowerBridging?: number;            // mm
+  wipeTowerConeAngle?: number;           // degrees
+  wipeTowerRotationAngle?: number;       // degrees
+  wipeTowerExtraFlow?: number;           // ratio
+  wipeTowerExtraSpacing?: number;        // ratio
+  wipeTowerFilament?: number;            // filament index
+  wipeTowerMaxPurgeSpeed?: number;       // mm/s
+  wipeTowerNoSparseLayers?: boolean;
+  wipeTowerFilletWall?: boolean;
+  wipeTowerRibWidth?: number;            // mm
+  wipeTowerExtraRibLength?: number;      // mm
+
+  // ======== Advanced Retraction ========
+  retractionRestartExtra?: number;       // mm (extra length on restart)
+  retractionRestartExtraToolchange?: number; // mm
+  retractionLengthToolchange?: number;   // mm
+  retractionDistancesWhenEc?: string;    // comma-separated distances
+  retractionLiftEnforce?: string;        // enforce options
+  retractBeforeWipePercent?: number;     // 0-100%
+  wipeDistance?: number;                 // mm
+  wipeSpeed?: number;                    // mm/s
+  wipeBeforeExternalLoop?: boolean;
+  wipeOnLoops?: boolean;
+
+  // ======== Z-Hop ========
+  zHopTypes?: string;                    // per-surface z-hop control
+
+  // ======== Travel ========
+  travelSpeed?: number;                  // mm/s
+  travelAcceleration?: number;           // mm/s²
+  travelJerk?: number;                   // mm/s
+  travelSlope?: boolean;                 // enable travel slope
+
+  // ======== Extruder Clearance ========
+  extruderClearanceHeightToLid?: number; // mm
+  extruderClearanceHeightToRod?: number; // mm
+  extruderClearanceRadius?: number;      // mm
+  extruderType?: 'direct_drive' | 'bowden';
+  extruderColour?: string;               // hex color
+  extruderPrintableArea?: string;        // area polygon
+  extruderPrintableHeight?: number;      // mm
+
+  // ======== Machine Limits Extended ========
+  maxAccelerationTravel?: number;        // mm/s²
+  maxJunctionDeviation?: number;         // mm (Klipper)
+  emitMachineLimitsToGcode?: boolean;
+
+  // ======== G-Code Extended ========
+  thumbnailsFormat?: string;             // e.g., 'PNG' or 'QOI'
+  printingByObjectGcode?: string;        // G-code for sequential printing
+  scanFirstLayer?: boolean;              // Bambu first layer inspection
+  timelapseGcode?: string;              // timelapse trigger G-code
+
+  // ======== Misc Machine Features ========
+  nozzleVolume?: number;                 // mm³
+  nozzleVolumeType?: 'standard' | 'high_flow';
+  hasScarfJointSeam?: boolean;
+  singleExtruderMultiMaterial?: boolean;
+  singleExtruderMultiMaterialPriming?: boolean;
+  machineLoadFilamentTime?: number;      // seconds
+  machineUnloadFilamentTime?: number;    // seconds
+  machineToolChangeTime?: number;        // seconds
+  printerNotes2?: string;                // additional notes field
 }
 
 /** Default values for basic machine settings */
@@ -242,6 +309,73 @@ export const DEFAULT_ADVANCED_MACHINE_SETTINGS: AdvancedMachineSettings = {
   printerWidth: 400,
   printerDepth: 400,
   printerHeight: 500,
+
+  // Wipe Tower
+  wipeTowerType: 'sparse',
+  wipeTowerWallType: 'single',
+  wipeTowerBridging: 10,
+  wipeTowerConeAngle: 0,
+  wipeTowerRotationAngle: 0,
+  wipeTowerExtraFlow: 1.0,
+  wipeTowerExtraSpacing: 100,
+  wipeTowerFilament: 0,
+  wipeTowerMaxPurgeSpeed: 60,
+  wipeTowerNoSparseLayers: false,
+  wipeTowerFilletWall: false,
+  wipeTowerRibWidth: 0,
+  wipeTowerExtraRibLength: 0,
+
+  // Advanced Retraction
+  retractionRestartExtra: 0,
+  retractionRestartExtraToolchange: 0,
+  retractionLengthToolchange: 10,
+  retractionDistancesWhenEc: '',
+  retractionLiftEnforce: '',
+  retractBeforeWipePercent: 0,
+  wipeDistance: 0,
+  wipeSpeed: 80,
+  wipeBeforeExternalLoop: false,
+  wipeOnLoops: false,
+
+  // Z-Hop
+  zHopTypes: '',
+
+  // Travel
+  travelSpeed: 200,
+  travelAcceleration: 5000,
+  travelJerk: 8,
+  travelSlope: false,
+
+  // Extruder Clearance
+  extruderClearanceHeightToLid: 40,
+  extruderClearanceHeightToRod: 36,
+  extruderClearanceRadius: 45,
+  extruderType: 'direct_drive',
+  extruderColour: '#FF8000',
+  extruderPrintableArea: '',
+  extruderPrintableHeight: 0,
+
+  // Machine Limits Extended
+  maxAccelerationTravel: 5000,
+  maxJunctionDeviation: 0.013,
+  emitMachineLimitsToGcode: true,
+
+  // G-Code Extended
+  thumbnailsFormat: 'PNG',
+  printingByObjectGcode: '',
+  scanFirstLayer: false,
+  timelapseGcode: '',
+
+  // Misc Machine Features
+  nozzleVolume: 0,
+  nozzleVolumeType: 'standard',
+  hasScarfJointSeam: false,
+  singleExtruderMultiMaterial: false,
+  singleExtruderMultiMaterialPriming: false,
+  machineLoadFilamentTime: 0,
+  machineUnloadFilamentTime: 0,
+  machineToolChangeTime: 0,
+  printerNotes2: '',
 };
 
 /**
@@ -341,6 +475,87 @@ export const MACHINE_SETTING_TO_CATEGORY_MAP: Record<keyof AdvancedMachineSettin
   printerWidth: 'general',
   printerDepth: 'general',
   printerHeight: 'general',
+
+  // Wipe Tower (Multi-Material)
+  wipeTowerType: 'extruder',
+  wipeTowerWallType: 'extruder',
+  wipeTowerBridging: 'extruder',
+  wipeTowerConeAngle: 'extruder',
+  wipeTowerRotationAngle: 'extruder',
+  wipeTowerExtraFlow: 'extruder',
+  wipeTowerExtraSpacing: 'extruder',
+  wipeTowerFilament: 'extruder',
+  wipeTowerMaxPurgeSpeed: 'extruder',
+  wipeTowerNoSparseLayers: 'extruder',
+  wipeTowerFilletWall: 'extruder',
+  wipeTowerRibWidth: 'extruder',
+  wipeTowerExtraRibLength: 'extruder',
+
+  // Advanced Retraction
+  retractionRestartExtra: 'extruder',
+  retractionRestartExtraToolchange: 'extruder',
+  retractionLengthToolchange: 'extruder',
+  retractionDistancesWhenEc: 'extruder',
+  retractionLiftEnforce: 'extruder',
+  retractBeforeWipePercent: 'extruder',
+  wipeDistance: 'extruder',
+  wipeSpeed: 'extruder',
+  wipeBeforeExternalLoop: 'extruder',
+  wipeOnLoops: 'extruder',
+
+  // Z-Hop
+  zHopTypes: 'extruder',
+
+  // Travel
+  travelSpeed: 'capabilities',
+  travelAcceleration: 'capabilities',
+  travelJerk: 'capabilities',
+  travelSlope: 'capabilities',
+
+  // Extruder Clearance
+  extruderClearanceHeightToLid: 'extruder',
+  extruderClearanceHeightToRod: 'extruder',
+  extruderClearanceRadius: 'extruder',
+  extruderType: 'extruder',
+  extruderColour: 'extruder',
+  extruderPrintableArea: 'extruder',
+  extruderPrintableHeight: 'extruder',
+
+  // Machine Limits Extended
+  maxAccelerationTravel: 'capabilities',
+  maxJunctionDeviation: 'capabilities',
+  emitMachineLimitsToGcode: 'capabilities',
+
+  // G-Code Extended
+  thumbnailsFormat: 'gcode',
+  printingByObjectGcode: 'gcode',
+  scanFirstLayer: 'gcode',
+  timelapseGcode: 'gcode',
+
+  // Misc Machine Features
+  nozzleVolume: 'capabilities',
+  nozzleVolumeType: 'capabilities',
+  hasScarfJointSeam: 'capabilities',
+  singleExtruderMultiMaterial: 'capabilities',
+  singleExtruderMultiMaterialPriming: 'capabilities',
+  machineLoadFilamentTime: 'extruder',
+  machineUnloadFilamentTime: 'extruder',
+  machineToolChangeTime: 'extruder',
+  printerNotes2: 'general',
+};
+
+/**
+ * Maps machine settings to their OrcaSlicer mode (comSimple/comAdvanced).
+ * Settings in 'simple' mode are shown in Basic view.
+ * Settings in 'advanced' mode are shown only in Advanced view.
+ */
+export const MACHINE_SETTING_MODE_MAP: Record<string, 'simple' | 'advanced'> = {
+  name: 'simple',
+  buildVolumeX: 'simple',
+  buildVolumeY: 'simple',
+  buildVolumeZ: 'simple',
+  nozzleDiameter: 'simple',
+  maxPrintSpeed: 'simple',
 };
 
 /** Common printer presets (manufacturer defaults) */
