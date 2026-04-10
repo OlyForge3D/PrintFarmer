@@ -89,6 +89,7 @@ export class SlicerHubService {
 
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, {
+        accessTokenFactory: () => localStorage.getItem('authToken') || '',
         withCredentials: true,
         skipNegotiation: false,
         transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.ServerSentEvents | signalR.HttpTransportType.LongPolling

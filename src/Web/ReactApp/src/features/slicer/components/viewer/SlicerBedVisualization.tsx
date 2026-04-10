@@ -1234,6 +1234,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   return (
     <div className={`w-full h-full ${className}`}>
       <Canvas
+        frameloop="demand"
         style={{ background: backgroundColor }}
         gl={{
           antialias: true,
