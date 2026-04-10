@@ -339,8 +339,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     /// <summary>
     /// Converts a Settings dictionary (where values are raw JSON text strings from GetRawText())
-    /// back into proper JSON with native types. This ensures numbers remain numbers, arrays remain
-    /// arrays, etc. — which OrcaSlicer requires for its --load-settings parser.
+    /// back into proper JSON. OrcaSlicer expects all scalar values as strings (e.g. "0", "1",
+    /// "50%") and arrays as native JSON arrays (e.g. ["0.4"]). GetRawText() wraps everything
+    /// in quotes, so we unwrap one layer and keep the inner string value as-is.
     /// </summary>
     private static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
     {
@@ -358,9 +359,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 writer.WritePropertyName(kvp.Key);
                 string rawValue = kvp.Value?.ToString() ?? "null";
 
-                // The value is raw JSON text (from JsonElement.GetRawText()).
-                // GetRawText() wraps every value in quotes (e.g. number 1 becomes "\"1\""),
-                // so we need to unwrap string-typed values that contain bare values.
+                // The value is raw JSON text from GetRawText().
+                // For a string "50%", GetRawText() returns "\"50%\"" (a JSON string literal).
+                // We parse it to unwrap the extra quoting layer.
                 try
                 {
                     using JsonDocument parsed = JsonDocument.Parse(rawValue);
@@ -368,10 +369,42 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
                     if (root.ValueKind == JsonValueKind.String)
                     {
-                        // The value is a JSON string — its content may be a bare value
-                        // that needs to be written as the appropriate JSON type.
                         string inner = root.GetString() ?? string.Empty;
-                        WriteUnwrappedValue(writer, inner);
+
+                        // If the inner string looks like a JSON array (e.g. "[\"0.4\"]"),
+                        // parse it as native JSON so arrays remain arrays.
+                        if (inner.Length > 0 && inner[0] == '[')
+                        {
+                            try
+                            {
+                                using JsonDocument arr = JsonDocument.Parse(inner);
+                                arr.RootElement.WriteTo(writer);
+                            }
+                            catch (JsonException)
+                            {
+                                writer.WriteStringValue(inner);
+                            }
+                        }
+                        else
+                        {
+                            // OrcaSlicer expects scalars as strings: "0", "1", "50%", "klipper"
+                            writer.WriteStringValue(inner);
+                        }
+                    }
+                    else if (root.ValueKind == JsonValueKind.Array)
+                    {
+                        // Arrays stay as arrays (e.g. nozzle_diameter: ["0.4"])
+                        root.WriteTo(writer);
+                    }
+                    else if (root.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    {
+                        // OrcaSlicer uses "1"/"0" strings for booleans
+                        writer.WriteStringValue(root.ValueKind == JsonValueKind.True ? "1" : "0");
+                    }
+                    else if (root.ValueKind == JsonValueKind.Number)
+                    {
+                        // OrcaSlicer expects numbers as strings: "0", "300", "0.4"
+                        writer.WriteStringValue(root.GetRawText());
                     }
                     else
                     {
@@ -380,7 +413,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
                 catch (JsonException)
                 {
-                    // If it's not valid JSON, write it as a string
                     writer.WriteStringValue(rawValue);
                 }
             }
@@ -389,58 +421,5 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
-    }
-
-    /// <summary>
-    /// Writes a string value as the most appropriate JSON type.
-    /// OrcaSlicer profile values from GetRawText() are all strings, but many represent
-    /// numbers, booleans, arrays, or percentage values that OrcaSlicer expects as native types.
-    /// </summary>
-    private static void WriteUnwrappedValue(Utf8JsonWriter writer, string value)
-    {
-        // Strip % suffix and write as number
-        if (value.EndsWith('%') && double.TryParse(
-                value.AsSpan(0, value.Length - 1),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out double pctVal))
-        {
-            writer.WriteNumberValue(pctVal);
-            return;
-        }
-
-        // Try parsing as a JSON value (handles arrays like "[0.4]", objects, etc.)
-        if (value.Length > 0 && (value[0] == '[' || value[0] == '{'))
-        {
-            try
-            {
-                using JsonDocument inner = JsonDocument.Parse(value);
-                inner.RootElement.WriteTo(writer);
-                return;
-            }
-            catch (JsonException)
-            {
-                // Not valid JSON, fall through to string
-            }
-        }
-
-        // Integer
-        if (int.TryParse(value, System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture, out int intVal))
-        {
-            writer.WriteNumberValue(intVal);
-            return;
-        }
-
-        // Float
-        if (double.TryParse(value, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out double dblVal))
-        {
-            writer.WriteNumberValue(dblVal);
-            return;
-        }
-
-        // Plain string — write as-is (e.g. enum values like "aligned", "grid", etc.)
-        writer.WriteStringValue(value);
     }
 }
