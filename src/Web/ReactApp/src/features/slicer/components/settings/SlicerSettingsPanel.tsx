@@ -35,6 +35,7 @@ import {
   BED_ADHESION_INFO,
   InfillPattern,
   BedAdhesionType,
+  ScarfJointSeam,
 } from './slicerSettingsTypes';
 
 interface SlicerSettingsPanelProps {
@@ -233,12 +234,44 @@ const QualitySettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
       <>
         <SettingSection icon={<SeamIcon className="w-4 h-4" />} title="Seam">
           <CompactSettingRow type="select" label="Seam position" value={settings.seamPosition ?? 'aligned'} onChange={(v) => onUpdate('seamPosition', v as 'random' | 'aligned' | 'back' | 'nearest')} options={[{ value: 'aligned', label: 'Aligned' }, { value: 'back', label: 'Back' }, { value: 'nearest', label: 'Nearest' }, { value: 'random', label: 'Random' }]} disabled={disabled} />
+          <CompactSettingRow type="number" label="Seam gap" value={settings.seamGap ?? 0} onChange={(v) => onUpdate('seamGap', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
           <CompactSettingRow type="checkbox" label="Staggered inner seams" checked={settings.staggeredInnerSeams ?? false} onChange={(v) => onUpdate('staggeredInnerSeams', v)} disabled={disabled} />
+        </SettingSection>
+
+        <SettingSection icon={<SeamIcon className="w-4 h-4" />} title="Scarf joint seam">
+          <CompactSettingRow type="select" label="Scarf joint seam" value={settings.scarfJointSeam ?? 'none'} onChange={(v) => onUpdate('scarfJointSeam', v as ScarfJointSeam)} options={[{ value: 'none', label: 'None' }, { value: 'contour', label: 'Contour' }, { value: 'all', label: 'All walls' }]} disabled={disabled} />
+          {settings.scarfJointSeam !== 'none' && (
+            <>
+              <CompactSettingRow type="number" label="Scarf length" value={settings.scarfLength ?? 10} onChange={(v) => onUpdate('scarfLength', v)} min={1} max={50} step={1} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="Scarf steps" value={settings.scarfSteps ?? 10} onChange={(v) => onUpdate('scarfSteps', v)} min={1} max={50} step={1} disabled={disabled} />
+              <CompactSettingRow type="number" label="Scarf start height" value={settings.scarfStartHeight ?? 0} onChange={(v) => onUpdate('scarfStartHeight', v)} min={0} max={10} step={0.1} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="Scarf joint speed" value={settings.scarfJointSpeed ?? 0} onChange={(v) => onUpdate('scarfJointSpeed', v)} min={0} max={200} step={5} unit="mm/s" disabled={disabled} />
+              <CompactSettingRow type="number" label="Scarf joint flow ratio" value={settings.scarfJointFlowRatio ?? 1.0} onChange={(v) => onUpdate('scarfJointFlowRatio', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
+              <CompactSettingRow type="checkbox" label="Scarf around entire wall" checked={settings.scarfAroundEntireWall ?? false} onChange={(v) => onUpdate('scarfAroundEntireWall', v)} disabled={disabled} />
+              <CompactSettingRow type="checkbox" label="Scarf joint for inner walls" checked={settings.scarfJointForInnerWalls ?? false} onChange={(v) => onUpdate('scarfJointForInnerWalls', v)} disabled={disabled} />
+              <CompactSettingRow type="checkbox" label="Conditional scarf joint" checked={settings.conditionalScarfJoint ?? false} onChange={(v) => onUpdate('conditionalScarfJoint', v)} disabled={disabled} />
+              {settings.conditionalScarfJoint && (
+                <>
+                  <CompactSettingRow type="number" label="Angle threshold" value={settings.conditionalAngleThreshold ?? 0} onChange={(v) => onUpdate('conditionalAngleThreshold', v)} min={0} max={180} step={5} unit="°" disabled={disabled} />
+                  <CompactSettingRow type="number" label="Overhang threshold" value={settings.conditionalOverhangThreshold ?? 0} onChange={(v) => onUpdate('conditionalOverhangThreshold', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
+                </>
+              )}
+            </>
+          )}
+        </SettingSection>
+
+        <SettingSection icon={<SpeedIcon className="w-4 h-4" />} title="Wipe">
+          <CompactSettingRow type="checkbox" label="Role-based wipe speed" checked={settings.roleBaseWipeSpeed ?? false} onChange={(v) => onUpdate('roleBaseWipeSpeed', v)} disabled={disabled} />
+          <CompactSettingRow type="number" label="Wipe speed" value={settings.wipeSpeed ?? 80} onChange={(v) => onUpdate('wipeSpeed', v)} min={10} max={200} step={5} unit="mm/s" disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Wipe on loops" checked={settings.wipeOnLoops ?? true} onChange={(v) => onUpdate('wipeOnLoops', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Wipe before external loop" checked={settings.wipeBeforeExternalLoop ?? false} onChange={(v) => onUpdate('wipeBeforeExternalLoop', v)} disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<PrecisionIcon className="w-4 h-4" />} title="Precision">
           <CompactSettingRow type="number" label="Resolution" value={settings.resolution ?? 0.0125} onChange={(v) => onUpdate('resolution', v)} min={0.001} max={0.1} step={0.001} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Slice gap closing radius" value={settings.sliceGapClosingRadius ?? 0.05} onChange={(v) => onUpdate('sliceGapClosingRadius', v)} min={0} max={1} step={0.01} unit="mm" disabled={disabled} />
           <CompactSettingRow type="number" label="Elephant foot compensation" value={settings.elephantFootCompensation ?? 0.1} onChange={(v) => onUpdate('elephantFootCompensation', v)} min={0} max={1} step={0.01} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Elephant foot comp. layers" value={settings.elephantFootCompensationLayers ?? 1} onChange={(v) => onUpdate('elephantFootCompensationLayers', v)} min={0} max={10} step={1} disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Wall generator">
@@ -247,6 +280,11 @@ const QualitySettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
 
         <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Walls & surfaces">
           <CompactSettingRow type="checkbox" label="Precise outer wall" checked={settings.preciseWall ?? false} onChange={(v) => onUpdate('preciseWall', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Precise Z height" checked={settings.preciseZHeight ?? false} onChange={(v) => onUpdate('preciseZHeight', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Convert holes to polyholes" checked={settings.convertHolesToPolyholes ?? false} onChange={(v) => onUpdate('convertHolesToPolyholes', v)} disabled={disabled} />
+          {settings.convertHolesToPolyholes && (
+            <CompactSettingRow type="number" label="Polyhole detection margin" value={settings.polyholeDetectionMargin ?? 0.01} onChange={(v) => onUpdate('polyholeDetectionMargin', v)} min={0} max={0.1} step={0.005} unit="mm" disabled={disabled} />
+          )}
         </SettingSection>
 
         <SettingSection icon={<InfillDensityIcon className="w-4 h-4" />} title="Flow ratio">
@@ -294,11 +332,15 @@ const StrengthSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate,
 const SpeedSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, disabled, isAdvanced }) => (
   <div className="space-y-4">
     <SettingSection icon={<SpeedIcon className="w-4 h-4" />} title="Speed">
+      {isAdvanced && (
+        <CompactSettingRow type="number" label="Print speed" value={settings.printSpeed ?? 100} onChange={(v) => onUpdate('printSpeed', v)} min={10} max={300} step={5} unit="mm/s" disabled={disabled} />
+      )}
       <CompactSettingRow type="number" label="Outer wall" value={settings.outerWallSpeed ?? 100} onChange={(v) => onUpdate('outerWallSpeed', v)} min={10} max={200} step={5} unit="mm/s" disabled={disabled} />
       <CompactSettingRow type="number" label="Inner wall" value={settings.innerWallSpeed ?? 150} onChange={(v) => onUpdate('innerWallSpeed', v)} min={10} max={300} step={5} unit="mm/s" disabled={disabled} />
       {isAdvanced && (
         <>
           <CompactSettingRow type="number" label="Sparse infill" value={settings.sparseInfillSpeed ?? 150} onChange={(v) => onUpdate('sparseInfillSpeed', v)} min={10} max={300} step={5} unit="mm/s" disabled={disabled} />
+          <CompactSettingRow type="number" label="Infill" value={settings.infillSpeed ?? 150} onChange={(v) => onUpdate('infillSpeed', v)} min={10} max={300} step={5} unit="mm/s" disabled={disabled} />
           <CompactSettingRow type="number" label="Internal solid infill" value={settings.solidInfillSpeed ?? 120} onChange={(v) => onUpdate('solidInfillSpeed', v)} min={10} max={300} step={5} unit="mm/s" disabled={disabled} />
           <CompactSettingRow type="number" label="Top surface" value={settings.topSurfaceSpeed ?? 100} onChange={(v) => onUpdate('topSurfaceSpeed', v)} min={10} max={200} step={5} unit="mm/s" disabled={disabled} />
         </>
@@ -313,6 +355,7 @@ const SpeedSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, di
         <CompactSettingRow type="number" label="Outer wall" value={settings.outerWallAcceleration ?? 2000} onChange={(v) => onUpdate('outerWallAcceleration', v)} min={100} max={10000} step={100} unit="mm/s²" disabled={disabled} />
         <CompactSettingRow type="number" label="Inner wall" value={settings.innerWallAcceleration ?? 5000} onChange={(v) => onUpdate('innerWallAcceleration', v)} min={100} max={20000} step={100} unit="mm/s²" disabled={disabled} />
         <CompactSettingRow type="number" label="Sparse infill" value={settings.infillAcceleration ?? 5000} onChange={(v) => onUpdate('infillAcceleration', v)} min={100} max={20000} step={100} unit="mm/s²" disabled={disabled} />
+        <CompactSettingRow type="number" label="Top surface" value={settings.topSurfaceAcceleration ?? 3000} onChange={(v) => onUpdate('topSurfaceAcceleration', v)} min={100} max={20000} step={100} unit="mm/s²" disabled={disabled} />
         <CompactSettingRow type="number" label="Travel" value={settings.travelAcceleration ?? 10000} onChange={(v) => onUpdate('travelAcceleration', v)} min={100} max={30000} step={100} unit="mm/s²" disabled={disabled} />
       </SettingSection>
     )}
@@ -334,6 +377,8 @@ const SupportSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
               <CompactSettingRow type="number" label="Bottom Z distance" value={settings.supportBottomZDistance ?? 0.2} onChange={(v) => onUpdate('supportBottomZDistance', v)} min={0} max={1} step={0.05} unit="mm" disabled={disabled} />
               <CompactSettingRow type="number" label="X/Y distance" value={settings.supportXYDistance ?? 0.6} onChange={(v) => onUpdate('supportXYDistance', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
               <CompactSettingRow type="number" label="Interface layers" value={settings.supportInterfaceLayers ?? 2} onChange={(v) => onUpdate('supportInterfaceLayers', v)} min={0} max={10} step={1} disabled={disabled} />
+              <CompactSettingRow type="number" label="Density" value={settings.supportDensity ?? 15} onChange={(v) => onUpdate('supportDensity', v)} min={5} max={100} step={5} unit="%" disabled={disabled} />
+              <CompactSettingRow type="number" label="Base interface layers" value={settings.supportBaseInterfaceLayers ?? 0} onChange={(v) => onUpdate('supportBaseInterfaceLayers', v)} min={0} max={10} step={1} disabled={disabled} />
             </>
           )}
         </>
@@ -428,6 +473,7 @@ const OtherSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, di
               <CompactSettingRow type="number" label="Flow rate" value={settings.ironingFlowRate ?? 15} onChange={(v) => onUpdate('ironingFlowRate', v as number)} min={0} max={50} step={5} unit="%" disabled={disabled} />
               <CompactSettingRow type="number" label="Spacing" value={settings.ironingSpacing ?? 0.1} onChange={(v) => onUpdate('ironingSpacing', v as number)} min={0.05} max={0.5} step={0.05} unit="mm" disabled={disabled} />
               <CompactSettingRow type="number" label="Speed" value={settings.ironingSpeed ?? 15} onChange={(v) => onUpdate('ironingSpeed', v as number)} min={5} max={100} step={5} unit="mm/s" disabled={disabled} />
+              <CompactSettingRow type="number" label="Angle" value={settings.ironingAngle ?? 45} onChange={(v) => onUpdate('ironingAngle', v as number)} min={0} max={360} step={5} unit="°" disabled={disabled} />
             </>
           )}
         </SettingSection>
