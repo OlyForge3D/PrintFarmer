@@ -68,13 +68,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
         finally
         {
-            try
+            // Keep temp files on failure for debugging; only clean up on success
+            if (Directory.Exists(jobWorkDir))
             {
-                Directory.Delete(jobWorkDir, recursive: true);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed cleanup {JobWorkDir}", jobWorkDir);
+                bool succeeded = File.Exists(Path.Combine(jobWorkDir, "output", Path.GetFileNameWithoutExtension(job.ModelFileName) + ".gcode"));
+                if (succeeded)
+                {
+                    try
+                    {
+                        Directory.Delete(jobWorkDir, recursive: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed cleanup {JobWorkDir}", jobWorkDir);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Keeping temp dir for debugging: {JobWorkDir}", jobWorkDir);
+                }
             }
         }
     }
