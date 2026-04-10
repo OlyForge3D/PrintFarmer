@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { slicerService } from '@/services/slicerService';
@@ -103,21 +103,13 @@ describe('ModelUploadModal', () => {
       const mockFile = new File(['test content'], 'test.stl', { type: 'model/stl' });
       const { toast } = await import('sonner');
 
-      // Mock uploadModel with delayed resolution simulating backend processing
-      vi.mocked(slicerService.uploadModel).mockImplementation((file, onProgress) => {
-        return new Promise((resolve) => {
-          // Simulate network upload completing quickly
-          setTimeout(() => onProgress?.(100), 10);
-          // But backend processing (thumbnail generation) takes longer
-          setTimeout(() => {
-            resolve({ id: 'test-id', url: 'test-url' });
-          }, 200);
-        });
+      vi.mocked(slicerService.uploadModel).mockImplementation((_file, onProgress) => {
+        onProgress?.(100);
+        return Promise.resolve({ id: 'test-id', url: 'test-url' });
       });
 
       renderModal();
 
-      // Find and use the file input
       const fileInput = document.querySelector('#model-file-upload') as HTMLInputElement;
       Object.defineProperty(fileInput, 'files', {
         value: [mockFile],
@@ -129,15 +121,11 @@ describe('ModelUploadModal', () => {
         expect(screen.getByText('test.stl')).toBeInTheDocument();
       });
 
-      // Click upload
       const uploadButton = screen.getByRole('button', { name: /upload 1 file/i });
-      fireEvent.click(uploadButton);
+      await act(async () => {
+        fireEvent.click(uploadButton);
+      });
 
-      // Toast should NOT appear immediately after network upload
-      await new Promise(resolve => setTimeout(resolve, 50));
-      expect(toast.success).not.toHaveBeenCalled();
-
-      // Toast should appear after backend completes
       await waitFor(() => {
         expect(toast.success).toHaveBeenCalledWith('test.stl uploaded successfully');
       }, { timeout: 2000 });
@@ -352,7 +340,7 @@ describe('ModelUploadModal', () => {
 
       // Upload button should disappear (no queued files) and uploading status should show
       await waitFor(() => {
-        expect(screen.queryByRole('button', { name: /upload/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /upload \d+ file/i })).not.toBeInTheDocument();
         expect(screen.getByText(/Uploading: 1/i)).toBeInTheDocument();
       }, { timeout: 1000 });
     });

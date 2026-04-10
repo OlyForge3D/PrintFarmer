@@ -152,7 +152,7 @@ describe('DeleteConfirmationModal', () => {
   });
 
   it('should display alert icon', () => {
-    const { container } = render(
+    render(
       <DeleteConfirmationModal
         isOpen={true}
         printers={[mockPrinter]}
@@ -161,7 +161,8 @@ describe('DeleteConfirmationModal', () => {
       />
     );
 
-    expect(container.querySelector('svg')).toBeInTheDocument();
+    // Modal renders via portal, so query the document
+    expect(document.querySelector('svg')).toBeInTheDocument();
   });
 
   it('should show manufacturer and model info in list', () => {

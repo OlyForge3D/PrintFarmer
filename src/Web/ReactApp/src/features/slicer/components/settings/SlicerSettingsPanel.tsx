@@ -160,7 +160,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       </div>
 
       {/* Category tabs + panel */}
-      <div className="flex gap-1 p-2 border-b border-pf-border overflow-x-auto" role="tablist" aria-label="Settings categories">
+      <div className="flex gap-1 p-2 border-b border-pf-border overflow-x-auto" role="tablist">
         {categories.map((cat) => {
           const isDirty = isCategoryDirty?.(cat.id) ?? false;
           const isActive = activeCategory === cat.id;
@@ -727,7 +727,7 @@ const OtherSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, di
     </SettingSection>
 
     <SettingSection icon={<PrecisionIcon />} title="Special mode">
-      <CompactSettingRow type="select" label="Print sequence" value={settings.printSequence ?? 'by_layer'} onChange={(v) => onUpdate('printSequence', v)} options={[{ value: 'by_layer', label: 'By layer' }, { value: 'by_object', label: 'By object' }]} disabled={disabled} />
+      <CompactSettingRow type="select" label="Print sequence" value={settings.printSequence ?? 'by_layer'} onChange={(v) => onUpdate('printSequence', v as 'by_layer' | 'by_object')} options={[{ value: 'by_layer', label: 'By layer' }, { value: 'by_object', label: 'By object' }]} disabled={disabled} />
       <CompactSettingRow type="checkbox" label="Spiral vase" checked={settings.spiralVase ?? false} onChange={(v) => onUpdate('spiralVase', v)} disabled={disabled} />
     </SettingSection>
 
