@@ -67,6 +67,7 @@ services:
       - IPC_LOCK
     volumes:
       - vault_data:/vault/data
+    restart: unless-stopped
     networks:
       - security
 
