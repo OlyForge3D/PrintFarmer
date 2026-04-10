@@ -516,19 +516,32 @@ public abstract class HttpJobPollerService(
                 int skipped = 0;
                 foreach (JsonProperty prop in overridesElem.EnumerateObject())
                 {
-                    // Map camelCase → native snake_case
-                    string nativeKey = CamelToNativeKeyMap.TryGetValue(prop.Name, out string? mapped)
-                        ? mapped
-                        : prop.Name; // pass through if already snake_case or unknown
+                    // Handle compound settings that map to multiple native keys or need value translation
+                    if (ApplyCompoundOverride(prop, profile.ProcessProfile.Settings))
+                    {
+                        applied++;
+                        continue;
+                    }
 
-                    // Store as raw JSON text to match how Settings dictionary values are stored
-                    // (from GetRawText() in SerializeElementToDict)
-                    string rawValue = prop.Value.GetRawText();
-                    profile.ProcessProfile.Settings[nativeKey] = rawValue;
-                    applied++;
+                    // Map camelCase → native snake_case
+                    if (CamelToNativeKeyMap.TryGetValue(prop.Name, out string? mapped))
+                    {
+                        profile.ProcessProfile.Settings[mapped] = prop.Value.GetRawText();
+                        applied++;
+                    }
+                    else if (prop.Name.Contains('_'))
+                    {
+                        // Already snake_case — pass through directly
+                        profile.ProcessProfile.Settings[prop.Name] = prop.Value.GetRawText();
+                        applied++;
+                    }
+                    else
+                    {
+                        skipped++;
+                    }
                 }
 
-                _logger.LogInformation("Applied {Applied} overrides to process profile ({Skipped} skipped)", applied, skipped);
+                _logger.LogInformation("Applied {Applied} overrides to process profile ({Skipped} skipped/unmapped)", applied, skipped);
             }
 
             return profile;
@@ -648,11 +661,76 @@ public abstract class HttpJobPollerService(
 
         // Support
         ["supportType"] = "support_type",
+        ["supportDensity"] = "support_base_pattern_spacing",
         ["supportAngle"] = "support_threshold_angle",
         ["supportTopZDistance"] = "support_top_z_distance",
         ["supportBottomZDistance"] = "support_bottom_z_distance",
         ["supportInterfaceLayers"] = "support_interface_top_layers",
         ["supportXYDistance"] = "support_object_xy_distance",
         ["supportBaseInterfaceLayers"] = "support_interface_bottom_layers",
+
+        // Temperature — bed temp uses hot_plate_temp as the most common plate type
+        ["bedTemp"] = "hot_plate_temp",
+        ["firstLayerBedTemp"] = "hot_plate_temp_initial_layer",
+
+        // Speed — generic speed maps to the base speed OrcaSlicer derives others from
+        ["printSpeed"] = "outer_wall_speed",
+        ["infillSpeed"] = "sparse_infill_speed",
+        ["infillAcceleration"] = "sparse_infill_acceleration",
+
+        // Fan cooling
+        ["enableFanCooling"] = "fan_cooling",
+
+        // Flow ratio
+        ["outerWallFlowRatio"] = "outer_wall_flow_ratio",
+        ["innerWallFlowRatio"] = "inner_wall_flow_ratio",
+
+        // Bridging
+        ["maxBridgeLength"] = "max_bridge_length",
+
+        // Overhang
+        ["overhangAngle"] = "overhang_speed_classic",
+
+        // Wall generator
+        ["minWallThickness"] = "min_width_top_surface",
     };
+
+    /// <summary>
+    /// Handles compound overrides that map to multiple native keys or need value translation.
+    /// Returns true if the override was handled, false to fall through to simple mapping.
+    /// </summary>
+    private static bool ApplyCompoundOverride(JsonProperty prop, Dictionary<string, object> settings)
+    {
+        switch (prop.Name)
+        {
+            case "bedAdhesion":
+                // Maps our enum (none/skirt/brim/raft) to OrcaSlicer's brim_type
+                string adhesion = prop.Value.GetString() ?? "none";
+                string brimType = adhesion.ToLowerInvariant() switch
+                {
+                    "skirt" => "\"outer_and_inner\"",
+                    "brim" => "\"outer_only\"",
+                    "raft" => "\"outer_only\"",
+                    _ => "\"no_brim\""
+                };
+                settings["brim_type"] = brimType;
+                if (adhesion.Equals("raft", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings["raft_layers"] = "4";
+                }
+
+                return true;
+
+            case "enableIroning":
+                // Maps our boolean to OrcaSlicer's ironing_type string
+                bool ironingEnabled = prop.Value.ValueKind == JsonValueKind.True;
+                settings["ironing_type"] = ironingEnabled
+                    ? "\"top_solid_surface_only\""
+                    : "\"no ironing\"";
+                return true;
+
+            default:
+                return false;
+        }
+    }
 }
