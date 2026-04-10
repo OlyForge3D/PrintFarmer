@@ -76,7 +76,7 @@ const GcodeIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) 
 export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
   settings,
   onChange,
-  initialViewMode = 'basic',
+  initialViewMode = 'simple',
   disabled = false,
   className = '',
   isCategoryDirty,
@@ -102,7 +102,7 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
 
   // View mode tabs
   const viewModes: { id: FilamentSettingsViewMode; label: string }[] = [
-    { id: 'basic', label: 'Basic' },
+    { id: 'simple', label: 'Simple' },
     { id: 'advanced', label: 'Advanced' },
   ];
 
@@ -144,7 +144,7 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
 
       {/* Settings Content */}
       <div className="p-4">
-        {viewMode === 'basic' && (
+        {viewMode === 'simple' && (
           <BasicFilamentSettings
             settings={settings}
             onUpdate={updateSetting}

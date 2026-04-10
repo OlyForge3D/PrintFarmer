@@ -4,7 +4,7 @@
  */
 
 /** View modes for machine settings panel complexity */
-export type MachineSettingsViewMode = 'basic' | 'advanced';
+export type MachineSettingsViewMode = 'simple' | 'advanced';
 
 /** Category tabs for machine settings in advanced mode */
 export type MachineSettingsCategory = 

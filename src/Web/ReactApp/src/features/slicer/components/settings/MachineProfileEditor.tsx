@@ -85,7 +85,7 @@ const CapabilitiesIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h
 export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
   settings,
   onChange,
-  initialViewMode = 'basic',
+  initialViewMode = 'simple',
   disabled = false,
   className = '',
   isCategoryDirty,
@@ -111,7 +111,7 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
 
   // View mode tabs
   const viewModes: { id: MachineSettingsViewMode; label: string }[] = [
-    { id: 'basic', label: 'Basic' },
+    { id: 'simple', label: 'Simple' },
     { id: 'advanced', label: 'Advanced' },
   ];
 
@@ -162,7 +162,7 @@ export const MachineProfileEditor: React.FC<MachineProfileEditorProps> = ({
 
       {/* Settings Content */}
       <div className="p-4">
-        {viewMode === 'basic' && (
+        {viewMode === 'simple' && (
           <BasicMachineSettingsPanel
             settings={settings}
             onUpdate={updateSetting}

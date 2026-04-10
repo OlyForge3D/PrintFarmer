@@ -4,7 +4,7 @@
  */
 
 /** View modes for filament settings panel complexity */
-export type FilamentSettingsViewMode = 'basic' | 'advanced';
+export type FilamentSettingsViewMode = 'simple' | 'advanced';
 
 /** Category tabs for filament settings in advanced mode */
 export type FilamentSettingsCategory = 

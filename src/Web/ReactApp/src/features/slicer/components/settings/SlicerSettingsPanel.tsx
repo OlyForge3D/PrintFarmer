@@ -6,7 +6,7 @@
  * settings appear within each tab.
  */
 import React, { useState, useCallback } from 'react';
-import { Button, Select, Checkbox, RadioGroup } from '@/common/components/ui';
+import { Button } from '@/common/components/ui';
 import { CompactSettingRow, SettingSection } from './SettingRow';
 import {
   InfillDensityIcon,
@@ -28,13 +28,10 @@ import {
 import {
   SettingsViewMode,
   SettingsCategory,
-  BasicSlicerSettings,
   SimpleSlicerSettings,
   AdvancedSlicerSettings,
   INFILL_PATTERN_INFO,
-  BED_ADHESION_INFO,
   InfillPattern,
-  BedAdhesionType,
   ScarfJointSeam,
   WallGenerator,
   WallSequence,
@@ -49,10 +46,10 @@ import {
 
 interface SlicerSettingsPanelProps {
   /** Current settings values */
-  settings: BasicSlicerSettings | SimpleSlicerSettings | AdvancedSlicerSettings;
+  settings: SimpleSlicerSettings | AdvancedSlicerSettings;
   /** Called when any setting changes */
-  onChange: (settings: BasicSlicerSettings | SimpleSlicerSettings | AdvancedSlicerSettings) => void;
-  /** Initial view mode — 'basic' and 'simple' map to Simple; 'advanced' maps to Advanced */
+  onChange: (settings: SimpleSlicerSettings | AdvancedSlicerSettings) => void;
+  /** Initial view mode */
   initialViewMode?: SettingsViewMode;
   /** Disable all controls */
   disabled?: boolean;
@@ -92,7 +89,7 @@ function getCategoriesForMode(mode: SettingsViewMode) {
 export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   settings,
   onChange,
-  initialViewMode = 'basic',
+  initialViewMode = 'simple',
   disabled = false,
   className = '',
   isCategoryDirty,
@@ -125,24 +122,18 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
     icon: <InfillPatternIcon className="w-5 h-5" />,
   }));
 
-  const bedAdhesionOptions = Object.entries(BED_ADHESION_INFO).map(([value, info]) => ({
-    value,
-    label: info.label,
-  }));
-
   const categoryProps = {
     settings: settings as AdvancedSlicerSettings,
     onUpdate: updateSetting,
     disabled,
     isAdvanced,
     infillPatternOptions,
-    bedAdhesionOptions,
     advancedSettings,
     onAdvancedSettingsChange,
   };
 
-  const modeButtonClass = (mode: SettingsViewMode, pos: 'left' | 'mid' | 'right') => {
-    const roundCls = pos === 'left' ? 'rounded-l-md' : pos === 'right' ? 'rounded-r-md -ml-px' : '-ml-px';
+  const modeButtonClass = (mode: SettingsViewMode, pos: 'left' | 'right') => {
+    const roundCls = pos === 'left' ? 'rounded-l-md' : 'rounded-r-md -ml-px';
     const active = viewMode === mode;
     return `px-2 py-0.5 text-[10px] font-medium ${roundCls} border transition-colors ${
       active
@@ -153,19 +144,13 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
   return (
     <div className={`bg-pf-bg-1 rounded-lg ${className}`}>
-      {/* Mode toggle: Basic / Simple / Advanced */}
+      {/* Mode toggle: Simple / Advanced */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-pf-border">
-        {viewMode !== 'basic' && (
-          <span className="text-[10px] text-pf-text-muted">
-            {categories.length} {categories.length === 1 ? 'tab' : 'tabs'}
-          </span>
-        )}
-        {viewMode === 'basic' && <span />}
+        <span className="text-[10px] text-pf-text-muted">
+          {categories.length} {categories.length === 1 ? 'tab' : 'tabs'}
+        </span>
         <div className="flex items-center gap-0">
-          <Button variant="unstyled" size="sm" onClick={() => setViewMode('basic')} disabled={disabled} className={modeButtonClass('basic', 'left')}>
-            Basic
-          </Button>
-          <Button variant="unstyled" size="sm" onClick={() => setViewMode('simple')} disabled={disabled} className={modeButtonClass('simple', 'mid')}>
+          <Button variant="unstyled" size="sm" onClick={() => setViewMode('simple')} disabled={disabled} className={modeButtonClass('simple', 'left')}>
             Simple
           </Button>
           <Button variant="unstyled" size="sm" onClick={() => setViewMode('advanced')} disabled={disabled} className={modeButtonClass('advanced', 'right')}>
@@ -174,174 +159,52 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         </div>
       </div>
 
-      {/* Basic mode: flat simplified UI, no category tabs */}
-      {viewMode === 'basic' && (
-        <div className="p-4 space-y-5">
-          <BasicModeSettings settings={settings as AdvancedSlicerSettings} onUpdate={updateSetting} disabled={disabled} infillPatternOptions={infillPatternOptions} bedAdhesionOptions={bedAdhesionOptions} />
-        </div>
-      )}
+      {/* Category tabs + panel */}
+      <div className="flex gap-1 p-2 border-b border-pf-border overflow-x-auto" role="tablist" aria-label="Settings categories">
+        {categories.map((cat) => {
+          const isDirty = isCategoryDirty?.(cat.id) ?? false;
+          const isActive = activeCategory === cat.id;
+          return (
+            <Button
+              key={cat.id}
+              variant="unstyled"
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`panel-${cat.id}`}
+              onClick={() => setActiveCategory(cat.id)}
+              disabled={disabled}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
+                         transition-colors duration-150 cursor-pointer disabled:opacity-50
+                         ${isActive
+                           ? 'bg-pf-accent text-white'
+                           : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                         }
+                         ${isDirty ? 'ring-1 ring-pf-accent-orange' : ''}`}
+            >
+              {cat.label}
+              {isDirty && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
+                  aria-label="Has modified settings"
+                />
+              )}
+            </Button>
+          );
+        })}
+      </div>
 
-      {/* Simple / Advanced: category tabs + panel */}
-      {viewMode !== 'basic' && (
-        <>
-          <div className="flex gap-1 p-2 border-b border-pf-border overflow-x-auto" role="tablist" aria-label="Settings categories">
-            {categories.map((cat) => {
-              const isDirty = isCategoryDirty?.(cat.id) ?? false;
-              const isActive = activeCategory === cat.id;
-              return (
-                <Button
-                  key={cat.id}
-                  variant="unstyled"
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  aria-controls={`panel-${cat.id}`}
-                  onClick={() => setActiveCategory(cat.id)}
-                  disabled={disabled}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
-                             transition-colors duration-150 cursor-pointer disabled:opacity-50
-                             ${isActive
-                               ? 'bg-pf-accent text-white'
-                               : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                             }
-                             ${isDirty ? 'ring-1 ring-pf-accent-orange' : ''}`}
-                >
-                  {cat.label}
-                  {isDirty && (
-                    <span
-                      className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
-                      aria-label="Has modified settings"
-                    />
-                  )}
-                </Button>
-              );
-            })}
-          </div>
-
-          <div className="p-3" id={`panel-${activeCategory}`} role="tabpanel">
-            {activeCategory === 'quality' && <QualitySettings {...categoryProps} />}
-            {activeCategory === 'strength' && <StrengthSettings {...categoryProps} />}
-            {activeCategory === 'speed' && <SpeedSettings {...categoryProps} />}
-            {activeCategory === 'support' && <SupportSettings {...categoryProps} />}
-            {activeCategory === 'multimaterial' && <MultimaterialSettings {...categoryProps} />}
-            {activeCategory === 'other' && <OtherSettings {...categoryProps} />}
-          </div>
-        </>
-      )}
+      <div className="p-3" id={`panel-${activeCategory}`} role="tabpanel">
+        {activeCategory === 'quality' && <QualitySettings {...categoryProps} />}
+        {activeCategory === 'strength' && <StrengthSettings {...categoryProps} />}
+        {activeCategory === 'speed' && <SpeedSettings {...categoryProps} />}
+        {activeCategory === 'support' && <SupportSettings {...categoryProps} />}
+        {activeCategory === 'multimaterial' && <MultimaterialSettings {...categoryProps} />}
+        {activeCategory === 'other' && <OtherSettings {...categoryProps} />}
+      </div>
     </div>
   );
 };
-
-/* ─── Basic Mode — flat simplified UI matching SimplyPrint/OrcaSlicer Basic ─── */
-interface BasicModeProps {
-  settings: AdvancedSlicerSettings;
-  onUpdate: <K extends keyof AdvancedSlicerSettings>(key: K, value: AdvancedSlicerSettings[K]) => void;
-  disabled: boolean;
-  infillPatternOptions: Array<{ value: string; label: string; icon?: React.ReactNode }>;
-  bedAdhesionOptions: Array<{ value: string; label: string }>;
-}
-
-const BasicModeSettings: React.FC<BasicModeProps> = ({ settings, onUpdate, disabled, infillPatternOptions, bedAdhesionOptions }) => (
-  <div className="space-y-6">
-    {/* Infill Density — slider 0-100% */}
-    <div>
-      <div className="flex items-center gap-2 mb-1">
-        <InfillDensityIcon className="w-5 h-5 text-pf-accent" />
-        <span className="text-sm font-medium text-pf-text-primary">Infill Density</span>
-      </div>
-      <p className="text-xs text-pf-text-muted mb-2">How much material fills the inside of your print</p>
-      <div className="flex items-center gap-3">
-        <input
-          type="range"
-          min={0} max={100} step={5}
-          value={settings.infillDensity ?? 20}
-          onChange={(e) => onUpdate('infillDensity', Number(e.target.value))}
-          disabled={disabled}
-          className="flex-1 accent-pf-accent"
-        />
-        <span className="text-sm font-semibold text-pf-text-primary w-10 text-right">{settings.infillDensity ?? 20}%</span>
-      </div>
-      <div className="flex justify-between text-[10px] text-pf-text-muted mt-0.5 px-0.5">
-        <span>0%</span><span>20%</span><span>40%</span><span>60%</span><span>80%</span><span>100%</span>
-      </div>
-    </div>
-
-    {/* Infill Pattern — dropdown */}
-    <div>
-      <div className="flex items-center gap-2 mb-1">
-        <InfillPatternIcon className="w-5 h-5 text-pf-accent" />
-        <span className="text-sm font-medium text-pf-text-primary">Infill Pattern</span>
-      </div>
-      <p className="text-xs text-pf-text-muted mb-2">The shape pattern used to fill your print</p>
-      <Select
-        value={settings.infillPattern ?? 'grid'}
-        onChange={(e) => onUpdate('infillPattern', e.target.value as InfillPattern)}
-        disabled={disabled}
-      >
-        {infillPatternOptions.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </Select>
-    </div>
-
-    {/* Wall Count — slider 1-4 */}
-    <div>
-      <div className="flex items-center gap-2 mb-1">
-        <WallCountIcon className="w-5 h-5 text-pf-accent" />
-        <span className="text-sm font-medium text-pf-text-primary">Wall Count</span>
-      </div>
-      <p className="text-xs text-pf-text-muted mb-2">The number of outer walls/shells for your print</p>
-      <div className="flex items-center gap-3">
-        <input
-          type="range"
-          min={1} max={4} step={1}
-          value={settings.wallCount ?? 3}
-          onChange={(e) => onUpdate('wallCount', Number(e.target.value))}
-          disabled={disabled}
-          className="flex-1 accent-pf-accent"
-        />
-        <span className="text-sm font-semibold text-pf-text-primary w-6 text-right">{settings.wallCount ?? 3}</span>
-      </div>
-      <div className="flex justify-between text-[10px] text-pf-text-muted mt-0.5 px-0.5">
-        <span>1</span><span>2</span><span>3</span><span>4</span>
-      </div>
-    </div>
-
-    {/* Bed Adhesion — radio: Skirt / Brim */}
-    <div>
-      <div className="flex items-center gap-2 mb-1">
-        <BedAdhesionIcon className="w-5 h-5 text-pf-accent" />
-        <span className="text-sm font-medium text-pf-text-primary">Bed Adhesion</span>
-      </div>
-      <p className="text-xs text-pf-text-muted mb-2">Choose between skirt or brim for better print adhesion</p>
-      <RadioGroup
-        name="bedAdhesion"
-        options={bedAdhesionOptions.map((opt) => ({ value: opt.value, label: opt.label }))}
-        value={settings.bedAdhesion ?? 'skirt'}
-        onChange={(v) => onUpdate('bedAdhesion', v as BedAdhesionType)}
-        disabled={disabled}
-      />
-    </div>
-
-    {/* Use Supports — checkbox */}
-    <div>
-      <div className="flex items-center gap-3">
-        <Checkbox
-          checked={settings.enableSupports ?? false}
-          onChange={(e) => onUpdate('enableSupports', e.target.checked)}
-          disabled={disabled}
-        />
-        <div>
-          <div className="flex items-center gap-2">
-            <SupportsIcon className="w-5 h-5 text-pf-accent" />
-            <span className="text-sm font-medium text-pf-text-primary">Use Supports</span>
-          </div>
-          <p className="text-xs text-pf-text-muted mt-0.5">Adds support structures for overhanging parts</p>
-        </div>
-      </div>
-    </div>
-  </div>
-);
 
 /* ─── shared prop shape for every category ─── */
 interface CategorySettingsProps {
@@ -350,7 +213,6 @@ interface CategorySettingsProps {
   disabled: boolean;
   isAdvanced: boolean;
   infillPatternOptions: Array<{ value: string; label: string; icon?: React.ReactNode }>;
-  bedAdhesionOptions: Array<{ value: string; label: string }>;
   advancedSettings?: Record<string, unknown>;
   onAdvancedSettingsChange?: (settings: Record<string, unknown>) => void;
 }
@@ -363,23 +225,22 @@ const QualitySettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
       <CompactSettingRow type="number" label="First layer height" value={settings.firstLayerHeight ?? 0.2} onChange={(v) => onUpdate('firstLayerHeight', v)} min={0.1} max={0.4} step={0.01} unit="mm" disabled={disabled} />
     </SettingSection>
 
-    <SettingSection icon={<LineWidthIcon className="w-4 h-4" />} title="Line width">
-      <CompactSettingRow type="number" label="Default" value={settings.lineWidthDefault ?? 0.45} onChange={(v) => onUpdate('lineWidthDefault', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-      {isAdvanced && (
-        <>
-          <CompactSettingRow type="number" label="First layer" value={settings.lineWidthFirstLayer ?? 0.5} onChange={(v) => onUpdate('lineWidthFirstLayer', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-          <CompactSettingRow type="number" label="Outer wall" value={settings.lineWidthOuterWall ?? 0.45} onChange={(v) => onUpdate('lineWidthOuterWall', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-          <CompactSettingRow type="number" label="Inner wall" value={settings.lineWidthInnerWall ?? 0.45} onChange={(v) => onUpdate('lineWidthInnerWall', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-          <CompactSettingRow type="number" label="Top surface" value={settings.lineWidthTopSurface ?? 0.45} onChange={(v) => onUpdate('lineWidthTopSurface', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-          <CompactSettingRow type="number" label="Sparse infill" value={settings.lineWidthSparseInfill ?? 0.45} onChange={(v) => onUpdate('lineWidthSparseInfill', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-          <CompactSettingRow type="number" label="Internal solid infill" value={settings.lineWidthInternalSolidInfill ?? 0.45} onChange={(v) => onUpdate('lineWidthInternalSolidInfill', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-          <CompactSettingRow type="number" label="Support" value={settings.lineWidthSupport ?? 0.45} onChange={(v) => onUpdate('lineWidthSupport', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-        </>
-      )}
-    </SettingSection>
+    {isAdvanced && (
+      <SettingSection icon={<LineWidthIcon className="w-4 h-4" />} title="Line width">
+        <CompactSettingRow type="number" label="Default" value={settings.lineWidthDefault ?? 0.45} onChange={(v) => onUpdate('lineWidthDefault', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="First layer" value={settings.lineWidthFirstLayer ?? 0.5} onChange={(v) => onUpdate('lineWidthFirstLayer', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Outer wall" value={settings.lineWidthOuterWall ?? 0.45} onChange={(v) => onUpdate('lineWidthOuterWall', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Inner wall" value={settings.lineWidthInnerWall ?? 0.45} onChange={(v) => onUpdate('lineWidthInnerWall', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Top surface" value={settings.lineWidthTopSurface ?? 0.45} onChange={(v) => onUpdate('lineWidthTopSurface', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Sparse infill" value={settings.lineWidthSparseInfill ?? 0.45} onChange={(v) => onUpdate('lineWidthSparseInfill', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Internal solid infill" value={settings.lineWidthInternalSolidInfill ?? 0.45} onChange={(v) => onUpdate('lineWidthInternalSolidInfill', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Support" value={settings.lineWidthSupport ?? 0.45} onChange={(v) => onUpdate('lineWidthSupport', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+      </SettingSection>
+    )}
 
     <SettingSection icon={<SeamIcon className="w-4 h-4" />} title="Seam">
       <CompactSettingRow type="select" label="Seam position" value={settings.seamPosition ?? 'aligned'} onChange={(v) => onUpdate('seamPosition', v as 'random' | 'aligned' | 'back' | 'nearest')} options={[{ value: 'aligned', label: 'Aligned' }, { value: 'back', label: 'Back' }, { value: 'nearest', label: 'Nearest' }, { value: 'random', label: 'Random' }]} disabled={disabled} />
+      <CompactSettingRow type="number" label="Scarf joint flow ratio" value={settings.scarfJointFlowRatio ?? 1.0} onChange={(v) => onUpdate('scarfJointFlowRatio', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
     </SettingSection>
 
     <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Surface quality">
@@ -388,10 +249,12 @@ const QualitySettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
       <CompactSettingRow type="checkbox" label="Precise outer wall" checked={settings.preciseWall ?? false} onChange={(v) => onUpdate('preciseWall', v)} disabled={disabled} />
     </SettingSection>
 
-    <SettingSection icon={<LayerHeightIcon className="w-4 h-4" />} title="Sequence">
-      <CompactSettingRow type="select" label="First layer filament sequence" value={settings.firstLayerSequenceChoice ?? 'default'} onChange={(v) => onUpdate('firstLayerSequenceChoice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
-      <CompactSettingRow type="select" label="Other layers filament sequence" value={settings.otherLayersSequenceChoice ?? 'default'} onChange={(v) => onUpdate('otherLayersSequenceChoice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
-    </SettingSection>
+    {isAdvanced && (
+      <SettingSection icon={<LayerHeightIcon className="w-4 h-4" />} title="Sequence">
+        <CompactSettingRow type="select" label="First layer filament sequence" value={settings.firstLayerSequenceChoice ?? 'default'} onChange={(v) => onUpdate('firstLayerSequenceChoice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
+        <CompactSettingRow type="select" label="Other layers filament sequence" value={settings.otherLayersSequenceChoice ?? 'default'} onChange={(v) => onUpdate('otherLayersSequenceChoice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
+      </SettingSection>
+    )}
 
     {isAdvanced && (
       <>
@@ -581,14 +444,15 @@ const StrengthSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate,
       )}
     </SettingSection>
 
+    <SettingSection icon={<InfillDensityIcon className="w-4 h-4" />} title="Top/bottom shells">
+      <CompactSettingRow type="number" label="Top surface density" value={settings.topSurfaceDensity ?? 100} onChange={(v) => onUpdate('topSurfaceDensity', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
+      <CompactSettingRow type="select" label="Top surface pattern" value={settings.topSurfacePattern ?? 'monotonic'} onChange={(v) => onUpdate('topSurfacePattern', v)} options={[{ value: 'monotonic', label: 'Monotonic' }, { value: 'monotoniclines', label: 'Monotonic lines' }, { value: 'rectilinear', label: 'Rectilinear' }, { value: 'concentric', label: 'Concentric' }]} disabled={disabled} />
+      <CompactSettingRow type="number" label="Bottom surface density" value={settings.bottomSurfaceDensity ?? 100} onChange={(v) => onUpdate('bottomSurfaceDensity', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
+      <CompactSettingRow type="select" label="Bottom surface pattern" value={settings.bottomSurfacePattern ?? 'monotonic'} onChange={(v) => onUpdate('bottomSurfacePattern', v)} options={[{ value: 'monotonic', label: 'Monotonic' }, { value: 'rectilinear', label: 'Rectilinear' }, { value: 'concentric', label: 'Concentric' }]} disabled={disabled} />
+    </SettingSection>
+
     {isAdvanced && (
       <>
-        <SettingSection icon={<InfillDensityIcon className="w-4 h-4" />} title="Surface density">
-          <CompactSettingRow type="number" label="Top surface density" value={settings.topSurfaceDensity ?? 100} onChange={(v) => onUpdate('topSurfaceDensity', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
-          <CompactSettingRow type="number" label="Bottom surface density" value={settings.bottomSurfaceDensity ?? 100} onChange={(v) => onUpdate('bottomSurfaceDensity', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
-          <CompactSettingRow type="select" label="Bottom surface pattern" value={settings.bottomSurfacePattern ?? 'monotonic'} onChange={(v) => onUpdate('bottomSurfacePattern', v)} options={[{ value: 'monotonic', label: 'Monotonic' }, { value: 'rectilinear', label: 'Rectilinear' }, { value: 'concentric', label: 'Concentric' }]} disabled={disabled} />
-        </SettingSection>
-
         <SettingSection icon={<SpeedIcon className="w-4 h-4" />} title="Bridging (strength)">
           <CompactSettingRow type="number" label="External bridge direction" value={settings.bridgeAngle ?? 0} onChange={(v) => onUpdate('bridgeAngle', v)} min={0} max={360} step={5} unit="°" disabled={disabled} />
           <CompactSettingRow type="number" label="External bridge density" value={settings.bridgeDensity ?? 100} onChange={(v) => onUpdate('bridgeDensity', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
@@ -694,7 +558,7 @@ const SpeedSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, di
 );
 
 /* ─── Support ─── */
-const SupportSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, disabled, isAdvanced, bedAdhesionOptions }) => (
+const SupportSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, disabled, isAdvanced }) => (
   <div className="space-y-4">
     <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Support">
       <CompactSettingRow type="checkbox" label="Enable support" checked={settings.enableSupports} onChange={(v) => onUpdate('enableSupports', v)} disabled={disabled} />
@@ -702,73 +566,148 @@ const SupportSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
         <>
           <CompactSettingRow type="select" label="Type" value={settings.supportType ?? 'normal'} onChange={(v) => onUpdate('supportType', v as 'none' | 'normal' | 'tree' | 'tree_auto')} options={[{ value: 'normal', label: 'Normal' }, { value: 'tree', label: 'Tree' }, { value: 'tree_auto', label: 'Tree (Auto)' }]} disabled={disabled} />
           <CompactSettingRow type="number" label="Threshold angle" value={settings.supportAngle ?? 45} onChange={(v) => onUpdate('supportAngle', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="On build plate only" checked={settings.supportOnBuildPlateOnly ?? false} onChange={(v) => onUpdate('supportOnBuildPlateOnly', v)} disabled={disabled} />
-          <CompactSettingRow type="number" label="Filament" value={settings.supportFilament ?? 0} onChange={(v) => onUpdate('supportFilament', v)} min={0} max={10} step={1} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Avoid interface filament for base" checked={settings.supportInterfaceNotForBody ?? false} onChange={(v) => onUpdate('supportInterfaceNotForBody', v)} disabled={disabled} />
           <CompactSettingRow type="number" label="Threshold overlap" value={settings.supportThresholdOverlap ?? 0} onChange={(v) => onUpdate('supportThresholdOverlap', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
-          {isAdvanced && (
-            <>
-              <CompactSettingRow type="select" label="Style" value={settings.supportStyle ?? 'default'} onChange={(v) => onUpdate('supportStyle', v as SupportStyle)} options={[{ value: 'default', label: 'Default' }, { value: 'grid', label: 'Grid' }, { value: 'snug', label: 'Snug' }, { value: 'organic', label: 'Organic' }]} disabled={disabled} />
-              <CompactSettingRow type="number" label="Top Z distance" value={settings.supportTopZDistance ?? 0.2} onChange={(v) => onUpdate('supportTopZDistance', v)} min={0} max={1} step={0.05} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Bottom Z distance" value={settings.supportBottomZDistance ?? 0.2} onChange={(v) => onUpdate('supportBottomZDistance', v)} min={0} max={1} step={0.05} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="X/Y distance" value={settings.supportXYDistance ?? 0.6} onChange={(v) => onUpdate('supportXYDistance', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Top interface layers" value={settings.supportInterfaceLayers ?? 2} onChange={(v) => onUpdate('supportInterfaceLayers', v)} min={0} max={10} step={1} disabled={disabled} />
-              <CompactSettingRow type="number" label="Bottom interface layers" value={settings.supportInterfaceBottomLayers ?? 0} onChange={(v) => onUpdate('supportInterfaceBottomLayers', v)} min={0} max={10} step={1} disabled={disabled} />
-              <CompactSettingRow type="number" label="Density" value={settings.supportDensity ?? 15} onChange={(v) => onUpdate('supportDensity', v)} min={5} max={100} step={5} unit="%" disabled={disabled} />
-              <CompactSettingRow type="number" label="Base interface layers" value={settings.supportBaseInterfaceLayers ?? 0} onChange={(v) => onUpdate('supportBaseInterfaceLayers', v)} min={0} max={10} step={1} disabled={disabled} />
-              <CompactSettingRow type="select" label="Base pattern" value={settings.supportBasePattern ?? 'default'} onChange={(v) => onUpdate('supportBasePattern', v)} options={[{ value: 'default', label: 'Default' }, { value: 'rectilinear', label: 'Rectilinear' }, { value: 'rectilinear_grid', label: 'Grid' }, { value: 'honeycomb', label: 'Honeycomb' }]} disabled={disabled} />
-              <CompactSettingRow type="number" label="Base pattern spacing" value={settings.supportBasePatternSpacing ?? 2.5} onChange={(v) => onUpdate('supportBasePatternSpacing', v)} min={0.5} max={10} step={0.5} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="select" label="Interface pattern" value={settings.supportInterfacePattern ?? 'auto'} onChange={(v) => onUpdate('supportInterfacePattern', v)} options={[{ value: 'auto', label: 'Auto' }, { value: 'rectilinear', label: 'Rectilinear' }, { value: 'concentric', label: 'Concentric' }]} disabled={disabled} />
-              <CompactSettingRow type="number" label="Top interface spacing" value={settings.supportInterfaceSpacing ?? 0.5} onChange={(v) => onUpdate('supportInterfaceSpacing', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Bottom interface spacing" value={settings.supportBottomInterfaceSpacing ?? 0.5} onChange={(v) => onUpdate('supportBottomInterfaceSpacing', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Expansion" value={settings.supportExpansion ?? 0} onChange={(v) => onUpdate('supportExpansion', v)} min={0} max={10} step={0.5} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Interface filament" value={settings.supportInterfaceFilament ?? 0} onChange={(v) => onUpdate('supportInterfaceFilament', v)} min={0} max={10} step={1} disabled={disabled} />
-              <CompactSettingRow type="checkbox" label="Interface loop pattern" checked={settings.supportInterfaceLoopPattern ?? false} onChange={(v) => onUpdate('supportInterfaceLoopPattern', v)} disabled={disabled} />
-              <CompactSettingRow type="checkbox" label="Independent layer height" checked={settings.independentSupportLayerHeight ?? false} onChange={(v) => onUpdate('independentSupportLayerHeight', v)} disabled={disabled} />
-              <CompactSettingRow type="checkbox" label="Don't support bridges" checked={settings.bridgeNoSupport ?? false} onChange={(v) => onUpdate('bridgeNoSupport', v)} disabled={disabled} />
-              <CompactSettingRow type="checkbox" label="Ignore small overhangs" checked={settings.supportRemoveSmallOverhang ?? true} onChange={(v) => onUpdate('supportRemoveSmallOverhang', v)} disabled={disabled} />
-              <CompactSettingRow type="checkbox" label="Critical regions only" checked={settings.supportCriticalRegionsOnly ?? false} onChange={(v) => onUpdate('supportCriticalRegionsOnly', v)} disabled={disabled} />
-              <CompactSettingRow type="number" label="Object first layer gap" value={settings.supportObjectFirstLayerGap ?? 0} onChange={(v) => onUpdate('supportObjectFirstLayerGap', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
-            </>
-          )}
+          <CompactSettingRow type="checkbox" label="On build plate only" checked={settings.supportOnBuildPlateOnly ?? false} onChange={(v) => onUpdate('supportOnBuildPlateOnly', v)} disabled={disabled} />
         </>
       )}
     </SettingSection>
 
-    {isAdvanced && settings.enableSupports && (settings.supportType === 'tree' || settings.supportType === 'tree_auto') && (
-      <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Tree support">
-        <CompactSettingRow type="number" label="Branch angle" value={settings.treeSupportBranchAngle ?? 40} onChange={(v) => onUpdate('treeSupportBranchAngle', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
-        <CompactSettingRow type="number" label="Branch diameter" value={settings.treeSupportBranchDiameter ?? 5} onChange={(v) => onUpdate('treeSupportBranchDiameter', v)} min={1} max={20} step={0.5} unit="mm" disabled={disabled} />
-        <CompactSettingRow type="number" label="Branch distance" value={settings.treeSupportBranchDistance ?? 5} onChange={(v) => onUpdate('treeSupportBranchDistance', v)} min={1} max={20} step={0.5} unit="mm" disabled={disabled} />
-        <CompactSettingRow type="number" label="Tip diameter" value={settings.treeSupportTipDiameter ?? 0.8} onChange={(v) => onUpdate('treeSupportTipDiameter', v)} min={0.2} max={5} step={0.1} unit="mm" disabled={disabled} />
-        <CompactSettingRow type="number" label="Branch density" value={settings.treeSupportTopRate ?? 30} onChange={(v) => onUpdate('treeSupportTopRate', v)} min={5} max={100} step={5} unit="%" disabled={disabled} />
-        <CompactSettingRow type="number" label="Wall loops" value={settings.treeSupportWallCount ?? 0} onChange={(v) => onUpdate('treeSupportWallCount', v)} min={0} max={5} step={1} disabled={disabled} />
-        <CompactSettingRow type="checkbox" label="With infill" checked={settings.treeSupportWithInfill ?? false} onChange={(v) => onUpdate('treeSupportWithInfill', v)} disabled={disabled} />
-        <CompactSettingRow type="number" label="Preferred branch angle" value={settings.treeSupportAngleSlow ?? 25} onChange={(v) => onUpdate('treeSupportAngleSlow', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
-        <CompactSettingRow type="number" label="Diameter angle" value={settings.treeSupportBranchDiameterAngle ?? 5} onChange={(v) => onUpdate('treeSupportBranchDiameterAngle', v)} min={0} max={15} step={1} unit="°" disabled={disabled} />
-        <CompactSettingRow type="number" label="Organic branch angle" value={settings.treeSupportBranchAngleOrganic ?? 40} onChange={(v) => onUpdate('treeSupportBranchAngleOrganic', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
-        <CompactSettingRow type="number" label="Organic branch diameter" value={settings.treeSupportBranchDiameterOrganic ?? 2} onChange={(v) => onUpdate('treeSupportBranchDiameterOrganic', v)} min={0.5} max={10} step={0.5} unit="mm" disabled={disabled} />
-        <CompactSettingRow type="number" label="Organic branch distance" value={settings.treeSupportBranchDistanceOrganic ?? 1} onChange={(v) => onUpdate('treeSupportBranchDistanceOrganic', v)} min={0.5} max={10} step={0.5} unit="mm" disabled={disabled} />
+    {settings.enableSupports && (
+      <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Filament for supports">
+        <CompactSettingRow type="number" label="Support/raft base" value={settings.supportFilament ?? 0} onChange={(v) => onUpdate('supportFilament', v)} min={0} max={10} step={1} disabled={disabled} />
+        <CompactSettingRow type="number" label="Support/raft interface" value={settings.supportInterfaceFilament ?? 0} onChange={(v) => onUpdate('supportInterfaceFilament', v)} min={0} max={10} step={1} disabled={disabled} />
+      </SettingSection>
+    )}
+
+    {settings.enableSupports && (settings.supportType === 'tree' || settings.supportType === 'tree_auto') && (
+      <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Tree support brim">
         <CompactSettingRow type="checkbox" label="Auto brim" checked={settings.treeSupportAutoBrim ?? true} onChange={(v) => onUpdate('treeSupportAutoBrim', v)} disabled={disabled} />
-        <CompactSettingRow type="number" label="Brim width" value={settings.treeSupportBrimWidth ?? 3} onChange={(v) => onUpdate('treeSupportBrimWidth', v)} min={0} max={20} step={1} unit="mm" disabled={disabled} />
+        <CompactSettingRow type="number" label="Tree support brim width" value={settings.treeSupportBrimWidth ?? 3} onChange={(v) => onUpdate('treeSupportBrimWidth', v)} min={0} max={20} step={1} unit="mm" disabled={disabled} />
       </SettingSection>
     )}
 
     {isAdvanced && settings.enableSupports && (
-      <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Support ironing">
-        <CompactSettingRow type="checkbox" label="Iron support interface" checked={settings.supportIroning ?? false} onChange={(v) => onUpdate('supportIroning', v)} disabled={disabled} />
-        {settings.supportIroning && (
-          <>
-            <CompactSettingRow type="number" label="Flow" value={settings.supportIroningFlow ?? 15} onChange={(v) => onUpdate('supportIroningFlow', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
-            <CompactSettingRow type="number" label="Spacing" value={settings.supportIroningSpacing ?? 0.1} onChange={(v) => onUpdate('supportIroningSpacing', v)} min={0.01} max={1} step={0.01} unit="mm" disabled={disabled} />
-            <CompactSettingRow type="select" label="Pattern" value={settings.supportIroningPattern ?? 'rectilinear'} onChange={(v) => onUpdate('supportIroningPattern', v)} options={[{ value: 'rectilinear', label: 'Rectilinear' }, { value: 'concentric', label: 'Concentric' }]} disabled={disabled} />
-          </>
-        )}
-      </SettingSection>
-    )}
+      <>
+        <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Support (advanced)">
+          <CompactSettingRow type="select" label="Style" value={settings.supportStyle ?? 'default'} onChange={(v) => onUpdate('supportStyle', v as SupportStyle)} options={[{ value: 'default', label: 'Default' }, { value: 'grid', label: 'Grid' }, { value: 'snug', label: 'Snug' }, { value: 'organic', label: 'Organic' }]} disabled={disabled} />
+          <CompactSettingRow type="number" label="Top Z distance" value={settings.supportTopZDistance ?? 0.2} onChange={(v) => onUpdate('supportTopZDistance', v)} min={0} max={1} step={0.05} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Bottom Z distance" value={settings.supportBottomZDistance ?? 0.2} onChange={(v) => onUpdate('supportBottomZDistance', v)} min={0} max={1} step={0.05} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="X/Y distance" value={settings.supportXYDistance ?? 0.6} onChange={(v) => onUpdate('supportXYDistance', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Top interface layers" value={settings.supportInterfaceLayers ?? 2} onChange={(v) => onUpdate('supportInterfaceLayers', v)} min={0} max={10} step={1} disabled={disabled} />
+          <CompactSettingRow type="number" label="Bottom interface layers" value={settings.supportInterfaceBottomLayers ?? 0} onChange={(v) => onUpdate('supportInterfaceBottomLayers', v)} min={0} max={10} step={1} disabled={disabled} />
+          <CompactSettingRow type="number" label="Density" value={settings.supportDensity ?? 15} onChange={(v) => onUpdate('supportDensity', v)} min={5} max={100} step={5} unit="%" disabled={disabled} />
+          <CompactSettingRow type="number" label="Base interface layers" value={settings.supportBaseInterfaceLayers ?? 0} onChange={(v) => onUpdate('supportBaseInterfaceLayers', v)} min={0} max={10} step={1} disabled={disabled} />
+          <CompactSettingRow type="select" label="Base pattern" value={settings.supportBasePattern ?? 'default'} onChange={(v) => onUpdate('supportBasePattern', v)} options={[{ value: 'default', label: 'Default' }, { value: 'rectilinear', label: 'Rectilinear' }, { value: 'rectilinear_grid', label: 'Grid' }, { value: 'honeycomb', label: 'Honeycomb' }]} disabled={disabled} />
+          <CompactSettingRow type="number" label="Base pattern spacing" value={settings.supportBasePatternSpacing ?? 2.5} onChange={(v) => onUpdate('supportBasePatternSpacing', v)} min={0.5} max={10} step={0.5} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="select" label="Interface pattern" value={settings.supportInterfacePattern ?? 'auto'} onChange={(v) => onUpdate('supportInterfacePattern', v)} options={[{ value: 'auto', label: 'Auto' }, { value: 'rectilinear', label: 'Rectilinear' }, { value: 'concentric', label: 'Concentric' }]} disabled={disabled} />
+          <CompactSettingRow type="number" label="Top interface spacing" value={settings.supportInterfaceSpacing ?? 0.5} onChange={(v) => onUpdate('supportInterfaceSpacing', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Bottom interface spacing" value={settings.supportBottomInterfaceSpacing ?? 0.5} onChange={(v) => onUpdate('supportBottomInterfaceSpacing', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Expansion" value={settings.supportExpansion ?? 0} onChange={(v) => onUpdate('supportExpansion', v)} min={0} max={10} step={0.5} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Avoid interface filament for base" checked={settings.supportInterfaceNotForBody ?? false} onChange={(v) => onUpdate('supportInterfaceNotForBody', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Interface loop pattern" checked={settings.supportInterfaceLoopPattern ?? false} onChange={(v) => onUpdate('supportInterfaceLoopPattern', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Independent layer height" checked={settings.independentSupportLayerHeight ?? false} onChange={(v) => onUpdate('independentSupportLayerHeight', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Don't support bridges" checked={settings.bridgeNoSupport ?? false} onChange={(v) => onUpdate('bridgeNoSupport', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Ignore small overhangs" checked={settings.supportRemoveSmallOverhang ?? true} onChange={(v) => onUpdate('supportRemoveSmallOverhang', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Critical regions only" checked={settings.supportCriticalRegionsOnly ?? false} onChange={(v) => onUpdate('supportCriticalRegionsOnly', v)} disabled={disabled} />
+          <CompactSettingRow type="number" label="Object first layer gap" value={settings.supportObjectFirstLayerGap ?? 0} onChange={(v) => onUpdate('supportObjectFirstLayerGap', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
+        </SettingSection>
 
-    <SettingSection icon={<BedAdhesionIcon className="w-4 h-4" />} title="Bed adhesion">
-      <CompactSettingRow type="select" label="Type" value={settings.bedAdhesion} onChange={(v) => onUpdate('bedAdhesion', v as BedAdhesionType)} options={bedAdhesionOptions} disabled={disabled} />
+        {(settings.supportType === 'tree' || settings.supportType === 'tree_auto') && (
+          <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Tree support (advanced)">
+            <CompactSettingRow type="number" label="Branch angle" value={settings.treeSupportBranchAngle ?? 40} onChange={(v) => onUpdate('treeSupportBranchAngle', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
+            <CompactSettingRow type="number" label="Branch diameter" value={settings.treeSupportBranchDiameter ?? 5} onChange={(v) => onUpdate('treeSupportBranchDiameter', v)} min={1} max={20} step={0.5} unit="mm" disabled={disabled} />
+            <CompactSettingRow type="number" label="Branch distance" value={settings.treeSupportBranchDistance ?? 5} onChange={(v) => onUpdate('treeSupportBranchDistance', v)} min={1} max={20} step={0.5} unit="mm" disabled={disabled} />
+            <CompactSettingRow type="number" label="Tip diameter" value={settings.treeSupportTipDiameter ?? 0.8} onChange={(v) => onUpdate('treeSupportTipDiameter', v)} min={0.2} max={5} step={0.1} unit="mm" disabled={disabled} />
+            <CompactSettingRow type="number" label="Branch density" value={settings.treeSupportTopRate ?? 30} onChange={(v) => onUpdate('treeSupportTopRate', v)} min={5} max={100} step={5} unit="%" disabled={disabled} />
+            <CompactSettingRow type="number" label="Wall loops" value={settings.treeSupportWallCount ?? 0} onChange={(v) => onUpdate('treeSupportWallCount', v)} min={0} max={5} step={1} disabled={disabled} />
+            <CompactSettingRow type="checkbox" label="With infill" checked={settings.treeSupportWithInfill ?? false} onChange={(v) => onUpdate('treeSupportWithInfill', v)} disabled={disabled} />
+            <CompactSettingRow type="number" label="Preferred branch angle" value={settings.treeSupportAngleSlow ?? 25} onChange={(v) => onUpdate('treeSupportAngleSlow', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
+            <CompactSettingRow type="number" label="Diameter angle" value={settings.treeSupportBranchDiameterAngle ?? 5} onChange={(v) => onUpdate('treeSupportBranchDiameterAngle', v)} min={0} max={15} step={1} unit="°" disabled={disabled} />
+            <CompactSettingRow type="number" label="Organic branch angle" value={settings.treeSupportBranchAngleOrganic ?? 40} onChange={(v) => onUpdate('treeSupportBranchAngleOrganic', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
+            <CompactSettingRow type="number" label="Organic branch diameter" value={settings.treeSupportBranchDiameterOrganic ?? 2} onChange={(v) => onUpdate('treeSupportBranchDiameterOrganic', v)} min={0.5} max={10} step={0.5} unit="mm" disabled={disabled} />
+            <CompactSettingRow type="number" label="Organic branch distance" value={settings.treeSupportBranchDistanceOrganic ?? 1} onChange={(v) => onUpdate('treeSupportBranchDistanceOrganic', v)} min={0.5} max={10} step={0.5} unit="mm" disabled={disabled} />
+          </SettingSection>
+        )}
+
+        <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Support ironing">
+          <CompactSettingRow type="checkbox" label="Iron support interface" checked={settings.supportIroning ?? false} onChange={(v) => onUpdate('supportIroning', v)} disabled={disabled} />
+          {settings.supportIroning && (
+            <>
+              <CompactSettingRow type="number" label="Flow" value={settings.supportIroningFlow ?? 15} onChange={(v) => onUpdate('supportIroningFlow', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
+              <CompactSettingRow type="number" label="Spacing" value={settings.supportIroningSpacing ?? 0.1} onChange={(v) => onUpdate('supportIroningSpacing', v)} min={0.01} max={1} step={0.01} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="select" label="Pattern" value={settings.supportIroningPattern ?? 'rectilinear'} onChange={(v) => onUpdate('supportIroningPattern', v)} options={[{ value: 'rectilinear', label: 'Rectilinear' }, { value: 'concentric', label: 'Concentric' }]} disabled={disabled} />
+            </>
+          )}
+        </SettingSection>
+
+        <SettingSection icon={<BedAdhesionIcon className="w-4 h-4" />} title="Raft">
+          <CompactSettingRow type="number" label="Raft layers" value={settings.raftLayers ?? 0} onChange={(v) => onUpdate('raftLayers', v)} min={0} max={10} step={1} disabled={disabled} />
+          {(settings.raftLayers ?? 0) > 0 && (
+            <>
+              <CompactSettingRow type="number" label="Contact Z distance" value={settings.raftContactDistance ?? 0.1} onChange={(v) => onUpdate('raftContactDistance', v)} min={0} max={1} step={0.05} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="Expansion" value={settings.raftExpansion ?? 1.5} onChange={(v) => onUpdate('raftExpansion', v)} min={0} max={10} step={0.5} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="First layer density" value={settings.raftFirstLayerDensity ?? 90} onChange={(v) => onUpdate('raftFirstLayerDensity', v)} min={10} max={100} step={5} unit="%" disabled={disabled} />
+              <CompactSettingRow type="number" label="First layer expansion" value={settings.raftFirstLayerExpansion ?? 2} onChange={(v) => onUpdate('raftFirstLayerExpansion', v)} min={0} max={10} step={0.5} unit="mm" disabled={disabled} />
+            </>
+          )}
+        </SettingSection>
+      </>
+    )}
+  </div>
+);
+
+/* ─── Multimaterial ─── */
+const MultimaterialSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, disabled, isAdvanced }) => (
+  <div className="space-y-4">
+    <SettingSection icon={<LineWidthIcon className="w-4 h-4" />} title="Prime tower">
+      <CompactSettingRow type="checkbox" label="Enable" checked={settings.purgeOnLayerChange ?? true} onChange={(v) => onUpdate('purgeOnLayerChange', v)} disabled={disabled} />
+      {settings.purgeOnLayerChange && (
+        <>
+          <CompactSettingRow type="number" label="Width" value={settings.wipeTowerWidth ?? 30} onChange={(v) => onUpdate('wipeTowerWidth', v)} min={10} max={100} step={5} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Prime volume" value={settings.purgeTowerVolume ?? 50} onChange={(v) => onUpdate('purgeTowerVolume', v)} min={10} max={500} step={10} unit="mm³" disabled={disabled} />
+        </>
+      )}
+    </SettingSection>
+
+    <SettingSection icon={<TemperatureIcon className="w-4 h-4" />} title="Flush options">
+      <CompactSettingRow type="checkbox" label="Flush into objects' infill" checked={settings.flushIntoInfill ?? false} onChange={(v) => onUpdate('flushIntoInfill', v)} disabled={disabled} />
+      <CompactSettingRow type="checkbox" label="Flush into this object" checked={settings.flushIntoObjects ?? false} onChange={(v) => onUpdate('flushIntoObjects', v)} disabled={disabled} />
+      <CompactSettingRow type="checkbox" label="Flush into objects' support" checked={settings.flushIntoSupport ?? false} onChange={(v) => onUpdate('flushIntoSupport', v)} disabled={disabled} />
+    </SettingSection>
+
+    {isAdvanced && (
+      <>
+        <SettingSection icon={<LineWidthIcon className="w-4 h-4" />} title="Filament lanes">
+          <div className="space-y-3">
+            <p className="text-xs text-pf-text-muted px-3 py-1">
+              Select filament profiles for each extruder. Use None for unused extruders.
+            </p>
+            <CompactSettingRow type="select" label="Extruder 1 (Primary)" value={settings.filament1ProfileId ?? ''} onChange={(v) => onUpdate('filament1ProfileId', v || undefined)} options={[{ value: '', label: 'Select filament profile...' }, { value: 'pla-standard', label: 'PLA - Standard' }, { value: 'petg-standard', label: 'PETG - Durable' }, { value: 'tpu-flexible', label: 'TPU - Flexible' }, { value: 'abs-engineering', label: 'ABS - Engineering' }, { value: 'nylon-tough', label: 'Nylon - Tough' }, { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' }]} disabled={disabled} />
+            <CompactSettingRow type="select" label="Extruder 2" value={settings.filament2ProfileId ?? ''} onChange={(v) => onUpdate('filament2ProfileId', v || undefined)} options={[{ value: '', label: 'None (not used)' }, { value: 'pla-standard', label: 'PLA - Standard' }, { value: 'petg-standard', label: 'PETG - Durable' }, { value: 'tpu-flexible', label: 'TPU - Flexible' }, { value: 'abs-engineering', label: 'ABS - Engineering' }, { value: 'nylon-tough', label: 'Nylon - Tough' }, { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' }]} disabled={disabled} />
+            <CompactSettingRow type="select" label="Extruder 3" value={settings.filament3ProfileId ?? ''} onChange={(v) => onUpdate('filament3ProfileId', v || undefined)} options={[{ value: '', label: 'None (not used)' }, { value: 'pla-standard', label: 'PLA - Standard' }, { value: 'petg-standard', label: 'PETG - Durable' }, { value: 'tpu-flexible', label: 'TPU - Flexible' }, { value: 'abs-engineering', label: 'ABS - Engineering' }, { value: 'nylon-tough', label: 'Nylon - Tough' }, { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' }]} disabled={disabled} />
+          </div>
+        </SettingSection>
+      </>
+    )}
+  </div>
+);
+
+/* ─── Other ─── */
+const OtherSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, disabled, isAdvanced, advancedSettings, onAdvancedSettingsChange }) => (
+  <div className="space-y-1">
+    <SettingSection icon={<BedAdhesionIcon />} title="Skirt">
+      <CompactSettingRow type="number" label="Skirt loops" value={settings.skirtLoops ?? 1} onChange={(v) => onUpdate('skirtLoops', v)} min={0} max={10} step={1} disabled={disabled} />
+      <CompactSettingRow type="number" label="Skirt height" value={settings.skirtHeight ?? 1} onChange={(v) => onUpdate('skirtHeight', v)} min={0} max={10} step={1} disabled={disabled} />
+      {isAdvanced && (
+        <>
+          <CompactSettingRow type="number" label="Skirt distance" value={settings.skirtDistance ?? 6} onChange={(v) => onUpdate('skirtDistance', v)} min={0} max={20} step={1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Skirt speed" value={settings.skirtSpeed ?? 50} onChange={(v) => onUpdate('skirtSpeed', v)} min={5} max={200} step={5} unit="mm/s" disabled={disabled} />
+          <CompactSettingRow type="number" label="Skirt start angle" value={settings.skirtStartAngle ?? 0} onChange={(v) => onUpdate('skirtStartAngle', v)} min={0} max={360} step={15} unit="°" disabled={disabled} />
+        </>
+      )}
+    </SettingSection>
+
+    <SettingSection icon={<BedAdhesionIcon />} title="Brim">
       <CompactSettingRow type="select" label="Brim type" value={settings.brimType ?? 'auto_brim'} onChange={(v) => onUpdate('brimType', v as BrimType)} options={[{ value: 'no_brim', label: 'No brim' }, { value: 'outer_only', label: 'Outer only' }, { value: 'inner_only', label: 'Inner only' }, { value: 'outer_and_inner', label: 'Outer and inner' }, { value: 'auto_brim', label: 'Auto' }]} disabled={disabled} />
       <CompactSettingRow type="number" label="Brim width" value={settings.brimWidth ?? 5} onChange={(v) => onUpdate('brimWidth', v)} min={0} max={20} step={1} unit="mm" disabled={disabled} />
       {isAdvanced && (
@@ -783,65 +722,24 @@ const SupportSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
           )}
           <CompactSettingRow type="checkbox" label="Brim follows compensated outline" checked={settings.brimUseEfcOutline ?? false} onChange={(v) => onUpdate('brimUseEfcOutline', v)} disabled={disabled} />
           <CompactSettingRow type="checkbox" label="Combine brims" checked={settings.combineBrims ?? true} onChange={(v) => onUpdate('combineBrims', v)} disabled={disabled} />
-          <CompactSettingRow type="number" label="Skirt start angle" value={settings.skirtStartAngle ?? 0} onChange={(v) => onUpdate('skirtStartAngle', v)} min={0} max={360} step={15} unit="°" disabled={disabled} />
         </>
       )}
     </SettingSection>
 
-    {isAdvanced && (
-      <SettingSection icon={<BedAdhesionIcon className="w-4 h-4" />} title="Raft">
-        <CompactSettingRow type="number" label="Raft layers" value={settings.raftLayers ?? 0} onChange={(v) => onUpdate('raftLayers', v)} min={0} max={10} step={1} disabled={disabled} />
-        {(settings.raftLayers ?? 0) > 0 && (
-          <>
-            <CompactSettingRow type="number" label="Contact Z distance" value={settings.raftContactDistance ?? 0.1} onChange={(v) => onUpdate('raftContactDistance', v)} min={0} max={1} step={0.05} unit="mm" disabled={disabled} />
-            <CompactSettingRow type="number" label="Expansion" value={settings.raftExpansion ?? 1.5} onChange={(v) => onUpdate('raftExpansion', v)} min={0} max={10} step={0.5} unit="mm" disabled={disabled} />
-            <CompactSettingRow type="number" label="First layer density" value={settings.raftFirstLayerDensity ?? 90} onChange={(v) => onUpdate('raftFirstLayerDensity', v)} min={10} max={100} step={5} unit="%" disabled={disabled} />
-            <CompactSettingRow type="number" label="First layer expansion" value={settings.raftFirstLayerExpansion ?? 2} onChange={(v) => onUpdate('raftFirstLayerExpansion', v)} min={0} max={10} step={0.5} unit="mm" disabled={disabled} />
-          </>
-        )}
-      </SettingSection>
-    )}
-  </div>
-);
-
-/* ─── Multimaterial ─── */
-const MultimaterialSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, disabled }) => (
-  <div className="space-y-4">
-    <SettingSection icon={<LineWidthIcon className="w-4 h-4" />} title="Filament lanes">
-      <div className="space-y-3">
-        <p className="text-xs text-pf-text-muted px-3 py-1">
-          Select filament profiles for each extruder. Use None for unused extruders.
-        </p>
-        <CompactSettingRow type="select" label="Extruder 1 (Primary)" value={settings.filament1ProfileId ?? ''} onChange={(v) => onUpdate('filament1ProfileId', v || undefined)} options={[{ value: '', label: 'Select filament profile...' }, { value: 'pla-standard', label: 'PLA - Standard' }, { value: 'petg-standard', label: 'PETG - Durable' }, { value: 'tpu-flexible', label: 'TPU - Flexible' }, { value: 'abs-engineering', label: 'ABS - Engineering' }, { value: 'nylon-tough', label: 'Nylon - Tough' }, { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' }]} disabled={disabled} />
-        <CompactSettingRow type="select" label="Extruder 2" value={settings.filament2ProfileId ?? ''} onChange={(v) => onUpdate('filament2ProfileId', v || undefined)} options={[{ value: '', label: 'None (not used)' }, { value: 'pla-standard', label: 'PLA - Standard' }, { value: 'petg-standard', label: 'PETG - Durable' }, { value: 'tpu-flexible', label: 'TPU - Flexible' }, { value: 'abs-engineering', label: 'ABS - Engineering' }, { value: 'nylon-tough', label: 'Nylon - Tough' }, { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' }]} disabled={disabled} />
-        <CompactSettingRow type="select" label="Extruder 3" value={settings.filament3ProfileId ?? ''} onChange={(v) => onUpdate('filament3ProfileId', v || undefined)} options={[{ value: '', label: 'None (not used)' }, { value: 'pla-standard', label: 'PLA - Standard' }, { value: 'petg-standard', label: 'PETG - Durable' }, { value: 'tpu-flexible', label: 'TPU - Flexible' }, { value: 'abs-engineering', label: 'ABS - Engineering' }, { value: 'nylon-tough', label: 'Nylon - Tough' }, { value: 'cf-carbon', label: 'Carbon Fiber Reinforced' }]} disabled={disabled} />
-      </div>
+    <SettingSection icon={<PrecisionIcon />} title="Special mode">
+      <CompactSettingRow type="select" label="Print sequence" value={settings.printSequence ?? 'by_layer'} onChange={(v) => onUpdate('printSequence', v)} options={[{ value: 'by_layer', label: 'By layer' }, { value: 'by_object', label: 'By object' }]} disabled={disabled} />
+      <CompactSettingRow type="checkbox" label="Spiral vase" checked={settings.spiralVase ?? false} onChange={(v) => onUpdate('spiralVase', v)} disabled={disabled} />
     </SettingSection>
 
-    <SettingSection icon={<TemperatureIcon className="w-4 h-4" />} title="Purge & wipe tower">
-      <CompactSettingRow type="checkbox" label="Purge on layer change" checked={settings.purgeOnLayerChange ?? true} onChange={(v) => onUpdate('purgeOnLayerChange', v)} disabled={disabled} />
-      {settings.purgeOnLayerChange && (
-        <>
-          <CompactSettingRow type="number" label="Purge tower volume" value={settings.purgeTowerVolume ?? 50} onChange={(v) => onUpdate('purgeTowerVolume', v)} min={10} max={500} step={10} unit="mm³" disabled={disabled} />
-          <CompactSettingRow type="number" label="Wipe tower width" value={settings.wipeTowerWidth ?? 30} onChange={(v) => onUpdate('wipeTowerWidth', v)} min={10} max={100} step={5} unit="mm" disabled={disabled} />
-        </>
-      )}
-    </SettingSection>
-  </div>
-);
-
-/* ─── Other ─── */
-const OtherSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, disabled, isAdvanced, advancedSettings, onAdvancedSettingsChange }) => (
-  <div className="space-y-1">
     <SettingSection icon={<PrecisionIcon />} title="Fuzzy skin">
-      <CompactSettingRow type="checkbox" label="Enable fuzzy skin" checked={settings.fuzzySkin ?? false} onChange={(v) => onUpdate('fuzzySkin', v)} disabled={disabled} />
+      <CompactSettingRow type="checkbox" label="Fuzzy skin" checked={settings.fuzzySkin ?? false} onChange={(v) => onUpdate('fuzzySkin', v)} disabled={disabled} />
       {settings.fuzzySkin && (
         <>
-          <CompactSettingRow type="select" label="Mode" value={settings.fuzzySkinMode ?? 'none'} onChange={(v) => onUpdate('fuzzySkinMode', v as FuzzySkinMode)} options={[{ value: 'none', label: 'None' }, { value: 'external', label: 'External' }, { value: 'all', label: 'All walls' }, { value: 'allWalls', label: 'All walls (alternate)' }]} disabled={disabled} />
-          <CompactSettingRow type="select" label="Noise type" value={settings.fuzzySkinNoiseType ?? 'classic'} onChange={(v) => onUpdate('fuzzySkinNoiseType', v as FuzzySkinNoiseType)} options={[{ value: 'classic', label: 'Classic' }, { value: 'perlin', label: 'Perlin' }]} disabled={disabled} />
-          <CompactSettingRow type="number" label="Thickness" value={settings.fuzzySkinThickness ?? 0.3} onChange={(v) => onUpdate('fuzzySkinThickness', v)} min={0.05} max={2} step={0.05} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Point distance" value={settings.fuzzySkinPointDistance ?? 0.8} onChange={(v) => onUpdate('fuzzySkinPointDistance', v)} min={0.1} max={5} step={0.1} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="First layer" checked={settings.fuzzySkinFirstLayer ?? false} onChange={(v) => onUpdate('fuzzySkinFirstLayer', v)} disabled={disabled} />
+          <CompactSettingRow type="select" label="Fuzzy skin generator mode" value={settings.fuzzySkinMode ?? 'none'} onChange={(v) => onUpdate('fuzzySkinMode', v as FuzzySkinMode)} options={[{ value: 'none', label: 'None' }, { value: 'external', label: 'External' }, { value: 'all', label: 'All walls' }, { value: 'allWalls', label: 'All walls (alternate)' }]} disabled={disabled} />
+          <CompactSettingRow type="select" label="Fuzzy skin noise type" value={settings.fuzzySkinNoiseType ?? 'classic'} onChange={(v) => onUpdate('fuzzySkinNoiseType', v as FuzzySkinNoiseType)} options={[{ value: 'classic', label: 'Classic' }, { value: 'perlin', label: 'Perlin' }]} disabled={disabled} />
+          <CompactSettingRow type="number" label="Fuzzy skin point distance" value={settings.fuzzySkinPointDistance ?? 0.8} onChange={(v) => onUpdate('fuzzySkinPointDistance', v)} min={0.1} max={5} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Fuzzy skin thickness" value={settings.fuzzySkinThickness ?? 0.3} onChange={(v) => onUpdate('fuzzySkinThickness', v)} min={0.05} max={2} step={0.05} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Apply fuzzy skin to first layer" checked={settings.fuzzySkinFirstLayer ?? false} onChange={(v) => onUpdate('fuzzySkinFirstLayer', v)} disabled={disabled} />
           {isAdvanced && (
             <>
               <CompactSettingRow type="number" label="Octaves" value={settings.fuzzySkinOctaves ?? 4} onChange={(v) => onUpdate('fuzzySkinOctaves', v)} min={1} max={8} step={1} disabled={disabled} />
@@ -854,56 +752,42 @@ const OtherSettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, di
     </SettingSection>
 
     {isAdvanced && (
-      <SettingSection icon={<PrecisionIcon />} title="Slicing">
-        <CompactSettingRow type="select" label="Slicing mode" value={settings.slicingMode ?? 'regular'} onChange={(v) => onUpdate('slicingMode', v as SlicingMode)} options={[{ value: 'regular', label: 'Regular' }, { value: 'even_odd', label: 'Even-Odd' }, { value: 'close_holes', label: 'Close holes' }]} disabled={disabled} />
-      </SettingSection>
-    )}
+      <>
+        <SettingSection icon={<PrecisionIcon />} title="Slicing">
+          <CompactSettingRow type="select" label="Slicing mode" value={settings.slicingMode ?? 'regular'} onChange={(v) => onUpdate('slicingMode', v as SlicingMode)} options={[{ value: 'regular', label: 'Regular' }, { value: 'even_odd', label: 'Even-Odd' }, { value: 'close_holes', label: 'Close holes' }]} disabled={disabled} />
+        </SettingSection>
 
-    <SettingSection icon={<TemperatureIcon />} title="Temperature">
-      <CompactSettingRow type="number" label="Nozzle temperature" value={settings.nozzleTemp ?? 210} onChange={(v) => onUpdate('nozzleTemp', v as number)} min={170} max={300} step={5} unit="°C" disabled={disabled} />
-      <CompactSettingRow type="number" label="Bed temperature" value={settings.bedTemp ?? 60} onChange={(v) => onUpdate('bedTemp', v as number)} min={0} max={120} step={5} unit="°C" disabled={disabled} />
-      {isAdvanced && (
-        <>
+        <SettingSection icon={<TemperatureIcon />} title="Temperature">
+          <CompactSettingRow type="number" label="Nozzle temperature" value={settings.nozzleTemp ?? 210} onChange={(v) => onUpdate('nozzleTemp', v as number)} min={170} max={300} step={5} unit="°C" disabled={disabled} />
+          <CompactSettingRow type="number" label="Bed temperature" value={settings.bedTemp ?? 60} onChange={(v) => onUpdate('bedTemp', v as number)} min={0} max={120} step={5} unit="°C" disabled={disabled} />
           <CompactSettingRow type="number" label="First layer nozzle temp" value={settings.firstLayerNozzleTemp ?? 215} onChange={(v) => onUpdate('firstLayerNozzleTemp', v as number)} min={170} max={300} step={5} unit="°C" disabled={disabled} />
           <CompactSettingRow type="number" label="First layer bed temp" value={settings.firstLayerBedTemp ?? 65} onChange={(v) => onUpdate('firstLayerBedTemp', v as number)} min={0} max={120} step={5} unit="°C" disabled={disabled} />
-        </>
-      )}
-    </SettingSection>
+        </SettingSection>
 
-    <SettingSection icon={<RetractionIcon />} title="Retraction">
-      <CompactSettingRow type="number" label="Retraction length" value={settings.retractionLength ?? 0.8} onChange={(v) => onUpdate('retractionLength', v as number)} min={0} max={10} step={0.1} unit="mm" disabled={disabled} />
-      <CompactSettingRow type="number" label="Retraction speed" value={settings.retractionSpeed ?? 30} onChange={(v) => onUpdate('retractionSpeed', v as number)} min={5} max={120} step={5} unit="mm/s" disabled={disabled} />
-      {isAdvanced && (
-        <>
+        <SettingSection icon={<RetractionIcon />} title="Retraction">
+          <CompactSettingRow type="number" label="Retraction length" value={settings.retractionLength ?? 0.8} onChange={(v) => onUpdate('retractionLength', v as number)} min={0} max={10} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Retraction speed" value={settings.retractionSpeed ?? 30} onChange={(v) => onUpdate('retractionSpeed', v as number)} min={5} max={120} step={5} unit="mm/s" disabled={disabled} />
           <CompactSettingRow type="number" label="Deretraction speed" value={settings.detractionSpeed ?? 30} onChange={(v) => onUpdate('detractionSpeed', v as number)} min={5} max={120} step={5} unit="mm/s" disabled={disabled} />
           <CompactSettingRow type="number" label="Z lift" value={settings.retractionLiftZ ?? 0.2} onChange={(v) => onUpdate('retractionLiftZ', v as number)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
           <CompactSettingRow type="number" label="Minimum travel" value={settings.retractionMinimumTravel ?? 1} onChange={(v) => onUpdate('retractionMinimumTravel', v as number)} min={0} max={10} step={0.5} unit="mm" disabled={disabled} />
           <CompactSettingRow type="checkbox" label="Retract on layer change" checked={settings.retractOnLayerChange ?? false} onChange={(v) => onUpdate('retractOnLayerChange', v)} disabled={disabled} />
           <CompactSettingRow type="checkbox" label="Wipe before retract" checked={settings.wipeBeforeRetract ?? false} onChange={(v) => onUpdate('wipeBeforeRetract', v)} disabled={disabled} />
-        </>
-      )}
-    </SettingSection>
+        </SettingSection>
 
-    <SettingSection icon={<CoolingIcon />} title="Cooling">
-      <CompactSettingRow type="checkbox" label="Enable fan cooling" checked={settings.enableFanCooling ?? true} onChange={(v) => onUpdate('enableFanCooling', v)} disabled={disabled} />
-      {settings.enableFanCooling !== false && (
-        <>
-          <CompactSettingRow type="number" label="Min fan speed" value={settings.minFanSpeed ?? 35} onChange={(v) => onUpdate('minFanSpeed', v as number)} min={0} max={100} step={5} unit="%" disabled={disabled} />
-          <CompactSettingRow type="number" label="Max fan speed" value={settings.maxFanSpeed ?? 100} onChange={(v) => onUpdate('maxFanSpeed', v as number)} min={0} max={100} step={5} unit="%" disabled={disabled} />
-          {isAdvanced && (
+        <SettingSection icon={<CoolingIcon />} title="Cooling">
+          <CompactSettingRow type="checkbox" label="Enable fan cooling" checked={settings.enableFanCooling ?? true} onChange={(v) => onUpdate('enableFanCooling', v)} disabled={disabled} />
+          {settings.enableFanCooling !== false && (
             <>
+              <CompactSettingRow type="number" label="Min fan speed" value={settings.minFanSpeed ?? 35} onChange={(v) => onUpdate('minFanSpeed', v as number)} min={0} max={100} step={5} unit="%" disabled={disabled} />
+              <CompactSettingRow type="number" label="Max fan speed" value={settings.maxFanSpeed ?? 100} onChange={(v) => onUpdate('maxFanSpeed', v as number)} min={0} max={100} step={5} unit="%" disabled={disabled} />
               <CompactSettingRow type="number" label="Bridge fan speed" value={settings.bridgeFanSpeed ?? 100} onChange={(v) => onUpdate('bridgeFanSpeed', v as number)} min={0} max={100} step={5} unit="%" disabled={disabled} />
               <CompactSettingRow type="number" label="Full fan at layer" value={settings.fullFanSpeedAtLayer ?? 3} onChange={(v) => onUpdate('fullFanSpeedAtLayer', v as number)} min={1} max={20} step={1} disabled={disabled} />
               <CompactSettingRow type="number" label="Slow down layer time" value={settings.slowDownForLayerTime ?? 5} onChange={(v) => onUpdate('slowDownForLayerTime', v as number)} min={1} max={60} step={1} unit="s" disabled={disabled} />
               <CompactSettingRow type="number" label="Min print speed" value={settings.minPrintSpeed ?? 10} onChange={(v) => onUpdate('minPrintSpeed', v as number)} min={5} max={50} step={5} unit="mm/s" disabled={disabled} />
             </>
           )}
-        </>
-      )}
-    </SettingSection>
+        </SettingSection>
 
-    {isAdvanced && (
-      <>
         <SettingSection icon={<IroningIcon />} title="Ironing">
           <CompactSettingRow type="checkbox" label="Enable ironing" checked={settings.enableIroning ?? false} onChange={(v) => onUpdate('enableIroning', v)} disabled={disabled} />
           {settings.enableIroning && (

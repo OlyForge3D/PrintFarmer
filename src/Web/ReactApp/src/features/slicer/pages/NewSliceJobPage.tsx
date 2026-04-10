@@ -19,7 +19,6 @@ import { ProfileEditorModal, type ProfileType } from '@/features/slicer/componen
 import {
   SlicerSettingsPanel,
   DEFAULT_ADVANCED_SETTINGS,
-  type BasicSlicerSettings,
   type SimpleSlicerSettings,
   type AdvancedSlicerSettings,
 } from '@/features/slicer/components/settings';
@@ -106,7 +105,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [saveProfileState, setSaveProfileState] = useState<{ open: boolean; name: string }>({ open: false, name: '' });
 
   // Callback for settings panel changes
-  const handleSlicerSettingsChange = useCallback((newSettings: BasicSlicerSettings | SimpleSlicerSettings | AdvancedSlicerSettings) => {
+  const handleSlicerSettingsChange = useCallback((newSettings: SimpleSlicerSettings | AdvancedSlicerSettings) => {
     setSlicerSettings((prev) => ({ ...prev, ...newSettings }));
   }, []);
 
@@ -1556,7 +1555,7 @@ export const NewSliceJobPage: React.FC = () => {
         isOpen={profileEditorOpen}
         onClose={() => setProfileEditorOpen(false)}
         profileType={profileEditorType}
-        initialViewMode={profileEditorType === 'machine' ? 'advanced' : 'basic'}
+        initialViewMode={profileEditorType === 'machine' ? 'advanced' : 'simple'}
         originalProfile={
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
           (selectedFilamentProfile ?? null)

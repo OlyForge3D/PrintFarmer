@@ -36,7 +36,7 @@ interface MachineSettingsPanelProps {
 export function MachineSettingsPanel({
   settings,
   onChange,
-  initialViewMode = 'basic',
+  initialViewMode = 'simple',
   disabled = false,
   className = '',
   isCategoryDirty,
@@ -57,7 +57,7 @@ export function MachineSettingsPanel({
 
   // View mode buttons
   const viewModeButtons = [
-    { mode: 'basic' as const, label: 'Basic' },
+    { mode: 'simple' as const, label: 'Simple' },
     ...(isAdvanced ? [{ mode: 'advanced' as const, label: 'Advanced' }] : []),
   ];
 
@@ -91,7 +91,7 @@ export function MachineSettingsPanel({
         </div>
       )}
 
-      {viewMode === 'basic' ? (
+      {viewMode === 'simple' ? (
         // BASIC MODE - Essential machine parameters
         <div className="space-y-4 px-4">
           <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Build volume">
