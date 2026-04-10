@@ -4,7 +4,7 @@
  */
 
 /** View modes for settings panel complexity */
-export type SettingsViewMode = 'basic' | 'simple' | 'advanced';
+export type SettingsViewMode = 'simple' | 'advanced';
 
 /** Category tabs in advanced mode */
 export type SettingsCategory = 'quality' | 'strength' | 'speed' | 'support' | 'multimaterial' | 'other';
@@ -70,17 +70,13 @@ export type SlicingMode = 'regular' | 'even_odd' | 'close_holes';
 /** OrcaSlicer setting mode - matches comSimple/comAdvanced from PrintConfig.cpp */
 export type OrcaSettingMode = 'simple' | 'advanced' | 'develop';
 
-/** Basic settings - shown in Basic mode */
-export interface BasicSlicerSettings {
+/** Simple settings — the base typed settings for Simple mode */
+export interface SimpleSlicerSettings {
   infillDensity: number;           // 0-100%
   infillPattern: InfillPattern;
   wallCount: number;               // 1-10 perimeters
   bedAdhesion: BedAdhesionType;
   enableSupports: boolean;
-}
-
-/** Simple settings - extends Basic with layer/line width controls */
-export interface SimpleSlicerSettings extends BasicSlicerSettings {
   layerHeight: number;             // mm (0.08-0.32 typical)
   firstLayerHeight: number;        // mm
   lineWidthDefault: number;        // mm
@@ -408,10 +404,15 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
   // --- Basic mode: Skirt ---
   skirtLoops?: number;
   skirtHeight?: number;
+  skirtDistance?: number;
+  skirtSpeed?: number;
 
   // --- Basic mode: Special mode ---
   spiralVase?: boolean;
+  smoothSpiral?: boolean;
   printSequence?: 'by_layer' | 'by_object';
+  timelapse?: string;
+  addLineNumber?: boolean;
 
   // --- Basic mode: Strength - Top surface pattern ---
   topSurfacePattern?: string;
@@ -419,6 +420,7 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
   // --- Basic mode: Multimaterial ---
   wipeTowerEnable?: boolean;
   flushIntoInfill?: boolean;
+  flushIntoObjects?: boolean;
   flushIntoSupport?: boolean;
 
   // --- Others: Simple mode settings (Fuzzy Skin) ---
@@ -439,17 +441,13 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
 }
 
 /** Default values for basic settings */
-export const DEFAULT_BASIC_SETTINGS: BasicSlicerSettings = {
+/** Default values for simple settings */
+export const DEFAULT_SIMPLE_SETTINGS: SimpleSlicerSettings = {
   infillDensity: 20,
   infillPattern: 'crosshatch',
   wallCount: 3,
   bedAdhesion: 'skirt',
   enableSupports: false,
-};
-
-/** Default values for simple settings */
-export const DEFAULT_SIMPLE_SETTINGS: SimpleSlicerSettings = {
-  ...DEFAULT_BASIC_SETTINGS,
   layerHeight: 0.2,
   firstLayerHeight: 0.2,
   lineWidthDefault: 0.45,
@@ -910,63 +908,68 @@ export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
  * Source: OrcaSlicer PrintConfig.cpp def->mode values.
  */
 export const SETTING_MODE_MAP: Record<string, OrcaSettingMode> = {
-  // Quality — Simple (comSimple)
+  // Quality — Simple (per SimplyPrint)
   layerHeight: 'simple',
   firstLayerHeight: 'simple',
   seamPosition: 'simple',
+  scarfJointFlowRatio: 'simple',
   preciseWall: 'simple',
-  firstLayerSequenceChoice: 'simple',
   onlyOneWallFirstLayer: 'simple',
   onlyOneWallTop: 'simple',
-  otherLayersSequenceChoice: 'simple',
-  treeSupportAutoBrim: 'simple',
-  treeSupportBrimWidth: 'simple',
 
   // Strength — Simple
-  infillDensity: 'simple',
-  infillPattern: 'simple',
   wallCount: 'simple',
   topLayers: 'simple',
+  topShellThickness: 'simple',
+  topSurfaceDensity: 'simple',
+  topSurfacePattern: 'simple',
   bottomLayers: 'simple',
   bottomShellThickness: 'simple',
   bottomSurfaceDensity: 'simple',
   bottomSurfacePattern: 'simple',
+  infillDensity: 'simple',
   fillMultiline: 'simple',
+  infillPattern: 'simple',
   internalSolidInfillPattern: 'simple',
-  topShellThickness: 'simple',
-  topSurfaceDensity: 'simple',
-  topSurfacePattern: 'simple',
 
-  // Speed — NO simple settings (all are Advanced in OrcaSlicer)
+  // Speed — NO simple settings (all Advanced per SimplyPrint)
 
   // Support — Simple
   enableSupports: 'simple',
   supportType: 'simple',
   supportAngle: 'simple',
-  brimType: 'simple',
-  brimWidth: 'simple',
-  supportFilament: 'simple',
-  supportInterfaceNotForBody: 'simple',
-  supportOnBuildPlateOnly: 'simple',
   supportThresholdOverlap: 'simple',
+  supportOnBuildPlateOnly: 'simple',
+  supportFilament: 'simple',
+  supportInterfaceFilament: 'simple',
+  treeSupportAutoBrim: 'simple',
+  treeSupportBrimWidth: 'simple',
 
-  // Others — Simple (Fuzzy Skin)
-  fuzzySkin: 'simple',
+  // Multimaterial — Simple
+  wipeTowerEnable: 'simple',
+  wipeTowerWidth: 'simple',
+  wipeTowerPrimeVolume: 'simple',
+  preheatSteps: 'simple',
+  flushIntoInfill: 'simple',
+  flushIntoObject: 'simple',
+  flushIntoSupport: 'simple',
+
+  // Others — Simple
   skirtLoops: 'simple',
   skirtHeight: 'simple',
-  spiralVase: 'simple',
+  brimType: 'simple',
+  brimWidth: 'simple',
   printSequence: 'simple',
-  wipeTowerEnable: 'simple',
-  flushIntoInfill: 'simple',
-  flushIntoSupport: 'simple',
-  fuzzySkinFirstLayer: 'simple',
+  spiralVase: 'simple',
+  smoothSpiral: 'simple',
+  timelapse: 'simple',
+  fuzzySkin: 'simple',
   fuzzySkinMode: 'simple',
   fuzzySkinNoiseType: 'simple',
   fuzzySkinPointDistance: 'simple',
   fuzzySkinThickness: 'simple',
-
-  // Develop mode (2 settings)
-  scarfJointFlowRatio: 'develop',
+  fuzzySkinFirstLayer: 'simple',
+  addLineNumber: 'simple',
 };
 
 /**

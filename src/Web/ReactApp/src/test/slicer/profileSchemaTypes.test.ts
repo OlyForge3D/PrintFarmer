@@ -7,7 +7,6 @@ import {
 } from '@/features/slicer/components/settings/filamentSettingsTypes';
 import type { FilamentSettingsCategory } from '@/features/slicer/components/settings/filamentSettingsTypes';
 import {
-  DEFAULT_BASIC_SETTINGS,
   DEFAULT_SIMPLE_SETTINGS,
   DEFAULT_ADVANCED_SETTINGS,
   SETTING_TO_CATEGORY_MAP,
@@ -120,34 +119,28 @@ describe('FilamentSettingsTypes', () => {
 // SlicerSettingsTypes contract tests
 // ---------------------------------------------------------------------------
 describe('SlicerSettingsTypes', () => {
-  describe('DEFAULT_BASIC_SETTINGS', () => {
+  describe('DEFAULT_SIMPLE_SETTINGS', () => {
     it('contains core basic keys', () => {
-      expect(DEFAULT_BASIC_SETTINGS).toHaveProperty('infillDensity');
-      expect(DEFAULT_BASIC_SETTINGS).toHaveProperty('infillPattern');
-      expect(DEFAULT_BASIC_SETTINGS).toHaveProperty('wallCount');
-      expect(DEFAULT_BASIC_SETTINGS).toHaveProperty('bedAdhesion');
-      expect(DEFAULT_BASIC_SETTINGS).toHaveProperty('enableSupports');
+      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('infillDensity');
+      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('infillPattern');
+      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('wallCount');
+      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('bedAdhesion');
+      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('enableSupports');
     });
 
     it('has reasonable default types', () => {
-      expect(typeof DEFAULT_BASIC_SETTINGS.infillDensity).toBe('number');
-      expect(typeof DEFAULT_BASIC_SETTINGS.wallCount).toBe('number');
-      expect(typeof DEFAULT_BASIC_SETTINGS.enableSupports).toBe('boolean');
-      expect(typeof DEFAULT_BASIC_SETTINGS.infillPattern).toBe('string');
+      expect(typeof DEFAULT_SIMPLE_SETTINGS.infillDensity).toBe('number');
+      expect(typeof DEFAULT_SIMPLE_SETTINGS.wallCount).toBe('number');
+      expect(typeof DEFAULT_SIMPLE_SETTINGS.enableSupports).toBe('boolean');
+      expect(typeof DEFAULT_SIMPLE_SETTINGS.infillPattern).toBe('string');
     });
-  });
 
-  describe('DEFAULT_SIMPLE_SETTINGS', () => {
     it('extends basic with layer/line controls', () => {
       expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('layerHeight');
       expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('firstLayerHeight');
       expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('lineWidthDefault');
       expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('topLayers');
       expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('bottomLayers');
-    });
-
-    it('inherits basic defaults', () => {
-      expect(DEFAULT_SIMPLE_SETTINGS.infillDensity).toBe(DEFAULT_BASIC_SETTINGS.infillDensity);
     });
   });
 

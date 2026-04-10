@@ -79,7 +79,7 @@ export function ProfileEditorModal({
   profileType,
   originalProfile,
   onSaveSuccess,
-  initialViewMode = 'basic',
+  initialViewMode = 'simple',
 }: ProfileEditorModalProps) {
   const queryClient = useQueryClient();
   
