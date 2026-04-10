@@ -405,6 +405,22 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
   treeSupportWallCount?: number;
   treeSupportWithInfill?: boolean;
 
+  // --- Basic mode: Skirt ---
+  skirtLoops?: number;
+  skirtHeight?: number;
+
+  // --- Basic mode: Special mode ---
+  spiralVase?: boolean;
+  printSequence?: 'by_layer' | 'by_object';
+
+  // --- Basic mode: Strength - Top surface pattern ---
+  topSurfacePattern?: string;
+
+  // --- Basic mode: Multimaterial ---
+  wipeTowerEnable?: boolean;
+  flushIntoInfill?: boolean;
+  flushIntoSupport?: boolean;
+
   // --- Others: Simple mode settings (Fuzzy Skin) ---
   fuzzySkin?: boolean;
   fuzzySkinFirstLayer?: boolean;
@@ -688,6 +704,9 @@ export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
   purgeOnLayerChange: 'multimaterial',
   purgeTowerVolume: 'multimaterial',
   wipeTowerWidth: 'multimaterial',
+  wipeTowerEnable: 'multimaterial',
+  flushIntoInfill: 'multimaterial',
+  flushIntoSupport: 'multimaterial',
   
   // Quality tab - Wall generator, Walls & surfaces, Flow ratio, Bridging, Overhangs
   minWallThickness: 'quality',
@@ -754,6 +773,7 @@ export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
   internalSolidInfillPattern: 'strength',
   topShellThickness: 'strength',
   topSurfaceDensity: 'strength',
+  topSurfacePattern: 'strength',
   alignInfillDirectionToModel: 'strength',
   alternateExtraWall: 'strength',
   bridgeAngle: 'strength',
@@ -878,6 +898,10 @@ export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
   fuzzySkinPersistence: 'other',
   fuzzySkinScale: 'other',
   slicingMode: 'other',
+  skirtLoops: 'other',
+  skirtHeight: 'other',
+  spiralVase: 'other',
+  printSequence: 'other',
 };
 
 /**
@@ -911,6 +935,7 @@ export const SETTING_MODE_MAP: Record<string, OrcaSettingMode> = {
   internalSolidInfillPattern: 'simple',
   topShellThickness: 'simple',
   topSurfaceDensity: 'simple',
+  topSurfacePattern: 'simple',
 
   // Speed — NO simple settings (all are Advanced in OrcaSlicer)
 
@@ -927,6 +952,13 @@ export const SETTING_MODE_MAP: Record<string, OrcaSettingMode> = {
 
   // Others — Simple (Fuzzy Skin)
   fuzzySkin: 'simple',
+  skirtLoops: 'simple',
+  skirtHeight: 'simple',
+  spiralVase: 'simple',
+  printSequence: 'simple',
+  wipeTowerEnable: 'simple',
+  flushIntoInfill: 'simple',
+  flushIntoSupport: 'simple',
   fuzzySkinFirstLayer: 'simple',
   fuzzySkinMode: 'simple',
   fuzzySkinNoiseType: 'simple',
