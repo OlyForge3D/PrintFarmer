@@ -555,16 +555,17 @@ public abstract class HttpJobPollerService(
 
     /// <summary>
     /// Maps camelCase frontend setting names to OrcaSlicer native snake_case parameter names.
+    /// Covers all ~280 process profile settings for full OrcaSlicer UI parity.
     /// </summary>
     private static readonly Dictionary<string, string> CamelToNativeKeyMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Layer & line width
+        // ── Quality: Layer height ──
         ["layerHeight"] = "layer_height",
         ["firstLayerHeight"] = "initial_layer_print_height",
+
+        // ── Quality: Line width ──
         ["lineWidthDefault"] = "line_width",
         ["lineWidthFirstLayer"] = "initial_layer_line_width",
-        ["topLayers"] = "top_shell_layers",
-        ["bottomLayers"] = "bottom_shell_layers",
         ["lineWidthOuterWall"] = "outer_wall_line_width",
         ["lineWidthInnerWall"] = "inner_wall_line_width",
         ["lineWidthTopSurface"] = "top_surface_line_width",
@@ -572,15 +573,7 @@ public abstract class HttpJobPollerService(
         ["lineWidthInternalSolidInfill"] = "internal_solid_infill_line_width",
         ["lineWidthSupport"] = "support_line_width",
 
-        // Infill & walls
-        ["infillDensity"] = "sparse_infill_density",
-        ["infillPattern"] = "sparse_infill_pattern",
-        ["wallCount"] = "wall_loops",
-        ["enableSupports"] = "enable_support",
-        ["infillOverlap"] = "infill_wall_overlap",
-        ["infillAnchorMaxLength"] = "infill_anchor_max",
-
-        // Seam
+        // ── Quality: Seam ──
         ["seamPosition"] = "seam_position",
         ["seamGap"] = "seam_gap",
         ["scarfJointSeam"] = "seam_slope_type",
@@ -596,13 +589,13 @@ public abstract class HttpJobPollerService(
         ["scarfJointFlowRatio"] = "scarf_joint_flow_ratio",
         ["scarfJointForInnerWalls"] = "seam_slope_inner_walls",
 
-        // Wipe
+        // ── Quality: Wipe ──
         ["roleBaseWipeSpeed"] = "role_based_wipe_speed",
         ["wipeSpeed"] = "wipe_speed",
         ["wipeOnLoops"] = "wipe_on_loops",
         ["wipeBeforeExternalLoop"] = "wipe_before_external_loop",
 
-        // Precision
+        // ── Quality: Precision ──
         ["sliceGapClosingRadius"] = "slice_closing_radius",
         ["resolution"] = "resolution",
         ["arcFitting"] = "enable_arc_fitting",
@@ -614,28 +607,293 @@ public abstract class HttpJobPollerService(
         ["preciseZHeight"] = "precise_z_height",
         ["convertHolesToPolyholes"] = "hole_to_polyhole",
         ["polyholeDetectionMargin"] = "hole_to_polyhole_threshold",
+        ["holeToPolyholeTwisted"] = "hole_to_polyhole_twisted",
 
-        // Speed
+        // ── Quality: Ironing ──
+        ["ironingType"] = "ironing_type",
+        ["ironingPattern"] = "ironing_pattern",
+        ["ironingFlowRate"] = "ironing_flow",
+        ["ironingSpacing"] = "ironing_spacing",
+        ["ironingSpeed"] = "ironing_speed",
+        ["ironingAngle"] = "ironing_angle",
+        ["ironingAngleFixed"] = "ironing_angle_fixed",
+        ["ironingInset"] = "ironing_inset",
+
+        // ── Quality: Wall generator ──
+        ["wallGenerator"] = "wall_generator",
+        ["wallTransitionAngle"] = "wall_transition_angle",
+        ["wallTransitionFilterDeviation"] = "wall_transition_filter_deviation",
+        ["wallTransitionLength"] = "wall_transition_length",
+        ["wallDistributionCount"] = "wall_distribution_count",
+        ["initialLayerMinBeadWidth"] = "initial_layer_min_bead_width",
+        ["minBeadWidth"] = "min_bead_width",
+        ["minFeatureSize"] = "min_feature_size",
+        ["minLengthFactor"] = "min_length_factor",
+
+        // ── Quality: Walls and surfaces ──
+        ["wallSequence"] = "wall_sequence",
+        ["isInfillFirst"] = "is_infill_first",
+        ["wallDirection"] = "wall_direction",
+        ["printFlowRatio"] = "print_flow_ratio",
+        ["outerWallFlowRatio"] = "outer_wall_flow_ratio",
+        ["innerWallFlowRatio"] = "inner_wall_flow_ratio",
+        ["onlyOneWallFirstLayer"] = "only_one_wall_first_layer",
+        ["onlyOneWallTop"] = "only_one_wall_top",
+        ["minWidthTopSurface"] = "min_width_top_surface",
+        ["reduceCrossingWall"] = "reduce_crossing_wall",
+        ["maxTravelDetourDistance"] = "max_travel_detour_distance",
+        ["smallAreaInfillFlowCompensation"] = "small_area_infill_flow_compensation",
+        ["firstLayerSequenceChoice"] = "first_layer_sequence_choice",
+        ["otherLayersSequenceChoice"] = "other_layers_sequence_choice",
+
+        // ── Quality: Bridging ──
+        ["bridgeFlow"] = "bridge_flow",
+        ["internalBridgeFlow"] = "internal_bridge_flow",
+        ["bridgeDensity"] = "bridge_density",
+        ["internalBridgeDensity"] = "internal_bridge_density",
+        ["thickBridges"] = "thick_bridges",
+        ["thickInternalBridges"] = "thick_internal_bridges",
+        ["enableExtraBridgeLayer"] = "enable_extra_bridge_layer",
+        ["dontFilterInternalBridges"] = "dont_filter_internal_bridges",
+        ["counterboreHoleBridging"] = "counterbore_hole_bridging",
+        ["maxBridgeLength"] = "max_bridge_length",
+
+        // ── Quality: Overhangs ──
+        ["detectOverhangWall"] = "detect_overhang_wall",
+        ["makeOverhangPrintable"] = "make_overhang_printable",
+        ["makeOverhangPrintableAngle"] = "make_overhang_printable_angle",
+        ["makeOverhangPrintableHoleSize"] = "make_overhang_printable_hole_size",
+        ["extraPerimetersOnOverhangs"] = "extra_perimeters_on_overhangs",
+        ["overhangReverse"] = "overhang_reverse",
+        ["overhangReverseInternalOnly"] = "overhang_reverse_internal_only",
+        ["overhangReverseThreshold"] = "overhang_reverse_threshold",
+
+        // ── Strength: Walls ──
+        ["wallCount"] = "wall_loops",
+        ["alternateExtraWall"] = "alternate_extra_wall",
+        ["detectThinWall"] = "detect_thin_wall",
+
+        // ── Strength: Top/bottom shells ──
+        ["topLayers"] = "top_shell_layers",
+        ["topShellThickness"] = "top_shell_thickness",
+        ["topSurfaceDensity"] = "top_surface_density",
+        ["topSurfacePattern"] = "top_surface_pattern",
+        ["bottomLayers"] = "bottom_shell_layers",
+        ["bottomShellThickness"] = "bottom_shell_thickness",
+        ["bottomSurfaceDensity"] = "bottom_surface_density",
+        ["bottomSurfacePattern"] = "bottom_surface_pattern",
+        ["topBottomInfillWallOverlap"] = "top_bottom_infill_wall_overlap",
+
+        // ── Strength: Infill ──
+        ["infillDensity"] = "sparse_infill_density",
+        ["infillPattern"] = "sparse_infill_pattern",
+        ["fillMultiline"] = "fill_multiline",
+        ["infillDirection"] = "infill_direction",
+        ["sparseInfillRotateTemplate"] = "sparse_infill_rotate_template",
+        ["skinInfillDensity"] = "skin_infill_density",
+        ["skeletonInfillDensity"] = "skeleton_infill_density",
+        ["infillLockDepth"] = "infill_lock_depth",
+        ["skinInfillDepth"] = "skin_infill_depth",
+        ["skinInfillLineWidth"] = "skin_infill_line_width",
+        ["skeletonInfillLineWidth"] = "skeleton_infill_line_width",
+        ["symmetricInfillYAxis"] = "symmetric_infill_y_axis",
+        ["infillShiftStep"] = "infill_shift_step",
+        ["lateralLatticeAngle1"] = "lateral_lattice_angle_1",
+        ["lateralLatticeAngle2"] = "lateral_lattice_angle_2",
+        ["infillOverhangAngle"] = "infill_overhang_angle",
+        ["infillOverlap"] = "infill_wall_overlap",
+        ["infillAnchorMaxLength"] = "infill_anchor_max",
+        ["internalSolidInfillPattern"] = "internal_solid_infill_pattern",
+        ["solidInfillDirection"] = "solid_infill_direction",
+        ["solidInfillRotateTemplate"] = "solid_infill_rotate_template",
+        ["gapFillTarget"] = "gap_fill_target",
+
+        // ── Strength: Advanced ──
+        ["alignInfillDirectionToModel"] = "align_infill_direction_to_model",
+        ["extraSolidInfills"] = "extra_solid_infills",
+        ["bridgeAngle"] = "bridge_angle",
+        ["internalBridgeAngle"] = "internal_bridge_angle",
+        ["minimumSparseInfillArea"] = "minimum_sparse_infill_area",
+        ["infillCombination"] = "infill_combination",
+        ["infillCombinationMaxLayerHeight"] = "infill_combination_max_layer_height",
+        ["detectNarrowInternalSolidInfill"] = "detect_narrow_internal_solid_infill",
+        ["ensureVerticalShellThickness"] = "ensure_vertical_shell_thickness",
+
+        // ── Speed: First layer ──
+        ["firstLayerSpeed"] = "initial_layer_speed",
+        ["initialLayerTravelSpeed"] = "initial_layer_travel_speed",
+        ["slowDownLayers"] = "slow_down_layers",
+
+        // ── Speed: Other layers ──
         ["outerWallSpeed"] = "outer_wall_speed",
         ["innerWallSpeed"] = "inner_wall_speed",
+        ["smallPerimeterSpeed"] = "small_perimeter_speed",
+        ["smallPerimeterThreshold"] = "small_perimeter_threshold",
         ["sparseInfillSpeed"] = "sparse_infill_speed",
         ["solidInfillSpeed"] = "internal_solid_infill_speed",
         ["topSurfaceSpeed"] = "top_surface_speed",
+        ["gapInfillSpeed"] = "gap_infill_speed",
+        ["supportSpeed"] = "support_speed",
+        ["supportInterfaceSpeed"] = "support_interface_speed",
+        ["bridgeSpeed"] = "bridge_speed",
+        ["internalBridgeSpeed"] = "internal_bridge_speed",
         ["travelSpeed"] = "travel_speed",
-        ["firstLayerSpeed"] = "initial_layer_speed",
 
-        // Acceleration
+        // ── Speed: Overhang speed ──
+        ["enableOverhangSpeed"] = "enable_overhang_speed",
+        ["slowdownForCurledPerimeters"] = "slowdown_for_curled_perimeters",
+        ["overhangPerimeterSpeed"] = "overhang_speed_classic",
+        ["overhang1_4Speed"] = "overhang_1_4_speed",
+        ["overhang2_4Speed"] = "overhang_2_4_speed",
+        ["overhang3_4Speed"] = "overhang_3_4_speed",
+        ["overhang4_4Speed"] = "overhang_4_4_speed",
+
+        // ── Speed: Acceleration ──
+        ["defaultAcceleration"] = "default_acceleration",
         ["outerWallAcceleration"] = "outer_wall_acceleration",
         ["innerWallAcceleration"] = "inner_wall_acceleration",
+        ["bridgeAcceleration"] = "bridge_acceleration",
+        ["infillAcceleration"] = "sparse_infill_acceleration",
+        ["internalSolidInfillAcceleration"] = "internal_solid_infill_acceleration",
+        ["initialLayerAcceleration"] = "initial_layer_acceleration",
         ["topSurfaceAcceleration"] = "top_surface_acceleration",
         ["travelAcceleration"] = "travel_acceleration",
-        ["defaultAcceleration"] = "default_acceleration",
+        ["accelToDecelEnable"] = "accel_to_decel_enable",
+        ["accelToDecelFactor"] = "accel_to_decel_factor",
 
-        // Temperature
+        // ── Speed: Jerk ──
+        ["defaultJunctionDeviation"] = "default_junction_deviation",
+        ["defaultJerk"] = "default_jerk",
+        ["outerWallJerk"] = "outer_wall_jerk",
+        ["innerWallJerk"] = "inner_wall_jerk",
+        ["infillJerk"] = "infill_jerk",
+        ["topSurfaceJerk"] = "top_surface_jerk",
+        ["initialLayerJerk"] = "initial_layer_jerk",
+        ["travelJerk"] = "travel_jerk",
+
+        // ── Speed: Legacy aliases ──
+        ["printSpeed"] = "outer_wall_speed",
+        ["infillSpeed"] = "sparse_infill_speed",
+        ["overhangAngle"] = "overhang_speed_classic",
+
+        // ── Support ──
+        ["enableSupports"] = "enable_support",
+        ["supportType"] = "support_type",
+        ["supportStyle"] = "support_style",
+        ["supportAngle"] = "support_threshold_angle",
+        ["supportThresholdOverlap"] = "support_threshold_overlap",
+        ["supportOnBuildPlateOnly"] = "support_on_build_plate_only",
+        ["supportCriticalRegionsOnly"] = "support_critical_regions_only",
+        ["supportRemoveSmallOverhang"] = "support_remove_small_overhang",
+
+        // ── Support: Raft ──
+        ["raftLayers"] = "raft_layers",
+        ["raftContactDistance"] = "raft_contact_distance",
+        ["raftExpansion"] = "raft_expansion",
+        ["raftFirstLayerDensity"] = "raft_first_layer_density",
+        ["raftFirstLayerExpansion"] = "raft_first_layer_expansion",
+
+        // ── Support: Filament ──
+        ["supportFilament"] = "support_filament",
+        ["supportInterfaceFilament"] = "support_interface_filament",
+        ["supportInterfaceNotForBody"] = "support_interface_not_for_body",
+
+        // ── Support: Ironing ──
+        ["supportIroning"] = "support_ironing",
+        ["supportIroningPattern"] = "support_ironing_pattern",
+        ["supportIroningFlow"] = "support_ironing_flow",
+        ["supportIroningSpacing"] = "support_ironing_spacing",
+
+        // ── Support: Advanced ──
+        ["supportTopZDistance"] = "support_top_z_distance",
+        ["supportBottomZDistance"] = "support_bottom_z_distance",
+        ["supportDensity"] = "support_base_pattern_spacing",
+        ["supportBasePattern"] = "support_base_pattern",
+        ["supportBasePatternSpacing"] = "support_base_pattern_spacing",
+        ["supportInterfacePattern"] = "support_interface_pattern",
+        ["supportInterfaceSpacing"] = "support_interface_spacing",
+        ["supportBottomInterfaceSpacing"] = "support_bottom_interface_spacing",
+        ["supportExpansion"] = "support_expansion",
+        ["supportInterfaceLoopPattern"] = "support_interface_loop_pattern",
+        ["supportInterfaceLayers"] = "support_interface_top_layers",
+        ["supportInterfaceBottomLayers"] = "support_interface_bottom_layers",
+        ["supportXYDistance"] = "support_object_xy_distance",
+        ["supportObjectFirstLayerGap"] = "support_object_first_layer_gap",
+        ["bridgeNoSupport"] = "bridge_no_support",
+        ["independentSupportLayerHeight"] = "independent_support_layer_height",
+        ["supportBaseInterfaceLayers"] = "support_interface_bottom_layers",
+
+        // ── Support: Tree supports ──
+        ["treeSupportTipDiameter"] = "tree_support_tip_diameter",
+        ["treeSupportBranchDistance"] = "tree_support_branch_distance",
+        ["treeSupportBranchDistanceOrganic"] = "tree_support_branch_distance_organic",
+        ["treeSupportTopRate"] = "tree_support_top_rate",
+        ["treeSupportBranchDiameter"] = "tree_support_branch_diameter",
+        ["treeSupportBranchDiameterOrganic"] = "tree_support_branch_diameter_organic",
+        ["treeSupportBranchDiameterAngle"] = "tree_support_branch_diameter_angle",
+        ["treeSupportBranchAngle"] = "tree_support_branch_angle",
+        ["treeSupportBranchAngleOrganic"] = "tree_support_branch_angle_organic",
+        ["treeSupportAngleSlow"] = "tree_support_angle_slow",
+        ["treeSupportAutoBrim"] = "tree_support_auto_brim",
+        ["treeSupportBrimWidth"] = "tree_support_brim_width",
+        ["treeSupportWallCount"] = "tree_support_wall_count",
+        ["treeSupportWithInfill"] = "tree_support_with_infill",
+
+        // ── Multimaterial: Prime tower ──
+        ["wipeTowerEnable"] = "enable_prime_tower",
+        ["wipeTowerWidth"] = "prime_tower_width",
+        ["purgeOnLayerChange"] = "purge_on_layer_change",
+        ["purgeTowerVolume"] = "prime_volume",
+
+        // ── Multimaterial: Filament for features ──
+        ["filament1ProfileId"] = "wall_filament",
+        ["filament2ProfileId"] = "sparse_infill_filament",
+        ["filament3ProfileId"] = "solid_infill_filament",
+
+        // ── Multimaterial: Flush options ──
+        ["flushIntoInfill"] = "flush_into_infill",
+        ["flushIntoSupport"] = "flush_into_support",
+
+        // ── Multimaterial: Advanced ──
+        ["interfaceShells"] = "interface_shells",
+
+        // ── Others: Skirt ──
+        ["skirtLoops"] = "skirt_loops",
+        ["skirtHeight"] = "skirt_height",
+        ["skirtStartAngle"] = "skirt_start_angle",
+
+        // ── Others: Brim ──
+        ["brimType"] = "brim_type",
+        ["brimWidth"] = "brim_width",
+        ["brimObjectGap"] = "brim_object_gap",
+        ["brimUseEfcOutline"] = "brim_use_efc_outline",
+        ["combineBrims"] = "combine_brims",
+        ["brimEarsMaxAngle"] = "brim_ears_max_angle",
+        ["brimEarsDetectionLength"] = "brim_ears_detection_length",
+
+        // ── Others: Special mode ──
+        ["slicingMode"] = "slicing_mode",
+        ["printSequence"] = "print_sequence",
+        ["spiralVase"] = "spiral_mode",
+
+        // ── Others: Fuzzy skin ──
+        ["fuzzySkin"] = "fuzzy_skin",
+        ["fuzzySkinMode"] = "fuzzy_skin_mode",
+        ["fuzzySkinNoiseType"] = "fuzzy_skin_noise_type",
+        ["fuzzySkinPointDistance"] = "fuzzy_skin_point_distance",
+        ["fuzzySkinThickness"] = "fuzzy_skin_thickness",
+        ["fuzzySkinScale"] = "fuzzy_skin_scale",
+        ["fuzzySkinOctaves"] = "fuzzy_skin_octaves",
+        ["fuzzySkinPersistence"] = "fuzzy_skin_persistence",
+        ["fuzzySkinFirstLayer"] = "fuzzy_skin_first_layer",
+
+        // ── Temperature ──
         ["nozzleTemp"] = "nozzle_temperature",
         ["firstLayerNozzleTemp"] = "nozzle_temperature_initial_layer",
+        ["bedTemp"] = "hot_plate_temp",
+        ["firstLayerBedTemp"] = "hot_plate_temp_initial_layer",
 
-        // Retraction
+        // ── Retraction (filament-level settings exposed in process UI) ──
         ["retractionLength"] = "filament_retraction_length",
         ["retractionSpeed"] = "filament_retraction_speed",
         ["detractionSpeed"] = "filament_deretraction_speed",
@@ -644,7 +902,8 @@ public abstract class HttpJobPollerService(
         ["wipeBeforeRetract"] = "filament_retract_before_wipe",
         ["retractionLiftZ"] = "filament_z_hop",
 
-        // Cooling
+        // ── Cooling (filament-level settings exposed in process UI) ──
+        ["enableFanCooling"] = "fan_cooling",
         ["minFanSpeed"] = "fan_min_speed",
         ["maxFanSpeed"] = "fan_max_speed",
         ["bridgeFanSpeed"] = "overhang_fan_speed",
@@ -652,47 +911,11 @@ public abstract class HttpJobPollerService(
         ["slowDownForLayerTime"] = "slow_down_layer_time",
         ["minPrintSpeed"] = "slow_down_min_speed",
 
-        // Ironing
-        ["ironingPattern"] = "ironing_pattern",
-        ["ironingFlowRate"] = "ironing_flow",
-        ["ironingSpacing"] = "ironing_spacing",
-        ["ironingSpeed"] = "ironing_speed",
-        ["ironingAngle"] = "ironing_angle",
-
-        // Support
-        ["supportType"] = "support_type",
-        ["supportDensity"] = "support_base_pattern_spacing",
-        ["supportAngle"] = "support_threshold_angle",
-        ["supportTopZDistance"] = "support_top_z_distance",
-        ["supportBottomZDistance"] = "support_bottom_z_distance",
-        ["supportInterfaceLayers"] = "support_interface_top_layers",
-        ["supportXYDistance"] = "support_object_xy_distance",
-        ["supportBaseInterfaceLayers"] = "support_interface_bottom_layers",
-
-        // Temperature — bed temp uses hot_plate_temp as the most common plate type
-        ["bedTemp"] = "hot_plate_temp",
-        ["firstLayerBedTemp"] = "hot_plate_temp_initial_layer",
-
-        // Speed — generic speed maps to the base speed OrcaSlicer derives others from
-        ["printSpeed"] = "outer_wall_speed",
-        ["infillSpeed"] = "sparse_infill_speed",
-        ["infillAcceleration"] = "sparse_infill_acceleration",
-
-        // Fan cooling
-        ["enableFanCooling"] = "fan_cooling",
-
-        // Flow ratio
-        ["outerWallFlowRatio"] = "outer_wall_flow_ratio",
-        ["innerWallFlowRatio"] = "inner_wall_flow_ratio",
-
-        // Bridging
-        ["maxBridgeLength"] = "max_bridge_length",
-
-        // Overhang
-        ["overhangAngle"] = "overhang_speed_classic",
-
-        // Wall generator
-        ["minWallThickness"] = "min_width_top_surface",
+        // ── Filament ironing (filament-level settings exposed in process UI) ──
+        ["filamentIroningFlow"] = "filament_ironing_flow",
+        ["filamentIroningInset"] = "filament_ironing_inset",
+        ["filamentIroningSpacing"] = "filament_ironing_spacing",
+        ["filamentIroningSpeed"] = "filament_ironing_speed",
     };
 
     /// <summary>
