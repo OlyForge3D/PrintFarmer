@@ -349,6 +349,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             return "{}";
         }
 
+        // DEBUG: Log the runtime types to diagnose \u0022 issue
+        KeyValuePair<string, object> first = settings.First();
+        Console.Error.WriteLine($"[DEBUG SettingsDictToNativeJson] First key={first.Key}, ValueType={first.Value?.GetType().FullName}, ValueToString='{first.Value}', IsString={first.Value is string}");
+
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
         {
