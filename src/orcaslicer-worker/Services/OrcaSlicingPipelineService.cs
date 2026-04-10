@@ -351,7 +351,35 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 try
                 {
                     using JsonDocument parsed = JsonDocument.Parse(rawValue);
-                    parsed.RootElement.WriteTo(writer);
+                    JsonElement root = parsed.RootElement;
+
+                    // OrcaSlicer stores some values as strings with % suffix (e.g. "50%")
+                    // but --load-settings expects bare numbers. Strip % and convert.
+                    if (root.ValueKind == JsonValueKind.String)
+                    {
+                        string strVal = root.GetString() ?? string.Empty;
+                        if (strVal.EndsWith('%') && double.TryParse(strVal.AsSpan(0, strVal.Length - 1),
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out double pctVal))
+                        {
+                            if (pctVal == Math.Floor(pctVal))
+                            {
+                                writer.WriteNumberValue((int)pctVal);
+                            }
+                            else
+                            {
+                                writer.WriteNumberValue(pctVal);
+                            }
+                        }
+                        else
+                        {
+                            root.WriteTo(writer);
+                        }
+                    }
+                    else
+                    {
+                        root.WriteTo(writer);
+                    }
                 }
                 catch (JsonException)
                 {
