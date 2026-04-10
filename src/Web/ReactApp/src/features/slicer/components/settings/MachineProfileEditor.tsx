@@ -588,6 +588,384 @@ const AdvancedMachineSettingsPanel: React.FC<{
             disabled={disabled}
             description="Flow rate multiplier"
           />
+
+          {/* Advanced Retraction */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Advanced Retraction</h4>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <SettingRow
+                  type="number"
+                  label="Restart Extra"
+                  value={settings.retractionRestartExtra ?? 0}
+                  min={0}
+                  max={2}
+                  step={0.01}
+                  unit="mm"
+                  onChange={(v) => onUpdate('retractionRestartExtra', v)}
+                  disabled={disabled}
+                />
+                <SettingRow
+                  type="number"
+                  label="Restart Extra (Toolchange)"
+                  value={settings.retractionRestartExtraToolchange ?? 0}
+                  min={0}
+                  max={5}
+                  step={0.1}
+                  unit="mm"
+                  onChange={(v) => onUpdate('retractionRestartExtraToolchange', v)}
+                  disabled={disabled}
+                />
+              </div>
+              <SettingRow
+                type="number"
+                label="Retraction Length (Toolchange)"
+                value={settings.retractionLengthToolchange ?? 10}
+                min={0}
+                max={20}
+                step={0.5}
+                unit="mm"
+                onChange={(v) => onUpdate('retractionLengthToolchange', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="slider"
+                label="Retract Before Wipe %"
+                value={settings.retractBeforeWipePercent ?? 0}
+                min={0}
+                max={100}
+                step={1}
+                unit="%"
+                onChange={(v) => onUpdate('retractBeforeWipePercent', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Wipe */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Wipe</h4>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <SettingRow
+                  type="number"
+                  label="Wipe Distance"
+                  value={settings.wipeDistance ?? 0}
+                  min={0}
+                  max={10}
+                  step={0.5}
+                  unit="mm"
+                  onChange={(v) => onUpdate('wipeDistance', v)}
+                  disabled={disabled}
+                />
+                <SettingRow
+                  type="number"
+                  label="Wipe Speed"
+                  value={settings.wipeSpeed ?? 80}
+                  min={0}
+                  max={200}
+                  step={5}
+                  unit="mm/s"
+                  onChange={(v) => onUpdate('wipeSpeed', v)}
+                  disabled={disabled}
+                />
+              </div>
+              <SettingRow
+                type="checkbox"
+                label="Wipe Before External Loop"
+                checked={settings.wipeBeforeExternalLoop ?? false}
+                onChange={(v) => onUpdate('wipeBeforeExternalLoop', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="checkbox"
+                label="Wipe On Loops"
+                checked={settings.wipeOnLoops ?? false}
+                onChange={(v) => onUpdate('wipeOnLoops', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Z-Hop */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Z-Hop</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="text"
+                label="Z Hop Types"
+                value={settings.zHopTypes ?? ''}
+                onChange={(v) => onUpdate('zHopTypes', v)}
+                disabled={disabled}
+                description="Per-surface z-hop control"
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <SettingRow
+                  type="number"
+                  label="Retraction Lift Above"
+                  value={settings.retractionLiftAbove || 0}
+                  min={0}
+                  max={10}
+                  step={0.1}
+                  unit="mm"
+                  onChange={(v) => onUpdate('retractionLiftAbove', v)}
+                  disabled={disabled}
+                />
+                <SettingRow
+                  type="number"
+                  label="Retraction Lift Below"
+                  value={settings.retractionLiftBelow || 0}
+                  min={0}
+                  max={10}
+                  step={0.1}
+                  unit="mm"
+                  onChange={(v) => onUpdate('retractionLiftBelow', v)}
+                  disabled={disabled}
+                />
+              </div>
+              <SettingRow
+                type="text"
+                label="Retraction Lift Enforce"
+                value={settings.retractionLiftEnforce ?? ''}
+                onChange={(v) => onUpdate('retractionLiftEnforce', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Extruder Clearance */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Extruder Clearance</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="select"
+                label="Extruder Type"
+                value={settings.extruderType ?? 'direct_drive'}
+                options={[
+                  { value: 'direct_drive', label: 'Direct Drive' },
+                  { value: 'bowden', label: 'Bowden' },
+                ]}
+                onChange={(v) => onUpdate('extruderType', v as 'direct_drive' | 'bowden')}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                label="Clearance Radius"
+                value={settings.extruderClearanceRadius ?? 45}
+                min={0}
+                max={100}
+                step={1}
+                unit="mm"
+                onChange={(v) => onUpdate('extruderClearanceRadius', v)}
+                disabled={disabled}
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <SettingRow
+                  type="number"
+                  label="Clearance Height to Lid"
+                  value={settings.extruderClearanceHeightToLid ?? 40}
+                  min={0}
+                  max={200}
+                  step={1}
+                  unit="mm"
+                  onChange={(v) => onUpdate('extruderClearanceHeightToLid', v)}
+                  disabled={disabled}
+                />
+                <SettingRow
+                  type="number"
+                  label="Clearance Height to Rod"
+                  value={settings.extruderClearanceHeightToRod ?? 36}
+                  min={0}
+                  max={200}
+                  step={1}
+                  unit="mm"
+                  onChange={(v) => onUpdate('extruderClearanceHeightToRod', v)}
+                  disabled={disabled}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Wipe Tower (Multi-Material) */}
+          {settings.supportMultiMaterial && (
+            <div className="py-3">
+              <h4 className="text-sm font-medium text-pf-text-primary mb-3">Wipe Tower</h4>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <SettingRow
+                    type="select"
+                    label="Tower Type"
+                    value={settings.wipeTowerType ?? 'sparse'}
+                    options={[
+                      { value: 'sparse', label: 'Sparse' },
+                      { value: 'dense', label: 'Dense' },
+                    ]}
+                    onChange={(v) => onUpdate('wipeTowerType', v as 'sparse' | 'dense')}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="select"
+                    label="Wall Type"
+                    value={settings.wipeTowerWallType ?? 'single'}
+                    options={[
+                      { value: 'single', label: 'Single' },
+                      { value: 'double', label: 'Double' },
+                    ]}
+                    onChange={(v) => onUpdate('wipeTowerWallType', v as 'single' | 'double')}
+                    disabled={disabled}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <SettingRow
+                    type="number"
+                    label="Bridging"
+                    value={settings.wipeTowerBridging ?? 10}
+                    min={1}
+                    max={20}
+                    step={0.5}
+                    unit="mm"
+                    onChange={(v) => onUpdate('wipeTowerBridging', v)}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    label="Cone Angle"
+                    value={settings.wipeTowerConeAngle ?? 0}
+                    min={0}
+                    max={90}
+                    step={5}
+                    unit="°"
+                    onChange={(v) => onUpdate('wipeTowerConeAngle', v)}
+                    disabled={disabled}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <SettingRow
+                    type="number"
+                    label="Rotation Angle"
+                    value={settings.wipeTowerRotationAngle ?? 0}
+                    min={0}
+                    max={360}
+                    step={15}
+                    unit="°"
+                    onChange={(v) => onUpdate('wipeTowerRotationAngle', v)}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    label="Max Purge Speed"
+                    value={settings.wipeTowerMaxPurgeSpeed ?? 60}
+                    min={10}
+                    max={200}
+                    step={5}
+                    unit="mm/s"
+                    onChange={(v) => onUpdate('wipeTowerMaxPurgeSpeed', v)}
+                    disabled={disabled}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <SettingRow
+                    type="number"
+                    label="Extra Flow"
+                    value={settings.wipeTowerExtraFlow ?? 1.0}
+                    min={1}
+                    max={2}
+                    step={0.05}
+                    onChange={(v) => onUpdate('wipeTowerExtraFlow', v)}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    label="Extra Spacing"
+                    value={settings.wipeTowerExtraSpacing ?? 100}
+                    min={100}
+                    max={300}
+                    step={5}
+                    onChange={(v) => onUpdate('wipeTowerExtraSpacing', v)}
+                    disabled={disabled}
+                  />
+                </div>
+                <SettingRow
+                  type="checkbox"
+                  label="No Sparse Layers"
+                  checked={settings.wipeTowerNoSparseLayers ?? false}
+                  onChange={(v) => onUpdate('wipeTowerNoSparseLayers', v)}
+                  disabled={disabled}
+                />
+                <SettingRow
+                  type="checkbox"
+                  label="Fillet Wall"
+                  checked={settings.wipeTowerFilletWall ?? false}
+                  onChange={(v) => onUpdate('wipeTowerFilletWall', v)}
+                  disabled={disabled}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <SettingRow
+                    type="number"
+                    label="Rib Width"
+                    value={settings.wipeTowerRibWidth ?? 0}
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    unit="mm"
+                    onChange={(v) => onUpdate('wipeTowerRibWidth', v)}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    label="Extra Rib Length"
+                    value={settings.wipeTowerExtraRibLength ?? 0}
+                    min={0}
+                    max={10}
+                    step={0.5}
+                    unit="mm"
+                    onChange={(v) => onUpdate('wipeTowerExtraRibLength', v)}
+                    disabled={disabled}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Load/Unload Times */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Filament Load/Unload</h4>
+            <div className="grid grid-cols-3 gap-4">
+              <SettingRow
+                type="number"
+                label="Load Time"
+                value={settings.machineLoadFilamentTime ?? 0}
+                min={0}
+                max={60}
+                step={1}
+                unit="s"
+                onChange={(v) => onUpdate('machineLoadFilamentTime', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                label="Unload Time"
+                value={settings.machineUnloadFilamentTime ?? 0}
+                min={0}
+                max={60}
+                step={1}
+                unit="s"
+                onChange={(v) => onUpdate('machineUnloadFilamentTime', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                label="Tool Change Time"
+                value={settings.machineToolChangeTime ?? 0}
+                min={0}
+                max={60}
+                step={1}
+                unit="s"
+                onChange={(v) => onUpdate('machineToolChangeTime', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
         </>
       )}
 
@@ -825,6 +1203,138 @@ const AdvancedMachineSettingsPanel: React.FC<{
               />
             </div>
           </div>
+
+          {/* Travel */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Travel</h4>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <SettingRow
+                  type="number"
+                  label="Travel Speed"
+                  value={settings.travelSpeed ?? 200}
+                  min={50}
+                  max={500}
+                  step={10}
+                  unit="mm/s"
+                  onChange={(v) => onUpdate('travelSpeed', v)}
+                  disabled={disabled}
+                />
+                <SettingRow
+                  type="number"
+                  label="Travel Acceleration"
+                  value={settings.travelAcceleration ?? 5000}
+                  min={100}
+                  max={20000}
+                  step={100}
+                  unit="mm/s²"
+                  onChange={(v) => onUpdate('travelAcceleration', v)}
+                  disabled={disabled}
+                />
+              </div>
+              <SettingRow
+                type="number"
+                label="Travel Jerk"
+                value={settings.travelJerk ?? 8}
+                min={0}
+                max={20}
+                step={0.5}
+                unit="mm/s"
+                onChange={(v) => onUpdate('travelJerk', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="checkbox"
+                label="Travel Slope"
+                checked={settings.travelSlope ?? false}
+                onChange={(v) => onUpdate('travelSlope', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Machine Limits Extended */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Machine Limits Extended</h4>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <SettingRow
+                  type="number"
+                  label="Max Accel Travel"
+                  value={settings.maxAccelerationTravel ?? 5000}
+                  min={100}
+                  max={20000}
+                  step={100}
+                  unit="mm/s²"
+                  onChange={(v) => onUpdate('maxAccelerationTravel', v)}
+                  disabled={disabled}
+                />
+                <SettingRow
+                  type="number"
+                  label="Max Junction Deviation"
+                  value={settings.maxJunctionDeviation ?? 0.013}
+                  min={0}
+                  max={1}
+                  step={0.001}
+                  unit="mm"
+                  onChange={(v) => onUpdate('maxJunctionDeviation', v)}
+                  disabled={disabled}
+                />
+              </div>
+              <SettingRow
+                type="checkbox"
+                label="Emit Machine Limits to G-code"
+                checked={settings.emitMachineLimitsToGcode ?? true}
+                onChange={(v) => onUpdate('emitMachineLimitsToGcode', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Additional Features */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Additional Features</h4>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <SettingRow
+                  type="number"
+                  label="Nozzle Volume"
+                  value={settings.nozzleVolume ?? 0}
+                  min={0}
+                  max={50}
+                  step={0.5}
+                  unit="mm³"
+                  onChange={(v) => onUpdate('nozzleVolume', v)}
+                  disabled={disabled}
+                />
+                <SettingRow
+                  type="select"
+                  label="Nozzle Volume Type"
+                  value={settings.nozzleVolumeType ?? 'standard'}
+                  options={[
+                    { value: 'standard', label: 'Standard' },
+                    { value: 'high_flow', label: 'High Flow' },
+                  ]}
+                  onChange={(v) => onUpdate('nozzleVolumeType', v as 'standard' | 'high_flow')}
+                  disabled={disabled}
+                />
+              </div>
+              <SettingRow
+                type="checkbox"
+                label="Has Scarf Joint Seam"
+                checked={settings.hasScarfJointSeam ?? false}
+                onChange={(v) => onUpdate('hasScarfJointSeam', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="checkbox"
+                label="Single Extruder Multi Material"
+                checked={settings.singleExtruderMultiMaterial ?? false}
+                onChange={(v) => onUpdate('singleExtruderMultiMaterial', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
         </>
       )}
 
@@ -859,6 +1369,43 @@ const AdvancedMachineSettingsPanel: React.FC<{
                 checked={settings.useFirmwareRetraction ?? false}
                 onChange={(v) => onUpdate('useFirmwareRetraction', v)}
                 disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* G-code Extended */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Extended G-code Features</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="text"
+                label="Thumbnails Format"
+                value={settings.thumbnailsFormat ?? 'PNG'}
+                onChange={(v) => onUpdate('thumbnailsFormat', v)}
+                disabled={disabled}
+                description="e.g., PNG or QOI"
+              />
+              <SettingRow
+                type="checkbox"
+                label="Scan First Layer"
+                checked={settings.scanFirstLayer ?? false}
+                onChange={(v) => onUpdate('scanFirstLayer', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="text"
+                label="Timelapse G-code"
+                value={settings.timelapseGcode ?? ''}
+                onChange={(v) => onUpdate('timelapseGcode', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="text"
+                label="Printing By Object G-code"
+                value={settings.printingByObjectGcode ?? ''}
+                onChange={(v) => onUpdate('printingByObjectGcode', v)}
+                disabled={disabled}
+                description="G-code for sequential printing"
               />
             </div>
           </div>

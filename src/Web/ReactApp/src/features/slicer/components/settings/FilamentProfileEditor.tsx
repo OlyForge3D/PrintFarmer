@@ -358,6 +358,44 @@ const AdvancedFilamentSettingsPanel: React.FC<{
             unit="mm³/s"
             disabled={disabled}
           />
+          <SettingRow
+            type="number"
+            icon={<TemperatureIcon />}
+            label="Temperature Vitrification"
+            description="Glass transition temperature"
+            value={settings.temperatureVitrification ?? 0}
+            onChange={(v) => onUpdate('temperatureVitrification', v)}
+            min={0}
+            max={300}
+            step={5}
+            unit="°C"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<TemperatureIcon />}
+            label="Filament Flush Temp"
+            description="Temperature for flushing filament"
+            value={settings.filamentFlushTemp ?? 0}
+            onChange={(v) => onUpdate('filamentFlushTemp', v)}
+            min={0}
+            max={300}
+            step={5}
+            unit="°C"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<SpeedIcon />}
+            label="Filament Flush Volumetric Speed"
+            value={settings.filamentFlushVolumetricSpeed ?? 0}
+            onChange={(v) => onUpdate('filamentFlushVolumetricSpeed', v)}
+            min={0}
+            max={30}
+            step={0.5}
+            unit="mm³/s"
+            disabled={disabled}
+          />
         </div>
       );
 
@@ -453,6 +491,201 @@ const AdvancedFilamentSettingsPanel: React.FC<{
               disabled={disabled}
             />
           )}
+
+          {/* Per-Feature Flow Ratios */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Per-Feature Flow Ratios</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="checkbox"
+                icon={<FlowIcon />}
+                label="Set Other Flow Ratios"
+                description="When enabled, all feature flow ratios follow the main Flow Ratio"
+                checked={settings.setOtherFlowRatios ?? false}
+                onChange={(v) => onUpdate('setOtherFlowRatios', v)}
+                disabled={disabled}
+              />
+              {!settings.setOtherFlowRatios && (
+                <>
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Outer Wall Flow Ratio"
+                    value={settings.outerWallFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('outerWallFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Inner Wall Flow Ratio"
+                    value={settings.innerWallFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('innerWallFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Top Solid Infill Flow Ratio"
+                    value={settings.topSolidInfillFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('topSolidInfillFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Bottom Solid Infill Flow Ratio"
+                    value={settings.bottomSolidInfillFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('bottomSolidInfillFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Internal Solid Infill Flow Ratio"
+                    value={settings.internalSolidInfillFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('internalSolidInfillFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Sparse Infill Flow Ratio"
+                    value={settings.sparseInfillFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('sparseInfillFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Gap Fill Flow Ratio"
+                    value={settings.gapFillFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('gapFillFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Support Flow Ratio"
+                    value={settings.supportFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('supportFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Support Interface Flow Ratio"
+                    value={settings.supportInterfaceFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('supportInterfaceFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="Overhang Flow Ratio"
+                    value={settings.overhangFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('overhangFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<FlowIcon />}
+                    label="First Layer Flow Ratio"
+                    value={settings.firstLayerFlowRatio ?? 1.0}
+                    onChange={(v) => onUpdate('firstLayerFlowRatio', v)}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    disabled={disabled}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Per-Filament Ironing */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Per-Filament Ironing</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="number"
+                icon={<FlowIcon />}
+                label="Ironing Flow"
+                value={settings.filamentIroningFlow ?? 0.15}
+                onChange={(v) => onUpdate('filamentIroningFlow', v)}
+                min={0}
+                max={2}
+                step={0.01}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Ironing Inset"
+                value={settings.filamentIroningInset ?? 0.25}
+                onChange={(v) => onUpdate('filamentIroningInset', v)}
+                min={0}
+                max={5}
+                step={0.1}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Ironing Spacing"
+                value={settings.filamentIroningSpacing ?? 0.1}
+                onChange={(v) => onUpdate('filamentIroningSpacing', v)}
+                min={0}
+                max={2}
+                step={0.05}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Ironing Speed"
+                value={settings.filamentIroningSpeed ?? 15}
+                onChange={(v) => onUpdate('filamentIroningSpeed', v)}
+                min={5}
+                max={100}
+                step={5}
+                unit="mm/s"
+                disabled={disabled}
+              />
+            </div>
+          </div>
         </div>
       );
 
@@ -569,6 +802,78 @@ const AdvancedFilamentSettingsPanel: React.FC<{
                 unit="%"
                 disabled={disabled}
               />
+
+              {/* Advanced Cooling */}
+              <div className="py-3">
+                <h4 className="text-sm font-medium text-pf-text-primary mb-3">Advanced Cooling</h4>
+                <div className="space-y-3">
+                  <SettingRow
+                    type="number"
+                    icon={<CoolingIcon />}
+                    label="Fan Kickstart"
+                    value={settings.fanKickstart ?? 0}
+                    onChange={(v) => onUpdate('fanKickstart', v)}
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    unit="s"
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<CoolingIcon />}
+                    label="Fan Speedup Time"
+                    value={settings.fanSpeedupTime ?? 0}
+                    onChange={(v) => onUpdate('fanSpeedupTime', v)}
+                    min={0}
+                    max={10}
+                    step={0.5}
+                    unit="s"
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="checkbox"
+                    icon={<CoolingIcon />}
+                    label="Fan Speedup Overhangs"
+                    checked={settings.fanSpeedupOverhangs ?? false}
+                    onChange={(v) => onUpdate('fanSpeedupOverhangs', v)}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="slider"
+                    icon={<CoolingIcon />}
+                    label="Overhang Fan Speed"
+                    value={settings.overhangFanSpeed ?? 0}
+                    onChange={(v) => onUpdate('overhangFanSpeed', v)}
+                    min={0}
+                    max={100}
+                    step={5}
+                    unit="%"
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="text"
+                    icon={<CoolingIcon />}
+                    label="Overhang Fan Threshold"
+                    description="Overhang angle threshold"
+                    value={settings.overhangFanThreshold ?? ''}
+                    onChange={(v) => onUpdate('overhangFanThreshold', v)}
+                    disabled={disabled}
+                  />
+                  <SettingRow
+                    type="number"
+                    icon={<CoolingIcon />}
+                    label="Slow Down Layers"
+                    description="Number of initial slow layers"
+                    value={settings.slowDownLayers ?? 0}
+                    onChange={(v) => onUpdate('slowDownLayers', v)}
+                    min={0}
+                    max={20}
+                    step={1}
+                    disabled={disabled}
+                  />
+                </div>
+              </div>
             </>
           )}
         </div>
@@ -689,6 +994,63 @@ const AdvancedFilamentSettingsPanel: React.FC<{
             unit="$"
             disabled={disabled}
           />
+
+          {/* Shrinkage Compensation */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Shrinkage Compensation</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Filament Shrink XY"
+                description="XY shrinkage compensation"
+                value={settings.filamentShrink ?? 0}
+                onChange={(v) => onUpdate('filamentShrink', v)}
+                min={0}
+                max={10}
+                step={0.1}
+                unit="%"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Filament Shrinkage Compensation Z"
+                description="Z shrinkage compensation"
+                value={settings.filamentShrinkageCompensationZ ?? 0}
+                onChange={(v) => onUpdate('filamentShrinkageCompensationZ', v)}
+                min={0}
+                max={10}
+                step={0.1}
+                unit="%"
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Material Properties */}
+          <div className="py-3">
+            <div className="space-y-3">
+              <SettingRow
+                type="checkbox"
+                icon={<FilamentIcon />}
+                label="Filament Is Support"
+                description="This filament is a support material"
+                checked={settings.filamentIsSupport ?? false}
+                onChange={(v) => onUpdate('filamentIsSupport', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="checkbox"
+                icon={<FilamentIcon />}
+                label="Filament Soluble"
+                description="This filament is water/solvent soluble"
+                checked={settings.filamentSoluble ?? false}
+                onChange={(v) => onUpdate('filamentSoluble', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
         </div>
       );
 
@@ -783,6 +1145,342 @@ const AdvancedFilamentSettingsPanel: React.FC<{
             unit="s"
             disabled={disabled}
           />
+
+          {/* Metadata */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Metadata</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="text"
+                icon={<FilamentIcon />}
+                label="Filament Vendor"
+                value={settings.filamentVendor ?? ''}
+                onChange={(v) => onUpdate('filamentVendor', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="text"
+                icon={<FilamentIcon />}
+                label="Filament Notes"
+                description="Notes about this filament"
+                value={settings.filamentNotes ?? ''}
+                onChange={(v) => onUpdate('filamentNotes', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* MMU / Multi-Tool */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">MMU / Multi-Tool</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="number"
+                icon={<RetractionIcon />}
+                label="Filament Cooling Moves"
+                value={settings.filamentCoolingMoves ?? 0}
+                onChange={(v) => onUpdate('filamentCoolingMoves', v)}
+                min={0}
+                max={10}
+                step={1}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Filament Cooling Initial Speed"
+                value={settings.filamentCoolingInitialSpeed ?? 0}
+                onChange={(v) => onUpdate('filamentCoolingInitialSpeed', v)}
+                min={0}
+                max={50}
+                step={1}
+                unit="mm/s"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Filament Cooling Final Speed"
+                value={settings.filamentCoolingFinalSpeed ?? 0}
+                onChange={(v) => onUpdate('filamentCoolingFinalSpeed', v)}
+                min={0}
+                max={50}
+                step={1}
+                unit="mm/s"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<RetractionIcon />}
+                label="Filament Change Length"
+                value={settings.filamentChangeLength ?? 0}
+                onChange={(v) => onUpdate('filamentChangeLength', v)}
+                min={0}
+                max={100}
+                step={1}
+                unit="mm"
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Ramming & Stamping */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Ramming & Stamping</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Filament Stamping Distance"
+                value={settings.filamentStampingDistance ?? 0}
+                onChange={(v) => onUpdate('filamentStampingDistance', v)}
+                min={0}
+                max={50}
+                step={0.5}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Filament Stamping Loading Speed"
+                value={settings.filamentStampingLoadingSpeed ?? 0}
+                onChange={(v) => onUpdate('filamentStampingLoadingSpeed', v)}
+                min={0}
+                max={100}
+                step={5}
+                unit="mm/s"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="checkbox"
+                icon={<PrecisionIcon />}
+                label="Filament Multitool Ramming"
+                checked={settings.filamentMultitoolRamming ?? false}
+                onChange={(v) => onUpdate('filamentMultitoolRamming', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<FlowIcon />}
+                label="Filament Multitool Ramming Flow"
+                value={settings.filamentMultitoolRammingFlow ?? 0}
+                onChange={(v) => onUpdate('filamentMultitoolRammingFlow', v)}
+                min={0}
+                max={5}
+                step={0.1}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<FlowIcon />}
+                label="Filament Multitool Ramming Volume"
+                value={settings.filamentMultitoolRammingVolume ?? 0}
+                onChange={(v) => onUpdate('filamentMultitoolRammingVolume', v)}
+                min={0}
+                max={500}
+                step={10}
+                unit="mm³"
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Wipe Tower (Per-Filament) */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Wipe Tower (Per-Filament)</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="number"
+                icon={<FlowIcon />}
+                label="Filament Minimal Purge"
+                value={settings.filamentMinimalPurge ?? 0}
+                onChange={(v) => onUpdate('filamentMinimalPurge', v)}
+                min={0}
+                max={100}
+                step={1}
+                unit="mm³"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<FlowIcon />}
+                label="Wipe Tower Interface Flow Ratio"
+                value={settings.wipeTowerInterfaceFlowRatio ?? 1.0}
+                onChange={(v) => onUpdate('wipeTowerInterfaceFlowRatio', v)}
+                min={0}
+                max={2}
+                step={0.05}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Wipe Tower Interface Speed"
+                value={settings.wipeTowerInterfaceSpeed ?? 0}
+                onChange={(v) => onUpdate('wipeTowerInterfaceSpeed', v)}
+                min={0}
+                max={200}
+                step={5}
+                unit="mm/s"
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Loading / Unloading Speeds */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Loading / Unloading Speeds</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Filament Loading Speed"
+                value={settings.filamentLoadingSpeed ?? 0}
+                onChange={(v) => onUpdate('filamentLoadingSpeed', v)}
+                min={0}
+                max={100}
+                step={1}
+                unit="mm/s"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Filament Loading Speed Start"
+                value={settings.filamentLoadingSpeedStart ?? 0}
+                onChange={(v) => onUpdate('filamentLoadingSpeedStart', v)}
+                min={0}
+                max={100}
+                step={1}
+                unit="mm/s"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Filament Unloading Speed"
+                value={settings.filamentUnloadingSpeed ?? 0}
+                onChange={(v) => onUpdate('filamentUnloadingSpeed', v)}
+                min={0}
+                max={100}
+                step={1}
+                unit="mm/s"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SpeedIcon />}
+                label="Filament Unloading Speed Start"
+                value={settings.filamentUnloadingSpeedStart ?? 0}
+                onChange={(v) => onUpdate('filamentUnloadingSpeedStart', v)}
+                min={0}
+                max={100}
+                step={1}
+                unit="mm/s"
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Interlocking Beam */}
+          <div className="py-3">
+            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Interlocking Beam</h4>
+            <div className="space-y-3">
+              <SettingRow
+                type="checkbox"
+                icon={<PrecisionIcon />}
+                label="Interlocking Beam"
+                description="Enable interlocking beams between materials"
+                checked={settings.interlockingBeam ?? false}
+                onChange={(v) => onUpdate('interlockingBeam', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Interlocking Beam Layer Count"
+                value={settings.interlockingBeamLayerCount ?? 2}
+                onChange={(v) => onUpdate('interlockingBeamLayerCount', v)}
+                min={0}
+                max={20}
+                step={1}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Interlocking Beam Width"
+                value={settings.interlockingBeamWidth ?? 0.8}
+                onChange={(v) => onUpdate('interlockingBeamWidth', v)}
+                min={0}
+                max={5}
+                step={0.1}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Interlocking Boundary Avoidance"
+                value={settings.interlockingBoundaryAvoidance ?? 2}
+                onChange={(v) => onUpdate('interlockingBoundaryAvoidance', v)}
+                min={0}
+                max={5}
+                step={0.1}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Interlocking Depth"
+                value={settings.interlockingDepth ?? 0.4}
+                onChange={(v) => onUpdate('interlockingDepth', v)}
+                min={0}
+                max={5}
+                step={0.1}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<PrecisionIcon />}
+                label="Interlocking Orientation"
+                value={settings.interlockingOrientation ?? 22.5}
+                onChange={(v) => onUpdate('interlockingOrientation', v)}
+                min={0}
+                max={360}
+                step={15}
+                unit="°"
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Air Filtration */}
+          <div className="py-3">
+            <div className="space-y-3">
+              <SettingRow
+                type="checkbox"
+                icon={<CoolingIcon />}
+                label="Activate Air Filtration"
+                description="Enable air filtration during print"
+                checked={settings.activateAirFiltration ?? false}
+                onChange={(v) => onUpdate('activateAirFiltration', v)}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="text"
+                icon={<TemperatureIcon />}
+                label="Bed Temperature Formula"
+                description="Custom bed temp formula"
+                value={settings.bedTemperatureFormula ?? ''}
+                onChange={(v) => onUpdate('bedTemperatureFormula', v)}
+                disabled={disabled}
+              />
+            </div>
+          </div>
         </div>
       );
 

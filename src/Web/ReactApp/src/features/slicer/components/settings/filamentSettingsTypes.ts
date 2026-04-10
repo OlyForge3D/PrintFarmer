@@ -83,6 +83,84 @@ export interface AdvancedFilamentSettings extends BasicFilamentSettings {
   toolchangeDelay: number;          // seconds
   startGcode: string;               // filament-specific start g-code
   endGcode: string;                 // filament-specific end g-code
+
+  // Per-Feature Flow Ratios
+  outerWallFlowRatio?: number;            // multiplier
+  innerWallFlowRatio?: number;            // multiplier
+  topSolidInfillFlowRatio?: number;       // multiplier
+  bottomSolidInfillFlowRatio?: number;    // multiplier
+  internalSolidInfillFlowRatio?: number;  // multiplier
+  sparseInfillFlowRatio?: number;         // multiplier
+  gapFillFlowRatio?: number;             // multiplier
+  supportFlowRatio?: number;             // multiplier
+  supportInterfaceFlowRatio?: number;     // multiplier
+  overhangFlowRatio?: number;            // multiplier
+  firstLayerFlowRatio?: number;          // multiplier
+  setOtherFlowRatios?: boolean;          // when true, all ratios follow flowRatio
+
+  // Shrinkage Compensation
+  filamentShrink?: number;               // % XY shrinkage
+  filamentShrinkageCompensationZ?: number; // % Z shrinkage
+
+  // Advanced Cooling
+  fanKickstart?: number;                 // seconds
+  fanSpeedupTime?: number;               // seconds
+  fanSpeedupOverhangs?: boolean;
+  overhangFanSpeed?: number;             // 0-100%
+  overhangFanThreshold?: string;         // threshold description
+
+  // Filament Ironing (per-filament)
+  filamentIroningFlow?: number;          // ratio
+  filamentIroningInset?: number;         // mm
+  filamentIroningSpacing?: number;       // mm
+  filamentIroningSpeed?: number;         // mm/s
+
+  // Interlocking Beam
+  interlockingBeam?: boolean;
+  interlockingBeamLayerCount?: number;
+  interlockingBeamWidth?: number;        // mm
+  interlockingBoundaryAvoidance?: number; // mm
+  interlockingDepth?: number;            // mm
+  interlockingOrientation?: number;      // degrees
+  mmuSegmentedRegionMaxWidth?: number;   // mm
+  mmuSegmentedRegionInterlockingDepth?: number; // mm
+
+  // Cooling Moves (MMU/AMS)
+  filamentCoolingMoves?: number;
+  filamentCoolingInitialSpeed?: number;  // mm/s
+  filamentCoolingFinalSpeed?: number;    // mm/s
+
+  // Ramming & Stamping
+  filamentChangeLength?: number;         // mm
+  filamentStampingDistance?: number;      // mm
+  filamentStampingLoadingSpeed?: number; // mm/s
+  filamentMultitoolRamming?: boolean;
+  filamentMultitoolRammingFlow?: number; // ratio
+  filamentMultitoolRammingVolume?: number; // mm³
+
+  // Wipe Tower Per-Filament
+  filamentMinimalPurge?: number;         // mm³
+  wipeTowerInterfaceFlowRatio?: number;  // ratio
+  wipeTowerInterfaceSpeed?: number;      // mm/s
+  wipeTowerIroningArea?: number;         // mm²
+
+  // Metadata
+  filamentVendor?: string;
+  filamentNotes?: string;
+  filamentIsSupport?: boolean;
+  filamentSoluble?: boolean;
+
+  // Misc Advanced
+  temperatureVitrification?: number;     // °C (glass transition)
+  activateAirFiltration?: boolean;
+  bedTemperatureFormula?: string;        // formula string
+  filamentFlushTemp?: number;            // °C
+  filamentFlushVolumetricSpeed?: number; // mm³/s
+  filamentLoadingSpeed?: number;         // mm/s
+  filamentLoadingSpeedStart?: number;    // mm/s
+  filamentUnloadingSpeed?: number;       // mm/s
+  filamentUnloadingSpeedStart?: number;  // mm/s
+  slowDownLayers?: number;              // number of initial slow layers
 }
 
 /** Default values for basic filament settings */
@@ -139,6 +217,84 @@ export const DEFAULT_ADVANCED_FILAMENT_SETTINGS: AdvancedFilamentSettings = {
   toolchangeDelay: 0,
   startGcode: '',
   endGcode: '',
+
+  // Per-Feature Flow Ratios
+  outerWallFlowRatio: 1.0,
+  innerWallFlowRatio: 1.0,
+  topSolidInfillFlowRatio: 1.0,
+  bottomSolidInfillFlowRatio: 1.0,
+  internalSolidInfillFlowRatio: 1.0,
+  sparseInfillFlowRatio: 1.0,
+  gapFillFlowRatio: 1.0,
+  supportFlowRatio: 1.0,
+  supportInterfaceFlowRatio: 1.0,
+  overhangFlowRatio: 1.0,
+  firstLayerFlowRatio: 1.0,
+  setOtherFlowRatios: false,
+
+  // Shrinkage Compensation
+  filamentShrink: 0,
+  filamentShrinkageCompensationZ: 0,
+
+  // Advanced Cooling
+  fanKickstart: 0,
+  fanSpeedupTime: 0,
+  fanSpeedupOverhangs: false,
+  overhangFanSpeed: 0,
+  overhangFanThreshold: '',
+
+  // Filament Ironing
+  filamentIroningFlow: 0.15,
+  filamentIroningInset: 0.25,
+  filamentIroningSpacing: 0.1,
+  filamentIroningSpeed: 15,
+
+  // Interlocking Beam
+  interlockingBeam: false,
+  interlockingBeamLayerCount: 2,
+  interlockingBeamWidth: 0.8,
+  interlockingBoundaryAvoidance: 2,
+  interlockingDepth: 0.4,
+  interlockingOrientation: 22.5,
+  mmuSegmentedRegionMaxWidth: 0,
+  mmuSegmentedRegionInterlockingDepth: 0,
+
+  // Cooling Moves (MMU/AMS)
+  filamentCoolingMoves: 0,
+  filamentCoolingInitialSpeed: 0,
+  filamentCoolingFinalSpeed: 0,
+
+  // Ramming & Stamping
+  filamentChangeLength: 0,
+  filamentStampingDistance: 0,
+  filamentStampingLoadingSpeed: 0,
+  filamentMultitoolRamming: false,
+  filamentMultitoolRammingFlow: 0,
+  filamentMultitoolRammingVolume: 0,
+
+  // Wipe Tower Per-Filament
+  filamentMinimalPurge: 0,
+  wipeTowerInterfaceFlowRatio: 1.0,
+  wipeTowerInterfaceSpeed: 0,
+  wipeTowerIroningArea: 0,
+
+  // Metadata
+  filamentVendor: '',
+  filamentNotes: '',
+  filamentIsSupport: false,
+  filamentSoluble: false,
+
+  // Misc Advanced
+  temperatureVitrification: 0,
+  activateAirFiltration: false,
+  bedTemperatureFormula: '',
+  filamentFlushTemp: 0,
+  filamentFlushVolumetricSpeed: 0,
+  filamentLoadingSpeed: 0,
+  filamentLoadingSpeedStart: 0,
+  filamentUnloadingSpeed: 0,
+  filamentUnloadingSpeedStart: 0,
+  slowDownLayers: 0,
 };
 
 /** Material presets for quick selection */
@@ -277,4 +433,105 @@ export const FILAMENT_SETTING_TO_CATEGORY_MAP: Record<string, FilamentSettingsCa
   filamentUnloadTime: 'other',
   filamentRammingParameters: 'other',
   toolchangeDelay: 'other',
+
+  // Per-Feature Flow Ratios
+  outerWallFlowRatio: 'flow',
+  innerWallFlowRatio: 'flow',
+  topSolidInfillFlowRatio: 'flow',
+  bottomSolidInfillFlowRatio: 'flow',
+  internalSolidInfillFlowRatio: 'flow',
+  sparseInfillFlowRatio: 'flow',
+  gapFillFlowRatio: 'flow',
+  supportFlowRatio: 'flow',
+  supportInterfaceFlowRatio: 'flow',
+  overhangFlowRatio: 'flow',
+  firstLayerFlowRatio: 'flow',
+  setOtherFlowRatios: 'flow',
+
+  // Shrinkage Compensation
+  filamentShrink: 'physical',
+  filamentShrinkageCompensationZ: 'physical',
+
+  // Advanced Cooling
+  fanKickstart: 'cooling',
+  fanSpeedupTime: 'cooling',
+  fanSpeedupOverhangs: 'cooling',
+  overhangFanSpeed: 'cooling',
+  overhangFanThreshold: 'cooling',
+  slowDownLayers: 'cooling',
+
+  // Filament Ironing
+  filamentIroningFlow: 'flow',
+  filamentIroningInset: 'flow',
+  filamentIroningSpacing: 'flow',
+  filamentIroningSpeed: 'flow',
+
+  // Interlocking Beam
+  interlockingBeam: 'other',
+  interlockingBeamLayerCount: 'other',
+  interlockingBeamWidth: 'other',
+  interlockingBoundaryAvoidance: 'other',
+  interlockingDepth: 'other',
+  interlockingOrientation: 'other',
+  mmuSegmentedRegionMaxWidth: 'other',
+  mmuSegmentedRegionInterlockingDepth: 'other',
+
+  // Cooling Moves (MMU/AMS)
+  filamentCoolingMoves: 'other',
+  filamentCoolingInitialSpeed: 'other',
+  filamentCoolingFinalSpeed: 'other',
+
+  // Ramming & Stamping
+  filamentChangeLength: 'other',
+  filamentStampingDistance: 'other',
+  filamentStampingLoadingSpeed: 'other',
+  filamentMultitoolRamming: 'other',
+  filamentMultitoolRammingFlow: 'other',
+  filamentMultitoolRammingVolume: 'other',
+
+  // Wipe Tower Per-Filament
+  filamentMinimalPurge: 'other',
+  wipeTowerInterfaceFlowRatio: 'other',
+  wipeTowerInterfaceSpeed: 'other',
+  wipeTowerIroningArea: 'other',
+
+  // Metadata
+  filamentVendor: 'other',
+  filamentNotes: 'other',
+  filamentIsSupport: 'other',
+  filamentSoluble: 'other',
+
+  // Misc Advanced – temperature-related
+  temperatureVitrification: 'temperature',
+  filamentFlushTemp: 'temperature',
+  filamentFlushVolumetricSpeed: 'temperature',
+
+  // Misc Advanced – other
+  activateAirFiltration: 'other',
+  bedTemperatureFormula: 'other',
+  filamentLoadingSpeed: 'other',
+  filamentLoadingSpeedStart: 'other',
+  filamentUnloadingSpeed: 'other',
+  filamentUnloadingSpeedStart: 'other',
+};
+
+/**
+ * Maps filament settings to their OrcaSlicer mode (comSimple/comAdvanced).
+ * Settings in 'simple' mode are shown in Basic view.
+ * Settings in 'advanced' mode are shown only in Advanced view.
+ */
+export const FILAMENT_SETTING_MODE_MAP: Record<string, 'simple' | 'advanced'> = {
+  // Simple (Basic) settings
+  name: 'simple',
+  material: 'simple',
+  color: 'simple',
+  nozzleTemperature: 'simple',
+  bedTemperature: 'simple',
+  density: 'simple',
+  cost: 'simple',
+  flowRatio: 'simple',
+  enableFanCooling: 'simple',
+  minFanSpeed: 'simple',
+  maxFanSpeed: 'simple',
+  // Everything else is advanced
 };
