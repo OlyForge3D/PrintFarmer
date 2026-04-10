@@ -40,6 +40,36 @@ export type SeamPosition = 'random' | 'aligned' | 'back' | 'nearest';
 /** Scarf joint seam options */
 export type ScarfJointSeam = 'none' | 'contour' | 'all';
 
+/** Wall generator types */
+export type WallGenerator = 'classic' | 'arachne';
+
+/** Wall printing sequence */
+export type WallSequence = 'inner wall/outer wall' | 'outer wall/inner wall' | 'inner-outer-inner wall';
+
+/** Ironing type options */
+export type IroningType = 'no_ironing' | 'top' | 'topmost' | 'all_solid';
+
+/** Brim type options */
+export type BrimType = 'no_brim' | 'outer_only' | 'inner_only' | 'outer_and_inner' | 'auto_brim';
+
+/** Support style options */
+export type SupportStyle = 'default' | 'grid' | 'snug' | 'organic';
+
+/** Fuzzy skin mode options */
+export type FuzzySkinMode = 'none' | 'external' | 'all';
+
+/** Fuzzy skin noise type */
+export type FuzzySkinNoiseType = 'classic' | 'perlin';
+
+/** Gap fill target options */
+export type GapFillTarget = 'everywhere' | 'topbottom' | 'nowhere';
+
+/** Slicing mode options */
+export type SlicingMode = 'regular' | 'even_odd' | 'close_holes';
+
+/** OrcaSlicer setting mode - matches comSimple/comAdvanced from PrintConfig.cpp */
+export type OrcaSettingMode = 'simple' | 'advanced' | 'develop';
+
 /** Basic settings - shown in Basic mode */
 export interface BasicSlicerSettings {
   infillDensity: number;           // 0-100%
@@ -193,6 +223,203 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
   // Overhangs settings
   overhangAngle?: number;
   overhangPerimeterSpeed?: number;
+
+  // =========================================================================
+  // OrcaSlicer Process Settings — Full Parity
+  // All properties below match OrcaSlicer PrintConfig.cpp definitions.
+  // Optional because not all backends populate every setting.
+  // =========================================================================
+
+  // --- Quality: Simple mode settings ---
+  firstLayerSequenceChoice?: string;
+  onlyOneWallFirstLayer?: boolean;
+  onlyOneWallTop?: boolean;
+  otherLayersSequenceChoice?: string;
+  treeSupportAutoBrim?: boolean;
+  treeSupportBrimWidth?: number;
+
+  // --- Quality: Advanced mode settings ---
+  bridgeFlow?: number;
+  counterboreHoleBridging?: string;
+  detectOverhangWall?: boolean;
+  dontFilterInternalBridges?: boolean;
+  enableExtraBridgeLayer?: boolean;
+  extraPerimetersOnOverhangs?: boolean;
+  filamentIroningFlow?: number;
+  filamentIroningInset?: number;
+  filamentIroningSpacing?: number;
+  holeToPolyholeTwisted?: boolean;
+  initialLayerMinBeadWidth?: number;
+  interfaceShells?: boolean;
+  internalBridgeFlow?: number;
+  ironingAngleFixed?: number;
+  ironingInset?: number;
+  ironingType?: IroningType;
+  isInfillFirst?: boolean;
+  makeOverhangPrintable?: boolean;
+  makeOverhangPrintableAngle?: number;
+  makeOverhangPrintableHoleSize?: number;
+  maxTravelDetourDistance?: number;
+  minBeadWidth?: number;
+  minFeatureSize?: number;
+  minLengthFactor?: number;
+  minWidthTopSurface?: number;
+  overhangReverse?: boolean;
+  overhangReverseInternalOnly?: boolean;
+  overhangReverseThreshold?: number;
+  printFlowRatio?: number;
+  reduceCrossingWall?: boolean;
+  smallAreaInfillFlowCompensation?: boolean;
+  thickBridges?: boolean;
+  thickInternalBridges?: boolean;
+  wallDirection?: string;
+  wallDistributionCount?: number;
+  wallGenerator?: WallGenerator;
+  wallSequence?: WallSequence;
+  wallTransitionAngle?: number;
+  wallTransitionFilterDeviation?: number;
+  wallTransitionLength?: number;
+
+  // --- Strength: Simple mode settings ---
+  bottomShellThickness?: number;
+  bottomSurfaceDensity?: number;
+  bottomSurfacePattern?: string;
+  fillMultiline?: boolean;
+  internalSolidInfillPattern?: string;
+  topShellThickness?: number;
+  topSurfaceDensity?: number;
+
+  // --- Strength: Advanced mode settings ---
+  alignInfillDirectionToModel?: boolean;
+  alternateExtraWall?: boolean;
+  bridgeAngle?: number;
+  bridgeDensity?: number;
+  detectNarrowInternalSolidInfill?: boolean;
+  detectThinWall?: boolean;
+  ensureVerticalShellThickness?: string;
+  extraSolidInfills?: boolean;
+  gapFillTarget?: GapFillTarget;
+  infillCombination?: boolean;
+  infillCombinationMaxLayerHeight?: number;
+  infillDirection?: number;
+  infillLockDepth?: number;
+  infillOverhangAngle?: number;
+  infillShiftStep?: number;
+  internalBridgeAngle?: number;
+  internalBridgeDensity?: number;
+  lateralLatticeAngle1?: number;
+  lateralLatticeAngle2?: number;
+  minimumSparseInfillArea?: number;
+  skeletonInfillDensity?: number;
+  skeletonInfillLineWidth?: number;
+  skinInfillDensity?: number;
+  skinInfillDepth?: number;
+  skinInfillLineWidth?: number;
+  solidInfillDirection?: number;
+  solidInfillRotateTemplate?: boolean;
+  sparseInfillRotateTemplate?: boolean;
+  symmetricInfillYAxis?: boolean;
+  topBottomInfillWallOverlap?: number;
+
+  // --- Speed: Advanced mode settings (ALL speed settings are Advanced in OrcaSlicer) ---
+  accelToDecelEnable?: boolean;
+  accelToDecelFactor?: number;
+  bridgeAcceleration?: number;
+  bridgeSpeed?: number;
+  defaultJerk?: number;
+  defaultJunctionDeviation?: number;
+  enableOverhangSpeed?: boolean;
+  filamentIroningSpeed?: number;
+  gapInfillSpeed?: number;
+  infillJerk?: number;
+  initialLayerAcceleration?: number;
+  initialLayerJerk?: number;
+  initialLayerTravelSpeed?: number;
+  innerWallJerk?: number;
+  internalBridgeSpeed?: number;
+  internalSolidInfillAcceleration?: number;
+  outerWallJerk?: number;
+  overhang1_4Speed?: number;
+  overhang2_4Speed?: number;
+  overhang3_4Speed?: number;
+  overhang4_4Speed?: number;
+  slowDownLayers?: number;
+  slowdownForCurledPerimeters?: boolean;
+  smallPerimeterSpeed?: number;
+  smallPerimeterThreshold?: number;
+  supportInterfaceSpeed?: number;
+  supportSpeed?: number;
+  topSurfaceJerk?: number;
+  travelJerk?: number;
+
+  // --- Support: Simple mode settings ---
+  brimType?: BrimType;
+  brimWidth?: number;
+  supportFilament?: number;
+  supportInterfaceNotForBody?: boolean;
+  supportOnBuildPlateOnly?: boolean;
+  supportThresholdOverlap?: number;
+
+  // --- Support: Advanced mode settings ---
+  bridgeNoSupport?: boolean;
+  brimEars?: boolean;
+  brimEarsDetectionLength?: number;
+  brimEarsMaxAngle?: number;
+  brimObjectGap?: number;
+  brimUseEfcOutline?: boolean;
+  combineBrims?: boolean;
+  independentSupportLayerHeight?: boolean;
+  raftContactDistance?: number;
+  raftExpansion?: number;
+  raftFirstLayerDensity?: number;
+  raftFirstLayerExpansion?: number;
+  raftLayers?: number;
+  skirtStartAngle?: number;
+  supportBasePattern?: string;
+  supportBasePatternSpacing?: number;
+  supportBottomInterfaceSpacing?: number;
+  supportCriticalRegionsOnly?: boolean;
+  supportExpansion?: number;
+  supportInterfaceBottomLayers?: number;
+  supportInterfaceFilament?: number;
+  supportInterfaceLoopPattern?: boolean;
+  supportInterfacePattern?: string;
+  supportInterfaceSpacing?: number;
+  supportIroning?: boolean;
+  supportIroningFlow?: number;
+  supportIroningPattern?: string;
+  supportIroningSpacing?: number;
+  supportObjectFirstLayerGap?: number;
+  supportRemoveSmallOverhang?: boolean;
+  supportStyle?: SupportStyle;
+  treeSupportAngleSlow?: number;
+  treeSupportBranchAngle?: number;
+  treeSupportBranchAngleOrganic?: number;
+  treeSupportBranchDiameter?: number;
+  treeSupportBranchDiameterAngle?: number;
+  treeSupportBranchDiameterOrganic?: number;
+  treeSupportBranchDistance?: number;
+  treeSupportBranchDistanceOrganic?: number;
+  treeSupportTipDiameter?: number;
+  treeSupportTopRate?: number;
+  treeSupportWallCount?: number;
+  treeSupportWithInfill?: boolean;
+
+  // --- Others: Simple mode settings (Fuzzy Skin) ---
+  fuzzySkin?: boolean;
+  fuzzySkinFirstLayer?: boolean;
+  fuzzySkinMode?: FuzzySkinMode;
+  fuzzySkinNoiseType?: FuzzySkinNoiseType;
+  fuzzySkinPointDistance?: number;
+  fuzzySkinThickness?: number;
+
+  // --- Others: Advanced mode settings ---
+  fuzzySkinOctaves?: number;
+  fuzzySkinPersistence?: number;
+  fuzzySkinScale?: number;
+
+  // --- Other: Advanced ---
+  slicingMode?: SlicingMode;
 }
 
 /** Default values for basic settings */
@@ -470,6 +697,244 @@ export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
   bridgeSpeedReduction: 'quality',
   overhangAngle: 'quality',
   overhangPerimeterSpeed: 'quality',
+
+  // Quality — new OrcaSlicer settings
+  firstLayerSequenceChoice: 'quality',
+  onlyOneWallFirstLayer: 'quality',
+  onlyOneWallTop: 'quality',
+  otherLayersSequenceChoice: 'quality',
+  treeSupportAutoBrim: 'quality',
+  treeSupportBrimWidth: 'quality',
+  bridgeFlow: 'quality',
+  counterboreHoleBridging: 'quality',
+  detectOverhangWall: 'quality',
+  dontFilterInternalBridges: 'quality',
+  enableExtraBridgeLayer: 'quality',
+  extraPerimetersOnOverhangs: 'quality',
+  filamentIroningFlow: 'quality',
+  filamentIroningInset: 'quality',
+  filamentIroningSpacing: 'quality',
+  holeToPolyholeTwisted: 'quality',
+  initialLayerMinBeadWidth: 'quality',
+  interfaceShells: 'quality',
+  internalBridgeFlow: 'quality',
+  ironingAngleFixed: 'quality',
+  ironingInset: 'quality',
+  ironingType: 'quality',
+  isInfillFirst: 'quality',
+  makeOverhangPrintable: 'quality',
+  makeOverhangPrintableAngle: 'quality',
+  makeOverhangPrintableHoleSize: 'quality',
+  maxTravelDetourDistance: 'quality',
+  minBeadWidth: 'quality',
+  minFeatureSize: 'quality',
+  minLengthFactor: 'quality',
+  minWidthTopSurface: 'quality',
+  overhangReverse: 'quality',
+  overhangReverseInternalOnly: 'quality',
+  overhangReverseThreshold: 'quality',
+  printFlowRatio: 'quality',
+  reduceCrossingWall: 'quality',
+  smallAreaInfillFlowCompensation: 'quality',
+  thickBridges: 'quality',
+  thickInternalBridges: 'quality',
+  wallDirection: 'quality',
+  wallDistributionCount: 'quality',
+  wallGenerator: 'quality',
+  wallSequence: 'quality',
+  wallTransitionAngle: 'quality',
+  wallTransitionFilterDeviation: 'quality',
+  wallTransitionLength: 'quality',
+
+  // Strength — new OrcaSlicer settings
+  bottomShellThickness: 'strength',
+  bottomSurfaceDensity: 'strength',
+  bottomSurfacePattern: 'strength',
+  fillMultiline: 'strength',
+  internalSolidInfillPattern: 'strength',
+  topShellThickness: 'strength',
+  topSurfaceDensity: 'strength',
+  alignInfillDirectionToModel: 'strength',
+  alternateExtraWall: 'strength',
+  bridgeAngle: 'strength',
+  bridgeDensity: 'strength',
+  detectNarrowInternalSolidInfill: 'strength',
+  detectThinWall: 'strength',
+  ensureVerticalShellThickness: 'strength',
+  extraSolidInfills: 'strength',
+  gapFillTarget: 'strength',
+  infillCombination: 'strength',
+  infillCombinationMaxLayerHeight: 'strength',
+  infillDirection: 'strength',
+  infillLockDepth: 'strength',
+  infillOverhangAngle: 'strength',
+  infillShiftStep: 'strength',
+  internalBridgeAngle: 'strength',
+  internalBridgeDensity: 'strength',
+  lateralLatticeAngle1: 'strength',
+  lateralLatticeAngle2: 'strength',
+  minimumSparseInfillArea: 'strength',
+  skeletonInfillDensity: 'strength',
+  skeletonInfillLineWidth: 'strength',
+  skinInfillDensity: 'strength',
+  skinInfillDepth: 'strength',
+  skinInfillLineWidth: 'strength',
+  solidInfillDirection: 'strength',
+  solidInfillRotateTemplate: 'strength',
+  sparseInfillRotateTemplate: 'strength',
+  symmetricInfillYAxis: 'strength',
+  topBottomInfillWallOverlap: 'strength',
+
+  // Speed — new OrcaSlicer settings
+  accelToDecelEnable: 'speed',
+  accelToDecelFactor: 'speed',
+  bridgeAcceleration: 'speed',
+  bridgeSpeed: 'speed',
+  defaultJerk: 'speed',
+  defaultJunctionDeviation: 'speed',
+  enableOverhangSpeed: 'speed',
+  filamentIroningSpeed: 'speed',
+  gapInfillSpeed: 'speed',
+  infillJerk: 'speed',
+  initialLayerAcceleration: 'speed',
+  initialLayerJerk: 'speed',
+  initialLayerTravelSpeed: 'speed',
+  innerWallJerk: 'speed',
+  internalBridgeSpeed: 'speed',
+  internalSolidInfillAcceleration: 'speed',
+  outerWallJerk: 'speed',
+  overhang1_4Speed: 'speed',
+  overhang2_4Speed: 'speed',
+  overhang3_4Speed: 'speed',
+  overhang4_4Speed: 'speed',
+  slowDownLayers: 'speed',
+  slowdownForCurledPerimeters: 'speed',
+  smallPerimeterSpeed: 'speed',
+  smallPerimeterThreshold: 'speed',
+  supportInterfaceSpeed: 'speed',
+  supportSpeed: 'speed',
+  topSurfaceJerk: 'speed',
+  travelJerk: 'speed',
+
+  // Support — new OrcaSlicer settings
+  brimType: 'support',
+  brimWidth: 'support',
+  supportFilament: 'support',
+  supportInterfaceNotForBody: 'support',
+  supportOnBuildPlateOnly: 'support',
+  supportThresholdOverlap: 'support',
+  bridgeNoSupport: 'support',
+  brimEars: 'support',
+  brimEarsDetectionLength: 'support',
+  brimEarsMaxAngle: 'support',
+  brimObjectGap: 'support',
+  brimUseEfcOutline: 'support',
+  combineBrims: 'support',
+  independentSupportLayerHeight: 'support',
+  raftContactDistance: 'support',
+  raftExpansion: 'support',
+  raftFirstLayerDensity: 'support',
+  raftFirstLayerExpansion: 'support',
+  raftLayers: 'support',
+  skirtStartAngle: 'support',
+  supportBasePattern: 'support',
+  supportBasePatternSpacing: 'support',
+  supportBottomInterfaceSpacing: 'support',
+  supportCriticalRegionsOnly: 'support',
+  supportExpansion: 'support',
+  supportInterfaceBottomLayers: 'support',
+  supportInterfaceFilament: 'support',
+  supportInterfaceLoopPattern: 'support',
+  supportInterfacePattern: 'support',
+  supportInterfaceSpacing: 'support',
+  supportIroning: 'support',
+  supportIroningFlow: 'support',
+  supportIroningPattern: 'support',
+  supportIroningSpacing: 'support',
+  supportObjectFirstLayerGap: 'support',
+  supportRemoveSmallOverhang: 'support',
+  supportStyle: 'support',
+  treeSupportAngleSlow: 'support',
+  treeSupportBranchAngle: 'support',
+  treeSupportBranchAngleOrganic: 'support',
+  treeSupportBranchDiameter: 'support',
+  treeSupportBranchDiameterAngle: 'support',
+  treeSupportBranchDiameterOrganic: 'support',
+  treeSupportBranchDistance: 'support',
+  treeSupportBranchDistanceOrganic: 'support',
+  treeSupportTipDiameter: 'support',
+  treeSupportTopRate: 'support',
+  treeSupportWallCount: 'support',
+  treeSupportWithInfill: 'support',
+
+  // Others — new OrcaSlicer settings (Fuzzy Skin)
+  fuzzySkin: 'other',
+  fuzzySkinFirstLayer: 'other',
+  fuzzySkinMode: 'other',
+  fuzzySkinNoiseType: 'other',
+  fuzzySkinPointDistance: 'other',
+  fuzzySkinThickness: 'other',
+  fuzzySkinOctaves: 'other',
+  fuzzySkinPersistence: 'other',
+  fuzzySkinScale: 'other',
+  slicingMode: 'other',
+};
+
+/**
+ * Maps each setting to its OrcaSlicer mode (simple/advanced/develop).
+ * Settings NOT in this map default to 'advanced'.
+ * Source: OrcaSlicer PrintConfig.cpp def->mode values.
+ */
+export const SETTING_MODE_MAP: Record<string, OrcaSettingMode> = {
+  // Quality — Simple (comSimple)
+  layerHeight: 'simple',
+  firstLayerHeight: 'simple',
+  seamPosition: 'simple',
+  preciseWall: 'simple',
+  firstLayerSequenceChoice: 'simple',
+  onlyOneWallFirstLayer: 'simple',
+  onlyOneWallTop: 'simple',
+  otherLayersSequenceChoice: 'simple',
+  treeSupportAutoBrim: 'simple',
+  treeSupportBrimWidth: 'simple',
+
+  // Strength — Simple
+  infillDensity: 'simple',
+  infillPattern: 'simple',
+  wallCount: 'simple',
+  topLayers: 'simple',
+  bottomLayers: 'simple',
+  bottomShellThickness: 'simple',
+  bottomSurfaceDensity: 'simple',
+  bottomSurfacePattern: 'simple',
+  fillMultiline: 'simple',
+  internalSolidInfillPattern: 'simple',
+  topShellThickness: 'simple',
+  topSurfaceDensity: 'simple',
+
+  // Speed — NO simple settings (all are Advanced in OrcaSlicer)
+
+  // Support — Simple
+  enableSupports: 'simple',
+  supportType: 'simple',
+  supportAngle: 'simple',
+  brimType: 'simple',
+  brimWidth: 'simple',
+  supportFilament: 'simple',
+  supportInterfaceNotForBody: 'simple',
+  supportOnBuildPlateOnly: 'simple',
+  supportThresholdOverlap: 'simple',
+
+  // Others — Simple (Fuzzy Skin)
+  fuzzySkin: 'simple',
+  fuzzySkinFirstLayer: 'simple',
+  fuzzySkinMode: 'simple',
+  fuzzySkinNoiseType: 'simple',
+  fuzzySkinPointDistance: 'simple',
+  fuzzySkinThickness: 'simple',
+
+  // Develop mode (2 settings)
+  scarfJointFlowRatio: 'develop',
 };
 
 /**
