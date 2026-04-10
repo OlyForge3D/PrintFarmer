@@ -1576,7 +1576,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         return null;
     }
 
-    private static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
+    internal static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
     {
         Dictionary<string, object> dict = [];
         try

@@ -1,12 +1,14 @@
-using System.Text.Json;
+﻿using System.Text.Json;
+using Farm.OrcaSlicer.Worker.Services;
 using FluentAssertions;
 using Xunit;
 
 namespace Farm.OrcaSlicer.Worker.Tests;
 
 /// <summary>
-/// Tests the exact serialization path: JSON profile → SerializeElementToDict → SettingsDictToNativeJson → file output.
-/// Validates the output matches native OrcaSlicer profile format.
+/// Tests the REAL production serialization path:
+/// OrcaProfilesService.SerializeElementToDict → OrcaSlicingPipelineService.SettingsDictToNativeJson.
+/// These are the actual methods that run in the container.
 /// </summary>
 public class SettingsSerializationTests
 {
@@ -63,70 +65,20 @@ public class SettingsSerializationTests
         """;
 
     /// <summary>
-    /// Reproduces the exact code path: parse JSON → SerializeElementToDict → SettingsDictToNativeJson.
-    /// These are private static methods, so we duplicate the logic here for testing.
+    /// Helper: runs the REAL production code path end-to-end.
     /// </summary>
-    private static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
+    private static string RoundTrip(string inputJson)
     {
-        Dictionary<string, object> dict = [];
-        if (elem.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty prop in elem.EnumerateObject())
-            {
-                dict[prop.Name] = prop.Value.ValueKind switch
-                {
-                    JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
-                    JsonValueKind.Array => prop.Value.Clone(),
-                    JsonValueKind.True => "1",
-                    JsonValueKind.False => "0",
-                    JsonValueKind.Number => prop.Value.GetRawText(),
-                    _ => prop.Value.GetRawText()
-                };
-            }
-        }
-
-        return dict;
-    }
-
-    private static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
-    {
-        if (settings == null || settings.Count == 0)
-        {
-            return "{}";
-        }
-
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
-        {
-            writer.WriteStartObject();
-            foreach (KeyValuePair<string, object> kvp in settings)
-            {
-                writer.WritePropertyName(kvp.Key);
-
-                if (kvp.Value is JsonElement jsonElem)
-                {
-                    jsonElem.WriteTo(writer);
-                }
-                else
-                {
-                    writer.WriteStringValue(kvp.Value?.ToString() ?? string.Empty);
-                }
-            }
-
-            writer.WriteEndObject();
-        }
-
-        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+        using JsonDocument doc = JsonDocument.Parse(inputJson);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+        return OrcaSlicingPipelineService.SettingsDictToNativeJson(settings);
     }
 
     [Fact]
     public void ProcessProfile_StringValues_NotDoubleQuoted()
     {
-        using JsonDocument doc = JsonDocument.Parse(SampleProcessProfile);
-        Dictionary<string, object> settings = SerializeElementToDict(doc.RootElement);
-        string json = SettingsDictToNativeJson(settings);
+        string json = RoundTrip(SampleProcessProfile);
 
-        // Parse the output and verify values are clean strings, not double-quoted
         using JsonDocument output = JsonDocument.Parse(json);
         JsonElement root = output.RootElement;
 
@@ -143,9 +95,7 @@ public class SettingsSerializationTests
     [Fact]
     public void ProcessProfile_PercentageValues_PreservedAsIs()
     {
-        using JsonDocument doc = JsonDocument.Parse(SampleProcessProfile);
-        Dictionary<string, object> settings = SerializeElementToDict(doc.RootElement);
-        string json = SettingsDictToNativeJson(settings);
+        string json = RoundTrip(SampleProcessProfile);
 
         using JsonDocument output = JsonDocument.Parse(json);
         JsonElement root = output.RootElement;
@@ -159,22 +109,17 @@ public class SettingsSerializationTests
     [Fact]
     public void ProcessProfile_Arrays_RemainNativeJsonArrays()
     {
-        using JsonDocument doc = JsonDocument.Parse(SampleProcessProfile);
-        Dictionary<string, object> settings = SerializeElementToDict(doc.RootElement);
-        string json = SettingsDictToNativeJson(settings);
+        string json = RoundTrip(SampleProcessProfile);
 
         using JsonDocument output = JsonDocument.Parse(json);
         JsonElement root = output.RootElement;
 
-        // compatible_printers should be an array, not a string
         root.GetProperty("compatible_printers").ValueKind.Should().Be(JsonValueKind.Array);
         root.GetProperty("compatible_printers")[0].GetString().Should().Be("Phrozen Arco 0.4 nozzle");
 
-        // post_process should be an empty array
         root.GetProperty("post_process").ValueKind.Should().Be(JsonValueKind.Array);
         root.GetProperty("post_process").GetArrayLength().Should().Be(0);
 
-        // wiping_volumes_extruders should be an array of strings
         root.GetProperty("wiping_volumes_extruders").ValueKind.Should().Be(JsonValueKind.Array);
         root.GetProperty("wiping_volumes_extruders")[0].GetString().Should().Be("70");
     }
@@ -182,24 +127,19 @@ public class SettingsSerializationTests
     [Fact]
     public void MachineProfile_AllValueTypes_CorrectFormat()
     {
-        using JsonDocument doc = JsonDocument.Parse(SampleMachineProfile);
-        Dictionary<string, object> settings = SerializeElementToDict(doc.RootElement);
-        string json = SettingsDictToNativeJson(settings);
+        string json = RoundTrip(SampleMachineProfile);
 
         using JsonDocument output = JsonDocument.Parse(json);
         JsonElement root = output.RootElement;
 
-        // String values
         root.GetProperty("adaptive_bed_mesh_margin").GetString().Should().Be("0");
         root.GetProperty("auxiliary_fan").GetString().Should().Be("1");
         root.GetProperty("z_offset").GetString().Should().Be("0");
         root.GetProperty("gcode_flavor").GetString().Should().Be("klipper");
 
-        // Array values - nozzle_diameter
         root.GetProperty("nozzle_diameter").ValueKind.Should().Be(JsonValueKind.Array);
         root.GetProperty("nozzle_diameter")[0].GetString().Should().Be("0.4");
 
-        // printable_area - array of coordinate strings
         root.GetProperty("printable_area").ValueKind.Should().Be(JsonValueKind.Array);
         root.GetProperty("printable_area")[0].GetString().Should().Be("0x0");
     }
@@ -207,12 +147,8 @@ public class SettingsSerializationTests
     [Fact]
     public void Output_NoBackslashQuotes_InRawJson()
     {
-        using JsonDocument doc = JsonDocument.Parse(SampleProcessProfile);
-        Dictionary<string, object> settings = SerializeElementToDict(doc.RootElement);
-        string json = SettingsDictToNativeJson(settings);
+        string json = RoundTrip(SampleProcessProfile);
 
-        // The raw JSON string should never contain \" inside values
-        // (backslash-quote indicates double-quoting bug)
         json.Should().NotContain("\\u0022", "no unicode-escaped quotes");
         json.Should().NotContain("\\\"", "no backslash-escaped quotes inside values");
     }
@@ -220,14 +156,38 @@ public class SettingsSerializationTests
     [Fact]
     public void Output_MatchesNativeOrcaSlicerFormat()
     {
-        using JsonDocument doc = JsonDocument.Parse(SampleProcessProfile);
-        Dictionary<string, object> settings = SerializeElementToDict(doc.RootElement);
-        string json = SettingsDictToNativeJson(settings);
+        string json = RoundTrip(SampleProcessProfile);
 
-        // Spot-check that specific lines match OrcaSlicer native format
         json.Should().Contain("\"accel_to_decel_factor\": \"50%\"");
         json.Should().Contain("\"accel_to_decel_enable\": \"1\"");
         json.Should().Contain("\"default_acceleration\": \"10000\"");
         json.Should().Contain("\"sparse_infill_pattern\": \"crosshatch\"");
+    }
+
+    [Fact]
+    public void Output_WrittenToFile_MatchesNativeFormat()
+    {
+        // Simulate the EXACT file-writing path the worker uses
+        string json = RoundTrip(SampleProcessProfile);
+
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempFile, json);
+            string fileContent = File.ReadAllText(tempFile);
+
+            // Verify the file content byte-for-byte
+            fileContent.Should().Contain("\"accel_to_decel_factor\": \"50%\"");
+            fileContent.Should().NotContain("\\u0022");
+            fileContent.Should().NotContain("\\\"");
+
+            // Verify it's valid JSON that round-trips cleanly
+            using JsonDocument reparsed = JsonDocument.Parse(fileContent);
+            reparsed.RootElement.GetProperty("accel_to_decel_factor").GetString().Should().Be("50%");
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 }

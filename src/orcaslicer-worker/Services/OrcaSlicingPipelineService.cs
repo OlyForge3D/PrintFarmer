@@ -342,7 +342,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// Values are stored as plain strings (from GetString()), arrays (as JsonElement),
     /// or raw number text. OrcaSlicer expects all scalars as JSON strings.
     /// </summary>
-    private static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
+    internal static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
     {
         if (settings == null || settings.Count == 0)
         {
