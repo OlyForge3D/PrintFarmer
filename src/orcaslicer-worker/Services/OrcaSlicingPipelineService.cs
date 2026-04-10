@@ -338,9 +338,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private static partial Regex MyRegex();
 
     /// <summary>
-    /// Converts a Settings dictionary (where values are raw JSON text strings from GetRawText())
-    /// back into proper JSON. The values are already valid JSON fragments (e.g. "\"50%\"" for
-    /// a string, "[\"0.4\"]" for an array), so we write them directly using WriteRawValue.
+    /// Converts a Settings dictionary to JSON for OrcaSlicer --load-settings.
+    /// Values are stored as plain strings (from GetString()), arrays (as JsonElement),
+    /// or raw number text. OrcaSlicer expects all scalars as JSON strings.
     /// </summary>
     private static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
     {
@@ -356,19 +356,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             foreach (KeyValuePair<string, object> kvp in settings)
             {
                 writer.WritePropertyName(kvp.Key);
-                string rawValue = kvp.Value?.ToString() ?? "null";
 
-                // The value is raw JSON text from GetRawText().
-                // It's already a valid JSON fragment: "\"50%\"", "\"0\"", "[\"0.4\"]", etc.
-                // WriteRawValue writes it directly without any escaping.
-                try
+                if (kvp.Value is JsonElement jsonElem)
                 {
-                    writer.WriteRawValue(rawValue);
+                    // Arrays stored as cloned JsonElement
+                    jsonElem.WriteTo(writer);
                 }
-                catch (JsonException)
+                else
                 {
-                    // If the raw value isn't valid JSON, wrap it as a string
-                    writer.WriteStringValue(rawValue);
+                    // Strings and numbers — write as JSON string value
+                    writer.WriteStringValue(kvp.Value?.ToString() ?? string.Empty);
                 }
             }
 
