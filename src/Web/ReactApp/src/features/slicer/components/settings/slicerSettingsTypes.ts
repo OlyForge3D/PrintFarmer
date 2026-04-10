@@ -268,7 +268,7 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
   smallAreaInfillFlowCompensation?: boolean;
   thickBridges?: boolean;
   thickInternalBridges?: boolean;
-  wallDirection?: string;
+  wallDirection?: number;
   wallDistributionCount?: number;
   wallGenerator?: WallGenerator;
   wallSequence?: WallSequence;

@@ -430,7 +430,7 @@ export const OrcaSlicerPage: React.FC = () => {
               <SlicerSettingsPanel
                 settings={slicerSettings}
                 onChange={handleSlicerSettingsChange}
-                initialViewMode="basic"
+                initialViewMode="simple"
               />
             </div>
 

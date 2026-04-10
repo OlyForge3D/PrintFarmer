@@ -956,7 +956,7 @@ export const NewSliceJobPage: React.FC = () => {
     selectedModelId,
   ]);
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     submitSliceJob();
   };
@@ -1431,7 +1431,7 @@ export const NewSliceJobPage: React.FC = () => {
             <SlicerSettingsPanel
               settings={slicerSettings}
               onChange={handleSlicerSettingsChange}
-              initialViewMode="basic"
+              initialViewMode="simple"
               advancedSettings={advancedProcessSettings}
               onAdvancedSettingsChange={setAdvancedProcessSettings}
             />
@@ -1577,7 +1577,7 @@ export const NewSliceJobPage: React.FC = () => {
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
           (selectedFilamentProfile ?? null)
         }
-        onSaveSuccess={(profileId, profileName) => {
+        onSaveSuccess={(_profileId, profileName) => {
           // Invalidate custom profiles cache
           qc.invalidateQueries({ queryKey: ['customProfiles'] });
           // Show success message
