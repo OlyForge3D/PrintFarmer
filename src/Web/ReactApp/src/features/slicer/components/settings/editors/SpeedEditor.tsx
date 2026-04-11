@@ -5,15 +5,15 @@
 import React from 'react';
 import { SettingRow, SettingSection } from '../SettingRow';
 import { SpeedIcon } from '../SlicerSettingIcons';
-import type { AdvancedSlicerSettings } from '../slicerSettingsTypes';
+import type { OrcaProcessSettings } from '../slicerSettingsTypes';
 
 interface SpeedEditorProps {
-  settings: AdvancedSlicerSettings;
-  onChange: <K extends keyof AdvancedSlicerSettings>(key: K, value: AdvancedSlicerSettings[K]) => void;
+  settings: OrcaProcessSettings;
+  onChange: <K extends keyof OrcaProcessSettings>(key: K, value: OrcaProcessSettings[K]) => void;
   disabled?: boolean;
-  hasChanges?: (key: keyof AdvancedSlicerSettings) => boolean;
-  onReset?: (key: keyof AdvancedSlicerSettings) => void;
-  getOriginalValue?: <K extends keyof AdvancedSlicerSettings>(key: K) => AdvancedSlicerSettings[K];
+  hasChanges?: (key: keyof OrcaProcessSettings) => boolean;
+  onReset?: (key: keyof OrcaProcessSettings) => void;
+  getOriginalValue?: <K extends keyof OrcaProcessSettings>(key: K) => OrcaProcessSettings[K];
 }
 
 export const SpeedEditor: React.FC<SpeedEditorProps> = ({
@@ -30,113 +30,97 @@ export const SpeedEditor: React.FC<SpeedEditorProps> = ({
         <SettingRow
           type="slider"
           icon={<SpeedIcon />}
-          label="Print Speed"
-          value={settings.printSpeed}
-          onChange={(v) => onChange('printSpeed', v)}
-          min={10}
-          max={500}
-          step={5}
-          unit="mm/s"
-          disabled={disabled}
-          isModified={hasChanges?.('printSpeed')}
-          onReset={() => onReset?.('printSpeed')}
-          originalValue={getOriginalValue?.('printSpeed')}
-          tooltip="Default printing speed for all features"
-        />
-        <SettingRow
-          type="slider"
-          icon={<SpeedIcon />}
           label="Outer Wall Speed"
-          value={settings.outerWallSpeed}
-          onChange={(v) => onChange('outerWallSpeed', v)}
+          value={settings.outer_wall_speed}
+          onChange={(v) => onChange('outer_wall_speed', v)}
           min={10}
           max={500}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('outerWallSpeed')}
-          onReset={() => onReset?.('outerWallSpeed')}
-          originalValue={getOriginalValue?.('outerWallSpeed')}
+          isModified={hasChanges?.('outer_wall_speed')}
+          onReset={() => onReset?.('outer_wall_speed')}
+          originalValue={getOriginalValue?.('outer_wall_speed')}
           tooltip="Speed for outer perimeter (affects surface quality)"
         />
         <SettingRow
           type="slider"
           icon={<SpeedIcon />}
           label="Inner Wall Speed"
-          value={settings.innerWallSpeed}
-          onChange={(v) => onChange('innerWallSpeed', v)}
+          value={settings.inner_wall_speed}
+          onChange={(v) => onChange('inner_wall_speed', v)}
           min={10}
           max={500}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('innerWallSpeed')}
-          onReset={() => onReset?.('innerWallSpeed')}
-          originalValue={getOriginalValue?.('innerWallSpeed')}
+          isModified={hasChanges?.('inner_wall_speed')}
+          onReset={() => onReset?.('inner_wall_speed')}
+          originalValue={getOriginalValue?.('inner_wall_speed')}
           tooltip="Speed for inner perimeters"
         />
         <SettingRow
           type="slider"
           icon={<SpeedIcon />}
           label="Sparse Infill Speed"
-          value={settings.sparseInfillSpeed}
-          onChange={(v) => onChange('sparseInfillSpeed', v)}
+          value={settings.sparse_infill_speed}
+          onChange={(v) => onChange('sparse_infill_speed', v)}
           min={10}
           max={500}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('sparseInfillSpeed')}
-          onReset={() => onReset?.('sparseInfillSpeed')}
-          originalValue={getOriginalValue?.('sparseInfillSpeed')}
+          isModified={hasChanges?.('sparse_infill_speed')}
+          onReset={() => onReset?.('sparse_infill_speed')}
+          originalValue={getOriginalValue?.('sparse_infill_speed')}
           tooltip="Speed for sparse infill patterns"
         />
         <SettingRow
           type="slider"
           icon={<SpeedIcon />}
           label="Solid Infill Speed"
-          value={settings.solidInfillSpeed}
-          onChange={(v) => onChange('solidInfillSpeed', v)}
+          value={settings.internal_solid_infill_speed}
+          onChange={(v) => onChange('internal_solid_infill_speed', v)}
           min={10}
           max={500}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('solidInfillSpeed')}
-          onReset={() => onReset?.('solidInfillSpeed')}
-          originalValue={getOriginalValue?.('solidInfillSpeed')}
+          isModified={hasChanges?.('internal_solid_infill_speed')}
+          onReset={() => onReset?.('internal_solid_infill_speed')}
+          originalValue={getOriginalValue?.('internal_solid_infill_speed')}
           tooltip="Speed for solid infill regions"
         />
         <SettingRow
           type="slider"
           icon={<SpeedIcon />}
           label="Top Surface Speed"
-          value={settings.topSurfaceSpeed}
-          onChange={(v) => onChange('topSurfaceSpeed', v)}
+          value={settings.top_surface_speed}
+          onChange={(v) => onChange('top_surface_speed', v)}
           min={10}
           max={500}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('topSurfaceSpeed')}
-          onReset={() => onReset?.('topSurfaceSpeed')}
-          originalValue={getOriginalValue?.('topSurfaceSpeed')}
+          isModified={hasChanges?.('top_surface_speed')}
+          onReset={() => onReset?.('top_surface_speed')}
+          originalValue={getOriginalValue?.('top_surface_speed')}
           tooltip="Speed for top surface finish"
         />
         <SettingRow
           type="slider"
           icon={<SpeedIcon />}
           label="Travel Speed"
-          value={settings.travelSpeed}
-          onChange={(v) => onChange('travelSpeed', v)}
+          value={settings.travel_speed}
+          onChange={(v) => onChange('travel_speed', v)}
           min={10}
           max={500}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('travelSpeed')}
-          onReset={() => onReset?.('travelSpeed')}
-          originalValue={getOriginalValue?.('travelSpeed')}
+          isModified={hasChanges?.('travel_speed')}
+          onReset={() => onReset?.('travel_speed')}
+          originalValue={getOriginalValue?.('travel_speed')}
           tooltip="Speed for non-printing travel moves"
         />
       </SettingSection>
@@ -146,16 +130,16 @@ export const SpeedEditor: React.FC<SpeedEditorProps> = ({
           type="slider"
           icon={<SpeedIcon />}
           label="First Layer Speed"
-          value={settings.firstLayerSpeed}
-          onChange={(v) => onChange('firstLayerSpeed', v)}
+          value={settings.initial_layer_speed}
+          onChange={(v) => onChange('initial_layer_speed', v)}
           min={10}
           max={200}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('firstLayerSpeed')}
-          onReset={() => onReset?.('firstLayerSpeed')}
-          originalValue={getOriginalValue?.('firstLayerSpeed')}
+          isModified={hasChanges?.('initial_layer_speed')}
+          onReset={() => onReset?.('initial_layer_speed')}
+          originalValue={getOriginalValue?.('initial_layer_speed')}
           tooltip="Reduced speed for first layer (better bed adhesion)"
         />
       </SettingSection>

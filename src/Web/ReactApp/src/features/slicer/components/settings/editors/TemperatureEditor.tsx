@@ -5,15 +5,15 @@
 import React from 'react';
 import { SettingRow, SettingSection } from '../SettingRow';
 import { TemperatureIcon } from '../SlicerSettingIcons';
-import type { AdvancedSlicerSettings } from '../slicerSettingsTypes';
+import type { OrcaProcessSettings } from '../slicerSettingsTypes';
 
 interface TemperatureEditorProps {
-  settings: AdvancedSlicerSettings;
-  onChange: <K extends keyof AdvancedSlicerSettings>(key: K, value: AdvancedSlicerSettings[K]) => void;
+  settings: OrcaProcessSettings;
+  onChange: <K extends keyof OrcaProcessSettings>(key: K, value: OrcaProcessSettings[K]) => void;
   disabled?: boolean;
-  hasChanges?: (key: keyof AdvancedSlicerSettings) => boolean;
-  onReset?: (key: keyof AdvancedSlicerSettings) => void;
-  getOriginalValue?: <K extends keyof AdvancedSlicerSettings>(key: K) => AdvancedSlicerSettings[K];
+  hasChanges?: (key: keyof OrcaProcessSettings) => boolean;
+  onReset?: (key: keyof OrcaProcessSettings) => void;
+  getOriginalValue?: <K extends keyof OrcaProcessSettings>(key: K) => OrcaProcessSettings[K];
 }
 
 export const TemperatureEditor: React.FC<TemperatureEditorProps> = ({
@@ -31,32 +31,32 @@ export const TemperatureEditor: React.FC<TemperatureEditorProps> = ({
           type="slider"
           icon={<TemperatureIcon />}
           label="Nozzle Temperature"
-          value={settings.nozzleTemp}
-          onChange={(v) => onChange('nozzleTemp', v)}
+          value={settings.nozzle_temperature}
+          onChange={(v) => onChange('nozzle_temperature', v)}
           min={150}
           max={300}
           step={5}
           unit="°C"
           disabled={disabled}
-          isModified={hasChanges?.('nozzleTemp')}
-          onReset={() => onReset?.('nozzleTemp')}
-          originalValue={getOriginalValue?.('nozzleTemp')}
+          isModified={hasChanges?.('nozzle_temperature')}
+          onReset={() => onReset?.('nozzle_temperature')}
+          originalValue={getOriginalValue?.('nozzle_temperature')}
           tooltip="Extruder temperature for normal printing"
         />
         <SettingRow
           type="slider"
           icon={<TemperatureIcon />}
           label="Bed Temperature"
-          value={settings.bedTemp}
-          onChange={(v) => onChange('bedTemp', v)}
+          value={settings.hot_plate_temp}
+          onChange={(v) => onChange('hot_plate_temp', v)}
           min={0}
           max={120}
           step={5}
           unit="°C"
           disabled={disabled}
-          isModified={hasChanges?.('bedTemp')}
-          onReset={() => onReset?.('bedTemp')}
-          originalValue={getOriginalValue?.('bedTemp')}
+          isModified={hasChanges?.('hot_plate_temp')}
+          onReset={() => onReset?.('hot_plate_temp')}
+          originalValue={getOriginalValue?.('hot_plate_temp')}
           tooltip="Heated bed temperature for normal printing"
         />
       </SettingSection>
@@ -66,32 +66,32 @@ export const TemperatureEditor: React.FC<TemperatureEditorProps> = ({
           type="slider"
           icon={<TemperatureIcon />}
           label="First Layer Nozzle Temp"
-          value={settings.firstLayerNozzleTemp}
-          onChange={(v) => onChange('firstLayerNozzleTemp', v)}
+          value={settings.nozzle_temperature_initial_layer}
+          onChange={(v) => onChange('nozzle_temperature_initial_layer', v)}
           min={150}
           max={300}
           step={5}
           unit="°C"
           disabled={disabled}
-          isModified={hasChanges?.('firstLayerNozzleTemp')}
-          onReset={() => onReset?.('firstLayerNozzleTemp')}
-          originalValue={getOriginalValue?.('firstLayerNozzleTemp')}
+          isModified={hasChanges?.('nozzle_temperature_initial_layer')}
+          onReset={() => onReset?.('nozzle_temperature_initial_layer')}
+          originalValue={getOriginalValue?.('nozzle_temperature_initial_layer')}
           tooltip="Extruder temperature for first layer (better adhesion)"
         />
         <SettingRow
           type="slider"
           icon={<TemperatureIcon />}
           label="First Layer Bed Temp"
-          value={settings.firstLayerBedTemp}
-          onChange={(v) => onChange('firstLayerBedTemp', v)}
+          value={settings.hot_plate_temp_initial_layer}
+          onChange={(v) => onChange('hot_plate_temp_initial_layer', v)}
           min={0}
           max={120}
           step={5}
           unit="°C"
           disabled={disabled}
-          isModified={hasChanges?.('firstLayerBedTemp')}
-          onReset={() => onReset?.('firstLayerBedTemp')}
-          originalValue={getOriginalValue?.('firstLayerBedTemp')}
+          isModified={hasChanges?.('hot_plate_temp_initial_layer')}
+          onReset={() => onReset?.('hot_plate_temp_initial_layer')}
+          originalValue={getOriginalValue?.('hot_plate_temp_initial_layer')}
           tooltip="Heated bed temperature for first layer (better adhesion)"
         />
       </SettingSection>
