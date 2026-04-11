@@ -23,12 +23,13 @@ import {
   type AdvancedSlicerSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
-import { ModelSelector } from '../components/job/ModelSelector';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
+import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
+import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, Input, Select } from '@/common/components/ui';
-import { LayersIcon, EyeIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
+import { LayersIcon, EyeIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon, CubeIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
@@ -186,7 +187,6 @@ export const NewSliceJobPage: React.FC = () => {
   // === Model Selection ===
   const [modelFileUrl, setModelFileUrl] = useState('');
   const [modelFileName, setModelFileName] = useState('');
-  const [useModelPicker, setUseModelPicker] = useState(true);
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   // Multi-model bed state — accumulates models added via the "+" button
@@ -668,7 +668,7 @@ export const NewSliceJobPage: React.FC = () => {
   }, [customProcessProfiles, selectedProcessPresetId]);
 
   // Fetch models for picker
-  const { data: models = [], error: modelsError } = useQuery<ModelListItem[], Error>({
+  const { data: models = [], error: modelsError, isLoading: isLoadingModels } = useQuery<ModelListItem[], Error>({
     queryKey: ['modelsListBasic'],
     queryFn: async () => {
       const response = await apiClient.get<unknown[]>('/3d-models');
@@ -686,6 +686,11 @@ export const NewSliceJobPage: React.FC = () => {
     },
     staleTime: 20_000
   });
+
+  const selectedModel = useMemo(
+    () => models.find(m => m.id === selectedModelId),
+    [models, selectedModelId]
+  );
 
   // Connect to SlicerHub for real-time updates
   useEffect(() => {
@@ -789,7 +794,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Derive model file URL when selected and add to bed
   useEffect(() => {
-    if (useModelPicker && selectedModelId) {
+    if (selectedModelId) {
       const apiBase = getApiBaseUrl();
       const mdl = models?.find(m => m.id === selectedModelId);
       const url = `${apiBase}/3d-models/file/${selectedModelId}`;
@@ -815,7 +820,7 @@ export const NewSliceJobPage: React.FC = () => {
         });
       });
     }
-  }, [useModelPicker, selectedModelId, models]);
+  }, [selectedModelId, models]);
 
 
 
@@ -876,20 +881,13 @@ export const NewSliceJobPage: React.FC = () => {
   const submitSliceJob = useCallback(() => {
     setError(null);
 
-    if (useModelPicker) {
-      if (!selectedModelId) {
-        setError('Select a model or switch to manual URL mode');
-        return;
-      }
-    } else {
-      if (!modelFileUrl.trim()) {
-        setError('Model file URL is required');
-        return;
-      }
-      if (!modelFileName.trim()) {
-        setError('Model file name is required');
-        return;
-      }
+    if (!selectedModelId && !modelFileUrl.trim()) {
+      setError('Select a model or enter a URL');
+      return;
+    }
+    if (!selectedModelId && modelFileUrl.trim() && !modelFileName.trim()) {
+      setError('Model file name is required when using a URL');
+      return;
     }
 
     if (!selectedProcessPresetId) {
@@ -934,7 +932,6 @@ export const NewSliceJobPage: React.FC = () => {
     slicerInfo.engine,
     slicerSettings,
     submitMutation,
-    useModelPicker,
     user?.id,
     selectedModelId,
   ]);
@@ -956,11 +953,8 @@ export const NewSliceJobPage: React.FC = () => {
   const workspaceModels = bedModels;
 
   const handleWorkspaceAddModel = useCallback(() => {
-    if (!useModelPicker) {
-      setUseModelPicker(true);
-    }
     setModelPickerOpen(true);
-  }, [useModelPicker]);
+  }, []);
 
   const handleWorkspaceModelSelect = useCallback((modelId: string | null) => {
     setSelectedBedModelId(modelId);
@@ -1420,29 +1414,50 @@ export const NewSliceJobPage: React.FC = () => {
             />
           </div>
 
-          {/* MODEL SELECTION - Uses searchable picker modal */}
-          <ModelSelector
-            useModelPicker={useModelPicker}
-            onToggleMode={() => {
-              setUseModelPicker(v => !v);
-              if (useModelPicker) {
-                setSelectedModelId('');
-                setModelFileUrl('');
-                setModelFileName('');
-                setBedModels([]);
-              }
-            }}
-            models={models}
-            modelsError={modelsError}
-            selectedModelId={selectedModelId}
-            onModelIdChange={setSelectedModelId}
-            fileUrl={modelFileUrl}
-            onFileUrlChange={setModelFileUrl}
-            fileName={modelFileName}
-            onFileNameChange={setModelFileName}
-            pickerOpen={modelPickerOpen}
-            onPickerOpenChange={setModelPickerOpen}
-          />
+          {/* MODEL SELECTION - Picker button opens SearchablePickerModal with URL tab */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
+            <label className="block text-sm font-semibold text-pf-text-primary">3D Model</label>
+            {modelsError ? (
+              <p className="text-sm text-pf-error">{modelsError.message}</p>
+            ) : (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => setModelPickerOpen(true)}
+                  iconLeft={<CubeIcon className="w-4 h-4" />}
+                  className="w-full justify-start text-left"
+                >
+                  <span className={selectedModelId || modelFileUrl ? 'text-pf-text-primary' : 'text-pf-text-muted'}>
+                    {selectedModel?.originalFileName ?? (modelFileUrl ? modelFileName || modelFileUrl : 'Select a model...')}
+                  </span>
+                </Button>
+
+                <SearchablePickerModal<Model3DBasic>
+                  isOpen={modelPickerOpen}
+                  onClose={() => setModelPickerOpen(false)}
+                  onSelect={(model) => {
+                    setSelectedModelId(model.id);
+                    setModelFileUrl('');
+                    setModelFileName('');
+                  }}
+                  items={models ?? []}
+                  getItemId={(m) => m.id}
+                  getLabel={(m) => m.originalFileName}
+                  selectedId={selectedModelId}
+                  title="Select 3D Model"
+                  searchPlaceholder="Search models by filename..."
+                  emptyMessage="No models match your search."
+                  isLoading={isLoadingModels}
+                  onUrlSubmit={(url, name) => {
+                    setModelFileUrl(url);
+                    setModelFileName(name);
+                    setSelectedModelId('');
+                    setBedModels([]);
+                  }}
+                />
+              </>
+            )}
+          </div>
 
           {/* STL Preview Button */}
           {(selectedModelId || modelFileUrl) && (
