@@ -18,9 +18,8 @@ import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesMo
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import {
   SlicerSettingsPanel,
-  DEFAULT_ADVANCED_SETTINGS,
-  type SimpleSlicerSettings,
-  type AdvancedSlicerSettings,
+  DEFAULT_ORCA_PROCESS_SETTINGS,
+  type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing } from '../components/job';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
@@ -40,21 +39,21 @@ import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
 /**
- * Helper function to convert OrcaProcessProfile to AdvancedSlicerSettings
+ * Helper function to convert OrcaProcessProfile to OrcaProcessSettings
  * Maps profile data to settings structure, using defaults for missing values
  */
-function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undefined): AdvancedSlicerSettings {
-  if (!profile) return DEFAULT_ADVANCED_SETTINGS;
+function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undefined): OrcaProcessSettings {
+  if (!profile) return DEFAULT_ORCA_PROCESS_SETTINGS;
 
   // Parse settings from profile if available
   const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
 
   return {
-    ...DEFAULT_ADVANCED_SETTINGS,
-    layerHeight: profile.layerHeight ?? DEFAULT_ADVANCED_SETTINGS.layerHeight,
-    infillDensity: profile.infillPercentage ?? DEFAULT_ADVANCED_SETTINGS.infillDensity,
-    printSpeed: profile.printSpeed ?? DEFAULT_ADVANCED_SETTINGS.printSpeed,
-    enableSupports: profile.supports ?? DEFAULT_ADVANCED_SETTINGS.enableSupports,
+    ...DEFAULT_ORCA_PROCESS_SETTINGS,
+    layer_height: profile.layerHeight ?? DEFAULT_ORCA_PROCESS_SETTINGS.layer_height,
+    sparse_infill_density: profile.infillPercentage ?? DEFAULT_ORCA_PROCESS_SETTINGS.sparse_infill_density,
+    outer_wall_speed: profile.printSpeed ?? DEFAULT_ORCA_PROCESS_SETTINGS.outer_wall_speed,
+    enable_support: profile.supports ?? DEFAULT_ORCA_PROCESS_SETTINGS.enable_support,
     // Spread any additional parsed settings from profile.settings
     ...profileSettings,
   };
@@ -97,7 +96,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
 
   // === OrcaSlicer-style Settings Panel ===
-  const [slicerSettings, setSlicerSettings] = useState<AdvancedSlicerSettings>(DEFAULT_ADVANCED_SETTINGS);
+  const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>(DEFAULT_ORCA_PROCESS_SETTINGS);
   const [advancedProcessSettings, setAdvancedProcessSettings] = useState<Record<string, unknown>>({});
   
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -106,13 +105,13 @@ export const NewSliceJobPage: React.FC = () => {
   const [saveProfileState, setSaveProfileState] = useState<{ open: boolean; name: string }>({ open: false, name: '' });
 
   // Callback for settings panel changes
-  const handleSlicerSettingsChange = useCallback((newSettings: SimpleSlicerSettings | AdvancedSlicerSettings) => {
+  const handleSlicerSettingsChange = useCallback((newSettings: OrcaProcessSettings) => {
     setSlicerSettings((prev) => ({ ...prev, ...newSettings }));
   }, []);
 
   // === Process Profile Management handlers ===
   const handleResetProcessProfile = useCallback(() => {
-    setSlicerSettings(DEFAULT_ADVANCED_SETTINGS);
+    setSlicerSettings(DEFAULT_ORCA_PROCESS_SETTINGS);
     setAdvancedProcessSettings({});
   }, []);
 
