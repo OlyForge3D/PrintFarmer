@@ -1,649 +1,840 @@
 /**
  * OrcaSlicer Machine settings type definitions
- * Maps to OrcaSlicer's machine/printer profile settings
+ * Uses OrcaSlicer native snake_case property names.
  */
 
-/** View modes for machine settings panel complexity */
+/** View mode for settings panel complexity */
 export type MachineSettingsViewMode = 'simple' | 'advanced';
 
-/** Category tabs for machine settings in advanced mode */
-export type MachineSettingsCategory = 
-  | 'general'
+/** Category tabs matching OrcaSlicer / SimplyPrint tab layout */
+export type MachineCategory =
+  | 'basic_information'
+  | 'machine_gcode'
+  | 'multimaterial'
   | 'extruder'
-  | 'printbed'
-  | 'capabilities'
-  | 'gcode';
+  | 'motion_ability'
+  | 'notes';
 
 /**
- * Basic machine settings - shown in Basic mode
+ * Unified machine settings interface using OrcaSlicer native snake_case keys.
+ * All properties are optional to support partial profiles and progressive editing.
  */
-export interface BasicMachineSettings {
-  // Basic info
-  name: string;
+export interface OrcaMachineSettings {
+  // ── Basic information ─────────────────────────────────────────────────────
+  /** Nozzle tip size shown in Basic view (mm) */
+  nozzle_size?: number;
+  /** Standard or high-flow nozzle volume type */
+  nozzle_volume_type?: 'standard' | 'high_flow';
+  /** Maximum printable height / build volume Z (mm) */
+  printable_height?: number;
+  /** Whether the printer supports multiple bed surface types */
+  support_multi_bed_types?: boolean;
+  /** Whether the printer has a pellet extruder mod */
+  pellet_modded_printer?: boolean;
+  /** Nozzle hardness (Rockwell C scale) */
+  nozzle_hrc?: number;
+  /** Whether the printer supports closed-loop chamber temperature control */
+  support_chamber_temp_control?: boolean;
+  /** Whether the printer has an active air filtration system */
+  support_air_filtration?: boolean;
+  /** Z offset adjustment (mm) */
+  z_offset?: number;
+  /** Preferred model orientation for slicing */
+  preferred_orientation?: string;
+  /** Enable first-layer scan (camera-equipped printers) */
+  scan_first_layer?: boolean;
+  /** Disable M73 remaining print time command */
+  disable_m73?: boolean;
+  /** G-code thumbnail sizes (e.g., "300x300,32x32") */
+  thumbnails?: string;
+  /** Use relative E distances in G-code */
+  use_relative_e_distances?: boolean;
+  /** Use firmware-side retraction (G10/G11) */
+  use_firmware_retraction?: boolean;
+  /** Time cost multiplier for time estimates */
+  time_cost?: number;
+  /** Enable fan speed-up only on overhangs */
+  fan_speedup_overhangs?: boolean;
+  /** Fan kick-start pulse duration (s) */
+  fan_kickstart?: number;
+  /** Extruder clearance radius from nozzle tip (mm) */
+  extruder_clearance_radius?: number;
+  /** Extruder clearance height to X/Y rod (mm) */
+  extruder_clearance_height_to_rod?: number;
+  /** Extruder clearance height to printer lid (mm) */
+  extruder_clearance_height_to_lid?: number;
+  /** Margin around mesh area for adaptive bed meshing (mm) */
+  adaptive_bed_mesh_margin?: number;
+  /** Enable auxiliary part-cooling fan */
+  auxiliary_fan?: boolean;
+
+  // ── Machine G-code ────────────────────────────────────────────────────────
+  /** G-code injected at the start of every file */
+  file_start_gcode?: string;
+  /** G-code used to detect filament clumping / wrapping */
+  wrapping_detection_gcode?: string;
+
+  // ── Multimaterial ─────────────────────────────────────────────────────────
+  /** Single extruder operating in multi-material mode */
+  single_extruder_multi_material?: boolean;
+  /** Use manual filament-change procedure instead of automated swap */
+  manual_filament_change?: boolean;
+  /** Purge excess filament into the prime/wipe tower */
+  purge_in_prime_tower?: boolean;
+  /** Enable filament tip ramming on retract */
+  enable_filament_ramming?: boolean;
+  /** Retraction distance to reach the cooling tube (mm) */
+  cooling_tube_retraction?: number;
+  /** Length of the cooling tube (mm) */
+  cooling_tube_length?: number;
+  /** Filament parking position retraction distance (mm) */
+  parking_pos_retraction?: number;
+  /** Extra loading move distance (mm) */
+  extra_loading_move?: number;
+  /** Run extruder at high current during filament swap */
+  high_current_on_filament_swap?: boolean;
+  /** Time to load filament into the extruder (s) */
+  machine_load_filament_time?: number;
+  /** Time to unload filament from the extruder (s) */
+  machine_unload_filament_time?: number;
+  /** Tool-change overhead time (s) */
+  machine_tool_change_time?: number;
+
+  // ── Extruder ──────────────────────────────────────────────────────────────
+  /** Retraction length (mm) */
+  retraction_length?: number;
+  /** Z-hop height on retract (mm) */
+  z_hop?: number;
+  /** Long retraction distance when using filament cutter (mm) */
+  long_retractions_when_cut?: number;
+  /** Comma-separated retraction distances for cut operation (mm) */
+  retraction_distances_when_cut?: string;
+  /** Nozzle internal diameter (mm) */
+  nozzle_diameter?: number;
+  /** Nozzle melt-zone volume (mm³) */
+  nozzle_volume?: number;
+  /** Maximum printable height per extruder (mm) */
+  extruder_printable_height?: number;
+  /** Minimum layer height (mm) */
+  min_layer_height?: number;
+  /** Maximum layer height (mm) */
+  max_layer_height?: number;
+  /** Extra filament length on unretract (mm) */
+  retract_restart_extra?: number;
+  /** Retraction speed (mm/s) */
+  retraction_speed?: number;
+  /** Deretraction / unretract speed (mm/s) */
+  deretraction_speed?: number;
+  /** Minimum travel distance that triggers retraction (mm) */
+  retraction_minimum_travel?: number;
+  /** Retract when changing layer */
+  retract_when_changing_layer?: boolean;
+  /** Wipe nozzle while retracting */
+  wipe?: boolean;
+  /** Wipe move distance (mm) */
+  wipe_distance?: number;
+  /** Percentage of retraction to complete before wipe begins (%) */
+  retract_before_wipe?: number;
+  /** Slope travel moves to avoid stringing over Z */
+  travel_slope?: boolean;
+  /** Only apply Z-hop above this Z height (mm) */
+  retract_lift_above?: number;
+  /** Only apply Z-hop below this Z height; 0 = unlimited (mm) */
+  retract_lift_below?: number;
+  /** Retraction length on tool change (mm) */
+  retract_length_toolchange?: number;
+  /** Extra restart length after tool change (mm) */
+  retract_restart_extra_toolchange?: number;
+
+  // ── Motion ability ────────────────────────────────────────────────────────
+  /** Write machine speed/acceleration limits to G-code header */
+  emit_machine_limits_to_gcode?: boolean;
+  /** Enable input-shaping / resonance avoidance */
+  resonance_avoidance?: boolean;
+  /** Minimum speed for resonance avoidance (mm/s) */
+  min_resonance_avoidance_speed?: number;
+  /** Maximum speed for resonance avoidance (mm/s) */
+  max_resonance_avoidance_speed?: number;
+
+  // ── Notes ─────────────────────────────────────────────────────────────────
+  /** Free-form notes stored in the machine profile */
+  printer_notes?: string;
+
+  // ── Advanced extras (not in SimplyPrint catalog) ──────────────────────────
+
+  // Metadata
   inherits?: string;
-  
-  // Build volume
-  buildVolumeX: number;       // mm
-  buildVolumeY: number;       // mm
-  buildVolumeZ: number;       // mm
-  printableArea: string;      // e.g., "0x0,220x0,220x220,0x220"
-  
-  // Nozzle
-  nozzleDiameter: number;     // mm (0.2, 0.4, 0.6, 0.8, etc.)
-  
-  // Basic capabilities
-  maxPrintSpeed: number;      // mm/s
-}
+  printer_model?: string;
+  printer_variant?: string;
+  thumbnails_format?: string;
 
-/**
- * Advanced machine settings - full OrcaSlicer parameter set
- */
-export interface AdvancedMachineSettings extends BasicMachineSettings {
-  // General printer settings
-  printerModel: string;
-  printerVariant: string;
-  printerNotes: string;
-  thumbnailSize: string;          // e.g., "300x300,32x32"
-  useRelativeEDistances: boolean;
-  useFirmwareRetraction: boolean;
-  
-  // Build volume extended
-  buildVolumeOrigin: 'center' | 'corner';
-  maxLayerHeight: number;         // mm
-  minLayerHeight: number;         // mm
-  bedShape: 'rectangular' | 'circular';
-  
-  // Extruder settings
-  extruderCount: number;
-  extruderOffset: string;         // e.g., "0x0" for single, "0x0,40x0" for dual
-  retractionLength: number;       // mm
-  retractionSpeed: number;        // mm/s
-  retractionLiftZ: number;        // mm (Z hop)
-  retractionLiftAbove: number;    // mm (min Z for lift)
-  retractionLiftBelow: number;    // mm (max Z for lift, 0 = unlimited)
-  detractionSpeed: number;        // mm/s (unretract)
-  longRetractionWhenCut: number;  // mm (for filament cutter)
-  extrusionMultiplier: number;    // ratio (0.9 - 1.1 typical)
-  
-  // Nozzle extended
-  nozzleType: 'brass' | 'hardened_steel' | 'stainless_steel' | 'custom';
-  nozzleHrc: number;              // Hardness Rockwell C (for wear calculation)
-  
+  // Build volume
+  bed_size_x?: number;
+  bed_size_y?: number;
+  printable_area?: string;
+  bed_origin?: 'center' | 'corner';
+  bed_shape?: 'rectangular' | 'circular';
+
+  // Nozzle
+  nozzle_type?: 'brass' | 'hardened_steel' | 'stainless_steel' | 'custom';
+
+  // Extruder
+  extruder_count?: number;
+  extruder_offset?: string;
+  extrusion_multiplier?: number;
+  extruder_type?: 'direct_drive' | 'bowden';
+  extruder_colour?: string;
+  extruder_printable_area?: string;
+  retract_lift_enforce?: string;
+  z_hop_types?: string;
+  wipe_speed?: number;
+  wipe_before_external_loop?: boolean;
+  wipe_on_loops?: boolean;
+
   // Print bed
-  bedType: 'textured_pei' | 'smooth_pei' | 'glass' | 'spring_steel' | 'custom';
-  hasBedProbe: boolean;
-  probeType: 'bltouch' | 'inductive' | 'capacitive' | 'manual' | 'none';
-  meshBedLeveling: boolean;
-  bedCustomTexture: string;       // path to texture image
-  bedCustomModel: string;         // path to 3D model
-  
+  bed_type?: 'textured_pei' | 'smooth_pei' | 'glass' | 'spring_steel' | 'custom';
+  has_bed_probe?: boolean;
+  probe_type?: 'bltouch' | 'inductive' | 'capacitive' | 'manual' | 'none';
+  mesh_bed_leveling?: boolean;
+  bed_custom_texture?: string;
+  bed_custom_model?: string;
+
   // Capabilities
-  hasHeatedBed: boolean;
-  hasHeatedChamber: boolean;
-  maxBedTemperature: number;      // °C
-  maxChamberTemperature: number;  // °C
-  maxHotendTemperature: number;   // °C
-  supportMultiMaterial: boolean;
-  supportArcMovement: boolean;    // G2/G3 support
-  arcResolution: number;          // mm (for arc fitting)
-  
-  // Motion system
-  motionType: 'cartesian' | 'corexy' | 'delta' | 'belt';
-  maxAccelerationX: number;       // mm/s²
-  maxAccelerationY: number;       // mm/s²
-  maxAccelerationZ: number;       // mm/s²
-  maxAccelerationE: number;       // mm/s² (extruder)
-  maxJerkX: number;               // mm/s
-  maxJerkY: number;               // mm/s
-  maxJerkZ: number;               // mm/s
-  maxJerkE: number;               // mm/s (extruder)
-  maxFeedrateX: number;           // mm/s
-  maxFeedrateY: number;           // mm/s
-  maxFeedrateZ: number;           // mm/s
-  maxFeedrateE: number;           // mm/s
-  
+  has_heated_bed?: boolean;
+  has_heated_chamber?: boolean;
+  max_bed_temperature?: number;
+  max_chamber_temperature?: number;
+  max_hotend_temperature?: number;
+  support_multi_material?: boolean;
+  support_arc_movement?: boolean;
+  arc_resolution?: number;
+  has_scarf_joint_seam?: boolean;
+  single_extruder_multi_material_priming?: boolean;
+
+  // Motion limits
+  motion_type?: 'cartesian' | 'corexy' | 'delta' | 'belt';
+  machine_max_acceleration_x?: number;
+  machine_max_acceleration_y?: number;
+  machine_max_acceleration_z?: number;
+  machine_max_acceleration_e?: number;
+  machine_max_jerk_x?: number;
+  machine_max_jerk_y?: number;
+  machine_max_jerk_z?: number;
+  machine_max_jerk_e?: number;
+  machine_max_speed_x?: number;
+  machine_max_speed_y?: number;
+  machine_max_speed_z?: number;
+  machine_max_speed_e?: number;
+  max_print_speed?: number;
+  machine_max_acceleration_travel?: number;
+  max_junction_deviation?: number;
+
   // Cooling
-  coolingFanCount: number;
-  hasChamberFan: boolean;
-  hasAuxiliaryFan: boolean;
-  fanMaxSpeed: number;            // RPM or PWM max
-  
-  // G-code flavor
-  gcodeDialect: 'marlin' | 'marlin2' | 'klipper' | 'reprap' | 'smoothie' | 'mach3' | 'custom';
-  startGcode: string;             // machine start g-code
-  endGcode: string;               // machine end g-code
-  beforeLayerChangeGcode: string;
-  afterLayerChangeGcode: string;
-  toolChangeGcode: string;
-  pauseGcode: string;
-  
-  // Printer-specific features
-  silentMode: boolean;
-  silentModeMaxSpeed: number;     // mm/s when silent
-  powerLossRecovery: boolean;
-  filamentSensor: boolean;
-  autoLevelingEnabled: boolean;
-  
-  // Timelapses / Octoprint
-  timelapseType: 'none' | 'regular' | 'layered';
-  octoprintHost?: string;
-  octoprintApiKey?: string;
-  
+  cooling_fan_count?: number;
+  has_chamber_fan?: boolean;
+  fan_max_speed?: number;
+
+  // G-code (beyond Machine G-code tab)
+  gcode_flavor?: 'marlin' | 'marlin2' | 'klipper' | 'reprap' | 'smoothie' | 'mach3' | 'custom';
+  machine_start_gcode?: string;
+  machine_end_gcode?: string;
+  before_layer_change_gcode?: string;
+  layer_change_gcode?: string;
+  toolchange_gcode?: string;
+  pause_print_gcode?: string;
+  printing_by_object_gcode?: string;
+  timelapse_gcode?: string;
+
+  // Features / misc
+  silent_mode?: boolean;
+  silent_mode_max_speed?: number;
+  power_loss_recovery?: boolean;
+  filament_sensor?: boolean;
+  auto_leveling?: boolean;
+  timelapse_type?: 'none' | 'regular' | 'layered';
+  octoprint_host?: string;
+  octoprint_api_key?: string;
+
   // Physical dimensions (for visualization)
-  printerWidth: number;           // mm (for clearance)
-  printerDepth: number;           // mm
-  printerHeight: number;          // mm
+  printer_width?: number;
+  printer_depth?: number;
+  printer_height?: number;
 
-  // ======== Wipe Tower (Multi-Material) ========
-  wipeTowerType?: 'sparse' | 'dense';
-  wipeTowerWallType?: 'single' | 'double';
-  wipeTowerBridging?: number;            // mm
-  wipeTowerConeAngle?: number;           // degrees
-  wipeTowerRotationAngle?: number;       // degrees
-  wipeTowerExtraFlow?: number;           // ratio
-  wipeTowerExtraSpacing?: number;        // ratio
-  wipeTowerFilament?: number;            // filament index
-  wipeTowerMaxPurgeSpeed?: number;       // mm/s
-  wipeTowerNoSparseLayers?: boolean;
-  wipeTowerFilletWall?: boolean;
-  wipeTowerRibWidth?: number;            // mm
-  wipeTowerExtraRibLength?: number;      // mm
+  // Travel
+  travel_speed?: number;
+  travel_acceleration?: number;
+  travel_jerk?: number;
 
-  // ======== Advanced Retraction ========
-  retractionRestartExtra?: number;       // mm (extra length on restart)
-  retractionRestartExtraToolchange?: number; // mm
-  retractionLengthToolchange?: number;   // mm
-  retractionDistancesWhenEc?: string;    // comma-separated distances
-  retractionLiftEnforce?: string;        // enforce options
-  retractBeforeWipePercent?: number;     // 0-100%
-  wipeDistance?: number;                 // mm
-  wipeSpeed?: number;                    // mm/s
-  wipeBeforeExternalLoop?: boolean;
-  wipeOnLoops?: boolean;
-
-  // ======== Z-Hop ========
-  zHopTypes?: string;                    // per-surface z-hop control
-
-  // ======== Travel ========
-  travelSpeed?: number;                  // mm/s
-  travelAcceleration?: number;           // mm/s²
-  travelJerk?: number;                   // mm/s
-  travelSlope?: boolean;                 // enable travel slope
-
-  // ======== Extruder Clearance ========
-  extruderClearanceHeightToLid?: number; // mm
-  extruderClearanceHeightToRod?: number; // mm
-  extruderClearanceRadius?: number;      // mm
-  extruderType?: 'direct_drive' | 'bowden';
-  extruderColour?: string;               // hex color
-  extruderPrintableArea?: string;        // area polygon
-  extruderPrintableHeight?: number;      // mm
-
-  // ======== Machine Limits Extended ========
-  maxAccelerationTravel?: number;        // mm/s²
-  maxJunctionDeviation?: number;         // mm (Klipper)
-  emitMachineLimitsToGcode?: boolean;
-
-  // ======== G-Code Extended ========
-  thumbnailsFormat?: string;             // e.g., 'PNG' or 'QOI'
-  printingByObjectGcode?: string;        // G-code for sequential printing
-  scanFirstLayer?: boolean;              // Bambu first layer inspection
-  timelapseGcode?: string;              // timelapse trigger G-code
-
-  // ======== Misc Machine Features ========
-  nozzleVolume?: number;                 // mm³
-  nozzleVolumeType?: 'standard' | 'high_flow';
-  hasScarfJointSeam?: boolean;
-  singleExtruderMultiMaterial?: boolean;
-  singleExtruderMultiMaterialPriming?: boolean;
-  machineLoadFilamentTime?: number;      // seconds
-  machineUnloadFilamentTime?: number;    // seconds
-  machineToolChangeTime?: number;        // seconds
-  printerNotes2?: string;                // additional notes field
+  // Wipe tower
+  wipe_tower_type?: 'sparse' | 'dense';
+  wipe_tower_wall_type?: 'single' | 'double';
+  wipe_tower_bridging?: number;
+  wipe_tower_cone_angle?: number;
+  wipe_tower_rotation_angle?: number;
+  wipe_tower_extra_flow?: number;
+  wipe_tower_extra_spacing?: number;
+  wipe_tower_filament?: number;
+  wipe_tower_max_purge_speed?: number;
+  wipe_tower_no_sparse_layers?: boolean;
+  wipe_tower_fillet_wall?: boolean;
+  wipe_tower_rib_width?: number;
+  wipe_tower_extra_rib_length?: number;
 }
 
-/** Default values for basic machine settings */
-export const DEFAULT_BASIC_MACHINE_SETTINGS: BasicMachineSettings = {
-  name: 'Custom Printer',
-  buildVolumeX: 220,
-  buildVolumeY: 220,
-  buildVolumeZ: 250,
-  printableArea: '0x0,220x0,220x220,0x220',
-  nozzleDiameter: 0.4,
-  maxPrintSpeed: 250,
+/**
+ * Maps each OrcaMachineSettings key to its display mode.
+ * Keys present in both simple and advanced SimplyPrint views are 'simple'.
+ * Everything else (advanced-only SP keys and our extras) is 'advanced'.
+ */
+export const ORCA_MACHINE_MODE_MAP: Record<string, 'simple' | 'advanced'> = {
+  // ── simple (visible in Basic view) ────────────────────────────────────────
+  nozzle_size: 'simple',
+  nozzle_volume_type: 'simple',
+  printable_height: 'simple',
+  support_multi_bed_types: 'simple',
+  pellet_modded_printer: 'simple',
+  nozzle_hrc: 'simple',
+  support_chamber_temp_control: 'simple',
+  support_air_filtration: 'simple',
+  retraction_length: 'simple',
+  z_hop: 'simple',
+  long_retractions_when_cut: 'simple',
+  retraction_distances_when_cut: 'simple',
+
+  // ── advanced (SP catalog, advanced-only tab entries) ──────────────────────
+  z_offset: 'advanced',
+  preferred_orientation: 'advanced',
+  scan_first_layer: 'advanced',
+  disable_m73: 'advanced',
+  thumbnails: 'advanced',
+  use_relative_e_distances: 'advanced',
+  use_firmware_retraction: 'advanced',
+  time_cost: 'advanced',
+  fan_speedup_overhangs: 'advanced',
+  fan_kickstart: 'advanced',
+  extruder_clearance_radius: 'advanced',
+  extruder_clearance_height_to_rod: 'advanced',
+  extruder_clearance_height_to_lid: 'advanced',
+  adaptive_bed_mesh_margin: 'advanced',
+  auxiliary_fan: 'advanced',
+  file_start_gcode: 'advanced',
+  wrapping_detection_gcode: 'advanced',
+  single_extruder_multi_material: 'advanced',
+  manual_filament_change: 'advanced',
+  purge_in_prime_tower: 'advanced',
+  enable_filament_ramming: 'advanced',
+  cooling_tube_retraction: 'advanced',
+  cooling_tube_length: 'advanced',
+  parking_pos_retraction: 'advanced',
+  extra_loading_move: 'advanced',
+  high_current_on_filament_swap: 'advanced',
+  machine_load_filament_time: 'advanced',
+  machine_unload_filament_time: 'advanced',
+  machine_tool_change_time: 'advanced',
+  nozzle_diameter: 'advanced',
+  nozzle_volume: 'advanced',
+  extruder_printable_height: 'advanced',
+  min_layer_height: 'advanced',
+  max_layer_height: 'advanced',
+  retract_restart_extra: 'advanced',
+  retraction_speed: 'advanced',
+  deretraction_speed: 'advanced',
+  retraction_minimum_travel: 'advanced',
+  retract_when_changing_layer: 'advanced',
+  wipe: 'advanced',
+  wipe_distance: 'advanced',
+  retract_before_wipe: 'advanced',
+  travel_slope: 'advanced',
+  retract_lift_above: 'advanced',
+  retract_lift_below: 'advanced',
+  retract_length_toolchange: 'advanced',
+  retract_restart_extra_toolchange: 'advanced',
+  emit_machine_limits_to_gcode: 'advanced',
+  resonance_avoidance: 'advanced',
+  min_resonance_avoidance_speed: 'advanced',
+  max_resonance_avoidance_speed: 'advanced',
+  printer_notes: 'advanced',
+
+  // ── advanced (extras not in SP catalog) ───────────────────────────────────
+  inherits: 'advanced',
+  printer_model: 'advanced',
+  printer_variant: 'advanced',
+  thumbnails_format: 'advanced',
+  bed_size_x: 'advanced',
+  bed_size_y: 'advanced',
+  printable_area: 'advanced',
+  bed_origin: 'advanced',
+  bed_shape: 'advanced',
+  nozzle_type: 'advanced',
+  extruder_count: 'advanced',
+  extruder_offset: 'advanced',
+  extrusion_multiplier: 'advanced',
+  extruder_type: 'advanced',
+  extruder_colour: 'advanced',
+  extruder_printable_area: 'advanced',
+  retract_lift_enforce: 'advanced',
+  z_hop_types: 'advanced',
+  wipe_speed: 'advanced',
+  wipe_before_external_loop: 'advanced',
+  wipe_on_loops: 'advanced',
+  bed_type: 'advanced',
+  has_bed_probe: 'advanced',
+  probe_type: 'advanced',
+  mesh_bed_leveling: 'advanced',
+  bed_custom_texture: 'advanced',
+  bed_custom_model: 'advanced',
+  has_heated_bed: 'advanced',
+  has_heated_chamber: 'advanced',
+  max_bed_temperature: 'advanced',
+  max_chamber_temperature: 'advanced',
+  max_hotend_temperature: 'advanced',
+  support_multi_material: 'advanced',
+  support_arc_movement: 'advanced',
+  arc_resolution: 'advanced',
+  has_scarf_joint_seam: 'advanced',
+  single_extruder_multi_material_priming: 'advanced',
+  motion_type: 'advanced',
+  machine_max_acceleration_x: 'advanced',
+  machine_max_acceleration_y: 'advanced',
+  machine_max_acceleration_z: 'advanced',
+  machine_max_acceleration_e: 'advanced',
+  machine_max_jerk_x: 'advanced',
+  machine_max_jerk_y: 'advanced',
+  machine_max_jerk_z: 'advanced',
+  machine_max_jerk_e: 'advanced',
+  machine_max_speed_x: 'advanced',
+  machine_max_speed_y: 'advanced',
+  machine_max_speed_z: 'advanced',
+  machine_max_speed_e: 'advanced',
+  max_print_speed: 'advanced',
+  machine_max_acceleration_travel: 'advanced',
+  max_junction_deviation: 'advanced',
+  cooling_fan_count: 'advanced',
+  has_chamber_fan: 'advanced',
+  fan_max_speed: 'advanced',
+  gcode_flavor: 'advanced',
+  machine_start_gcode: 'advanced',
+  machine_end_gcode: 'advanced',
+  before_layer_change_gcode: 'advanced',
+  layer_change_gcode: 'advanced',
+  toolchange_gcode: 'advanced',
+  pause_print_gcode: 'advanced',
+  printing_by_object_gcode: 'advanced',
+  timelapse_gcode: 'advanced',
+  silent_mode: 'advanced',
+  silent_mode_max_speed: 'advanced',
+  power_loss_recovery: 'advanced',
+  filament_sensor: 'advanced',
+  auto_leveling: 'advanced',
+  timelapse_type: 'advanced',
+  octoprint_host: 'advanced',
+  octoprint_api_key: 'advanced',
+  printer_width: 'advanced',
+  printer_depth: 'advanced',
+  printer_height: 'advanced',
+  travel_speed: 'advanced',
+  travel_acceleration: 'advanced',
+  travel_jerk: 'advanced',
+  wipe_tower_type: 'advanced',
+  wipe_tower_wall_type: 'advanced',
+  wipe_tower_bridging: 'advanced',
+  wipe_tower_cone_angle: 'advanced',
+  wipe_tower_rotation_angle: 'advanced',
+  wipe_tower_extra_flow: 'advanced',
+  wipe_tower_extra_spacing: 'advanced',
+  wipe_tower_filament: 'advanced',
+  wipe_tower_max_purge_speed: 'advanced',
+  wipe_tower_no_sparse_layers: 'advanced',
+  wipe_tower_fillet_wall: 'advanced',
+  wipe_tower_rib_width: 'advanced',
+  wipe_tower_extra_rib_length: 'advanced',
 };
 
-/** Default values for advanced machine settings */
-export const DEFAULT_ADVANCED_MACHINE_SETTINGS: AdvancedMachineSettings = {
-  ...DEFAULT_BASIC_MACHINE_SETTINGS,
-  printerModel: '',
-  printerVariant: '',
-  printerNotes: '',
-  thumbnailSize: '300x300,32x32',
-  useRelativeEDistances: false,
-  useFirmwareRetraction: false,
-  
+/**
+ * Maps each OrcaMachineSettings key to its SimplyPrint/OrcaSlicer tab category.
+ * Extras not in the SP catalog are assigned to the most appropriate category.
+ */
+export const ORCA_MACHINE_CATEGORY_MAP: Record<string, MachineCategory> = {
+  // basic_information
+  nozzle_size: 'basic_information',
+  nozzle_volume_type: 'basic_information',
+  printable_height: 'basic_information',
+  support_multi_bed_types: 'basic_information',
+  pellet_modded_printer: 'basic_information',
+  nozzle_hrc: 'basic_information',
+  support_chamber_temp_control: 'basic_information',
+  support_air_filtration: 'basic_information',
+  z_offset: 'basic_information',
+  preferred_orientation: 'basic_information',
+  scan_first_layer: 'basic_information',
+  disable_m73: 'basic_information',
+  thumbnails: 'basic_information',
+  use_relative_e_distances: 'basic_information',
+  use_firmware_retraction: 'basic_information',
+  time_cost: 'basic_information',
+  fan_speedup_overhangs: 'basic_information',
+  fan_kickstart: 'basic_information',
+  extruder_clearance_radius: 'basic_information',
+  extruder_clearance_height_to_rod: 'basic_information',
+  extruder_clearance_height_to_lid: 'basic_information',
+  adaptive_bed_mesh_margin: 'basic_information',
+  auxiliary_fan: 'basic_information',
+
+  // machine_gcode
+  file_start_gcode: 'machine_gcode',
+  wrapping_detection_gcode: 'machine_gcode',
+  gcode_flavor: 'machine_gcode',
+  machine_start_gcode: 'machine_gcode',
+  machine_end_gcode: 'machine_gcode',
+  before_layer_change_gcode: 'machine_gcode',
+  layer_change_gcode: 'machine_gcode',
+  toolchange_gcode: 'machine_gcode',
+  pause_print_gcode: 'machine_gcode',
+  printing_by_object_gcode: 'machine_gcode',
+  timelapse_gcode: 'machine_gcode',
+
+  // multimaterial
+  single_extruder_multi_material: 'multimaterial',
+  manual_filament_change: 'multimaterial',
+  purge_in_prime_tower: 'multimaterial',
+  enable_filament_ramming: 'multimaterial',
+  cooling_tube_retraction: 'multimaterial',
+  cooling_tube_length: 'multimaterial',
+  parking_pos_retraction: 'multimaterial',
+  extra_loading_move: 'multimaterial',
+  high_current_on_filament_swap: 'multimaterial',
+  machine_load_filament_time: 'multimaterial',
+  machine_unload_filament_time: 'multimaterial',
+  machine_tool_change_time: 'multimaterial',
+  support_multi_material: 'multimaterial',
+  single_extruder_multi_material_priming: 'multimaterial',
+  wipe_tower_type: 'multimaterial',
+  wipe_tower_wall_type: 'multimaterial',
+  wipe_tower_bridging: 'multimaterial',
+  wipe_tower_cone_angle: 'multimaterial',
+  wipe_tower_rotation_angle: 'multimaterial',
+  wipe_tower_extra_flow: 'multimaterial',
+  wipe_tower_extra_spacing: 'multimaterial',
+  wipe_tower_filament: 'multimaterial',
+  wipe_tower_max_purge_speed: 'multimaterial',
+  wipe_tower_no_sparse_layers: 'multimaterial',
+  wipe_tower_fillet_wall: 'multimaterial',
+  wipe_tower_rib_width: 'multimaterial',
+  wipe_tower_extra_rib_length: 'multimaterial',
+
+  // extruder
+  retraction_length: 'extruder',
+  z_hop: 'extruder',
+  long_retractions_when_cut: 'extruder',
+  retraction_distances_when_cut: 'extruder',
+  nozzle_diameter: 'extruder',
+  nozzle_volume: 'extruder',
+  extruder_printable_height: 'extruder',
+  min_layer_height: 'extruder',
+  max_layer_height: 'extruder',
+  retract_restart_extra: 'extruder',
+  retraction_speed: 'extruder',
+  deretraction_speed: 'extruder',
+  retraction_minimum_travel: 'extruder',
+  retract_when_changing_layer: 'extruder',
+  wipe: 'extruder',
+  wipe_distance: 'extruder',
+  retract_before_wipe: 'extruder',
+  travel_slope: 'extruder',
+  retract_lift_above: 'extruder',
+  retract_lift_below: 'extruder',
+  retract_length_toolchange: 'extruder',
+  retract_restart_extra_toolchange: 'extruder',
+  extruder_count: 'extruder',
+  extruder_offset: 'extruder',
+  extrusion_multiplier: 'extruder',
+  extruder_type: 'extruder',
+  extruder_colour: 'extruder',
+  extruder_printable_area: 'extruder',
+  retract_lift_enforce: 'extruder',
+  z_hop_types: 'extruder',
+  wipe_speed: 'extruder',
+  wipe_before_external_loop: 'extruder',
+  wipe_on_loops: 'extruder',
+
+  // motion_ability
+  emit_machine_limits_to_gcode: 'motion_ability',
+  resonance_avoidance: 'motion_ability',
+  min_resonance_avoidance_speed: 'motion_ability',
+  max_resonance_avoidance_speed: 'motion_ability',
+  motion_type: 'motion_ability',
+  machine_max_acceleration_x: 'motion_ability',
+  machine_max_acceleration_y: 'motion_ability',
+  machine_max_acceleration_z: 'motion_ability',
+  machine_max_acceleration_e: 'motion_ability',
+  machine_max_jerk_x: 'motion_ability',
+  machine_max_jerk_y: 'motion_ability',
+  machine_max_jerk_z: 'motion_ability',
+  machine_max_jerk_e: 'motion_ability',
+  machine_max_speed_x: 'motion_ability',
+  machine_max_speed_y: 'motion_ability',
+  machine_max_speed_z: 'motion_ability',
+  machine_max_speed_e: 'motion_ability',
+  max_print_speed: 'motion_ability',
+  machine_max_acceleration_travel: 'motion_ability',
+  max_junction_deviation: 'motion_ability',
+  support_arc_movement: 'motion_ability',
+  arc_resolution: 'motion_ability',
+  travel_speed: 'motion_ability',
+  travel_acceleration: 'motion_ability',
+  travel_jerk: 'motion_ability',
+
+  // notes
+  printer_notes: 'notes',
+
+  // extras → basic_information (metadata, build volume, bed, capabilities, misc)
+  inherits: 'basic_information',
+  printer_model: 'basic_information',
+  printer_variant: 'basic_information',
+  thumbnails_format: 'basic_information',
+  bed_size_x: 'basic_information',
+  bed_size_y: 'basic_information',
+  printable_area: 'basic_information',
+  bed_origin: 'basic_information',
+  bed_shape: 'basic_information',
+  nozzle_type: 'basic_information',
+  bed_type: 'basic_information',
+  has_bed_probe: 'basic_information',
+  probe_type: 'basic_information',
+  mesh_bed_leveling: 'basic_information',
+  bed_custom_texture: 'basic_information',
+  bed_custom_model: 'basic_information',
+  has_heated_bed: 'basic_information',
+  has_heated_chamber: 'basic_information',
+  max_bed_temperature: 'basic_information',
+  max_chamber_temperature: 'basic_information',
+  max_hotend_temperature: 'basic_information',
+  has_scarf_joint_seam: 'basic_information',
+  cooling_fan_count: 'basic_information',
+  has_chamber_fan: 'basic_information',
+  fan_max_speed: 'basic_information',
+  silent_mode: 'basic_information',
+  silent_mode_max_speed: 'basic_information',
+  power_loss_recovery: 'basic_information',
+  filament_sensor: 'basic_information',
+  auto_leveling: 'basic_information',
+  timelapse_type: 'basic_information',
+  octoprint_host: 'basic_information',
+  octoprint_api_key: 'basic_information',
+  printer_width: 'basic_information',
+  printer_depth: 'basic_information',
+  printer_height: 'basic_information',
+};
+
+/** Sensible OrcaSlicer defaults for a generic Cartesian FDM printer */
+export const DEFAULT_ORCA_MACHINE_SETTINGS: Partial<OrcaMachineSettings> = {
   // Build volume
-  buildVolumeOrigin: 'corner',
-  maxLayerHeight: 0.28,
-  minLayerHeight: 0.08,
-  bedShape: 'rectangular',
-  
-  // Extruder
-  extruderCount: 1,
-  extruderOffset: '0x0',
-  retractionLength: 0.8,
-  retractionSpeed: 35,
-  retractionLiftZ: 0.2,
-  retractionLiftAbove: 0,
-  retractionLiftBelow: 0,
-  detractionSpeed: 25,
-  longRetractionWhenCut: 6,
-  extrusionMultiplier: 1.0,
-  
+  printable_height: 250,
+  bed_size_x: 220,
+  bed_size_y: 220,
+  printable_area: '0x0,220x0,220x220,0x220',
+  bed_shape: 'rectangular',
+  bed_origin: 'corner',
+
   // Nozzle
-  nozzleType: 'brass',
-  nozzleHrc: 0,
-  
-  // Print bed
-  bedType: 'textured_pei',
-  hasBedProbe: true,
-  probeType: 'inductive',
-  meshBedLeveling: true,
-  bedCustomTexture: '',
-  bedCustomModel: '',
-  
+  nozzle_size: 0.4,
+  nozzle_diameter: 0.4,
+  nozzle_volume_type: 'standard',
+  nozzle_hrc: 0,
+  nozzle_type: 'brass',
+
+  // Layer heights
+  min_layer_height: 0.08,
+  max_layer_height: 0.28,
+
+  // Retraction
+  retraction_length: 0.8,
+  retraction_speed: 35,
+  deretraction_speed: 25,
+  retract_restart_extra: 0,
+  retraction_minimum_travel: 2.0,
+  retract_when_changing_layer: false,
+  retract_length_toolchange: 10,
+  retract_restart_extra_toolchange: 0,
+
+  // Z-hop
+  z_hop: 0.2,
+  retract_lift_above: 0,
+  retract_lift_below: 0,
+
+  // Wipe
+  wipe: false,
+  wipe_distance: 0,
+  retract_before_wipe: 0,
+  wipe_speed: 80,
+
+  // Extruder clearance
+  extruder_clearance_radius: 45,
+  extruder_clearance_height_to_rod: 36,
+  extruder_clearance_height_to_lid: 40,
+  extruder_count: 1,
+  extruder_offset: '0x0',
+  extrusion_multiplier: 1.0,
+  extruder_type: 'direct_drive',
+  extruder_colour: '#FF8000',
+
+  // G-code
+  use_relative_e_distances: false,
+  use_firmware_retraction: false,
+  gcode_flavor: 'marlin2',
+  machine_start_gcode: '; Start G-code\nG28 ; Home all axes\nG1 Z5 F3000 ; Lift nozzle',
+  machine_end_gcode: '; End G-code\nM104 S0 ; Turn off hotend\nM140 S0 ; Turn off bed\nG28 X Y ; Home X and Y\nM84 ; Disable motors',
+  thumbnails: '300x300,32x32',
+  thumbnails_format: 'PNG',
+  scan_first_layer: false,
+
+  // Bed
+  bed_type: 'textured_pei',
+  has_bed_probe: true,
+  probe_type: 'inductive',
+  mesh_bed_leveling: true,
+
   // Capabilities
-  hasHeatedBed: true,
-  hasHeatedChamber: false,
-  maxBedTemperature: 110,
-  maxChamberTemperature: 0,
-  maxHotendTemperature: 300,
-  supportMultiMaterial: false,
-  supportArcMovement: true,
-  arcResolution: 0.25,
-  
+  has_heated_bed: true,
+  has_heated_chamber: false,
+  max_bed_temperature: 110,
+  max_chamber_temperature: 0,
+  max_hotend_temperature: 300,
+  support_multi_bed_types: false,
+  pellet_modded_printer: false,
+  support_chamber_temp_control: false,
+  support_air_filtration: false,
+  auxiliary_fan: false,
+
   // Motion
-  motionType: 'cartesian',
-  maxAccelerationX: 3000,
-  maxAccelerationY: 3000,
-  maxAccelerationZ: 500,
-  maxAccelerationE: 5000,
-  maxJerkX: 8,
-  maxJerkY: 8,
-  maxJerkZ: 0.4,
-  maxJerkE: 2.5,
-  maxFeedrateX: 300,
-  maxFeedrateY: 300,
-  maxFeedrateZ: 10,
-  maxFeedrateE: 120,
-  
+  motion_type: 'cartesian',
+  machine_max_acceleration_x: 3000,
+  machine_max_acceleration_y: 3000,
+  machine_max_acceleration_z: 500,
+  machine_max_acceleration_e: 5000,
+  machine_max_jerk_x: 8,
+  machine_max_jerk_y: 8,
+  machine_max_jerk_z: 0.4,
+  machine_max_jerk_e: 2.5,
+  machine_max_speed_x: 300,
+  machine_max_speed_y: 300,
+  machine_max_speed_z: 10,
+  machine_max_speed_e: 120,
+  max_print_speed: 250,
+  machine_max_acceleration_travel: 5000,
+  max_junction_deviation: 0.013,
+  emit_machine_limits_to_gcode: true,
+
   // Cooling
-  coolingFanCount: 1,
-  hasChamberFan: false,
-  hasAuxiliaryFan: false,
-  fanMaxSpeed: 255,
-  
-  // G-code
-  gcodeDialect: 'marlin2',
-  startGcode: '; Start G-code\nG28 ; Home all axes\nG1 Z5 F3000 ; Lift nozzle',
-  endGcode: '; End G-code\nM104 S0 ; Turn off hotend\nM140 S0 ; Turn off bed\nG28 X Y ; Home X and Y\nM84 ; Disable motors',
-  beforeLayerChangeGcode: '',
-  afterLayerChangeGcode: '',
-  toolChangeGcode: '',
-  pauseGcode: 'M601 ; Pause',
-  
+  cooling_fan_count: 1,
+  has_chamber_fan: false,
+
+  // Multi-material
+  single_extruder_multi_material: false,
+  single_extruder_multi_material_priming: false,
+  machine_load_filament_time: 0,
+  machine_unload_filament_time: 0,
+  machine_tool_change_time: 0,
+  wipe_tower_type: 'sparse',
+  wipe_tower_wall_type: 'single',
+
   // Features
-  silentMode: false,
-  silentModeMaxSpeed: 100,
-  powerLossRecovery: false,
-  filamentSensor: false,
-  autoLevelingEnabled: true,
-  
-  // Timelapse
-  timelapseType: 'none',
-  octoprintHost: undefined,
-  octoprintApiKey: undefined,
-  
-  // Physical
-  printerWidth: 400,
-  printerDepth: 400,
-  printerHeight: 500,
+  power_loss_recovery: false,
+  filament_sensor: false,
+  auto_leveling: true,
 
-  // Wipe Tower
-  wipeTowerType: 'sparse',
-  wipeTowerWallType: 'single',
-  wipeTowerBridging: 10,
-  wipeTowerConeAngle: 0,
-  wipeTowerRotationAngle: 0,
-  wipeTowerExtraFlow: 1.0,
-  wipeTowerExtraSpacing: 100,
-  wipeTowerFilament: 0,
-  wipeTowerMaxPurgeSpeed: 60,
-  wipeTowerNoSparseLayers: false,
-  wipeTowerFilletWall: false,
-  wipeTowerRibWidth: 0,
-  wipeTowerExtraRibLength: 0,
-
-  // Advanced Retraction
-  retractionRestartExtra: 0,
-  retractionRestartExtraToolchange: 0,
-  retractionLengthToolchange: 10,
-  retractionDistancesWhenEc: '',
-  retractionLiftEnforce: '',
-  retractBeforeWipePercent: 0,
-  wipeDistance: 0,
-  wipeSpeed: 80,
-  wipeBeforeExternalLoop: false,
-  wipeOnLoops: false,
-
-  // Z-Hop
-  zHopTypes: '',
-
-  // Travel
-  travelSpeed: 200,
-  travelAcceleration: 5000,
-  travelJerk: 8,
-  travelSlope: false,
-
-  // Extruder Clearance
-  extruderClearanceHeightToLid: 40,
-  extruderClearanceHeightToRod: 36,
-  extruderClearanceRadius: 45,
-  extruderType: 'direct_drive',
-  extruderColour: '#FF8000',
-  extruderPrintableArea: '',
-  extruderPrintableHeight: 0,
-
-  // Machine Limits Extended
-  maxAccelerationTravel: 5000,
-  maxJunctionDeviation: 0.013,
-  emitMachineLimitsToGcode: true,
-
-  // G-Code Extended
-  thumbnailsFormat: 'PNG',
-  printingByObjectGcode: '',
-  scanFirstLayer: false,
-  timelapseGcode: '',
-
-  // Misc Machine Features
-  nozzleVolume: 0,
-  nozzleVolumeType: 'standard',
-  hasScarfJointSeam: false,
-  singleExtruderMultiMaterial: false,
-  singleExtruderMultiMaterialPriming: false,
-  machineLoadFilamentTime: 0,
-  machineUnloadFilamentTime: 0,
-  machineToolChangeTime: 0,
-  printerNotes2: '',
+  // Physical dimensions
+  printer_width: 400,
+  printer_depth: 400,
+  printer_height: 500,
 };
 
-/**
- * Map settings to their category
- * Used to determine which tab shows dirty indicator
- */
-export const MACHINE_SETTING_TO_CATEGORY_MAP: Record<keyof AdvancedMachineSettings, MachineSettingsCategory> = {
-  // General
-  name: 'general',
-  inherits: 'general',
-  printerModel: 'general',
-  printerVariant: 'general',
-  printerNotes: 'general',
-  thumbnailSize: 'general',
-  useRelativeEDistances: 'gcode',
-  useFirmwareRetraction: 'gcode',
-  
-  // Build volume (general)
-  buildVolumeX: 'general',
-  buildVolumeY: 'general',
-  buildVolumeZ: 'general',
-  printableArea: 'general',
-  buildVolumeOrigin: 'general',
-  maxLayerHeight: 'general',
-  minLayerHeight: 'general',
-  bedShape: 'printbed',
-  
-  // Extruder
-  extruderCount: 'extruder',
-  extruderOffset: 'extruder',
-  nozzleDiameter: 'extruder',
-  nozzleType: 'extruder',
-  nozzleHrc: 'extruder',
-  retractionLength: 'extruder',
-  retractionSpeed: 'extruder',
-  retractionLiftZ: 'extruder',
-  retractionLiftAbove: 'extruder',
-  retractionLiftBelow: 'extruder',
-  detractionSpeed: 'extruder',
-  longRetractionWhenCut: 'extruder',
-  extrusionMultiplier: 'extruder',
-  
-  // Print bed
-  bedType: 'printbed',
-  hasBedProbe: 'printbed',
-  probeType: 'printbed',
-  meshBedLeveling: 'printbed',
-  bedCustomTexture: 'printbed',
-  bedCustomModel: 'printbed',
-  
-  // Capabilities
-  hasHeatedBed: 'capabilities',
-  hasHeatedChamber: 'capabilities',
-  maxBedTemperature: 'capabilities',
-  maxChamberTemperature: 'capabilities',
-  maxHotendTemperature: 'capabilities',
-  supportMultiMaterial: 'capabilities',
-  supportArcMovement: 'capabilities',
-  arcResolution: 'capabilities',
-  motionType: 'capabilities',
-  maxAccelerationX: 'capabilities',
-  maxAccelerationY: 'capabilities',
-  maxAccelerationZ: 'capabilities',
-  maxAccelerationE: 'capabilities',
-  maxJerkX: 'capabilities',
-  maxJerkY: 'capabilities',
-  maxJerkZ: 'capabilities',
-  maxJerkE: 'capabilities',
-  maxFeedrateX: 'capabilities',
-  maxFeedrateY: 'capabilities',
-  maxFeedrateZ: 'capabilities',
-  maxFeedrateE: 'capabilities',
-  maxPrintSpeed: 'capabilities',
-  coolingFanCount: 'capabilities',
-  hasChamberFan: 'capabilities',
-  hasAuxiliaryFan: 'capabilities',
-  fanMaxSpeed: 'capabilities',
-  silentMode: 'capabilities',
-  silentModeMaxSpeed: 'capabilities',
-  powerLossRecovery: 'capabilities',
-  filamentSensor: 'capabilities',
-  autoLevelingEnabled: 'capabilities',
-  
-  // G-code
-  gcodeDialect: 'gcode',
-  startGcode: 'gcode',
-  endGcode: 'gcode',
-  beforeLayerChangeGcode: 'gcode',
-  afterLayerChangeGcode: 'gcode',
-  toolChangeGcode: 'gcode',
-  pauseGcode: 'gcode',
-  
-  // Timelapse / Other
-  timelapseType: 'general',
-  octoprintHost: 'general',
-  octoprintApiKey: 'general',
-  printerWidth: 'general',
-  printerDepth: 'general',
-  printerHeight: 'general',
-
-  // Wipe Tower (Multi-Material)
-  wipeTowerType: 'extruder',
-  wipeTowerWallType: 'extruder',
-  wipeTowerBridging: 'extruder',
-  wipeTowerConeAngle: 'extruder',
-  wipeTowerRotationAngle: 'extruder',
-  wipeTowerExtraFlow: 'extruder',
-  wipeTowerExtraSpacing: 'extruder',
-  wipeTowerFilament: 'extruder',
-  wipeTowerMaxPurgeSpeed: 'extruder',
-  wipeTowerNoSparseLayers: 'extruder',
-  wipeTowerFilletWall: 'extruder',
-  wipeTowerRibWidth: 'extruder',
-  wipeTowerExtraRibLength: 'extruder',
-
-  // Advanced Retraction
-  retractionRestartExtra: 'extruder',
-  retractionRestartExtraToolchange: 'extruder',
-  retractionLengthToolchange: 'extruder',
-  retractionDistancesWhenEc: 'extruder',
-  retractionLiftEnforce: 'extruder',
-  retractBeforeWipePercent: 'extruder',
-  wipeDistance: 'extruder',
-  wipeSpeed: 'extruder',
-  wipeBeforeExternalLoop: 'extruder',
-  wipeOnLoops: 'extruder',
-
-  // Z-Hop
-  zHopTypes: 'extruder',
-
-  // Travel
-  travelSpeed: 'capabilities',
-  travelAcceleration: 'capabilities',
-  travelJerk: 'capabilities',
-  travelSlope: 'capabilities',
-
-  // Extruder Clearance
-  extruderClearanceHeightToLid: 'extruder',
-  extruderClearanceHeightToRod: 'extruder',
-  extruderClearanceRadius: 'extruder',
-  extruderType: 'extruder',
-  extruderColour: 'extruder',
-  extruderPrintableArea: 'extruder',
-  extruderPrintableHeight: 'extruder',
-
-  // Machine Limits Extended
-  maxAccelerationTravel: 'capabilities',
-  maxJunctionDeviation: 'capabilities',
-  emitMachineLimitsToGcode: 'capabilities',
-
-  // G-Code Extended
-  thumbnailsFormat: 'gcode',
-  printingByObjectGcode: 'gcode',
-  scanFirstLayer: 'gcode',
-  timelapseGcode: 'gcode',
-
-  // Misc Machine Features
-  nozzleVolume: 'capabilities',
-  nozzleVolumeType: 'capabilities',
-  hasScarfJointSeam: 'capabilities',
-  singleExtruderMultiMaterial: 'capabilities',
-  singleExtruderMultiMaterialPriming: 'capabilities',
-  machineLoadFilamentTime: 'extruder',
-  machineUnloadFilamentTime: 'extruder',
-  machineToolChangeTime: 'extruder',
-  printerNotes2: 'general',
-};
-
-/**
- * Maps machine settings to their OrcaSlicer mode (comSimple/comAdvanced).
- * Settings in 'simple' mode are shown in Basic view.
- * Settings in 'advanced' mode are shown only in Advanced view.
- */
-export const MACHINE_SETTING_MODE_MAP: Record<string, 'simple' | 'advanced'> = {
-  name: 'simple',
-  buildVolumeX: 'simple',
-  buildVolumeY: 'simple',
-  buildVolumeZ: 'simple',
-  nozzleDiameter: 'simple',
-  maxPrintSpeed: 'simple',
-};
-
-/** Common printer presets (manufacturer defaults) */
-export const PRINTER_PRESETS: Record<string, Partial<AdvancedMachineSettings>> = {
+/** Common printer presets with OrcaSlicer native keys */
+export const PRINTER_PRESETS: Record<string, Partial<OrcaMachineSettings>> = {
   'Prusa MK4': {
-    name: 'Prusa MK4',
-    printerModel: 'MK4',
-    buildVolumeX: 250,
-    buildVolumeY: 210,
-    buildVolumeZ: 220,
-    nozzleDiameter: 0.4,
-    maxPrintSpeed: 500,
-    motionType: 'cartesian',
-    gcodeDialect: 'marlin2',
-    hasHeatedBed: true,
-    maxBedTemperature: 120,
-    maxHotendTemperature: 290,
-    filamentSensor: true,
-    powerLossRecovery: true,
+    printer_model: 'MK4',
+    bed_size_x: 250,
+    bed_size_y: 210,
+    printable_height: 220,
+    nozzle_size: 0.4,
+    nozzle_diameter: 0.4,
+    max_print_speed: 500,
+    motion_type: 'cartesian',
+    gcode_flavor: 'marlin2',
+    has_heated_bed: true,
+    max_bed_temperature: 120,
+    max_hotend_temperature: 290,
+    filament_sensor: true,
+    power_loss_recovery: true,
   },
   'Prusa CORE One': {
-    name: 'Prusa CORE One',
-    printerModel: 'CORE One',
-    buildVolumeX: 250,
-    buildVolumeY: 220,
-    buildVolumeZ: 270,
-    nozzleDiameter: 0.4,
-    maxPrintSpeed: 600,
-    motionType: 'corexy',
-    gcodeDialect: 'marlin2',
-    hasHeatedBed: true,
-    hasHeatedChamber: true,
-    maxBedTemperature: 120,
-    maxChamberTemperature: 55,
-    maxHotendTemperature: 300,
-    filamentSensor: true,
-    powerLossRecovery: true,
+    printer_model: 'CORE One',
+    bed_size_x: 250,
+    bed_size_y: 220,
+    printable_height: 270,
+    nozzle_size: 0.4,
+    nozzle_diameter: 0.4,
+    max_print_speed: 600,
+    motion_type: 'corexy',
+    gcode_flavor: 'marlin2',
+    has_heated_bed: true,
+    has_heated_chamber: true,
+    max_bed_temperature: 120,
+    max_chamber_temperature: 55,
+    max_hotend_temperature: 300,
+    filament_sensor: true,
+    power_loss_recovery: true,
   },
   'Voron 2.4': {
-    name: 'Voron 2.4',
-    printerModel: 'Voron 2.4',
-    buildVolumeX: 350,
-    buildVolumeY: 350,
-    buildVolumeZ: 350,
-    nozzleDiameter: 0.4,
-    maxPrintSpeed: 500,
-    motionType: 'corexy',
-    gcodeDialect: 'klipper',
-    hasHeatedBed: true,
-    hasHeatedChamber: true,
-    maxBedTemperature: 120,
-    maxHotendTemperature: 300,
+    printer_model: 'Voron 2.4',
+    bed_size_x: 350,
+    bed_size_y: 350,
+    printable_height: 350,
+    nozzle_size: 0.4,
+    nozzle_diameter: 0.4,
+    max_print_speed: 500,
+    motion_type: 'corexy',
+    gcode_flavor: 'klipper',
+    has_heated_bed: true,
+    has_heated_chamber: true,
+    max_bed_temperature: 120,
+    max_hotend_temperature: 300,
   },
   'Bambu Lab X1C': {
-    name: 'Bambu Lab X1C',
-    printerModel: 'X1 Carbon',
-    buildVolumeX: 256,
-    buildVolumeY: 256,
-    buildVolumeZ: 256,
-    nozzleDiameter: 0.4,
-    maxPrintSpeed: 500,
-    motionType: 'corexy',
-    gcodeDialect: 'marlin2',
-    hasHeatedBed: true,
-    hasHeatedChamber: true,
-    maxBedTemperature: 110,
-    maxChamberTemperature: 60,
-    maxHotendTemperature: 300,
-    supportMultiMaterial: true,
-    filamentSensor: true,
+    printer_model: 'X1 Carbon',
+    bed_size_x: 256,
+    bed_size_y: 256,
+    printable_height: 256,
+    nozzle_size: 0.4,
+    nozzle_diameter: 0.4,
+    max_print_speed: 500,
+    motion_type: 'corexy',
+    gcode_flavor: 'marlin2',
+    has_heated_bed: true,
+    has_heated_chamber: true,
+    max_bed_temperature: 110,
+    max_chamber_temperature: 60,
+    max_hotend_temperature: 300,
+    support_multi_material: true,
+    filament_sensor: true,
   },
   'Creality Ender 3 V3': {
-    name: 'Creality Ender 3 V3',
-    printerModel: 'Ender 3 V3',
-    buildVolumeX: 220,
-    buildVolumeY: 220,
-    buildVolumeZ: 250,
-    nozzleDiameter: 0.4,
-    maxPrintSpeed: 250,
-    motionType: 'cartesian',
-    gcodeDialect: 'marlin2',
-    hasHeatedBed: true,
-    maxBedTemperature: 100,
-    maxHotendTemperature: 260,
+    printer_model: 'Ender 3 V3',
+    bed_size_x: 220,
+    bed_size_y: 220,
+    printable_height: 250,
+    nozzle_size: 0.4,
+    nozzle_diameter: 0.4,
+    max_print_speed: 250,
+    motion_type: 'cartesian',
+    gcode_flavor: 'marlin2',
+    has_heated_bed: true,
+    max_bed_temperature: 100,
+    max_hotend_temperature: 260,
   },
 };
 
-/** G-code dialect labels */
+/** G-code flavor labels */
 export const GCODE_DIALECT_LABELS: Record<string, string> = {
   marlin: 'Marlin 1.x',
   marlin2: 'Marlin 2.x',
