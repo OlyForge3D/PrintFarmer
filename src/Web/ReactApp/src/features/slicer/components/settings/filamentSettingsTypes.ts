@@ -1,537 +1,608 @@
 /**
  * OrcaSlicer Filament settings type definitions
- * Maps to OrcaSlicer's filament profile settings
+ * Uses native OrcaSlicer snake_case property names aligned with the SimplyPrint filament catalog.
  */
 
 /** View modes for filament settings panel complexity */
 export type FilamentSettingsViewMode = 'simple' | 'advanced';
 
-/** Category tabs for filament settings in advanced mode */
-export type FilamentSettingsCategory = 
-  | 'temperature' 
-  | 'flow' 
-  | 'cooling' 
-  | 'retraction' 
-  | 'physical'
-  | 'gcode'
-  | 'other';
+/** Category tabs matching SimplyPrint / OrcaSlicer filament profile tabs */
+export type FilamentCategory =
+  | 'filament'
+  | 'cooling'
+  | 'setting_overrides'
+  | 'advanced'
+  | 'multimaterial'
+  | 'dependencies'
+  | 'notes';
 
 /**
- * Basic filament settings - shown in Basic mode
+ * OrcaSlicer filament profile settings — flat interface using native snake_case keys.
+ * All properties are optional; use DEFAULT_ORCA_FILAMENT_SETTINGS for sensible defaults.
+ * Properties not present in the SimplyPrint catalog are grouped at the bottom and
+ * mapped to 'advanced' mode.
  */
-export interface BasicFilamentSettings {
-  // Basic info
-  name: string;
-  material: string;
-  color?: string;
-  density: number;            // g/cm³
-  cost: number;               // cost per kg
-  
-  // Temperature
-  nozzleTemperature: number;  // °C
-  bedTemperature: number;     // °C
+export interface OrcaFilamentSettings {
+  // ── Profile / header fields (deduplicated — appear once, shown on every tab) ──
+  name?: string;
+  default_material_type?: string;
+  for_material_types?: string;
+  for_nozzle_size?: number;
+  for_nozzle_type?: string;
+  for_nozzle_volume_type?: string;
+
+  // ── Filament tab ─────────────────────────────────────────────────────────────
+  filament_type?: string;
+  filament_vendor?: string;
+  filament_soluble?: boolean;
+  filament_is_support?: boolean;
+  filament_change_length?: number;
+  required_nozzle_HRC?: number;
+  default_filament_colour?: string;
+  filament_diameter?: number;
+  filament_adhesiveness_category?: number;
+  filament_density?: number;
+  filament_shrink?: number;
+  filament_shrinkage_compensation_z?: number;
+  temperature_vitrification?: number;
+  idle_temperature?: number;
+  nozzle_temperature_range_low?: number;
+  nozzle_temperature_range_high?: number;
+  pellet_flow_coefficient?: number;
+  filament_flow_ratio?: number;
+  enable_pressure_advance?: boolean;
+  pressure_advance?: number;
+  adaptive_pressure_advance?: boolean;
+  adaptive_pressure_advance_overhangs?: boolean;
+  adaptive_pressure_advance_bridges?: number;
+  adaptive_pressure_advance_model?: string;
+  chamber_temperature?: number;
+  activate_chamber_temp_control?: boolean;
+  nozzle_temperature_initial_layer?: number;
+  nozzle_temperature?: number;
+  hot_plate_temp_initial_layer?: number;
+  hot_plate_temp?: number;
+  filament_adaptive_volumetric_speed?: boolean;
+  filament_max_volumetric_speed?: number;
+
+  // ── Cooling tab ──────────────────────────────────────────────────────────────
+  close_fan_the_first_x_layers?: number;
+  full_fan_speed_layer?: number;
+  fan_min_speed?: number;
+  fan_cooling_layer_time?: number;
+  fan_max_speed?: number;
+  slow_down_layer_time?: number;
+  reduce_fan_stop_start_freq?: boolean;
+  slow_down_for_layer_cooling?: boolean;
+  dont_slow_down_outer_wall?: boolean;
+  slow_down_min_speed?: number;
+  enable_overhang_bridge_fan?: boolean;
+  overhang_fan_speed?: number;
+  internal_bridge_fan_speed?: number;
+  support_material_interface_fan_speed?: number;
+  ironing_fan_speed?: number;
+  additional_cooling_fan_speed?: number;
+  activate_air_filtration?: boolean;
+  during_print_exhaust_fan_speed?: number;
+  complete_print_exhaust_fan_speed?: number;
+
+  // ── Setting Overrides tab ────────────────────────────────────────────────────
+  filament_retraction_length?: number;
+  filament_z_hop?: number;
+  filament_retract_lift_above?: number;
+  filament_retract_lift_below?: number;
+  filament_retraction_speed?: number;
+  filament_deretraction_speed?: number;
+  filament_retract_restart_extra?: number;
+  filament_retraction_minimum_travel?: number;
+  filament_retract_when_changing_layer?: boolean;
+  filament_wipe?: boolean;
+  filament_wipe_distance?: number;
+  filament_retract_before_wipe?: number;
+  filament_long_retractions_when_cut?: boolean;
+  filament_retraction_distances_when_cut?: number;
+  filament_ironing_flow?: number;
+  filament_ironing_spacing?: number;
+  filament_ironing_inset?: number;
+  filament_ironing_speed?: number;
+
+  // ── Multimaterial tab ────────────────────────────────────────────────────────
+  filament_minimal_purge_on_wipe_tower?: number;
+  filament_tower_interface_pre_extrusion_dist?: number;
+  filament_tower_interface_pre_extrusion_length?: number;
+  filament_tower_ironing_area?: number;
+  filament_tower_interface_purge_volume?: number;
+  filament_tower_interface_print_temp?: number;
+  long_retractions_when_ec?: boolean;
+  retraction_distances_when_ec?: number;
+  filament_loading_speed_start?: number;
+  filament_loading_speed?: number;
+  filament_unloading_speed_start?: number;
+  filament_unloading_speed?: number;
+  filament_toolchange_delay?: number;
+  filament_cooling_moves?: number;
+  filament_cooling_initial_speed?: number;
+  filament_cooling_final_speed?: number;
+  filament_stamping_loading_speed?: number;
+  filament_stamping_distance?: number;
+  filament_ramming_parameters?: string;
+  filament_multitool_ramming?: boolean;
+  filament_multitool_ramming_volume?: number;
+  filament_multitool_ramming_flow?: number;
+
+  // ── Dependencies tab ─────────────────────────────────────────────────────────
+  compatible_printers?: string[];
+  compatible_printers_condition?: string;
+
+  // ── Notes tab ────────────────────────────────────────────────────────────────
+  filament_notes?: string;
+
+  // ── Advanced extras (not in SimplyPrint catalog) ─────────────────────────────
+  cost?: number;                              // cost per kg
+  pressure_advance_smooth_time?: number;      // seconds
+  fan_cooling?: boolean;                      // explicit fan enable flag
+  close_loop_fan_power?: number;              // closed-loop fan power 0-100%
+  enable_volumetric_extrusion?: boolean;
+  filament_load_time?: number;                // seconds
+  filament_unload_time?: number;              // seconds
+  filament_start_gcode?: string;
+  filament_end_gcode?: string;
+  outer_wall_flow_ratio?: number;
+  inner_wall_flow_ratio?: number;
+  top_solid_infill_flow_ratio?: number;
+  bottom_solid_infill_flow_ratio?: number;
+  internal_solid_infill_flow_ratio?: number;
+  sparse_infill_flow_ratio?: number;
+  gap_fill_flow_ratio?: number;
+  support_flow_ratio?: number;
+  support_interface_flow_ratio?: number;
+  overhang_flow_ratio?: number;
+  first_layer_flow_ratio?: number;
+  set_other_flow_ratios?: boolean;
+  fan_kickstart?: number;                     // seconds
+  fan_speedup_time?: number;                  // seconds
+  fan_speedup_overhangs?: boolean;
+  overhang_fan_threshold?: string;
+  interlocking_beam?: boolean;
+  interlocking_beam_layer_count?: number;
+  interlocking_beam_width?: number;           // mm
+  interlocking_boundary_avoidance?: number;   // mm
+  interlocking_depth?: number;                // mm
+  interlocking_orientation?: number;          // degrees
+  mmu_segmented_region_max_width?: number;    // mm
+  mmu_segmented_region_interlocking_depth?: number; // mm
+  wipe_tower_interface_flow_ratio?: number;
+  wipe_tower_interface_speed?: number;        // mm/s
+  bed_temperature_formula?: string;
+  filament_flush_temp?: number;               // °C
+  filament_flush_volumetric_speed?: number;   // mm³/s
+  slow_down_layers?: number;
 }
 
-/**
- * Advanced filament settings - full OrcaSlicer parameter set
- */
-export interface AdvancedFilamentSettings extends BasicFilamentSettings {
-  // Extended temperature settings
-  firstLayerNozzleTemperature: number;
-  firstLayerBedTemperature: number;
-  maxVolumetricSpeed: number;       // mm³/s
-  chamberTemperature: number;       // °C
-  
-  // Flow settings
-  flowRatio: number;                // multiplier (e.g., 0.95 - 1.05)
-  printSpeed: number;               // mm/s override
-  
-  // Pressure advance / linear advance
-  enablePressureAdvance: boolean;
-  pressureAdvance: number;          // 0.0 - 1.0 typical
-  pressureAdvanceSmoothTime: number; // seconds
-  
-  // Retraction settings (filament-specific)
-  retractionLength: number;         // mm
-  retractionSpeed: number;          // mm/s
-  detractionSpeed: number;          // mm/s
-  retractionMinimumTravel: number;  // mm
-  retractOnLayerChange: boolean;
-  wipeBeforeRetract: boolean;
-  retractionLiftZ: number;          // mm - Z hop
-  
-  // Cooling settings (filament-specific)
-  enableFanCooling: boolean;
-  minFanSpeed: number;              // 0-100%
-  maxFanSpeed: number;              // 0-100%
-  bridgeFanSpeed: number;           // 0-100%
-  fullFanSpeedAtLayer: number;
-  slowDownForLayerTime: number;     // seconds
-  minPrintSpeed: number;            // mm/s when slowing for cooling
-  closeLoopFanPower: number;        // for printers with closed-loop fans
-  auxFanSpeed: number;              // auxiliary fan 0-100%
-  exhaustFanSpeed: number;          // exhaust/enclosure fan 0-100%
-  
-  // Volumetric settings
-  enableVolumetricExtrusion: boolean;
-  maxVolumetricExtrusionRate: number; // mm³/s
-  
-  // Advanced / Other
-  filamentLoadTime: number;         // seconds
-  filamentUnloadTime: number;       // seconds
-  filamentRammingParameters: string; // advanced ramming config
-  toolchangeDelay: number;          // seconds
-  startGcode: string;               // filament-specific start g-code
-  endGcode: string;                 // filament-specific end g-code
-
-  // Per-Feature Flow Ratios
-  outerWallFlowRatio?: number;            // multiplier
-  innerWallFlowRatio?: number;            // multiplier
-  topSolidInfillFlowRatio?: number;       // multiplier
-  bottomSolidInfillFlowRatio?: number;    // multiplier
-  internalSolidInfillFlowRatio?: number;  // multiplier
-  sparseInfillFlowRatio?: number;         // multiplier
-  gapFillFlowRatio?: number;             // multiplier
-  supportFlowRatio?: number;             // multiplier
-  supportInterfaceFlowRatio?: number;     // multiplier
-  overhangFlowRatio?: number;            // multiplier
-  firstLayerFlowRatio?: number;          // multiplier
-  setOtherFlowRatios?: boolean;          // when true, all ratios follow flowRatio
-
-  // Shrinkage Compensation
-  filamentShrink?: number;               // % XY shrinkage
-  filamentShrinkageCompensationZ?: number; // % Z shrinkage
-
-  // Advanced Cooling
-  fanKickstart?: number;                 // seconds
-  fanSpeedupTime?: number;               // seconds
-  fanSpeedupOverhangs?: boolean;
-  overhangFanSpeed?: number;             // 0-100%
-  overhangFanThreshold?: string;         // threshold description
-
-  // Filament Ironing (per-filament)
-  filamentIroningFlow?: number;          // ratio
-  filamentIroningInset?: number;         // mm
-  filamentIroningSpacing?: number;       // mm
-  filamentIroningSpeed?: number;         // mm/s
-
-  // Interlocking Beam
-  interlockingBeam?: boolean;
-  interlockingBeamLayerCount?: number;
-  interlockingBeamWidth?: number;        // mm
-  interlockingBoundaryAvoidance?: number; // mm
-  interlockingDepth?: number;            // mm
-  interlockingOrientation?: number;      // degrees
-  mmuSegmentedRegionMaxWidth?: number;   // mm
-  mmuSegmentedRegionInterlockingDepth?: number; // mm
-
-  // Cooling Moves (MMU/AMS)
-  filamentCoolingMoves?: number;
-  filamentCoolingInitialSpeed?: number;  // mm/s
-  filamentCoolingFinalSpeed?: number;    // mm/s
-
-  // Ramming & Stamping
-  filamentChangeLength?: number;         // mm
-  filamentStampingDistance?: number;      // mm
-  filamentStampingLoadingSpeed?: number; // mm/s
-  filamentMultitoolRamming?: boolean;
-  filamentMultitoolRammingFlow?: number; // ratio
-  filamentMultitoolRammingVolume?: number; // mm³
-
-  // Wipe Tower Per-Filament
-  filamentMinimalPurge?: number;         // mm³
-  wipeTowerInterfaceFlowRatio?: number;  // ratio
-  wipeTowerInterfaceSpeed?: number;      // mm/s
-  wipeTowerIroningArea?: number;         // mm²
-
-  // Metadata
-  filamentVendor?: string;
-  filamentNotes?: string;
-  filamentIsSupport?: boolean;
-  filamentSoluble?: boolean;
-
-  // Misc Advanced
-  temperatureVitrification?: number;     // °C (glass transition)
-  activateAirFiltration?: boolean;
-  bedTemperatureFormula?: string;        // formula string
-  filamentFlushTemp?: number;            // °C
-  filamentFlushVolumetricSpeed?: number; // mm³/s
-  filamentLoadingSpeed?: number;         // mm/s
-  filamentLoadingSpeedStart?: number;    // mm/s
-  filamentUnloadingSpeed?: number;       // mm/s
-  filamentUnloadingSpeedStart?: number;  // mm/s
-  slowDownLayers?: number;              // number of initial slow layers
-}
-
-/** Default values for basic filament settings */
-export const DEFAULT_BASIC_FILAMENT_SETTINGS: BasicFilamentSettings = {
-  name: 'Custom Filament',
-  material: 'PLA',
-  color: '#3B82F6',
-  density: 1.24,
+/** Sensible OrcaSlicer defaults for a generic PLA filament */
+export const DEFAULT_ORCA_FILAMENT_SETTINGS: Partial<OrcaFilamentSettings> = {
+  filament_type: 'PLA',
+  filament_diameter: 1.75,
+  filament_density: 1.24,
+  filament_flow_ratio: 1.0,
+  nozzle_temperature: 200,
+  nozzle_temperature_initial_layer: 210,
+  hot_plate_temp: 60,
+  hot_plate_temp_initial_layer: 65,
+  chamber_temperature: 0,
+  enable_pressure_advance: false,
+  pressure_advance: 0.04,
+  pressure_advance_smooth_time: 0.04,
+  filament_max_volumetric_speed: 12,
+  close_fan_the_first_x_layers: 1,
+  full_fan_speed_layer: 3,
+  fan_min_speed: 35,
+  fan_max_speed: 100,
+  fan_cooling_layer_time: 10,
+  slow_down_layer_time: 5,
+  slow_down_min_speed: 10,
+  enable_overhang_bridge_fan: true,
+  overhang_fan_speed: 100,
+  filament_retraction_length: 0.8,
+  filament_z_hop: 0.2,
+  filament_retraction_speed: 30,
+  filament_deretraction_speed: 30,
+  filament_retraction_minimum_travel: 1,
   cost: 16,
-  nozzleTemperature: 210,
-  bedTemperature: 60,
-};
-
-/** Default values for advanced filament settings */
-export const DEFAULT_ADVANCED_FILAMENT_SETTINGS: AdvancedFilamentSettings = {
-  ...DEFAULT_BASIC_FILAMENT_SETTINGS,
-  firstLayerNozzleTemperature: 215,
-  firstLayerBedTemperature: 65,
-  maxVolumetricSpeed: 12,
-  chamberTemperature: 0,
-  
-  flowRatio: 1.0,
-  printSpeed: 0, // 0 = use process profile speed
-  
-  enablePressureAdvance: false,
-  pressureAdvance: 0.04,
-  pressureAdvanceSmoothTime: 0.04,
-  
-  retractionLength: 0.8,
-  retractionSpeed: 30,
-  detractionSpeed: 30,
-  retractionMinimumTravel: 1,
-  retractOnLayerChange: false,
-  wipeBeforeRetract: false,
-  retractionLiftZ: 0.2,
-  
-  enableFanCooling: true,
-  minFanSpeed: 35,
-  maxFanSpeed: 100,
-  bridgeFanSpeed: 100,
-  fullFanSpeedAtLayer: 3,
-  slowDownForLayerTime: 5,
-  minPrintSpeed: 10,
-  closeLoopFanPower: 100,
-  auxFanSpeed: 0,
-  exhaustFanSpeed: 0,
-  
-  enableVolumetricExtrusion: false,
-  maxVolumetricExtrusionRate: 12,
-  
-  filamentLoadTime: 0,
-  filamentUnloadTime: 0,
-  filamentRammingParameters: '',
-  toolchangeDelay: 0,
-  startGcode: '',
-  endGcode: '',
-
-  // Per-Feature Flow Ratios
-  outerWallFlowRatio: 1.0,
-  innerWallFlowRatio: 1.0,
-  topSolidInfillFlowRatio: 1.0,
-  bottomSolidInfillFlowRatio: 1.0,
-  internalSolidInfillFlowRatio: 1.0,
-  sparseInfillFlowRatio: 1.0,
-  gapFillFlowRatio: 1.0,
-  supportFlowRatio: 1.0,
-  supportInterfaceFlowRatio: 1.0,
-  overhangFlowRatio: 1.0,
-  firstLayerFlowRatio: 1.0,
-  setOtherFlowRatios: false,
-
-  // Shrinkage Compensation
-  filamentShrink: 0,
-  filamentShrinkageCompensationZ: 0,
-
-  // Advanced Cooling
-  fanKickstart: 0,
-  fanSpeedupTime: 0,
-  fanSpeedupOverhangs: false,
-  overhangFanSpeed: 0,
-  overhangFanThreshold: '',
-
-  // Filament Ironing
-  filamentIroningFlow: 0.15,
-  filamentIroningInset: 0.25,
-  filamentIroningSpacing: 0.1,
-  filamentIroningSpeed: 15,
-
-  // Interlocking Beam
-  interlockingBeam: false,
-  interlockingBeamLayerCount: 2,
-  interlockingBeamWidth: 0.8,
-  interlockingBoundaryAvoidance: 2,
-  interlockingDepth: 0.4,
-  interlockingOrientation: 22.5,
-  mmuSegmentedRegionMaxWidth: 0,
-  mmuSegmentedRegionInterlockingDepth: 0,
-
-  // Cooling Moves (MMU/AMS)
-  filamentCoolingMoves: 0,
-  filamentCoolingInitialSpeed: 0,
-  filamentCoolingFinalSpeed: 0,
-
-  // Ramming & Stamping
-  filamentChangeLength: 0,
-  filamentStampingDistance: 0,
-  filamentStampingLoadingSpeed: 0,
-  filamentMultitoolRamming: false,
-  filamentMultitoolRammingFlow: 0,
-  filamentMultitoolRammingVolume: 0,
-
-  // Wipe Tower Per-Filament
-  filamentMinimalPurge: 0,
-  wipeTowerInterfaceFlowRatio: 1.0,
-  wipeTowerInterfaceSpeed: 0,
-  wipeTowerIroningArea: 0,
-
-  // Metadata
-  filamentVendor: '',
-  filamentNotes: '',
-  filamentIsSupport: false,
-  filamentSoluble: false,
-
-  // Misc Advanced
-  temperatureVitrification: 0,
-  activateAirFiltration: false,
-  bedTemperatureFormula: '',
-  filamentFlushTemp: 0,
-  filamentFlushVolumetricSpeed: 0,
-  filamentLoadingSpeed: 0,
-  filamentLoadingSpeedStart: 0,
-  filamentUnloadingSpeed: 0,
-  filamentUnloadingSpeedStart: 0,
-  slowDownLayers: 0,
 };
 
 /** Material presets for quick selection */
-export const MATERIAL_PRESETS: Record<string, Partial<AdvancedFilamentSettings>> = {
+export const MATERIAL_PRESETS: Record<string, Partial<OrcaFilamentSettings>> = {
   PLA: {
-    material: 'PLA',
-    density: 1.24,
+    filament_type: 'PLA',
+    filament_density: 1.24,
     cost: 16,
-    nozzleTemperature: 210,
-    bedTemperature: 60,
-    firstLayerNozzleTemperature: 215,
-    firstLayerBedTemperature: 65,
-    enableFanCooling: true,
-    maxFanSpeed: 100,
-    chamberTemperature: 0,
+    nozzle_temperature: 210,
+    hot_plate_temp: 60,
+    nozzle_temperature_initial_layer: 215,
+    hot_plate_temp_initial_layer: 65,
+    fan_max_speed: 100,
+    chamber_temperature: 0,
   },
   PETG: {
-    material: 'PETG',
-    density: 1.27,
+    filament_type: 'PETG',
+    filament_density: 1.27,
     cost: 18,
-    nozzleTemperature: 240,
-    bedTemperature: 80,
-    firstLayerNozzleTemperature: 245,
-    firstLayerBedTemperature: 85,
-    enableFanCooling: true,
-    maxFanSpeed: 50,
-    chamberTemperature: 0,
+    nozzle_temperature: 240,
+    hot_plate_temp: 80,
+    nozzle_temperature_initial_layer: 245,
+    hot_plate_temp_initial_layer: 85,
+    fan_max_speed: 50,
+    chamber_temperature: 0,
   },
   ABS: {
-    material: 'ABS',
-    density: 1.04,
+    filament_type: 'ABS',
+    filament_density: 1.04,
     cost: 16,
-    nozzleTemperature: 250,
-    bedTemperature: 100,
-    firstLayerNozzleTemperature: 255,
-    firstLayerBedTemperature: 105,
-    enableFanCooling: false,
-    maxFanSpeed: 0,
-    chamberTemperature: 45,
+    nozzle_temperature: 250,
+    hot_plate_temp: 100,
+    nozzle_temperature_initial_layer: 255,
+    hot_plate_temp_initial_layer: 105,
+    fan_max_speed: 0,
+    chamber_temperature: 45,
   },
   ASA: {
-    material: 'ASA',
-    density: 1.07,
+    filament_type: 'ASA',
+    filament_density: 1.07,
     cost: 22,
-    nozzleTemperature: 255,
-    bedTemperature: 100,
-    firstLayerNozzleTemperature: 260,
-    firstLayerBedTemperature: 105,
-    enableFanCooling: false,
-    maxFanSpeed: 0,
-    chamberTemperature: 45,
+    nozzle_temperature: 255,
+    hot_plate_temp: 100,
+    nozzle_temperature_initial_layer: 260,
+    hot_plate_temp_initial_layer: 105,
+    fan_max_speed: 0,
+    chamber_temperature: 45,
   },
   TPU: {
-    material: 'TPU',
-    density: 1.21,
+    filament_type: 'TPU',
+    filament_density: 1.21,
     cost: 24,
-    nozzleTemperature: 225,
-    bedTemperature: 50,
-    firstLayerNozzleTemperature: 230,
-    firstLayerBedTemperature: 55,
-    enableFanCooling: true,
-    maxFanSpeed: 50,
-    retractionLength: 0.4, // shorter for flexible
-    pressureAdvance: 0.06,
+    nozzle_temperature: 225,
+    hot_plate_temp: 50,
+    nozzle_temperature_initial_layer: 230,
+    hot_plate_temp_initial_layer: 55,
+    fan_max_speed: 50,
+    filament_retraction_length: 0.4,
+    pressure_advance: 0.06,
   },
   'PA-CF': {
-    material: 'PA-CF',
-    density: 1.15,
+    filament_type: 'PA-CF',
+    filament_density: 1.15,
     cost: 50,
-    nozzleTemperature: 280,
-    bedTemperature: 90,
-    firstLayerNozzleTemperature: 285,
-    firstLayerBedTemperature: 95,
-    enableFanCooling: false,
-    maxFanSpeed: 0,
-    chamberTemperature: 55,
-    maxVolumetricSpeed: 8,
+    nozzle_temperature: 280,
+    hot_plate_temp: 90,
+    nozzle_temperature_initial_layer: 285,
+    hot_plate_temp_initial_layer: 95,
+    fan_max_speed: 0,
+    chamber_temperature: 55,
+    filament_max_volumetric_speed: 8,
   },
 };
 
 /**
- * Maps each filament setting key to its category tab for dirty indicator tracking.
+ * Maps each OrcaFilamentSettings key to its display mode.
+ * 'simple' keys are shown when the user selects Basic view;
+ * 'advanced' keys are hidden until Advanced view is selected.
  */
-export const FILAMENT_SETTING_TO_CATEGORY_MAP: Record<string, FilamentSettingsCategory> = {
-  // Temperature tab
-  nozzleTemperature: 'temperature',
-  bedTemperature: 'temperature',
-  firstLayerNozzleTemperature: 'temperature',
-  firstLayerBedTemperature: 'temperature',
-  chamberTemperature: 'temperature',
-  maxVolumetricSpeed: 'temperature',
-  
-  // Flow tab
-  flowRatio: 'flow',
-  printSpeed: 'flow',
-  enablePressureAdvance: 'flow',
-  pressureAdvance: 'flow',
-  pressureAdvanceSmoothTime: 'flow',
-  enableVolumetricExtrusion: 'flow',
-  maxVolumetricExtrusionRate: 'flow',
-  
-  // Cooling tab
-  enableFanCooling: 'cooling',
-  minFanSpeed: 'cooling',
-  maxFanSpeed: 'cooling',
-  bridgeFanSpeed: 'cooling',
-  fullFanSpeedAtLayer: 'cooling',
-  slowDownForLayerTime: 'cooling',
-  minPrintSpeed: 'cooling',
-  closeLoopFanPower: 'cooling',
-  auxFanSpeed: 'cooling',
-  exhaustFanSpeed: 'cooling',
-  
-  // Retraction tab
-  retractionLength: 'retraction',
-  retractionSpeed: 'retraction',
-  detractionSpeed: 'retraction',
-  retractionMinimumTravel: 'retraction',
-  retractOnLayerChange: 'retraction',
-  wipeBeforeRetract: 'retraction',
-  retractionLiftZ: 'retraction',
-  
-  // Physical tab
-  density: 'physical',
-  cost: 'physical',
-  
-  // G-code tab
-  startGcode: 'gcode',
-  endGcode: 'gcode',
-  
-  // Other tab
-  name: 'other',
-  material: 'other',
-  color: 'other',
-  filamentLoadTime: 'other',
-  filamentUnloadTime: 'other',
-  filamentRammingParameters: 'other',
-  toolchangeDelay: 'other',
+export const ORCA_FILAMENT_MODE_MAP: Record<string, 'simple' | 'advanced'> = {
+  // Profile / header
+  name: 'simple',
+  default_material_type: 'simple',
+  for_material_types: 'simple',
+  for_nozzle_size: 'simple',
+  for_nozzle_type: 'simple',
+  for_nozzle_volume_type: 'simple',
 
-  // Per-Feature Flow Ratios
-  outerWallFlowRatio: 'flow',
-  innerWallFlowRatio: 'flow',
-  topSolidInfillFlowRatio: 'flow',
-  bottomSolidInfillFlowRatio: 'flow',
-  internalSolidInfillFlowRatio: 'flow',
-  sparseInfillFlowRatio: 'flow',
-  gapFillFlowRatio: 'flow',
-  supportFlowRatio: 'flow',
-  supportInterfaceFlowRatio: 'flow',
-  overhangFlowRatio: 'flow',
-  firstLayerFlowRatio: 'flow',
-  setOtherFlowRatios: 'flow',
+  // Filament tab — simple
+  filament_type: 'simple',
+  required_nozzle_HRC: 'simple',
+  filament_diameter: 'simple',
+  filament_adhesiveness_category: 'simple',
+  temperature_vitrification: 'simple',
+  idle_temperature: 'simple',
+  nozzle_temperature_range_low: 'simple',
+  nozzle_temperature_range_high: 'simple',
+  pellet_flow_coefficient: 'simple',
+  enable_pressure_advance: 'simple',
+  chamber_temperature: 'simple',
+  activate_chamber_temp_control: 'simple',
+  nozzle_temperature_initial_layer: 'simple',
+  nozzle_temperature: 'simple',
+  hot_plate_temp_initial_layer: 'simple',
+  hot_plate_temp: 'simple',
+  filament_adaptive_volumetric_speed: 'simple',
 
-  // Shrinkage Compensation
-  filamentShrink: 'physical',
-  filamentShrinkageCompensationZ: 'physical',
+  // Filament tab — advanced only
+  filament_vendor: 'advanced',
+  filament_soluble: 'advanced',
+  filament_is_support: 'advanced',
+  filament_change_length: 'advanced',
+  default_filament_colour: 'advanced',
+  filament_density: 'advanced',
+  filament_shrink: 'advanced',
+  filament_shrinkage_compensation_z: 'advanced',
+  filament_flow_ratio: 'advanced',
+  pressure_advance: 'advanced',
+  adaptive_pressure_advance: 'advanced',
+  adaptive_pressure_advance_overhangs: 'advanced',
+  adaptive_pressure_advance_bridges: 'advanced',
+  adaptive_pressure_advance_model: 'advanced',
+  filament_max_volumetric_speed: 'advanced',
 
-  // Advanced Cooling
-  fanKickstart: 'cooling',
-  fanSpeedupTime: 'cooling',
-  fanSpeedupOverhangs: 'cooling',
-  overhangFanSpeed: 'cooling',
-  overhangFanThreshold: 'cooling',
-  slowDownLayers: 'cooling',
+  // Cooling tab — simple
+  close_fan_the_first_x_layers: 'simple',
+  fan_min_speed: 'simple',
+  fan_cooling_layer_time: 'simple',
+  fan_max_speed: 'simple',
+  slow_down_layer_time: 'simple',
+  reduce_fan_stop_start_freq: 'simple',
+  slow_down_for_layer_cooling: 'simple',
+  dont_slow_down_outer_wall: 'simple',
+  enable_overhang_bridge_fan: 'simple',
+  additional_cooling_fan_speed: 'simple',
+  activate_air_filtration: 'simple',
+  during_print_exhaust_fan_speed: 'simple',
+  complete_print_exhaust_fan_speed: 'simple',
 
-  // Filament Ironing
-  filamentIroningFlow: 'flow',
-  filamentIroningInset: 'flow',
-  filamentIroningSpacing: 'flow',
-  filamentIroningSpeed: 'flow',
+  // Cooling tab — advanced only
+  full_fan_speed_layer: 'advanced',
+  slow_down_min_speed: 'advanced',
+  overhang_fan_speed: 'advanced',
+  internal_bridge_fan_speed: 'advanced',
+  support_material_interface_fan_speed: 'advanced',
+  ironing_fan_speed: 'advanced',
 
-  // Interlocking Beam
-  interlockingBeam: 'other',
-  interlockingBeamLayerCount: 'other',
-  interlockingBeamWidth: 'other',
-  interlockingBoundaryAvoidance: 'other',
-  interlockingDepth: 'other',
-  interlockingOrientation: 'other',
-  mmuSegmentedRegionMaxWidth: 'other',
-  mmuSegmentedRegionInterlockingDepth: 'other',
+  // Setting Overrides tab — simple
+  filament_retraction_length: 'simple',
+  filament_z_hop: 'simple',
+  filament_long_retractions_when_cut: 'simple',
+  filament_retraction_distances_when_cut: 'simple',
 
-  // Cooling Moves (MMU/AMS)
-  filamentCoolingMoves: 'other',
-  filamentCoolingInitialSpeed: 'other',
-  filamentCoolingFinalSpeed: 'other',
+  // Setting Overrides tab — advanced only
+  filament_retract_lift_above: 'advanced',
+  filament_retract_lift_below: 'advanced',
+  filament_retraction_speed: 'advanced',
+  filament_deretraction_speed: 'advanced',
+  filament_retract_restart_extra: 'advanced',
+  filament_retraction_minimum_travel: 'advanced',
+  filament_retract_when_changing_layer: 'advanced',
+  filament_wipe: 'advanced',
+  filament_wipe_distance: 'advanced',
+  filament_retract_before_wipe: 'advanced',
+  filament_ironing_flow: 'advanced',
+  filament_ironing_spacing: 'advanced',
+  filament_ironing_inset: 'advanced',
+  filament_ironing_speed: 'advanced',
 
-  // Ramming & Stamping
-  filamentChangeLength: 'other',
-  filamentStampingDistance: 'other',
-  filamentStampingLoadingSpeed: 'other',
-  filamentMultitoolRamming: 'other',
-  filamentMultitoolRammingFlow: 'other',
-  filamentMultitoolRammingVolume: 'other',
+  // Multimaterial tab — all advanced
+  filament_minimal_purge_on_wipe_tower: 'advanced',
+  filament_tower_interface_pre_extrusion_dist: 'advanced',
+  filament_tower_interface_pre_extrusion_length: 'advanced',
+  filament_tower_ironing_area: 'advanced',
+  filament_tower_interface_purge_volume: 'advanced',
+  filament_tower_interface_print_temp: 'advanced',
+  long_retractions_when_ec: 'advanced',
+  retraction_distances_when_ec: 'advanced',
+  filament_loading_speed_start: 'advanced',
+  filament_loading_speed: 'advanced',
+  filament_unloading_speed_start: 'advanced',
+  filament_unloading_speed: 'advanced',
+  filament_toolchange_delay: 'advanced',
+  filament_cooling_moves: 'advanced',
+  filament_cooling_initial_speed: 'advanced',
+  filament_cooling_final_speed: 'advanced',
+  filament_stamping_loading_speed: 'advanced',
+  filament_stamping_distance: 'advanced',
+  filament_ramming_parameters: 'advanced',
+  filament_multitool_ramming: 'advanced',
+  filament_multitool_ramming_volume: 'advanced',
+  filament_multitool_ramming_flow: 'advanced',
 
-  // Wipe Tower Per-Filament
-  filamentMinimalPurge: 'other',
-  wipeTowerInterfaceFlowRatio: 'other',
-  wipeTowerInterfaceSpeed: 'other',
-  wipeTowerIroningArea: 'other',
-
-  // Metadata
-  filamentVendor: 'other',
-  filamentNotes: 'other',
-  filamentIsSupport: 'other',
-  filamentSoluble: 'other',
-
-  // Misc Advanced – temperature-related
-  temperatureVitrification: 'temperature',
-  filamentFlushTemp: 'temperature',
-  filamentFlushVolumetricSpeed: 'temperature',
-
-  // Misc Advanced – other
-  activateAirFiltration: 'other',
-  bedTemperatureFormula: 'other',
-  filamentLoadingSpeed: 'other',
-  filamentLoadingSpeedStart: 'other',
-  filamentUnloadingSpeed: 'other',
-  filamentUnloadingSpeedStart: 'other',
+  // Dependencies / Notes / Advanced extras — all advanced
+  compatible_printers: 'advanced',
+  compatible_printers_condition: 'advanced',
+  filament_notes: 'advanced',
+  cost: 'advanced',
+  pressure_advance_smooth_time: 'advanced',
+  fan_cooling: 'advanced',
+  close_loop_fan_power: 'advanced',
+  enable_volumetric_extrusion: 'advanced',
+  filament_load_time: 'advanced',
+  filament_unload_time: 'advanced',
+  filament_start_gcode: 'advanced',
+  filament_end_gcode: 'advanced',
+  outer_wall_flow_ratio: 'advanced',
+  inner_wall_flow_ratio: 'advanced',
+  top_solid_infill_flow_ratio: 'advanced',
+  bottom_solid_infill_flow_ratio: 'advanced',
+  internal_solid_infill_flow_ratio: 'advanced',
+  sparse_infill_flow_ratio: 'advanced',
+  gap_fill_flow_ratio: 'advanced',
+  support_flow_ratio: 'advanced',
+  support_interface_flow_ratio: 'advanced',
+  overhang_flow_ratio: 'advanced',
+  first_layer_flow_ratio: 'advanced',
+  set_other_flow_ratios: 'advanced',
+  fan_kickstart: 'advanced',
+  fan_speedup_time: 'advanced',
+  fan_speedup_overhangs: 'advanced',
+  overhang_fan_threshold: 'advanced',
+  interlocking_beam: 'advanced',
+  interlocking_beam_layer_count: 'advanced',
+  interlocking_beam_width: 'advanced',
+  interlocking_boundary_avoidance: 'advanced',
+  interlocking_depth: 'advanced',
+  interlocking_orientation: 'advanced',
+  mmu_segmented_region_max_width: 'advanced',
+  mmu_segmented_region_interlocking_depth: 'advanced',
+  wipe_tower_interface_flow_ratio: 'advanced',
+  wipe_tower_interface_speed: 'advanced',
+  bed_temperature_formula: 'advanced',
+  filament_flush_temp: 'advanced',
+  filament_flush_volumetric_speed: 'advanced',
+  slow_down_layers: 'advanced',
 };
 
 /**
- * Maps filament settings to their OrcaSlicer mode (comSimple/comAdvanced).
- * Settings in 'simple' mode are shown in Basic view.
- * Settings in 'advanced' mode are shown only in Advanced view.
+ * Maps each OrcaFilamentSettings key to its UI category tab.
  */
-export const FILAMENT_SETTING_MODE_MAP: Record<string, 'simple' | 'advanced'> = {
-  // Simple (Basic) settings
-  name: 'simple',
-  material: 'simple',
-  color: 'simple',
-  nozzleTemperature: 'simple',
-  bedTemperature: 'simple',
-  density: 'simple',
-  cost: 'simple',
-  flowRatio: 'simple',
-  enableFanCooling: 'simple',
-  minFanSpeed: 'simple',
-  maxFanSpeed: 'simple',
-  // Everything else is advanced
+export const ORCA_FILAMENT_CATEGORY_MAP: Record<string, FilamentCategory> = {
+  // Profile / header — shown on every tab, canonical home is 'filament'
+  name: 'filament',
+  default_material_type: 'filament',
+  for_material_types: 'filament',
+  for_nozzle_size: 'filament',
+  for_nozzle_type: 'filament',
+  for_nozzle_volume_type: 'filament',
+
+  // Filament tab
+  filament_type: 'filament',
+  filament_vendor: 'filament',
+  filament_soluble: 'filament',
+  filament_is_support: 'filament',
+  filament_change_length: 'filament',
+  required_nozzle_HRC: 'filament',
+  default_filament_colour: 'filament',
+  filament_diameter: 'filament',
+  filament_adhesiveness_category: 'filament',
+  filament_density: 'filament',
+  filament_shrink: 'filament',
+  filament_shrinkage_compensation_z: 'filament',
+  temperature_vitrification: 'filament',
+  idle_temperature: 'filament',
+  nozzle_temperature_range_low: 'filament',
+  nozzle_temperature_range_high: 'filament',
+  pellet_flow_coefficient: 'filament',
+  filament_flow_ratio: 'filament',
+  enable_pressure_advance: 'filament',
+  pressure_advance: 'filament',
+  adaptive_pressure_advance: 'filament',
+  adaptive_pressure_advance_overhangs: 'filament',
+  adaptive_pressure_advance_bridges: 'filament',
+  adaptive_pressure_advance_model: 'filament',
+  chamber_temperature: 'filament',
+  activate_chamber_temp_control: 'filament',
+  nozzle_temperature_initial_layer: 'filament',
+  nozzle_temperature: 'filament',
+  hot_plate_temp_initial_layer: 'filament',
+  hot_plate_temp: 'filament',
+  filament_adaptive_volumetric_speed: 'filament',
+  filament_max_volumetric_speed: 'filament',
+
+  // Cooling tab
+  close_fan_the_first_x_layers: 'cooling',
+  full_fan_speed_layer: 'cooling',
+  fan_min_speed: 'cooling',
+  fan_cooling_layer_time: 'cooling',
+  fan_max_speed: 'cooling',
+  slow_down_layer_time: 'cooling',
+  reduce_fan_stop_start_freq: 'cooling',
+  slow_down_for_layer_cooling: 'cooling',
+  dont_slow_down_outer_wall: 'cooling',
+  slow_down_min_speed: 'cooling',
+  enable_overhang_bridge_fan: 'cooling',
+  overhang_fan_speed: 'cooling',
+  internal_bridge_fan_speed: 'cooling',
+  support_material_interface_fan_speed: 'cooling',
+  ironing_fan_speed: 'cooling',
+  additional_cooling_fan_speed: 'cooling',
+  activate_air_filtration: 'cooling',
+  during_print_exhaust_fan_speed: 'cooling',
+  complete_print_exhaust_fan_speed: 'cooling',
+
+  // Setting Overrides tab
+  filament_retraction_length: 'setting_overrides',
+  filament_z_hop: 'setting_overrides',
+  filament_retract_lift_above: 'setting_overrides',
+  filament_retract_lift_below: 'setting_overrides',
+  filament_retraction_speed: 'setting_overrides',
+  filament_deretraction_speed: 'setting_overrides',
+  filament_retract_restart_extra: 'setting_overrides',
+  filament_retraction_minimum_travel: 'setting_overrides',
+  filament_retract_when_changing_layer: 'setting_overrides',
+  filament_wipe: 'setting_overrides',
+  filament_wipe_distance: 'setting_overrides',
+  filament_retract_before_wipe: 'setting_overrides',
+  filament_long_retractions_when_cut: 'setting_overrides',
+  filament_retraction_distances_when_cut: 'setting_overrides',
+  filament_ironing_flow: 'setting_overrides',
+  filament_ironing_spacing: 'setting_overrides',
+  filament_ironing_inset: 'setting_overrides',
+  filament_ironing_speed: 'setting_overrides',
+
+  // Multimaterial tab
+  filament_minimal_purge_on_wipe_tower: 'multimaterial',
+  filament_tower_interface_pre_extrusion_dist: 'multimaterial',
+  filament_tower_interface_pre_extrusion_length: 'multimaterial',
+  filament_tower_ironing_area: 'multimaterial',
+  filament_tower_interface_purge_volume: 'multimaterial',
+  filament_tower_interface_print_temp: 'multimaterial',
+  long_retractions_when_ec: 'multimaterial',
+  retraction_distances_when_ec: 'multimaterial',
+  filament_loading_speed_start: 'multimaterial',
+  filament_loading_speed: 'multimaterial',
+  filament_unloading_speed_start: 'multimaterial',
+  filament_unloading_speed: 'multimaterial',
+  filament_toolchange_delay: 'multimaterial',
+  filament_cooling_moves: 'multimaterial',
+  filament_cooling_initial_speed: 'multimaterial',
+  filament_cooling_final_speed: 'multimaterial',
+  filament_stamping_loading_speed: 'multimaterial',
+  filament_stamping_distance: 'multimaterial',
+  filament_ramming_parameters: 'multimaterial',
+  filament_multitool_ramming: 'multimaterial',
+  filament_multitool_ramming_volume: 'multimaterial',
+  filament_multitool_ramming_flow: 'multimaterial',
+
+  // Dependencies tab
+  compatible_printers: 'dependencies',
+  compatible_printers_condition: 'dependencies',
+
+  // Notes tab
+  filament_notes: 'notes',
+
+  // Advanced extras (not in SimplyPrint catalog)
+  cost: 'advanced',
+  pressure_advance_smooth_time: 'advanced',
+  fan_cooling: 'advanced',
+  close_loop_fan_power: 'advanced',
+  enable_volumetric_extrusion: 'advanced',
+  filament_load_time: 'advanced',
+  filament_unload_time: 'advanced',
+  filament_start_gcode: 'advanced',
+  filament_end_gcode: 'advanced',
+  outer_wall_flow_ratio: 'advanced',
+  inner_wall_flow_ratio: 'advanced',
+  top_solid_infill_flow_ratio: 'advanced',
+  bottom_solid_infill_flow_ratio: 'advanced',
+  internal_solid_infill_flow_ratio: 'advanced',
+  sparse_infill_flow_ratio: 'advanced',
+  gap_fill_flow_ratio: 'advanced',
+  support_flow_ratio: 'advanced',
+  support_interface_flow_ratio: 'advanced',
+  overhang_flow_ratio: 'advanced',
+  first_layer_flow_ratio: 'advanced',
+  set_other_flow_ratios: 'advanced',
+  fan_kickstart: 'advanced',
+  fan_speedup_time: 'advanced',
+  fan_speedup_overhangs: 'advanced',
+  overhang_fan_threshold: 'advanced',
+  interlocking_beam: 'advanced',
+  interlocking_beam_layer_count: 'advanced',
+  interlocking_beam_width: 'advanced',
+  interlocking_boundary_avoidance: 'advanced',
+  interlocking_depth: 'advanced',
+  interlocking_orientation: 'advanced',
+  mmu_segmented_region_max_width: 'advanced',
+  mmu_segmented_region_interlocking_depth: 'advanced',
+  wipe_tower_interface_flow_ratio: 'advanced',
+  wipe_tower_interface_speed: 'advanced',
+  bed_temperature_formula: 'advanced',
+  filament_flush_temp: 'advanced',
+  filament_flush_volumetric_speed: 'advanced',
+  slow_down_layers: 'advanced',
 };
