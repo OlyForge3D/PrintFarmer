@@ -58,7 +58,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
         var modelId = Guid.NewGuid();
         string fileName = $"{modelId}.stl";
-        string modelsPath = config["Slicer:ModelsPath"] ?? "/app/uploads/models";
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Combine(Path.GetTempPath(), "slicer_models_fallback");
         Directory.CreateDirectory(modelsPath);
         string filePath = Path.Combine(modelsPath, fileName);
 
@@ -91,7 +91,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
             // Assert
             response.StatusCode.Should().Be(HttpStatusCode.OK, "valid model file should be downloadable");
-            response.Content.Headers.ContentType?.MediaType.Should().Be("application/octet-stream");
+            response.Content.Headers.ContentType?.MediaType.Should().Be("model/stl");
 
             string downloadedContent = await response.Content.ReadAsStringAsync();
             downloadedContent.Should().Be(fileContent, "downloaded content should match uploaded file");
@@ -115,7 +115,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
         var modelId = Guid.NewGuid();
         string fileName = $"{modelId}.stl";
-        string modelsPath = config["Slicer:ModelsPath"] ?? "/app/uploads/models";
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Combine(Path.GetTempPath(), "slicer_models_fallback");
         Directory.CreateDirectory(modelsPath);
         string filePath = Path.Combine(modelsPath, fileName);
 
@@ -151,7 +151,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
                 "REGRESSION: File endpoint must serve physical files regardless of IsValid status. " +
                 "This prevents 404 errors when downloading files for models that failed validation.");
 
-            response.Content.Headers.ContentType?.MediaType.Should().Be("application/octet-stream");
+            response.Content.Headers.ContentType?.MediaType.Should().Be("model/stl");
 
             string downloadedContent = await response.Content.ReadAsStringAsync();
             downloadedContent.Should().Be(fileContent,
@@ -190,7 +190,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
         var modelId = Guid.NewGuid();
         string fileName = $"{modelId}.stl";
-        string modelsPath = config["Slicer:ModelsPath"] ?? "/app/uploads/models";
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Combine(Path.GetTempPath(), "slicer_models_fallback");
 
         var model = new Model3D
         {
@@ -230,7 +230,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
         var modelId = Guid.NewGuid();
         string modelFileName = $"{modelId}.stl";
         string thumbnailFileName = $"{modelId}.png";
-        string modelsPath = config["Slicer:ModelsPath"] ?? "/app/uploads/models";
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Combine(Path.GetTempPath(), "slicer_models_fallback");
         Directory.CreateDirectory(modelsPath);
 
         // Create model file
