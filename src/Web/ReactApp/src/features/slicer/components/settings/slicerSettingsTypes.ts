@@ -1,16 +1,29 @@
 /**
- * OrcaSlicer settings type definitions
- * Maps to OrcaSlicer's process profile settings
+ * OrcaSlicer process settings type definitions.
+ * Uses OrcaSlicer native snake_case property names throughout.
  */
+
+import { useState, useCallback, useMemo } from 'react';
+
+// =============================================================================
+// VIEW MODE & CATEGORY TYPES
+// =============================================================================
 
 /** View modes for settings panel complexity */
 export type SettingsViewMode = 'simple' | 'advanced';
 
-/** Category tabs in advanced mode */
-export type SettingsCategory = 'quality' | 'strength' | 'speed' | 'support' | 'multimaterial' | 'other';
+/** Type alias for process settings view mode */
+export type ProcessSettingsViewMode = 'simple' | 'advanced';
+
+/** Category tabs in the settings panel */
+export type SettingsCategory = 'quality' | 'strength' | 'speed' | 'support' | 'multimaterial' | 'others';
+
+// =============================================================================
+// ENUM TYPES
+// =============================================================================
 
 /** Infill patterns supported by OrcaSlicer */
-export type InfillPattern = 
+export type InfillPattern =
   | 'grid'
   | 'triangles'
   | 'stars'
@@ -67,483 +80,612 @@ export type GapFillTarget = 'everywhere' | 'topbottom' | 'nowhere';
 /** Slicing mode options */
 export type SlicingMode = 'regular' | 'even_odd' | 'close_holes';
 
-/** OrcaSlicer setting mode - matches comSimple/comAdvanced from PrintConfig.cpp */
-export type OrcaSettingMode = 'simple' | 'advanced' | 'develop';
+// =============================================================================
+// MAIN SETTINGS INTERFACE
+// =============================================================================
 
-/** Simple settings — the base typed settings for Simple mode */
-export interface SimpleSlicerSettings {
-  infillDensity: number;           // 0-100%
-  infillPattern: InfillPattern;
-  wallCount: number;               // 1-10 perimeters
-  bedAdhesion: BedAdhesionType;
-  enableSupports: boolean;
-  layerHeight: number;             // mm (0.08-0.32 typical)
-  firstLayerHeight: number;        // mm
-  lineWidthDefault: number;        // mm
-  lineWidthFirstLayer: number;     // mm
-  topLayers: number;
-  bottomLayers: number;
-}
+/**
+ * OrcaSlicer process profile settings using native snake_case property names.
+ * All properties are optional — profiles may contain partial settings.
+ */
+export interface OrcaProcessSettings {
 
-/** Advanced settings - full OrcaSlicer parameter set */
-export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
-  // Line width per feature
-  lineWidthOuterWall: number;
-  lineWidthInnerWall: number;
-  lineWidthTopSurface: number;
-  lineWidthSparseInfill: number;
-  lineWidthInternalSolidInfill: number;
-  lineWidthSupport: number;
-  
-  // Seam settings
-  seamPosition: SeamPosition;
-  seamGap: number;                 // mm or %
-  scarfJointSeam: ScarfJointSeam;
-  staggeredInnerSeams: boolean;
-  
-  // Scarf joint settings (beta)
-  conditionalScarfJoint: boolean;
-  conditionalAngleThreshold: number;
-  conditionalOverhangThreshold: number;
-  scarfJointSpeed: number;
-  scarfStartHeight: number;
-  scarfAroundEntireWall: boolean;
-  scarfLength: number;
-  scarfSteps: number;
-  scarfJointFlowRatio: number;
-  scarfJointForInnerWalls: boolean;
-  
-  // Wipe settings
-  roleBaseWipeSpeed: boolean;
-  wipeSpeed: number;
-  wipeOnLoops: boolean;
-  wipeBeforeExternalLoop: boolean;
-  
-  // Precision settings
-  sliceGapClosingRadius: number;
-  resolution: number;
-  arcFitting: boolean;
-  xyHoleCompensation: number;
-  xyContourCompensation: number;
-  elephantFootCompensation: number;
-  elephantFootCompensationLayers: number;
-  preciseWall: boolean;
-  preciseZHeight: boolean;
-  convertHolesToPolyholes: boolean;
-  polyholeDetectionMargin: number;
-  
-  // Speed settings
-  printSpeed: number;
-  outerWallSpeed: number;
-  innerWallSpeed: number;
-  infillSpeed: number;
-  sparseInfillSpeed: number;
-  solidInfillSpeed: number;
-  topSurfaceSpeed: number;
-  travelSpeed: number;
-  firstLayerSpeed: number;
-  
-  // Acceleration & jerk
-  outerWallAcceleration: number;
-  innerWallAcceleration: number;
-  topSurfaceAcceleration: number;
-  infillAcceleration: number;
-  travelAcceleration: number;
-  defaultAcceleration: number;
-  
-  // Temperature
-  nozzleTemp: number;
-  bedTemp: number;
-  firstLayerNozzleTemp: number;
-  firstLayerBedTemp: number;
-  
-  // Retraction settings
-  retractionLength: number;        // mm
-  retractionSpeed: number;         // mm/s
-  detractionSpeed: number;         // mm/s
-  retractionMinimumTravel: number; // mm
-  retractOnLayerChange: boolean;
-  wipeBeforeRetract: boolean;
-  retractionLiftZ: number;         // mm - Z hop
-  
-  // Cooling settings
-  enableFanCooling: boolean;
-  minFanSpeed: number;             // 0-100%
-  maxFanSpeed: number;             // 0-100%
-  bridgeFanSpeed: number;          // 0-100%
-  fullFanSpeedAtLayer: number;
-  slowDownForLayerTime: number;    // seconds
-  minPrintSpeed: number;           // mm/s when slowing for cooling
-  
-  // Ironing settings
-  enableIroning: boolean;
-  ironingPattern: 'zigzag' | 'concentric';
-  ironingFlowRate: number;         // % of normal flow
-  ironingSpacing: number;          // mm
-  ironingSpeed: number;            // mm/s
-  ironingAngle: number;            // degrees
-  
-  // Strength settings
-  infillOverlap: number;           // %
-  infillAnchorMaxLength: number;   // mm
-  
-  // Support settings (when enabled)
-  supportType: SupportType;
-  supportDensity: number;
-  supportAngle: number;
-  supportTopZDistance: number;
-  supportBottomZDistance: number;
-  supportInterfaceLayers: number;
-  supportXYDistance: number;
-  supportBaseInterfaceLayers: number;
-  
-  // Multimaterial settings
-  filament1ProfileId?: string;
-  filament2ProfileId?: string;
-  filament3ProfileId?: string;
-  purgeOnLayerChange?: boolean;
-  purgeTowerVolume?: number;
-  wipeTowerWidth?: number;
-  
-  // Wall generator & Walls & surfaces settings
-  minWallThickness?: number;
-  
-  // Flow ratio settings
-  outerWallFlowRatio?: number;
-  innerWallFlowRatio?: number;
-  
-  // Bridging settings
-  maxBridgeLength?: number;
-  bridgeSpeedReduction?: number;
-  
-  // Overhangs settings
-  overhangAngle?: number;
-  overhangPerimeterSpeed?: number;
+  // ---------------------------------------------------------------------------
+  // Quality tab — Layer / Line width
+  // ---------------------------------------------------------------------------
 
-  // =========================================================================
-  // OrcaSlicer Process Settings — Full Parity
-  // All properties below match OrcaSlicer PrintConfig.cpp definitions.
-  // Optional because not all backends populate every setting.
-  // =========================================================================
+  layer_height?: number;
+  initial_layer_print_height?: number;
+  line_width?: number;
+  initial_layer_line_width?: number;
+  outer_wall_line_width?: number;
+  inner_wall_line_width?: number;
+  top_surface_line_width?: number;
+  sparse_infill_line_width?: number;
+  internal_solid_infill_line_width?: number;
+  support_line_width?: number;
 
-  // --- Quality: Simple mode settings ---
-  firstLayerSequenceChoice?: string;
-  onlyOneWallFirstLayer?: boolean;
-  onlyOneWallTop?: boolean;
-  otherLayersSequenceChoice?: string;
-  treeSupportAutoBrim?: boolean;
-  treeSupportBrimWidth?: number;
+  // Quality tab — Seam
 
-  // --- Quality: Advanced mode settings ---
-  bridgeFlow?: number;
-  counterboreHoleBridging?: string;
-  detectOverhangWall?: boolean;
-  dontFilterInternalBridges?: boolean;
-  enableExtraBridgeLayer?: boolean;
-  extraPerimetersOnOverhangs?: boolean;
-  filamentIroningFlow?: number;
-  filamentIroningInset?: number;
-  filamentIroningSpacing?: number;
-  holeToPolyholeTwisted?: boolean;
-  initialLayerMinBeadWidth?: number;
-  interfaceShells?: boolean;
-  internalBridgeFlow?: number;
-  ironingAngleFixed?: number;
-  ironingInset?: number;
-  ironingType?: IroningType;
-  isInfillFirst?: boolean;
-  makeOverhangPrintable?: boolean;
-  makeOverhangPrintableAngle?: number;
-  makeOverhangPrintableHoleSize?: number;
-  maxTravelDetourDistance?: number;
-  minBeadWidth?: number;
-  minFeatureSize?: number;
-  minLengthFactor?: number;
-  minWidthTopSurface?: number;
-  overhangReverse?: boolean;
-  overhangReverseInternalOnly?: boolean;
-  overhangReverseThreshold?: number;
-  printFlowRatio?: number;
-  reduceCrossingWall?: boolean;
-  smallAreaInfillFlowCompensation?: boolean;
-  thickBridges?: boolean;
-  thickInternalBridges?: boolean;
-  wallDirection?: number;
-  wallDistributionCount?: number;
-  wallGenerator?: WallGenerator;
-  wallSequence?: WallSequence;
-  wallTransitionAngle?: number;
-  wallTransitionFilterDeviation?: number;
-  wallTransitionLength?: number;
+  seam_position?: SeamPosition;
+  seam_gap?: number;
+  seam_slope_type?: ScarfJointSeam;
+  staggered_inner_seams?: boolean;
+  seam_slope_conditional?: boolean;
+  scarf_angle_threshold?: number;
+  scarf_overhang_threshold?: number;
+  scarf_joint_speed?: number;
+  seam_slope_start_height?: number;
+  seam_slope_entire_loop?: boolean;
+  seam_slope_min_length?: number;
+  seam_slope_steps?: number;
+  scarf_joint_flow_ratio?: number;
+  seam_slope_inner_walls?: boolean;
 
-  // --- Strength: Simple mode settings ---
-  bottomShellThickness?: number;
-  bottomSurfaceDensity?: number;
-  bottomSurfacePattern?: string;
-  fillMultiline?: boolean;
-  internalSolidInfillPattern?: string;
-  topShellThickness?: number;
-  topSurfaceDensity?: number;
+  // Quality tab — Wipe
 
-  // --- Strength: Advanced mode settings ---
-  alignInfillDirectionToModel?: boolean;
-  alternateExtraWall?: boolean;
-  bridgeAngle?: number;
-  bridgeDensity?: number;
-  detectNarrowInternalSolidInfill?: boolean;
-  detectThinWall?: boolean;
-  ensureVerticalShellThickness?: string;
-  extraSolidInfills?: boolean;
-  gapFillTarget?: GapFillTarget;
-  infillCombination?: boolean;
-  infillCombinationMaxLayerHeight?: number;
-  infillDirection?: number;
-  infillLockDepth?: number;
-  infillOverhangAngle?: number;
-  infillShiftStep?: number;
-  internalBridgeAngle?: number;
-  internalBridgeDensity?: number;
-  lateralLatticeAngle1?: number;
-  lateralLatticeAngle2?: number;
-  minimumSparseInfillArea?: number;
-  skeletonInfillDensity?: number;
-  skeletonInfillLineWidth?: number;
-  skinInfillDensity?: number;
-  skinInfillDepth?: number;
-  skinInfillLineWidth?: number;
-  solidInfillDirection?: number;
-  solidInfillRotateTemplate?: boolean;
-  sparseInfillRotateTemplate?: boolean;
-  symmetricInfillYAxis?: boolean;
-  topBottomInfillWallOverlap?: number;
+  role_based_wipe_speed?: boolean;
+  wipe_speed?: number;
+  wipe_on_loops?: boolean;
+  wipe_before_external_loop?: boolean;
 
-  // --- Speed: Advanced mode settings (ALL speed settings are Advanced in OrcaSlicer) ---
-  accelToDecelEnable?: boolean;
-  accelToDecelFactor?: number;
-  bridgeAcceleration?: number;
-  bridgeSpeed?: number;
-  defaultJerk?: number;
-  defaultJunctionDeviation?: number;
-  enableOverhangSpeed?: boolean;
-  filamentIroningSpeed?: number;
-  gapInfillSpeed?: number;
-  infillJerk?: number;
-  initialLayerAcceleration?: number;
-  initialLayerJerk?: number;
-  initialLayerTravelSpeed?: number;
-  innerWallJerk?: number;
-  internalBridgeSpeed?: number;
-  internalSolidInfillAcceleration?: number;
-  outerWallJerk?: number;
-  overhang1_4Speed?: number;
-  overhang2_4Speed?: number;
-  overhang3_4Speed?: number;
-  overhang4_4Speed?: number;
-  slowDownLayers?: number;
-  slowdownForCurledPerimeters?: boolean;
-  smallPerimeterSpeed?: number;
-  smallPerimeterThreshold?: number;
-  supportInterfaceSpeed?: number;
-  supportSpeed?: number;
-  topSurfaceJerk?: number;
-  travelJerk?: number;
+  // Quality tab — Precision / Compensation
 
-  // --- Support: Simple mode settings ---
-  brimType?: BrimType;
-  brimWidth?: number;
-  supportFilament?: number;
-  supportInterfaceNotForBody?: boolean;
-  supportOnBuildPlateOnly?: boolean;
-  supportThresholdOverlap?: number;
+  slice_closing_radius?: number;
+  resolution?: number;
+  enable_arc_fitting?: boolean;
+  xy_hole_compensation?: number;
+  xy_contour_compensation?: number;
+  elefant_foot_compensation?: number;
+  elefant_foot_compensation_layers?: number;
+  precise_outer_wall?: boolean;
+  precise_z_height?: boolean;
+  hole_to_polyhole?: boolean;
+  hole_to_polyhole_threshold?: number;
+  hole_to_polyhole_twisted?: boolean;
 
-  // --- Support: Advanced mode settings ---
-  bridgeNoSupport?: boolean;
-  brimEars?: boolean;
-  brimEarsDetectionLength?: number;
-  brimEarsMaxAngle?: number;
-  brimObjectGap?: number;
-  brimUseEfcOutline?: boolean;
-  combineBrims?: boolean;
-  independentSupportLayerHeight?: boolean;
-  raftContactDistance?: number;
-  raftExpansion?: number;
-  raftFirstLayerDensity?: number;
-  raftFirstLayerExpansion?: number;
-  raftLayers?: number;
-  skirtStartAngle?: number;
-  supportBasePattern?: string;
-  supportBasePatternSpacing?: number;
-  supportBottomInterfaceSpacing?: number;
-  supportCriticalRegionsOnly?: boolean;
-  supportExpansion?: number;
-  supportInterfaceBottomLayers?: number;
-  supportInterfaceFilament?: number;
-  supportInterfaceLoopPattern?: boolean;
-  supportInterfacePattern?: string;
-  supportInterfaceSpacing?: number;
-  supportIroning?: boolean;
-  supportIroningFlow?: number;
-  supportIroningPattern?: string;
-  supportIroningSpacing?: number;
-  supportObjectFirstLayerGap?: number;
-  supportRemoveSmallOverhang?: boolean;
-  supportStyle?: SupportStyle;
-  treeSupportAngleSlow?: number;
-  treeSupportBranchAngle?: number;
-  treeSupportBranchAngleOrganic?: number;
-  treeSupportBranchDiameter?: number;
-  treeSupportBranchDiameterAngle?: number;
-  treeSupportBranchDiameterOrganic?: number;
-  treeSupportBranchDistance?: number;
-  treeSupportBranchDistanceOrganic?: number;
-  treeSupportTipDiameter?: number;
-  treeSupportTopRate?: number;
-  treeSupportWallCount?: number;
-  treeSupportWithInfill?: boolean;
+  // Quality tab — Ironing
 
-  // --- Basic mode: Skirt ---
-  skirtLoops?: number;
-  skirtHeight?: number;
-  skirtDistance?: number;
-  skirtSpeed?: number;
+  ironing_type?: IroningType;
+  ironing_pattern?: 'rectilinear' | 'concentric';
+  ironing_flow?: number;
+  ironing_spacing?: number;
+  ironing_angle?: number;
+  ironing_angle_fixed?: number;
+  ironing_inset?: number;
 
-  // --- Basic mode: Special mode ---
-  spiralVase?: boolean;
-  smoothSpiral?: boolean;
-  printSequence?: 'by_layer' | 'by_object';
+  // Quality tab — Wall generator (Arachne)
+
+  wall_generator?: WallGenerator;
+  wall_transition_angle?: number;
+  wall_transition_filter_deviation?: number;
+  wall_transition_length?: number;
+  wall_distribution_count?: number;
+  initial_layer_min_bead_width?: number;
+  min_bead_width?: number;
+  min_feature_size?: number;
+  min_length_factor?: number;
+  wall_sequence?: WallSequence;
+  wall_direction?: number;
+  min_wall_thickness?: number;
+
+  // Quality tab — Flow ratios
+
+  print_flow_ratio?: number;
+  outer_wall_flow_ratio?: number;
+  inner_wall_flow_ratio?: number;
+  top_solid_infill_flow_ratio?: number;
+  bottom_solid_infill_flow_ratio?: number;
+  set_other_flow_ratios?: boolean;
+  first_layer_flow_ratio?: number;
+  overhang_flow_ratio?: number;
+  sparse_infill_flow_ratio?: number;
+  internal_solid_infill_flow_ratio?: number;
+  gap_fill_flow_ratio?: number;
+  support_flow_ratio?: number;
+  support_interface_flow_ratio?: number;
+
+  // Quality tab — Single-wall / Sequence
+
+  only_one_wall_first_layer?: boolean;
+  only_one_wall_top?: boolean;
+  min_width_top_surface?: number;
+  reduce_crossing_wall?: boolean;
+  max_travel_detour_distance?: number;
+  first_layer_sequence_choice?: string;
+  other_layers_sequence_choice?: string;
+  is_infill_first?: boolean;
+
+  // Quality tab — Bridging
+
+  bridge_flow?: number;
+  internal_bridge_flow?: number;
+  bridge_density?: number;
+  internal_bridge_density?: number;
+  thick_bridges?: boolean;
+  thick_internal_bridges?: boolean;
+  enable_extra_bridge_layer?: boolean;
+  dont_filter_internal_bridges?: boolean;
+  counterbore_hole_bridging?: string;
+
+  // Quality tab — Overhangs
+
+  detect_overhang_wall?: boolean;
+  make_overhang_printable?: boolean;
+  make_overhang_printable_angle?: number;
+  make_overhang_printable_hole_size?: number;
+  extra_perimeters_on_overhangs?: boolean;
+  overhang_reverse?: boolean;
+  overhang_reverse_internal_only?: boolean;
+  overhang_reverse_threshold?: number;
+
+  // Quality tab — Small area infill flow compensation
+
+  small_area_infill_flow_compensation?: boolean;
+  small_area_infill_flow_compensation_model?: string;
+
+  // Quality tab — Filament ironing (per-filament overrides)
+
+  filament_ironing_flow?: number;
+  filament_ironing_inset?: number;
+  filament_ironing_spacing?: number;
+  filament_ironing_speed?: number;
+
+  // ---------------------------------------------------------------------------
+  // Strength tab — Walls
+  // ---------------------------------------------------------------------------
+
+  wall_loops?: number;
+  alternate_extra_wall?: boolean;
+  detect_thin_wall?: boolean;
+
+  // Strength tab — Top/bottom shells
+
+  top_shell_layers?: number;
+  top_shell_thickness?: number;
+  top_surface_density?: number;
+  top_surface_pattern?: string;
+  bottom_shell_layers?: number;
+  bottom_shell_thickness?: number;
+  bottom_surface_density?: number;
+  bottom_surface_pattern?: string;
+  top_bottom_infill_wall_overlap?: number;
+
+  // Strength tab — Infill
+
+  sparse_infill_density?: number;
+  sparse_infill_pattern?: InfillPattern;
+  fill_multiline?: boolean;
+  infill_direction?: number;
+  sparse_infill_rotate_template?: boolean;
+  skin_infill_density?: number;
+  skeleton_infill_density?: number;
+  infill_lock_depth?: number;
+  skin_infill_depth?: number;
+  skin_infill_line_width?: number;
+  skeleton_infill_line_width?: number;
+  symmetric_infill_y_axis?: boolean;
+  infill_shift_step?: number;
+  lateral_lattice_angle_1?: number;
+  lateral_lattice_angle_2?: number;
+  infill_overhang_angle?: number;
+  infill_wall_overlap?: number;
+  infill_anchor_max?: number;
+  infill_anchor?: number;
+  internal_solid_infill_pattern?: string;
+  solid_infill_direction?: number;
+  solid_infill_rotate_template?: boolean;
+  gap_fill_target?: GapFillTarget;
+  filter_out_gap_fill?: number;
+  align_infill_direction_to_model?: boolean;
+  extra_solid_infills?: boolean;
+  bridge_angle?: number;
+  internal_bridge_angle?: number;
+  minimum_sparse_infill_area?: number;
+  infill_combination?: boolean;
+  infill_combination_max_layer_height?: number;
+  detect_narrow_internal_solid_infill?: boolean;
+  ensure_vertical_shell_thickness?: string;
+
+  // ---------------------------------------------------------------------------
+  // Speed tab — Print speeds
+  // ---------------------------------------------------------------------------
+
+  initial_layer_speed?: number;
+  initial_layer_infill_speed?: number;
+  initial_layer_travel_speed?: number;
+  slow_down_layers?: number;
+  outer_wall_speed?: number;
+  inner_wall_speed?: number;
+  small_perimeter_speed?: number;
+  small_perimeter_threshold?: number;
+  sparse_infill_speed?: number;
+  internal_solid_infill_speed?: number;
+  top_surface_speed?: number;
+  gap_infill_speed?: number;
+  ironing_speed?: number;
+  support_speed?: number;
+  support_interface_speed?: number;
+  bridge_speed?: number;
+  internal_bridge_speed?: number;
+  travel_speed?: number;
+
+  // Speed tab — Overhang speeds
+
+  enable_overhang_speed?: boolean;
+  slowdown_for_curled_perimeters?: boolean;
+  overhang_speed_classic?: number;
+  overhang_1_4_speed?: number;
+  overhang_2_4_speed?: number;
+  overhang_3_4_speed?: number;
+  overhang_4_4_speed?: number;
+
+  // Speed tab — Acceleration
+
+  default_acceleration?: number;
+  outer_wall_acceleration?: number;
+  inner_wall_acceleration?: number;
+  bridge_acceleration?: number;
+  sparse_infill_acceleration?: number;
+  internal_solid_infill_acceleration?: number;
+  initial_layer_acceleration?: number;
+  top_surface_acceleration?: number;
+  travel_acceleration?: number;
+  accel_to_decel_enable?: boolean;
+  accel_to_decel_factor?: number;
+
+  // Speed tab — Jerk / Junction deviation
+
+  default_junction_deviation?: number;
+  default_jerk?: number;
+  outer_wall_jerk?: number;
+  inner_wall_jerk?: number;
+  infill_jerk?: number;
+  top_surface_jerk?: number;
+  initial_layer_jerk?: number;
+  travel_jerk?: number;
+
+  // Speed tab — Volumetric flow rate
+
+  max_volumetric_extrusion_rate_slope?: number;
+  max_volumetric_extrusion_rate_slope_segment_length?: number;
+  extrusion_rate_smoothing_external_perimeter_only?: boolean;
+
+  // Speed tab — Slow-down for cooling
+
+  slow_down_layer_time?: number;
+  slow_down_min_speed?: number;
+
+  // ---------------------------------------------------------------------------
+  // Support tab — Main support
+  // ---------------------------------------------------------------------------
+
+  enable_support?: boolean;
+  support_type?: SupportType;
+  support_style?: SupportStyle;
+  support_threshold_angle?: number;
+  support_threshold_overlap?: number;
+  support_on_build_plate_only?: boolean;
+  support_critical_regions_only?: boolean;
+  support_remove_small_overhang?: boolean;
+  support_angle?: number;
+
+  // Support tab — Raft
+
+  raft_layers?: number;
+  raft_contact_distance?: number;
+  raft_expansion?: number;
+  raft_first_layer_density?: number;
+  raft_first_layer_expansion?: number;
+
+  // Support tab — Support filaments
+
+  support_filament?: number;
+  support_interface_filament?: number;
+  support_interface_not_for_body?: boolean;
+
+  // Support tab — Support ironing
+
+  support_ironing?: boolean;
+  support_ironing_flow?: number;
+  support_ironing_pattern?: string;
+  support_ironing_spacing?: number;
+
+  // Support tab — Support geometry
+
+  support_top_z_distance?: number;
+  support_bottom_z_distance?: number;
+  tree_support_wall_count?: number;
+  support_base_pattern_spacing?: number;
+  support_base_pattern?: string;
+  support_interface_top_layers?: number;
+  support_interface_bottom_layers?: number;
+  support_interface_pattern?: string;
+  support_interface_spacing?: number;
+  support_bottom_interface_spacing?: number;
+  support_expansion?: number;
+  support_interface_loop_pattern?: boolean;
+  support_object_xy_distance?: number;
+  support_object_first_layer_gap?: number;
+  bridge_no_support?: boolean;
+  max_bridge_length?: number;
+  independent_support_layer_height?: boolean;
+
+  // Support tab — Tree support
+
+  tree_support_tip_diameter?: number;
+  tree_support_branch_distance?: number;
+  tree_support_branch_distance_organic?: number;
+  tree_support_top_rate?: number;
+  tree_support_branch_diameter?: number;
+  tree_support_branch_diameter_organic?: number;
+  tree_support_branch_diameter_angle?: number;
+  tree_support_branch_angle?: number;
+  tree_support_branch_angle_organic?: number;
+  tree_support_angle_slow?: number;
+  tree_support_auto_brim?: boolean;
+  tree_support_brim_width?: number;
+  tree_support_with_infill?: boolean;
+
+  // ---------------------------------------------------------------------------
+  // Multimaterial tab — Prime / Wipe tower
+  // ---------------------------------------------------------------------------
+
+  enable_prime_tower?: boolean;
+  prime_tower_width?: number;
+  purge_on_layer_change?: boolean;
+  prime_volume?: number;
+  preheat_steps?: number;
+  flush_into_infill?: boolean;
+  flush_into_objects?: boolean;
+  flush_into_support?: boolean;
+  prime_tower_skip_points?: boolean;
+  enable_tower_interface_features?: boolean;
+  enable_tower_interface_cooldown_during_tower?: boolean;
+  prime_tower_enable_framework?: boolean;
+  prime_tower_brim_width?: number;
+  prime_tower_infill_gap?: number;
+  wipe_tower_rotation_angle?: number;
+  wipe_tower_bridging?: number;
+  wipe_tower_extra_spacing?: number;
+  wipe_tower_extra_flow?: number;
+  wipe_tower_max_purge_speed?: number;
+  wipe_tower_cone_angle?: number;
+  wipe_tower_extra_rib_length?: number;
+  wipe_tower_rib_width?: number;
+  wipe_tower_fillet_wall?: boolean;
+  wipe_tower_no_sparse_layers?: boolean;
+
+  // Multimaterial tab — Filament assignment
+
+  wall_filament?: string;
+  sparse_infill_filament?: string;
+  solid_infill_filament?: string;
+
+  // Multimaterial tab — Other
+
+  single_extruder_multi_material_priming?: boolean;
+  ooze_prevention?: boolean;
+  standby_temperature_delta?: number;
+  preheat_time?: number;
+  interlocking_beam?: boolean;
+  interface_shells?: boolean;
+  mmu_segmented_region_max_width?: number;
+  mmu_segmented_region_interlocking_depth?: number;
+  interlocking_beam_width?: number;
+  interlocking_orientation?: number;
+  interlocking_beam_layer_count?: number;
+  interlocking_depth?: number;
+  interlocking_boundary_avoidance?: number;
+
+  // ---------------------------------------------------------------------------
+  // Others tab — Skirt
+  // ---------------------------------------------------------------------------
+
+  skirt_loops?: number;
+  skirt_height?: number;
+  min_skirt_length?: number;
+  skirt_distance?: number;
+  skirt_start_angle?: number;
+  skirt_speed?: number;
+  single_loop_draft_shield?: boolean;
+
+  // Others tab — Brim
+
+  brim_type?: BrimType;
+  brim_width?: number;
+  brim_object_gap?: number;
+  brim_use_efc_outline?: boolean;
+  combine_brims?: boolean;
+  brim_ears_max_angle?: number;
+  brim_ears_detection_length?: number;
+
+  // Others tab — Special modes
+
+  spiral_mode?: boolean;
+  spiral_mode_smooth?: boolean;
+  spiral_mode_max_xy_smoothing?: number;
+  spiral_starting_flow_ratio?: number;
+  spiral_finishing_flow_ratio?: number;
+  print_sequence?: 'by_layer' | 'by_object';
+  slicing_mode?: SlicingMode;
+  enable_wrapping_detection?: boolean;
+
+  // Others tab — Fuzzy skin
+
+  fuzzy_skin?: FuzzySkinMode;
+  fuzzy_skin_mode?: FuzzySkinMode;
+  fuzzy_skin_noise_type?: FuzzySkinNoiseType;
+  fuzzy_skin_point_distance?: number;
+  fuzzy_skin_thickness?: number;
+  fuzzy_skin_scale?: number;
+  fuzzy_skin_octaves?: number;
+  fuzzy_skin_persistence?: number;
+  fuzzy_skin_first_layer?: boolean;
+
+  // Others tab — GCode / misc
+
+  reduce_infill_retraction?: boolean;
+  gcode_add_line_number?: boolean;
+  gcode_comments?: boolean;
+  gcode_label_objects?: boolean;
+  exclude_object?: boolean;
+  notes?: string;
   timelapse?: string;
-  addLineNumber?: boolean;
 
-  // --- Basic mode: Strength - Top surface pattern ---
-  topSurfacePattern?: string;
+  // ---------------------------------------------------------------------------
+  // Extended — Temperature (filament profile settings kept for legacy compat)
+  // ---------------------------------------------------------------------------
 
-  // --- Basic mode: Multimaterial ---
-  wipeTowerEnable?: boolean;
-  flushIntoInfill?: boolean;
-  flushIntoObjects?: boolean;
-  flushIntoSupport?: boolean;
+  nozzle_temperature?: number;
+  nozzle_temperature_initial_layer?: number;
+  hot_plate_temp?: number;
+  hot_plate_temp_initial_layer?: number;
 
-  // --- Others: Simple mode settings (Fuzzy Skin) ---
-  fuzzySkin?: boolean;
-  fuzzySkinFirstLayer?: boolean;
-  fuzzySkinMode?: FuzzySkinMode;
-  fuzzySkinNoiseType?: FuzzySkinNoiseType;
-  fuzzySkinPointDistance?: number;
-  fuzzySkinThickness?: number;
+  // Extended — Retraction
 
-  // --- Others: Advanced mode settings ---
-  fuzzySkinOctaves?: number;
-  fuzzySkinPersistence?: number;
-  fuzzySkinScale?: number;
+  filament_retraction_length?: number;
+  filament_retraction_speed?: number;
+  filament_deretraction_speed?: number;
+  filament_retraction_minimum_travel?: number;
+  filament_retract_when_changing_layer?: boolean;
+  filament_retract_before_wipe?: boolean;
+  filament_z_hop?: number;
 
-  // --- Other: Advanced ---
-  slicingMode?: SlicingMode;
+  // Extended — Cooling
+
+  fan_cooling?: boolean;
+  fan_min_speed?: number;
+  fan_max_speed?: number;
+  overhang_fan_speed?: number;
+  full_fan_speed_layer?: number;
 }
 
-/** Default values for basic settings */
-/** Default values for simple settings */
-export const DEFAULT_SIMPLE_SETTINGS: SimpleSlicerSettings = {
-  infillDensity: 20,
-  infillPattern: 'crosshatch',
-  wallCount: 3,
-  bedAdhesion: 'skirt',
-  enableSupports: false,
-  layerHeight: 0.2,
-  firstLayerHeight: 0.2,
-  lineWidthDefault: 0.45,
-  lineWidthFirstLayer: 0.5,
-  topLayers: 4,
-  bottomLayers: 3,
+// =============================================================================
+// DEFAULTS
+// =============================================================================
+
+/** Default values for OrcaSlicer process settings */
+export const DEFAULT_ORCA_PROCESS_SETTINGS: OrcaProcessSettings = {
+  // Quality — Layer / Line width
+  layer_height: 0.2,
+  initial_layer_print_height: 0.2,
+  line_width: 0.45,
+  initial_layer_line_width: 0.5,
+  outer_wall_line_width: 0.45,
+  inner_wall_line_width: 0.45,
+  top_surface_line_width: 0.45,
+  sparse_infill_line_width: 0.45,
+  internal_solid_infill_line_width: 0.45,
+  support_line_width: 0.45,
+  // Quality — Seam
+  seam_position: 'aligned',
+  seam_gap: 0,
+  seam_slope_type: 'none',
+  staggered_inner_seams: false,
+  seam_slope_conditional: false,
+  scarf_angle_threshold: 0,
+  scarf_overhang_threshold: 0,
+  scarf_joint_speed: 0,
+  seam_slope_start_height: 0,
+  seam_slope_entire_loop: false,
+  seam_slope_min_length: 10,
+  seam_slope_steps: 10,
+  scarf_joint_flow_ratio: 1.0,
+  seam_slope_inner_walls: false,
+  // Quality — Wipe
+  role_based_wipe_speed: false,
+  wipe_speed: 80,
+  wipe_on_loops: true,
+  wipe_before_external_loop: false,
+  // Quality — Precision
+  slice_closing_radius: 0.05,
+  resolution: 0.01,
+  enable_arc_fitting: false,
+  xy_hole_compensation: 0,
+  xy_contour_compensation: 0,
+  elefant_foot_compensation: 0.15,
+  elefant_foot_compensation_layers: 1,
+  precise_outer_wall: true,
+  precise_z_height: false,
+  hole_to_polyhole: false,
+  hole_to_polyhole_threshold: 0.01,
+  // Quality — Ironing
+  ironing_type: 'no_ironing',
+  ironing_pattern: 'rectilinear',
+  ironing_flow: 15,
+  ironing_spacing: 0.1,
+  ironing_angle: -1,
+  // Quality — Flow ratios
+  print_flow_ratio: 1.0,
+  only_one_wall_first_layer: false,
+  only_one_wall_top: false,
+  // Strength — Walls
+  wall_loops: 3,
+  // Strength — Top/bottom shells
+  top_shell_layers: 4,
+  bottom_shell_layers: 3,
+  // Strength — Infill
+  sparse_infill_density: 20,
+  sparse_infill_pattern: 'crosshatch',
+  infill_wall_overlap: 10,
+  infill_anchor_max: 10,
+  // Speed — Print speeds
+  outer_wall_speed: 60,
+  inner_wall_speed: 200,
+  sparse_infill_speed: 200,
+  internal_solid_infill_speed: 200,
+  top_surface_speed: 60,
+  travel_speed: 250,
+  initial_layer_speed: 40,
+  // Speed — Acceleration
+  outer_wall_acceleration: 500,
+  inner_wall_acceleration: 1000,
+  top_surface_acceleration: 500,
+  sparse_infill_acceleration: 2000,
+  travel_acceleration: 5000,
+  default_acceleration: 5000,
+  // Speed — Slow-down
+  slow_down_layer_time: 5,
+  slow_down_min_speed: 10,
+  // Support
+  enable_support: false,
+  support_type: 'none',
+  support_threshold_angle: 45,
+  support_top_z_distance: 0.2,
+  support_bottom_z_distance: 0.2,
+  support_interface_top_layers: 2,
+  support_object_xy_distance: 0.35,
+  support_interface_bottom_layers: 0,
+  support_base_pattern_spacing: 15,
+  // Others — Skirt/Brim
+  skirt_loops: 1,
+  brim_type: 'no_brim',
+  brim_width: 0,
+  // Extended — Temperature
+  nozzle_temperature: 220,
+  nozzle_temperature_initial_layer: 220,
+  hot_plate_temp: 60,
+  hot_plate_temp_initial_layer: 60,
+  // Extended — Retraction
+  filament_retraction_length: 1.0,
+  filament_retraction_speed: 40,
+  filament_deretraction_speed: 40,
+  filament_retraction_minimum_travel: 1.0,
+  filament_retract_when_changing_layer: false,
+  filament_retract_before_wipe: false,
+  filament_z_hop: 0,
+  // Extended — Cooling
+  fan_cooling: true,
+  fan_min_speed: 30,
+  fan_max_speed: 100,
+  overhang_fan_speed: 100,
+  full_fan_speed_layer: 3,
 };
 
-/** Default values for advanced settings */
-export const DEFAULT_ADVANCED_SETTINGS: AdvancedSlicerSettings = {
-  ...DEFAULT_SIMPLE_SETTINGS,
-  lineWidthOuterWall: 0.45,
-  lineWidthInnerWall: 0.45,
-  lineWidthTopSurface: 0.45,
-  lineWidthSparseInfill: 0.45,
-  lineWidthInternalSolidInfill: 0.45,
-  lineWidthSupport: 0.45,
-  seamPosition: 'aligned',
-  seamGap: 0,
-  scarfJointSeam: 'none',
-  staggeredInnerSeams: false,
-  conditionalScarfJoint: false,
-  conditionalAngleThreshold: 0,
-  conditionalOverhangThreshold: 0,
-  scarfJointSpeed: 0,
-  scarfStartHeight: 0,
-  scarfAroundEntireWall: false,
-  scarfLength: 10,
-  scarfSteps: 10,
-  scarfJointFlowRatio: 1.0,
-  scarfJointForInnerWalls: false,
-  roleBaseWipeSpeed: false,
-  wipeSpeed: 80,
-  wipeOnLoops: true,
-  wipeBeforeExternalLoop: false,
-  sliceGapClosingRadius: 0.05,
-  resolution: 0.01,
-  arcFitting: false,
-  xyHoleCompensation: 0,
-  xyContourCompensation: 0,
-  elephantFootCompensation: 0.15,
-  elephantFootCompensationLayers: 1,
-  preciseWall: true,
-  preciseZHeight: false,
-  convertHolesToPolyholes: false,
-  polyholeDetectionMargin: 0.01,
-  printSpeed: 200,
-  outerWallSpeed: 60,
-  innerWallSpeed: 200,
-  infillSpeed: 200,
-  sparseInfillSpeed: 200,
-  solidInfillSpeed: 200,
-  topSurfaceSpeed: 60,
-  travelSpeed: 250,
-  firstLayerSpeed: 40,
-  outerWallAcceleration: 500,
-  innerWallAcceleration: 1000,
-  topSurfaceAcceleration: 500,
-  infillAcceleration: 2000,
-  travelAcceleration: 5000,
-  defaultAcceleration: 5000,
-  nozzleTemp: 220,
-  bedTemp: 60,
-  firstLayerNozzleTemp: 220,
-  firstLayerBedTemp: 60,
-  retractionLength: 1.0,
-  retractionSpeed: 40,
-  detractionSpeed: 40,
-  retractionMinimumTravel: 1.0,
-  retractOnLayerChange: false,
-  wipeBeforeRetract: false,
-  retractionLiftZ: 0,
-  enableFanCooling: true,
-  minFanSpeed: 30,
-  maxFanSpeed: 100,
-  bridgeFanSpeed: 100,
-  fullFanSpeedAtLayer: 3,
-  slowDownForLayerTime: 5,
-  minPrintSpeed: 10,
-  enableIroning: false,
-  ironingPattern: 'zigzag',
-  ironingFlowRate: 15,
-  ironingSpacing: 0.1,
-  ironingSpeed: 15,
-  ironingAngle: -1,
-  infillOverlap: 10,
-  infillAnchorMaxLength: 10,
-  supportType: 'none',
-  supportDensity: 15,
-  supportAngle: 45,
-  supportTopZDistance: 0.2,
-  supportBottomZDistance: 0.2,
-  supportInterfaceLayers: 2,
-  supportXYDistance: 0.35,
-  supportBaseInterfaceLayers: 0,
-};
+// =============================================================================
+// HELPER INFO OBJECTS
+// =============================================================================
 
 /** Infill pattern display names and descriptions */
 export const INFILL_PATTERN_INFO: Record<InfillPattern, { label: string; description: string }> = {
@@ -574,403 +716,432 @@ export const BED_ADHESION_INFO: Record<BedAdhesionType, { label: string; descrip
 };
 
 // =============================================================================
-// CHANGE TRACKING SYSTEM
+// CATEGORY MAP
 // =============================================================================
 
-import { useState, useCallback, useMemo } from 'react';
-
 /**
- * Maps each setting key to its category tab for dirty indicator tracking.
- * Used to determine which tabs should be highlighted when settings change.
+ * Maps each native snake_case setting key to its UI category tab.
+ * Based on SimplyPrint tab assignments; extras assigned to best-fit category.
  */
-export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
+export const ORCA_PROCESS_CATEGORY_MAP: Record<string, SettingsCategory> = {
   // Quality tab
-  layerHeight: 'quality',
-  firstLayerHeight: 'quality',
-  lineWidthDefault: 'quality',
-  lineWidthFirstLayer: 'quality',
-  lineWidthOuterWall: 'quality',
-  lineWidthInnerWall: 'quality',
-  lineWidthTopSurface: 'quality',
-  lineWidthSparseInfill: 'quality',
-  lineWidthInternalSolidInfill: 'quality',
-  lineWidthSupport: 'quality',
-  seamPosition: 'quality',
-  seamGap: 'quality',
-  scarfJointSeam: 'quality',
-  staggeredInnerSeams: 'quality',
-  conditionalScarfJoint: 'quality',
-  conditionalAngleThreshold: 'quality',
-  conditionalOverhangThreshold: 'quality',
-  scarfJointSpeed: 'quality',
-  scarfStartHeight: 'quality',
-  scarfAroundEntireWall: 'quality',
-  scarfLength: 'quality',
-  scarfSteps: 'quality',
-  scarfJointFlowRatio: 'quality',
-  scarfJointForInnerWalls: 'quality',
-  roleBaseWipeSpeed: 'quality',
-  wipeSpeed: 'quality',
-  wipeOnLoops: 'quality',
-  wipeBeforeExternalLoop: 'quality',
-  sliceGapClosingRadius: 'quality',
+  layer_height: 'quality',
+  initial_layer_print_height: 'quality',
+  line_width: 'quality',
+  initial_layer_line_width: 'quality',
+  outer_wall_line_width: 'quality',
+  inner_wall_line_width: 'quality',
+  top_surface_line_width: 'quality',
+  sparse_infill_line_width: 'quality',
+  internal_solid_infill_line_width: 'quality',
+  support_line_width: 'quality',
+  seam_position: 'quality',
+  seam_gap: 'quality',
+  seam_slope_type: 'quality',
+  staggered_inner_seams: 'quality',
+  seam_slope_conditional: 'quality',
+  scarf_angle_threshold: 'quality',
+  scarf_overhang_threshold: 'quality',
+  scarf_joint_speed: 'quality',
+  seam_slope_start_height: 'quality',
+  seam_slope_entire_loop: 'quality',
+  seam_slope_min_length: 'quality',
+  seam_slope_steps: 'quality',
+  scarf_joint_flow_ratio: 'quality',
+  seam_slope_inner_walls: 'quality',
+  role_based_wipe_speed: 'quality',
+  wipe_speed: 'quality',
+  wipe_on_loops: 'quality',
+  wipe_before_external_loop: 'quality',
+  slice_closing_radius: 'quality',
   resolution: 'quality',
-  arcFitting: 'quality',
-  xyHoleCompensation: 'quality',
-  xyContourCompensation: 'quality',
-  elephantFootCompensation: 'quality',
-  elephantFootCompensationLayers: 'quality',
-  preciseWall: 'quality',
-  preciseZHeight: 'quality',
-  convertHolesToPolyholes: 'quality',
-  polyholeDetectionMargin: 'quality',
-  
+  enable_arc_fitting: 'quality',
+  xy_hole_compensation: 'quality',
+  xy_contour_compensation: 'quality',
+  elefant_foot_compensation: 'quality',
+  elefant_foot_compensation_layers: 'quality',
+  precise_outer_wall: 'quality',
+  precise_z_height: 'quality',
+  hole_to_polyhole: 'quality',
+  hole_to_polyhole_threshold: 'quality',
+  hole_to_polyhole_twisted: 'quality',
+  ironing_type: 'quality',
+  ironing_pattern: 'quality',
+  ironing_flow: 'quality',
+  ironing_spacing: 'quality',
+  ironing_angle: 'quality',
+  ironing_angle_fixed: 'quality',
+  ironing_inset: 'quality',
+  wall_generator: 'quality',
+  wall_transition_angle: 'quality',
+  wall_transition_filter_deviation: 'quality',
+  wall_transition_length: 'quality',
+  wall_distribution_count: 'quality',
+  initial_layer_min_bead_width: 'quality',
+  min_bead_width: 'quality',
+  min_feature_size: 'quality',
+  min_length_factor: 'quality',
+  wall_sequence: 'quality',
+  wall_direction: 'quality',
+  min_wall_thickness: 'quality',
+  print_flow_ratio: 'quality',
+  outer_wall_flow_ratio: 'quality',
+  inner_wall_flow_ratio: 'quality',
+  top_solid_infill_flow_ratio: 'quality',
+  bottom_solid_infill_flow_ratio: 'quality',
+  set_other_flow_ratios: 'quality',
+  first_layer_flow_ratio: 'quality',
+  overhang_flow_ratio: 'quality',
+  sparse_infill_flow_ratio: 'quality',
+  internal_solid_infill_flow_ratio: 'quality',
+  gap_fill_flow_ratio: 'quality',
+  support_flow_ratio: 'quality',
+  support_interface_flow_ratio: 'quality',
+  only_one_wall_first_layer: 'quality',
+  only_one_wall_top: 'quality',
+  min_width_top_surface: 'quality',
+  reduce_crossing_wall: 'quality',
+  max_travel_detour_distance: 'quality',
+  first_layer_sequence_choice: 'quality',
+  other_layers_sequence_choice: 'quality',
+  is_infill_first: 'quality',
+  bridge_flow: 'quality',
+  internal_bridge_flow: 'quality',
+  bridge_density: 'quality',
+  internal_bridge_density: 'quality',
+  thick_bridges: 'quality',
+  thick_internal_bridges: 'quality',
+  enable_extra_bridge_layer: 'quality',
+  dont_filter_internal_bridges: 'quality',
+  counterbore_hole_bridging: 'quality',
+  detect_overhang_wall: 'quality',
+  make_overhang_printable: 'quality',
+  make_overhang_printable_angle: 'quality',
+  make_overhang_printable_hole_size: 'quality',
+  extra_perimeters_on_overhangs: 'quality',
+  overhang_reverse: 'quality',
+  overhang_reverse_internal_only: 'quality',
+  overhang_reverse_threshold: 'quality',
+  small_area_infill_flow_compensation: 'quality',
+  small_area_infill_flow_compensation_model: 'quality',
+  filament_ironing_flow: 'quality',
+  filament_ironing_inset: 'quality',
+  filament_ironing_spacing: 'quality',
+  filament_ironing_speed: 'quality',
+
   // Strength tab
-  infillDensity: 'strength',
-  infillPattern: 'strength',
-  wallCount: 'strength',
-  topLayers: 'strength',
-  bottomLayers: 'strength',
-  infillOverlap: 'strength',
-  infillAnchorMaxLength: 'strength',
-  
+  wall_loops: 'strength',
+  alternate_extra_wall: 'strength',
+  detect_thin_wall: 'strength',
+  top_shell_layers: 'strength',
+  top_shell_thickness: 'strength',
+  top_surface_density: 'strength',
+  top_surface_pattern: 'strength',
+  bottom_shell_layers: 'strength',
+  bottom_shell_thickness: 'strength',
+  bottom_surface_density: 'strength',
+  bottom_surface_pattern: 'strength',
+  top_bottom_infill_wall_overlap: 'strength',
+  sparse_infill_density: 'strength',
+  sparse_infill_pattern: 'strength',
+  fill_multiline: 'strength',
+  infill_direction: 'strength',
+  sparse_infill_rotate_template: 'strength',
+  skin_infill_density: 'strength',
+  skeleton_infill_density: 'strength',
+  infill_lock_depth: 'strength',
+  skin_infill_depth: 'strength',
+  skin_infill_line_width: 'strength',
+  skeleton_infill_line_width: 'strength',
+  symmetric_infill_y_axis: 'strength',
+  infill_shift_step: 'strength',
+  lateral_lattice_angle_1: 'strength',
+  lateral_lattice_angle_2: 'strength',
+  infill_overhang_angle: 'strength',
+  infill_wall_overlap: 'strength',
+  infill_anchor_max: 'strength',
+  infill_anchor: 'strength',
+  internal_solid_infill_pattern: 'strength',
+  solid_infill_direction: 'strength',
+  solid_infill_rotate_template: 'strength',
+  gap_fill_target: 'strength',
+  filter_out_gap_fill: 'strength',
+  align_infill_direction_to_model: 'strength',
+  extra_solid_infills: 'strength',
+  bridge_angle: 'strength',
+  internal_bridge_angle: 'strength',
+  minimum_sparse_infill_area: 'strength',
+  infill_combination: 'strength',
+  infill_combination_max_layer_height: 'strength',
+  detect_narrow_internal_solid_infill: 'strength',
+  ensure_vertical_shell_thickness: 'strength',
+
   // Speed tab
-  printSpeed: 'speed',
-  outerWallSpeed: 'speed',
-  innerWallSpeed: 'speed',
-  infillSpeed: 'speed',
-  sparseInfillSpeed: 'speed',
-  solidInfillSpeed: 'speed',
-  topSurfaceSpeed: 'speed',
-  travelSpeed: 'speed',
-  firstLayerSpeed: 'speed',
-  outerWallAcceleration: 'speed',
-  innerWallAcceleration: 'speed',
-  topSurfaceAcceleration: 'speed',
-  infillAcceleration: 'speed',
-  travelAcceleration: 'speed',
-  defaultAcceleration: 'speed',
-  
+  initial_layer_speed: 'speed',
+  initial_layer_infill_speed: 'speed',
+  initial_layer_travel_speed: 'speed',
+  slow_down_layers: 'speed',
+  outer_wall_speed: 'speed',
+  inner_wall_speed: 'speed',
+  small_perimeter_speed: 'speed',
+  small_perimeter_threshold: 'speed',
+  sparse_infill_speed: 'speed',
+  internal_solid_infill_speed: 'speed',
+  top_surface_speed: 'speed',
+  gap_infill_speed: 'speed',
+  ironing_speed: 'speed',
+  support_speed: 'speed',
+  support_interface_speed: 'speed',
+  bridge_speed: 'speed',
+  internal_bridge_speed: 'speed',
+  travel_speed: 'speed',
+  enable_overhang_speed: 'speed',
+  slowdown_for_curled_perimeters: 'speed',
+  overhang_speed_classic: 'speed',
+  overhang_1_4_speed: 'speed',
+  overhang_2_4_speed: 'speed',
+  overhang_3_4_speed: 'speed',
+  overhang_4_4_speed: 'speed',
+  default_acceleration: 'speed',
+  outer_wall_acceleration: 'speed',
+  inner_wall_acceleration: 'speed',
+  bridge_acceleration: 'speed',
+  sparse_infill_acceleration: 'speed',
+  internal_solid_infill_acceleration: 'speed',
+  initial_layer_acceleration: 'speed',
+  top_surface_acceleration: 'speed',
+  travel_acceleration: 'speed',
+  accel_to_decel_enable: 'speed',
+  accel_to_decel_factor: 'speed',
+  default_junction_deviation: 'speed',
+  default_jerk: 'speed',
+  outer_wall_jerk: 'speed',
+  inner_wall_jerk: 'speed',
+  infill_jerk: 'speed',
+  top_surface_jerk: 'speed',
+  initial_layer_jerk: 'speed',
+  travel_jerk: 'speed',
+  max_volumetric_extrusion_rate_slope: 'speed',
+  max_volumetric_extrusion_rate_slope_segment_length: 'speed',
+  extrusion_rate_smoothing_external_perimeter_only: 'speed',
+  slow_down_layer_time: 'speed',
+  slow_down_min_speed: 'speed',
+
   // Support tab
-  enableSupports: 'support',
-  supportType: 'support',
-  supportDensity: 'support',
-  supportAngle: 'support',
-  supportTopZDistance: 'support',
-  supportBottomZDistance: 'support',
-  supportInterfaceLayers: 'support',
-  supportXYDistance: 'support',
-  supportBaseInterfaceLayers: 'support',
-  bedAdhesion: 'support',
-  
-  // Other tab - Temperature
-  nozzleTemp: 'other',
-  bedTemp: 'other',
-  firstLayerNozzleTemp: 'other',
-  firstLayerBedTemp: 'other',
-  
-  // Other tab - Retraction
-  retractionLength: 'other',
-  retractionSpeed: 'other',
-  detractionSpeed: 'other',
-  retractionMinimumTravel: 'other',
-  retractOnLayerChange: 'other',
-  wipeBeforeRetract: 'other',
-  retractionLiftZ: 'other',
-  
-  // Other tab - Cooling
-  enableFanCooling: 'other',
-  minFanSpeed: 'other',
-  maxFanSpeed: 'other',
-  bridgeFanSpeed: 'other',
-  fullFanSpeedAtLayer: 'other',
-  slowDownForLayerTime: 'other',
-  minPrintSpeed: 'other',
-  
-  // Other tab - Ironing
-  enableIroning: 'other',
-  ironingPattern: 'other',
-  ironingFlowRate: 'other',
-  ironingSpacing: 'other',
-  ironingSpeed: 'other',
-  ironingAngle: 'other',
-  
+  enable_support: 'support',
+  support_type: 'support',
+  support_style: 'support',
+  support_threshold_angle: 'support',
+  support_threshold_overlap: 'support',
+  support_on_build_plate_only: 'support',
+  support_critical_regions_only: 'support',
+  support_remove_small_overhang: 'support',
+  support_angle: 'support',
+  raft_layers: 'support',
+  raft_contact_distance: 'support',
+  raft_expansion: 'support',
+  raft_first_layer_density: 'support',
+  raft_first_layer_expansion: 'support',
+  support_filament: 'support',
+  support_interface_filament: 'support',
+  support_interface_not_for_body: 'support',
+  support_ironing: 'support',
+  support_ironing_flow: 'support',
+  support_ironing_pattern: 'support',
+  support_ironing_spacing: 'support',
+  support_top_z_distance: 'support',
+  support_bottom_z_distance: 'support',
+  tree_support_wall_count: 'support',
+  support_base_pattern_spacing: 'support',
+  support_base_pattern: 'support',
+  support_interface_top_layers: 'support',
+  support_interface_bottom_layers: 'support',
+  support_interface_pattern: 'support',
+  support_interface_spacing: 'support',
+  support_bottom_interface_spacing: 'support',
+  support_expansion: 'support',
+  support_interface_loop_pattern: 'support',
+  support_object_xy_distance: 'support',
+  support_object_first_layer_gap: 'support',
+  bridge_no_support: 'support',
+  max_bridge_length: 'support',
+  independent_support_layer_height: 'support',
+  tree_support_tip_diameter: 'support',
+  tree_support_branch_distance: 'support',
+  tree_support_branch_distance_organic: 'support',
+  tree_support_top_rate: 'support',
+  tree_support_branch_diameter: 'support',
+  tree_support_branch_diameter_organic: 'support',
+  tree_support_branch_diameter_angle: 'support',
+  tree_support_branch_angle: 'support',
+  tree_support_branch_angle_organic: 'support',
+  tree_support_angle_slow: 'support',
+  tree_support_auto_brim: 'support',
+  tree_support_brim_width: 'support',
+  tree_support_with_infill: 'support',
+
   // Multimaterial tab
-  filament1ProfileId: 'multimaterial',
-  filament2ProfileId: 'multimaterial',
-  filament3ProfileId: 'multimaterial',
-  purgeOnLayerChange: 'multimaterial',
-  purgeTowerVolume: 'multimaterial',
-  wipeTowerWidth: 'multimaterial',
-  wipeTowerEnable: 'multimaterial',
-  flushIntoInfill: 'multimaterial',
-  flushIntoSupport: 'multimaterial',
-  
-  // Quality tab - Wall generator, Walls & surfaces, Flow ratio, Bridging, Overhangs
-  minWallThickness: 'quality',
-  outerWallFlowRatio: 'quality',
-  innerWallFlowRatio: 'quality',
-  maxBridgeLength: 'quality',
-  bridgeSpeedReduction: 'quality',
-  overhangAngle: 'quality',
-  overhangPerimeterSpeed: 'quality',
+  enable_prime_tower: 'multimaterial',
+  prime_tower_width: 'multimaterial',
+  purge_on_layer_change: 'multimaterial',
+  prime_volume: 'multimaterial',
+  preheat_steps: 'multimaterial',
+  flush_into_infill: 'multimaterial',
+  flush_into_objects: 'multimaterial',
+  flush_into_support: 'multimaterial',
+  prime_tower_skip_points: 'multimaterial',
+  enable_tower_interface_features: 'multimaterial',
+  enable_tower_interface_cooldown_during_tower: 'multimaterial',
+  prime_tower_enable_framework: 'multimaterial',
+  prime_tower_brim_width: 'multimaterial',
+  prime_tower_infill_gap: 'multimaterial',
+  wipe_tower_rotation_angle: 'multimaterial',
+  wipe_tower_bridging: 'multimaterial',
+  wipe_tower_extra_spacing: 'multimaterial',
+  wipe_tower_extra_flow: 'multimaterial',
+  wipe_tower_max_purge_speed: 'multimaterial',
+  wipe_tower_cone_angle: 'multimaterial',
+  wipe_tower_extra_rib_length: 'multimaterial',
+  wipe_tower_rib_width: 'multimaterial',
+  wipe_tower_fillet_wall: 'multimaterial',
+  wipe_tower_no_sparse_layers: 'multimaterial',
+  wall_filament: 'multimaterial',
+  sparse_infill_filament: 'multimaterial',
+  solid_infill_filament: 'multimaterial',
+  single_extruder_multi_material_priming: 'multimaterial',
+  ooze_prevention: 'multimaterial',
+  standby_temperature_delta: 'multimaterial',
+  preheat_time: 'multimaterial',
+  interlocking_beam: 'multimaterial',
+  interface_shells: 'multimaterial',
+  mmu_segmented_region_max_width: 'multimaterial',
+  mmu_segmented_region_interlocking_depth: 'multimaterial',
+  interlocking_beam_width: 'multimaterial',
+  interlocking_orientation: 'multimaterial',
+  interlocking_beam_layer_count: 'multimaterial',
+  interlocking_depth: 'multimaterial',
+  interlocking_boundary_avoidance: 'multimaterial',
 
-  // Quality — new OrcaSlicer settings
-  firstLayerSequenceChoice: 'quality',
-  onlyOneWallFirstLayer: 'quality',
-  onlyOneWallTop: 'quality',
-  otherLayersSequenceChoice: 'quality',
-  treeSupportAutoBrim: 'quality',
-  treeSupportBrimWidth: 'quality',
-  bridgeFlow: 'quality',
-  counterboreHoleBridging: 'quality',
-  detectOverhangWall: 'quality',
-  dontFilterInternalBridges: 'quality',
-  enableExtraBridgeLayer: 'quality',
-  extraPerimetersOnOverhangs: 'quality',
-  filamentIroningFlow: 'quality',
-  filamentIroningInset: 'quality',
-  filamentIroningSpacing: 'quality',
-  holeToPolyholeTwisted: 'quality',
-  initialLayerMinBeadWidth: 'quality',
-  interfaceShells: 'quality',
-  internalBridgeFlow: 'quality',
-  ironingAngleFixed: 'quality',
-  ironingInset: 'quality',
-  ironingType: 'quality',
-  isInfillFirst: 'quality',
-  makeOverhangPrintable: 'quality',
-  makeOverhangPrintableAngle: 'quality',
-  makeOverhangPrintableHoleSize: 'quality',
-  maxTravelDetourDistance: 'quality',
-  minBeadWidth: 'quality',
-  minFeatureSize: 'quality',
-  minLengthFactor: 'quality',
-  minWidthTopSurface: 'quality',
-  overhangReverse: 'quality',
-  overhangReverseInternalOnly: 'quality',
-  overhangReverseThreshold: 'quality',
-  printFlowRatio: 'quality',
-  reduceCrossingWall: 'quality',
-  smallAreaInfillFlowCompensation: 'quality',
-  thickBridges: 'quality',
-  thickInternalBridges: 'quality',
-  wallDirection: 'quality',
-  wallDistributionCount: 'quality',
-  wallGenerator: 'quality',
-  wallSequence: 'quality',
-  wallTransitionAngle: 'quality',
-  wallTransitionFilterDeviation: 'quality',
-  wallTransitionLength: 'quality',
+  // Others tab
+  skirt_loops: 'others',
+  skirt_height: 'others',
+  min_skirt_length: 'others',
+  skirt_distance: 'others',
+  skirt_start_angle: 'others',
+  skirt_speed: 'others',
+  single_loop_draft_shield: 'others',
+  brim_type: 'others',
+  brim_width: 'others',
+  brim_object_gap: 'others',
+  brim_use_efc_outline: 'others',
+  combine_brims: 'others',
+  brim_ears_max_angle: 'others',
+  brim_ears_detection_length: 'others',
+  spiral_mode: 'others',
+  spiral_mode_smooth: 'others',
+  spiral_mode_max_xy_smoothing: 'others',
+  spiral_starting_flow_ratio: 'others',
+  spiral_finishing_flow_ratio: 'others',
+  print_sequence: 'others',
+  slicing_mode: 'others',
+  enable_wrapping_detection: 'others',
+  fuzzy_skin: 'others',
+  fuzzy_skin_mode: 'others',
+  fuzzy_skin_noise_type: 'others',
+  fuzzy_skin_point_distance: 'others',
+  fuzzy_skin_thickness: 'others',
+  fuzzy_skin_scale: 'others',
+  fuzzy_skin_octaves: 'others',
+  fuzzy_skin_persistence: 'others',
+  fuzzy_skin_first_layer: 'others',
+  reduce_infill_retraction: 'others',
+  gcode_add_line_number: 'others',
+  gcode_comments: 'others',
+  gcode_label_objects: 'others',
+  exclude_object: 'others',
+  notes: 'others',
+  timelapse: 'others',
 
-  // Strength — new OrcaSlicer settings
-  bottomShellThickness: 'strength',
-  bottomSurfaceDensity: 'strength',
-  bottomSurfacePattern: 'strength',
-  fillMultiline: 'strength',
-  internalSolidInfillPattern: 'strength',
-  topShellThickness: 'strength',
-  topSurfaceDensity: 'strength',
-  topSurfacePattern: 'strength',
-  alignInfillDirectionToModel: 'strength',
-  alternateExtraWall: 'strength',
-  bridgeAngle: 'strength',
-  bridgeDensity: 'strength',
-  detectNarrowInternalSolidInfill: 'strength',
-  detectThinWall: 'strength',
-  ensureVerticalShellThickness: 'strength',
-  extraSolidInfills: 'strength',
-  gapFillTarget: 'strength',
-  infillCombination: 'strength',
-  infillCombinationMaxLayerHeight: 'strength',
-  infillDirection: 'strength',
-  infillLockDepth: 'strength',
-  infillOverhangAngle: 'strength',
-  infillShiftStep: 'strength',
-  internalBridgeAngle: 'strength',
-  internalBridgeDensity: 'strength',
-  lateralLatticeAngle1: 'strength',
-  lateralLatticeAngle2: 'strength',
-  minimumSparseInfillArea: 'strength',
-  skeletonInfillDensity: 'strength',
-  skeletonInfillLineWidth: 'strength',
-  skinInfillDensity: 'strength',
-  skinInfillDepth: 'strength',
-  skinInfillLineWidth: 'strength',
-  solidInfillDirection: 'strength',
-  solidInfillRotateTemplate: 'strength',
-  sparseInfillRotateTemplate: 'strength',
-  symmetricInfillYAxis: 'strength',
-  topBottomInfillWallOverlap: 'strength',
-
-  // Speed — new OrcaSlicer settings
-  accelToDecelEnable: 'speed',
-  accelToDecelFactor: 'speed',
-  bridgeAcceleration: 'speed',
-  bridgeSpeed: 'speed',
-  defaultJerk: 'speed',
-  defaultJunctionDeviation: 'speed',
-  enableOverhangSpeed: 'speed',
-  filamentIroningSpeed: 'speed',
-  gapInfillSpeed: 'speed',
-  infillJerk: 'speed',
-  initialLayerAcceleration: 'speed',
-  initialLayerJerk: 'speed',
-  initialLayerTravelSpeed: 'speed',
-  innerWallJerk: 'speed',
-  internalBridgeSpeed: 'speed',
-  internalSolidInfillAcceleration: 'speed',
-  outerWallJerk: 'speed',
-  overhang1_4Speed: 'speed',
-  overhang2_4Speed: 'speed',
-  overhang3_4Speed: 'speed',
-  overhang4_4Speed: 'speed',
-  slowDownLayers: 'speed',
-  slowdownForCurledPerimeters: 'speed',
-  smallPerimeterSpeed: 'speed',
-  smallPerimeterThreshold: 'speed',
-  supportInterfaceSpeed: 'speed',
-  supportSpeed: 'speed',
-  topSurfaceJerk: 'speed',
-  travelJerk: 'speed',
-
-  // Support — new OrcaSlicer settings
-  brimType: 'support',
-  brimWidth: 'support',
-  supportFilament: 'support',
-  supportInterfaceNotForBody: 'support',
-  supportOnBuildPlateOnly: 'support',
-  supportThresholdOverlap: 'support',
-  bridgeNoSupport: 'support',
-  brimEars: 'support',
-  brimEarsDetectionLength: 'support',
-  brimEarsMaxAngle: 'support',
-  brimObjectGap: 'support',
-  brimUseEfcOutline: 'support',
-  combineBrims: 'support',
-  independentSupportLayerHeight: 'support',
-  raftContactDistance: 'support',
-  raftExpansion: 'support',
-  raftFirstLayerDensity: 'support',
-  raftFirstLayerExpansion: 'support',
-  raftLayers: 'support',
-  skirtStartAngle: 'support',
-  supportBasePattern: 'support',
-  supportBasePatternSpacing: 'support',
-  supportBottomInterfaceSpacing: 'support',
-  supportCriticalRegionsOnly: 'support',
-  supportExpansion: 'support',
-  supportInterfaceBottomLayers: 'support',
-  supportInterfaceFilament: 'support',
-  supportInterfaceLoopPattern: 'support',
-  supportInterfacePattern: 'support',
-  supportInterfaceSpacing: 'support',
-  supportIroning: 'support',
-  supportIroningFlow: 'support',
-  supportIroningPattern: 'support',
-  supportIroningSpacing: 'support',
-  supportObjectFirstLayerGap: 'support',
-  supportRemoveSmallOverhang: 'support',
-  supportStyle: 'support',
-  treeSupportAngleSlow: 'support',
-  treeSupportBranchAngle: 'support',
-  treeSupportBranchAngleOrganic: 'support',
-  treeSupportBranchDiameter: 'support',
-  treeSupportBranchDiameterAngle: 'support',
-  treeSupportBranchDiameterOrganic: 'support',
-  treeSupportBranchDistance: 'support',
-  treeSupportBranchDistanceOrganic: 'support',
-  treeSupportTipDiameter: 'support',
-  treeSupportTopRate: 'support',
-  treeSupportWallCount: 'support',
-  treeSupportWithInfill: 'support',
-
-  // Others — new OrcaSlicer settings (Fuzzy Skin)
-  fuzzySkin: 'other',
-  fuzzySkinFirstLayer: 'other',
-  fuzzySkinMode: 'other',
-  fuzzySkinNoiseType: 'other',
-  fuzzySkinPointDistance: 'other',
-  fuzzySkinThickness: 'other',
-  fuzzySkinOctaves: 'other',
-  fuzzySkinPersistence: 'other',
-  fuzzySkinScale: 'other',
-  slicingMode: 'other',
-  skirtLoops: 'other',
-  skirtHeight: 'other',
-  spiralVase: 'other',
-  printSequence: 'other',
+  // Extended — temperature, retraction, cooling
+  nozzle_temperature: 'others',
+  nozzle_temperature_initial_layer: 'others',
+  hot_plate_temp: 'others',
+  hot_plate_temp_initial_layer: 'others',
+  filament_retraction_length: 'others',
+  filament_retraction_speed: 'others',
+  filament_deretraction_speed: 'others',
+  filament_retraction_minimum_travel: 'others',
+  filament_retract_when_changing_layer: 'others',
+  filament_retract_before_wipe: 'others',
+  filament_z_hop: 'others',
+  fan_cooling: 'others',
+  fan_min_speed: 'others',
+  fan_max_speed: 'others',
+  overhang_fan_speed: 'others',
+  full_fan_speed_layer: 'others',
 };
 
+// =============================================================================
+// MODE MAP
+// =============================================================================
+
 /**
- * Maps each setting to its OrcaSlicer mode (simple/advanced/develop).
- * Settings NOT in this map default to 'advanced'.
- * Source: OrcaSlicer PrintConfig.cpp def->mode values.
+ * Maps each native snake_case setting key to its UI complexity mode.
+ * Source: SimplyPrint process settings catalog.
+ * Keys absent from this map default to 'advanced'.
  */
-export const SETTING_MODE_MAP: Record<string, OrcaSettingMode> = {
-  // Quality — Simple (per SimplyPrint)
-  layerHeight: 'simple',
-  firstLayerHeight: 'simple',
-  seamPosition: 'simple',
-  scarfJointFlowRatio: 'simple',
-  preciseWall: 'simple',
-  onlyOneWallFirstLayer: 'simple',
-  onlyOneWallTop: 'simple',
+export const ORCA_PROCESS_MODE_MAP: Record<string, ProcessSettingsViewMode> = {
+  // Quality — Simple
+  layer_height: 'simple',
+  initial_layer_print_height: 'simple',
+  scarf_joint_flow_ratio: 'simple',
+  precise_outer_wall: 'simple',
+  only_one_wall_first_layer: 'simple',
+  only_one_wall_top: 'simple',
 
   // Strength — Simple
-  wallCount: 'simple',
-  topLayers: 'simple',
-  topShellThickness: 'simple',
-  topSurfaceDensity: 'simple',
-  topSurfacePattern: 'simple',
-  bottomLayers: 'simple',
-  bottomShellThickness: 'simple',
-  bottomSurfaceDensity: 'simple',
-  bottomSurfacePattern: 'simple',
-  infillDensity: 'simple',
-  fillMultiline: 'simple',
-  infillPattern: 'simple',
-  internalSolidInfillPattern: 'simple',
-
-  // Speed — NO simple settings (all Advanced per SimplyPrint)
+  wall_loops: 'simple',
+  top_shell_layers: 'simple',
+  top_shell_thickness: 'simple',
+  top_surface_density: 'simple',
+  bottom_shell_layers: 'simple',
+  bottom_shell_thickness: 'simple',
+  bottom_surface_density: 'simple',
+  sparse_infill_density: 'simple',
+  fill_multiline: 'simple',
 
   // Support — Simple
-  enableSupports: 'simple',
-  supportType: 'simple',
-  supportAngle: 'simple',
-  supportThresholdOverlap: 'simple',
-  supportOnBuildPlateOnly: 'simple',
-  supportFilament: 'simple',
-  supportInterfaceFilament: 'simple',
-  treeSupportAutoBrim: 'simple',
-  treeSupportBrimWidth: 'simple',
+  enable_support: 'simple',
+  support_threshold_angle: 'simple',
+  support_threshold_overlap: 'simple',
+  support_on_build_plate_only: 'simple',
+  tree_support_auto_brim: 'simple',
+  tree_support_brim_width: 'simple',
 
   // Multimaterial — Simple
-  wipeTowerEnable: 'simple',
-  wipeTowerWidth: 'simple',
-  wipeTowerPrimeVolume: 'simple',
-  preheatSteps: 'simple',
-  flushIntoInfill: 'simple',
-  flushIntoObject: 'simple',
-  flushIntoSupport: 'simple',
+  enable_prime_tower: 'simple',
+  prime_tower_width: 'simple',
+  prime_volume: 'simple',
+  preheat_steps: 'simple',
+  flush_into_infill: 'simple',
+  flush_into_objects: 'simple',
+  flush_into_support: 'simple',
 
   // Others — Simple
-  skirtLoops: 'simple',
-  skirtHeight: 'simple',
-  brimType: 'simple',
-  brimWidth: 'simple',
-  printSequence: 'simple',
-  spiralVase: 'simple',
-  smoothSpiral: 'simple',
-  timelapse: 'simple',
-  fuzzySkin: 'simple',
-  fuzzySkinMode: 'simple',
-  fuzzySkinNoiseType: 'simple',
-  fuzzySkinPointDistance: 'simple',
-  fuzzySkinThickness: 'simple',
-  fuzzySkinFirstLayer: 'simple',
-  addLineNumber: 'simple',
+  skirt_loops: 'simple',
+  skirt_height: 'simple',
+  brim_width: 'simple',
+  spiral_mode: 'simple',
+  spiral_mode_smooth: 'simple',
+  fuzzy_skin_point_distance: 'simple',
+  fuzzy_skin_thickness: 'simple',
+  fuzzy_skin_first_layer: 'simple',
+  gcode_add_line_number: 'simple',
 };
+
+// =============================================================================
+// CHANGE TRACKING SYSTEM
+// =============================================================================
 
 /**
  * Deep equality check for comparing setting values.
@@ -980,27 +1151,27 @@ export function deepEqual<T>(a: T, b: T): boolean {
   if (a === b) return true;
   if (a === null || b === null) return a === b;
   if (typeof a !== typeof b) return false;
-  
+
   if (typeof a === 'object') {
     if (Array.isArray(a) && Array.isArray(b)) {
       if (a.length !== b.length) return false;
       return a.every((item, index) => deepEqual(item, b[index]));
     }
-    
+
     if (Array.isArray(a) !== Array.isArray(b)) return false;
-    
+
     const keysA = Object.keys(a as object);
     const keysB = Object.keys(b as object);
     if (keysA.length !== keysB.length) return false;
-    
-    return keysA.every(key => 
+
+    return keysA.every(key =>
       deepEqual(
-        (a as Record<string, unknown>)[key], 
+        (a as Record<string, unknown>)[key],
         (b as Record<string, unknown>)[key]
       )
     );
   }
-  
+
   return false;
 }
 
@@ -1010,7 +1181,7 @@ export function deepEqual<T>(a: T, b: T): boolean {
 export function deepClone<T>(obj: T): T {
   if (obj === null || typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map(item => deepClone(item)) as T;
-  
+
   const cloned = {} as T;
   for (const key in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
@@ -1054,49 +1225,21 @@ export interface TrackedSettingsState<T extends Record<string, unknown>> {
 /**
  * React hook for tracking changes to settings objects.
  * Enables reset-to-original functionality and dirty state detection per category.
- * 
- * @param initialSettings - The initial/original settings to track against
- * @returns TrackedSettingsState with utilities for change management
- * 
- * @example
- * ```tsx
- * const { current, hasChanges, resetToOriginal, isDirty } = useTrackedSettings(profileSettings);
- * 
- * // Check if layer height was modified
- * if (hasChanges('layerHeight')) {
- *   // Show reset icon
- * }
- * 
- * // Check if Quality tab has any changes
- * if (isCategoryDirty('quality')) {
- *   // Highlight the tab
- * }
- * ```
  */
 export function useTrackedSettings<T extends Record<string, unknown>>(
   initialSettings: T
 ): TrackedSettingsState<T> {
-  // Store deep clone of original to prevent mutation
   const [original] = useState<T>(() => deepClone(initialSettings));
   const [current, setCurrent] = useState<T>(() => deepClone(initialSettings));
 
-  /**
-   * Check if a specific setting has been modified from original
-   */
   const hasChanges = useCallback((key: keyof T): boolean => {
     return !deepEqual(original[key], current[key]);
   }, [original, current]);
 
-  /**
-   * Get all keys that have been modified
-   */
   const getChangedKeys = useCallback((): (keyof T)[] => {
     return (Object.keys(current) as (keyof T)[]).filter(key => hasChanges(key));
   }, [current, hasChanges]);
 
-  /**
-   * Reset a single setting to its original value
-   */
   const resetToOriginal = useCallback((key: keyof T): void => {
     setCurrent(prev => ({
       ...prev,
@@ -1104,16 +1247,10 @@ export function useTrackedSettings<T extends Record<string, unknown>>(
     }));
   }, [original]);
 
-  /**
-   * Reset all settings to original values
-   */
   const resetAll = useCallback((): void => {
     setCurrent(deepClone(original));
   }, [original]);
 
-  /**
-   * Update a single setting value
-   */
   const updateSetting = useCallback(<K extends keyof T>(key: K, value: T[K]): void => {
     setCurrent(prev => ({
       ...prev,
@@ -1121,9 +1258,6 @@ export function useTrackedSettings<T extends Record<string, unknown>>(
     }));
   }, []);
 
-  /**
-   * Update multiple settings at once
-   */
   const updateSettings = useCallback((updates: Partial<T>): void => {
     setCurrent(prev => ({
       ...prev,
@@ -1131,43 +1265,29 @@ export function useTrackedSettings<T extends Record<string, unknown>>(
     }));
   }, []);
 
-  /**
-   * Get the original value for a setting
-   */
   const getOriginalValue = useCallback(<K extends keyof T>(key: K): T[K] => {
     return original[key];
   }, [original]);
 
-  /**
-   * Compute whether any setting is dirty
-   */
   const isDirty = useMemo((): boolean => {
     return getChangedKeys().length > 0;
   }, [getChangedKeys]);
 
-  /**
-   * Compute map of changed keys grouped by category
-   */
   const changedKeysPerCategory = useMemo((): Map<SettingsCategory, Set<keyof T>> => {
     const categoryMap = new Map<SettingsCategory, Set<keyof T>>();
-    
-    // Initialize all categories with empty sets
-    const categories: SettingsCategory[] = ['quality', 'strength', 'speed', 'support', 'multimaterial', 'other'];
+
+    const categories: SettingsCategory[] = ['quality', 'strength', 'speed', 'support', 'multimaterial', 'others'];
     categories.forEach(cat => categoryMap.set(cat, new Set()));
-    
-    // Group changed keys by category
+
     const changedKeys = getChangedKeys();
     changedKeys.forEach(key => {
-      const category = SETTING_TO_CATEGORY_MAP[key as string] || 'other';
+      const category = ORCA_PROCESS_CATEGORY_MAP[key as string] ?? 'others';
       categoryMap.get(category)?.add(key);
     });
-    
+
     return categoryMap;
   }, [getChangedKeys]);
 
-  /**
-   * Check if a specific category has any modified settings
-   */
   const isCategoryDirty = useCallback((category: SettingsCategory): boolean => {
     const categoryKeys = changedKeysPerCategory.get(category);
     return categoryKeys !== undefined && categoryKeys.size > 0;
@@ -1190,8 +1310,8 @@ export function useTrackedSettings<T extends Record<string, unknown>>(
 }
 
 /**
- * Type guard to check if a value is a valid settings category
+ * Type guard to check if a value is a valid settings category.
  */
 export function isValidCategory(value: string): value is SettingsCategory {
-  return ['quality', 'strength', 'speed', 'support', 'multimaterial', 'other'].includes(value);
+  return ['quality', 'strength', 'speed', 'support', 'multimaterial', 'others'].includes(value);
 }
