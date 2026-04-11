@@ -644,3 +644,32 @@ The slicer subsystem is **far more complete than assumed.** The core pipeline (s
 2. File path resolution (backend) → 404 on download
 
 Both needed fixes, but they're orthogonal. The cache fix unblocked visibility, the path fix unblocks downloads.
+
+---
+
+## Session: Native Keys Migration Architecture (2025-07-11)
+
+**Role:** Lead architect — work breakdown and ADR for slicer settings migration
+**Status:** ADR written to `.squad/decisions/inbox/dallas-native-keys-migration.md`
+
+### Work Completed
+- Audited all 3 settings type files (process: 700+ lines, filament: 538, machine: 690)
+- Audited `CamelToNativeKeyMap` (283 entries, lines 560-919 of HttpJobPollerService.cs)
+- Mapped full blast radius: 18 frontend files, 70+ backend files
+- Produced 5 architectural decisions (AD-1 through AD-5)
+- Produced 12-item work breakdown (WI-01 through WI-12) with dependency graph
+- Estimated 41-57 hours total effort across Ripley (frontend), Lambert (backend), Kane (testing)
+
+### Key Learnings
+
+1. **The CamelToNativeKeyMap IS the Rosetta Stone.** It contains the exact mapping from every camelCase UI property to its native OrcaSlicer snake_case key. Many are non-obvious: `wallCount` → `wall_loops`, `infillDensity` → `sparse_infill_density`, `bedTemp` → `hot_plate_temp`. This map must be the primary reference during the type rewrite — don't guess native key names.
+
+2. **ProcessProfileDto promoted properties are server-populated.** The camelCase properties like `LayerHeight`, `PrintSpeed` on `ProcessProfileDto` are populated by the backend when parsing raw OrcaSlicer JSON. The frontend never sends these — it only sends the `overrides` dictionary. This means the backend DTO doesn't need changes.
+
+3. **The backend already has a snake_case passthrough.** Line 540 of `ApplyProfileOverrides`: `else if (prop.Name.Contains("_"))` — keys with underscores already pass through directly. This means the new snake_case frontend can work with the OLD backend during transition. Low-risk migration path.
+
+4. **SimplyPrint tab layouts diverge significantly for filament and machine.** Process tabs are nearly identical (we just have "Other" vs "Others"). But filament goes from 7 tabs to 7 completely different tabs, and machine from 5 to 6 different tabs. The tab restructure is the hardest part of WI-08 and WI-09.
+
+5. **OrcaSlicer has intentional typos in key names.** `elefant_foot_compensation` (not "elephant") is the real key. The migration must preserve these exact spellings — they're what OrcaSlicer expects in the JSON.
+
+6. **Risk: types and editors must ship together.** You can't merge WI-01 (new types) without WI-06 (updated editor) — it would break compilation. The merge strategy should batch types+editors per profile domain.
