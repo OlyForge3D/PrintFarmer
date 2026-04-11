@@ -2,6 +2,7 @@
 using FluentAssertions;
 
 namespace Farm.Slicer.Module.Tests.Services;
+
 public class ProfileSchemaProviderTests
 {
     [Fact]

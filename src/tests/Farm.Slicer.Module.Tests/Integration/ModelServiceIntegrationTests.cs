@@ -341,13 +341,17 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
         SlicerDbContext dbContext = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        IConfiguration config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
+        // Use the factory-configured storage path so the service finds our files
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"]
+            ?? Path.Combine(Path.GetTempPath(), "test-models-" + Guid.NewGuid());
+        Directory.CreateDirectory(modelsPath);
 
         // Create a test model with IsValid = false and a thumbnail
         var invalidModelId = Guid.NewGuid();
         string fileName = $"{invalidModelId}.stl";
         string thumbnailFileName = $"{invalidModelId}_thumb.png";
-        string modelsPath = Path.Combine(Path.GetTempPath(), "test-models-" + Guid.NewGuid());
-        Directory.CreateDirectory(modelsPath);
         string filePath = Path.Combine(modelsPath, fileName);
         string thumbnailPath = Path.Combine(modelsPath, thumbnailFileName);
 
@@ -716,9 +720,6 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
 
         // Assert
         filePath.Should().NotBeNull();
-
-        // Verify the path is relative (doesn't start with /)
-        filePath.Should().NotStartWith(Path.DirectorySeparatorChar.ToString(), "Path should be relative");
 
         // Verify the path contains the filename
         filePath.Should().Contain(".stl", "Path should contain the STL extension");

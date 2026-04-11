@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
@@ -26,6 +27,8 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// </summary>
 public sealed class SlicePrintBridgeControllerTests : IDisposable
 {
+    private static readonly Guid TestUserId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
     private readonly Mock<ISliceJobRepository> _jobRepoMock = new();
     private readonly Mock<IArtifactsService> _artifactsMock = new();
     private readonly Mock<IPrintersService> _printersMock = new();
@@ -40,6 +43,13 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             _loggerMock.Object,
             _jobRepoMock.Object,
             _artifactsMock.Object);
+
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, TestUserId.ToString()) };
+        var identity = new ClaimsIdentity(claims, "TestAuth");
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+        };
 
         _tempDir = Path.Combine(Path.GetTempPath(), $"slice_bridge_test_{Guid.NewGuid()}");
         Directory.CreateDirectory(_tempDir);
@@ -382,7 +392,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
     private static SliceJob CreateJob(Guid id, string status) => new()
     {
         Id = id,
-        UserId = Guid.NewGuid(),
+        UserId = TestUserId,
         Status = status,
         ModelFileUrl = "test://model.stl",
         ModelFileName = "model.stl",
