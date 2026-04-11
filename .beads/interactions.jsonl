@@ -105,3 +105,4 @@
 {"id":"int-9980c0e0","kind":"field_change","created_at":"2026-04-11T18:40:30.739302Z","actor":"Jeff Papiez","issue_id":"PFarm1-pysq.4","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-e9589ee9","kind":"field_change","created_at":"2026-04-11T18:50:08.459507Z","actor":"Jeff Papiez","issue_id":"PFarm1-pysq.1","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-03d3a3c0","kind":"field_change","created_at":"2026-04-11T18:59:09.131343Z","actor":"Jeff Papiez","issue_id":"PFarm1-pysq.7","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-ba99c1a5","kind":"field_change","created_at":"2026-04-11T19:05:40.403619Z","actor":"Jeff Papiez","issue_id":"PFarm1-pysq.8","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
