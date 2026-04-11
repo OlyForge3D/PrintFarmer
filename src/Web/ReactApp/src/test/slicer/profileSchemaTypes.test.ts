@@ -1,24 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_BASIC_FILAMENT_SETTINGS,
-  DEFAULT_ADVANCED_FILAMENT_SETTINGS,
-  FILAMENT_SETTING_TO_CATEGORY_MAP,
+  DEFAULT_ORCA_FILAMENT_SETTINGS,
+  ORCA_FILAMENT_CATEGORY_MAP,
   MATERIAL_PRESETS,
 } from '@/features/slicer/components/settings/filamentSettingsTypes';
-import type { FilamentSettingsCategory } from '@/features/slicer/components/settings/filamentSettingsTypes';
+import type { FilamentCategory } from '@/features/slicer/components/settings/filamentSettingsTypes';
 import {
-  DEFAULT_SIMPLE_SETTINGS,
-  DEFAULT_ADVANCED_SETTINGS,
-  SETTING_TO_CATEGORY_MAP,
+  DEFAULT_ORCA_PROCESS_SETTINGS,
+  ORCA_PROCESS_CATEGORY_MAP,
   INFILL_PATTERN_INFO,
   BED_ADHESION_INFO,
   isValidCategory,
 } from '@/features/slicer/components/settings/slicerSettingsTypes';
 import type { SettingsCategory } from '@/features/slicer/components/settings/slicerSettingsTypes';
 import {
-  DEFAULT_BASIC_MACHINE_SETTINGS,
-  DEFAULT_ADVANCED_MACHINE_SETTINGS,
-  MACHINE_SETTING_TO_CATEGORY_MAP,
+  DEFAULT_ORCA_MACHINE_SETTINGS,
+  ORCA_MACHINE_CATEGORY_MAP,
   GCODE_DIALECT_LABELS,
   MOTION_TYPE_LABELS,
   NOZZLE_TYPE_LABELS,
@@ -26,75 +23,52 @@ import {
   PROBE_TYPE_LABELS,
   PRINTER_PRESETS,
 } from '@/features/slicer/components/settings/machineSettingsTypes';
-import type { MachineSettingsCategory } from '@/features/slicer/components/settings/machineSettingsTypes';
+import type { MachineCategory } from '@/features/slicer/components/settings/machineSettingsTypes';
 import type { ProfileFieldMetadata, EnumOption, ProfileTypeSchema } from '@/types/api';
 
 // ---------------------------------------------------------------------------
 // FilamentSettingsTypes contract tests
 // ---------------------------------------------------------------------------
 describe('FilamentSettingsTypes', () => {
-  describe('DEFAULT_BASIC_FILAMENT_SETTINGS', () => {
-    it('contains all expected basic keys', () => {
-      const expected = ['name', 'material', 'density', 'cost', 'nozzleTemperature', 'bedTemperature'];
+  describe('DEFAULT_ORCA_FILAMENT_SETTINGS', () => {
+    it('contains all expected keys', () => {
+      const expected = ['nozzle_temperature', 'hot_plate_temp', 'filament_retraction_length'];
       for (const key of expected) {
-        expect(DEFAULT_BASIC_FILAMENT_SETTINGS).toHaveProperty(key);
+        expect(DEFAULT_ORCA_FILAMENT_SETTINGS).toHaveProperty(key);
       }
     });
 
     it('has numeric temperature values', () => {
-      expect(typeof DEFAULT_BASIC_FILAMENT_SETTINGS.nozzleTemperature).toBe('number');
-      expect(typeof DEFAULT_BASIC_FILAMENT_SETTINGS.bedTemperature).toBe('number');
+      expect(typeof DEFAULT_ORCA_FILAMENT_SETTINGS.nozzle_temperature).toBe('number');
+      expect(typeof DEFAULT_ORCA_FILAMENT_SETTINGS.hot_plate_temp).toBe('number');
     });
   });
 
-  describe('DEFAULT_ADVANCED_FILAMENT_SETTINGS', () => {
-    const advancedKeys = [
-      'nozzleTemperature', 'bedTemperature', 'flowRatio', 'density',
-      'retractionLength', 'retractionSpeed', 'enableFanCooling',
-      'minFanSpeed', 'maxFanSpeed', 'pressureAdvance',
-      'enablePressureAdvance', 'startGcode', 'endGcode',
+  describe('ORCA_FILAMENT_CATEGORY_MAP', () => {
+    const validCategories: FilamentCategory[] = [
+      'filament', 'cooling', 'setting_overrides', 'advanced', 'multimaterial', 'dependencies', 'notes',
     ];
 
-    it('contains all expected advanced keys', () => {
-      for (const key of advancedKeys) {
-        expect(DEFAULT_ADVANCED_FILAMENT_SETTINGS).toHaveProperty(key);
-      }
-    });
-
-    it('inherits basic settings', () => {
-      expect(DEFAULT_ADVANCED_FILAMENT_SETTINGS.nozzleTemperature)
-        .toBe(DEFAULT_BASIC_FILAMENT_SETTINGS.nozzleTemperature);
-      expect(DEFAULT_ADVANCED_FILAMENT_SETTINGS.bedTemperature)
-        .toBe(DEFAULT_BASIC_FILAMENT_SETTINGS.bedTemperature);
-    });
-  });
-
-  describe('FILAMENT_SETTING_TO_CATEGORY_MAP', () => {
-    const validCategories: FilamentSettingsCategory[] = [
-      'temperature', 'flow', 'cooling', 'retraction', 'physical', 'gcode', 'other',
-    ];
-
-    it('covers all expected categories', () => {
-      const usedCategories = new Set(Object.values(FILAMENT_SETTING_TO_CATEGORY_MAP));
-      for (const cat of ['temperature', 'flow', 'cooling', 'retraction', 'physical', 'gcode']) {
-        expect(usedCategories.has(cat as FilamentSettingsCategory)).toBe(true);
+    it('covers expected categories', () => {
+      const usedCategories = new Set(Object.values(ORCA_FILAMENT_CATEGORY_MAP));
+      for (const cat of ['filament', 'cooling', 'setting_overrides']) {
+        expect(usedCategories.has(cat as FilamentCategory)).toBe(true);
       }
     });
 
     it('maps every field to a valid category', () => {
-      for (const [, category] of Object.entries(FILAMENT_SETTING_TO_CATEGORY_MAP)) {
+      for (const [, category] of Object.entries(ORCA_FILAMENT_CATEGORY_MAP)) {
         expect(validCategories).toContain(category);
       }
     });
 
-    it('maps temperature fields to temperature category', () => {
-      expect(FILAMENT_SETTING_TO_CATEGORY_MAP['nozzleTemperature']).toBe('temperature');
-      expect(FILAMENT_SETTING_TO_CATEGORY_MAP['bedTemperature']).toBe('temperature');
+    it('maps temperature fields to filament category', () => {
+      expect(ORCA_FILAMENT_CATEGORY_MAP['nozzle_temperature']).toBe('filament');
+      expect(ORCA_FILAMENT_CATEGORY_MAP['hot_plate_temp']).toBe('filament');
     });
 
-    it('maps retraction fields to retraction category', () => {
-      expect(FILAMENT_SETTING_TO_CATEGORY_MAP['retractionLength']).toBe('retraction');
-      expect(FILAMENT_SETTING_TO_CATEGORY_MAP['retractionSpeed']).toBe('retraction');
+    it('maps retraction fields to setting_overrides category', () => {
+      expect(ORCA_FILAMENT_CATEGORY_MAP['filament_retraction_length']).toBe('setting_overrides');
     });
   });
 
@@ -108,8 +82,8 @@ describe('FilamentSettingsTypes', () => {
 
     it('each preset has temperature settings', () => {
       for (const [, preset] of Object.entries(MATERIAL_PRESETS)) {
-        expect(preset.nozzleTemperature).toBeGreaterThan(0);
-        expect(preset.bedTemperature).toBeGreaterThanOrEqual(0);
+        expect(preset.nozzle_temperature).toBeGreaterThan(0);
+        expect(preset.hot_plate_temp).toBeGreaterThanOrEqual(0);
       }
     });
   });
@@ -119,67 +93,63 @@ describe('FilamentSettingsTypes', () => {
 // SlicerSettingsTypes contract tests
 // ---------------------------------------------------------------------------
 describe('SlicerSettingsTypes', () => {
-  describe('DEFAULT_SIMPLE_SETTINGS', () => {
-    it('contains core basic keys', () => {
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('infillDensity');
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('infillPattern');
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('wallCount');
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('bedAdhesion');
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('enableSupports');
+  describe('DEFAULT_ORCA_PROCESS_SETTINGS', () => {
+    it('contains core keys', () => {
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('sparse_infill_density');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('sparse_infill_pattern');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('wall_loops');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('brim_type');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('enable_support');
     });
 
     it('has reasonable default types', () => {
-      expect(typeof DEFAULT_SIMPLE_SETTINGS.infillDensity).toBe('number');
-      expect(typeof DEFAULT_SIMPLE_SETTINGS.wallCount).toBe('number');
-      expect(typeof DEFAULT_SIMPLE_SETTINGS.enableSupports).toBe('boolean');
-      expect(typeof DEFAULT_SIMPLE_SETTINGS.infillPattern).toBe('string');
+      expect(typeof DEFAULT_ORCA_PROCESS_SETTINGS.sparse_infill_density).toBe('number');
+      expect(typeof DEFAULT_ORCA_PROCESS_SETTINGS.wall_loops).toBe('number');
+      expect(typeof DEFAULT_ORCA_PROCESS_SETTINGS.enable_support).toBe('boolean');
+      expect(typeof DEFAULT_ORCA_PROCESS_SETTINGS.sparse_infill_pattern).toBe('string');
     });
 
-    it('extends basic with layer/line controls', () => {
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('layerHeight');
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('firstLayerHeight');
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('lineWidthDefault');
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('topLayers');
-      expect(DEFAULT_SIMPLE_SETTINGS).toHaveProperty('bottomLayers');
+    it('has layer and line controls', () => {
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('layer_height');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('initial_layer_print_height');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('line_width');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('top_shell_layers');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('bottom_shell_layers');
     });
-  });
 
-  describe('DEFAULT_ADVANCED_SETTINGS', () => {
     it('has speed settings as numbers', () => {
-      expect(typeof DEFAULT_ADVANCED_SETTINGS.printSpeed).toBe('number');
-      expect(typeof DEFAULT_ADVANCED_SETTINGS.outerWallSpeed).toBe('number');
-      expect(typeof DEFAULT_ADVANCED_SETTINGS.travelSpeed).toBe('number');
+      expect(typeof DEFAULT_ORCA_PROCESS_SETTINGS.outer_wall_speed).toBe('number');
+      expect(typeof DEFAULT_ORCA_PROCESS_SETTINGS.travel_speed).toBe('number');
     });
 
     it('has support settings', () => {
-      expect(DEFAULT_ADVANCED_SETTINGS).toHaveProperty('supportType');
-      expect(DEFAULT_ADVANCED_SETTINGS).toHaveProperty('supportDensity');
-      expect(DEFAULT_ADVANCED_SETTINGS).toHaveProperty('supportAngle');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('support_type');
+      expect(DEFAULT_ORCA_PROCESS_SETTINGS).toHaveProperty('support_threshold_angle');
     });
   });
 
-  describe('SETTING_TO_CATEGORY_MAP', () => {
+  describe('ORCA_PROCESS_CATEGORY_MAP', () => {
     const validCategories: SettingsCategory[] = [
-      'quality', 'strength', 'speed', 'support', 'multimaterial', 'other',
+      'quality', 'strength', 'speed', 'support', 'multimaterial', 'others',
     ];
 
     it('maps key process settings', () => {
-      expect(SETTING_TO_CATEGORY_MAP['layerHeight']).toBe('quality');
-      expect(SETTING_TO_CATEGORY_MAP['infillDensity']).toBe('strength');
-      expect(SETTING_TO_CATEGORY_MAP['printSpeed']).toBe('speed');
-      expect(SETTING_TO_CATEGORY_MAP['enableSupports']).toBe('support');
+      expect(ORCA_PROCESS_CATEGORY_MAP['layer_height']).toBe('quality');
+      expect(ORCA_PROCESS_CATEGORY_MAP['sparse_infill_density']).toBe('strength');
+      expect(ORCA_PROCESS_CATEGORY_MAP['outer_wall_speed']).toBe('speed');
+      expect(ORCA_PROCESS_CATEGORY_MAP['enable_support']).toBe('support');
     });
 
     it('maps every field to a valid category', () => {
-      for (const [, category] of Object.entries(SETTING_TO_CATEGORY_MAP)) {
+      for (const [, category] of Object.entries(ORCA_PROCESS_CATEGORY_MAP)) {
         expect(validCategories).toContain(category);
       }
     });
 
     it('covers all category values', () => {
-      const usedCategories = new Set(Object.values(SETTING_TO_CATEGORY_MAP));
-      for (const cat of validCategories) {
-        expect(usedCategories.has(cat)).toBe(true);
+      const usedCategories = new Set(Object.values(ORCA_PROCESS_CATEGORY_MAP));
+      for (const cat of ['quality', 'strength', 'speed', 'support']) {
+        expect(usedCategories.has(cat as SettingsCategory)).toBe(true);
       }
     });
   });
@@ -221,68 +191,58 @@ describe('SlicerSettingsTypes', () => {
 // MachineSettingsTypes contract tests
 // ---------------------------------------------------------------------------
 describe('MachineSettingsTypes', () => {
-  describe('DEFAULT_BASIC_MACHINE_SETTINGS', () => {
+  describe('DEFAULT_ORCA_MACHINE_SETTINGS', () => {
     it('contains key machine fields', () => {
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS).toHaveProperty('name');
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS).toHaveProperty('buildVolumeX');
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS).toHaveProperty('buildVolumeY');
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS).toHaveProperty('buildVolumeZ');
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS).toHaveProperty('nozzleDiameter');
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS).toHaveProperty('maxPrintSpeed');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('bed_size_x');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('bed_size_y');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('printable_height');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('nozzle_diameter');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('max_print_speed');
     });
 
     it('has positive build volume values', () => {
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS.buildVolumeX).toBeGreaterThan(0);
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS.buildVolumeY).toBeGreaterThan(0);
-      expect(DEFAULT_BASIC_MACHINE_SETTINGS.buildVolumeZ).toBeGreaterThan(0);
-    });
-  });
-
-  describe('DEFAULT_ADVANCED_MACHINE_SETTINGS', () => {
-    it('inherits basic settings', () => {
-      expect(DEFAULT_ADVANCED_MACHINE_SETTINGS.buildVolumeX)
-        .toBe(DEFAULT_BASIC_MACHINE_SETTINGS.buildVolumeX);
-      expect(DEFAULT_ADVANCED_MACHINE_SETTINGS.nozzleDiameter)
-        .toBe(DEFAULT_BASIC_MACHINE_SETTINGS.nozzleDiameter);
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS.bed_size_x).toBeGreaterThan(0);
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS.bed_size_y).toBeGreaterThan(0);
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS.printable_height).toBeGreaterThan(0);
     });
 
     it('has motion and capability fields', () => {
-      expect(DEFAULT_ADVANCED_MACHINE_SETTINGS).toHaveProperty('motionType');
-      expect(DEFAULT_ADVANCED_MACHINE_SETTINGS).toHaveProperty('maxAccelerationX');
-      expect(DEFAULT_ADVANCED_MACHINE_SETTINGS).toHaveProperty('gcodeDialect');
-      expect(DEFAULT_ADVANCED_MACHINE_SETTINGS).toHaveProperty('hasHeatedBed');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('motion_type');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('machine_max_acceleration_x');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('gcode_flavor');
+      expect(DEFAULT_ORCA_MACHINE_SETTINGS).toHaveProperty('has_heated_bed');
     });
 
     it('has gcode fields as strings', () => {
-      expect(typeof DEFAULT_ADVANCED_MACHINE_SETTINGS.startGcode).toBe('string');
-      expect(typeof DEFAULT_ADVANCED_MACHINE_SETTINGS.endGcode).toBe('string');
+      expect(typeof DEFAULT_ORCA_MACHINE_SETTINGS.machine_start_gcode).toBe('string');
+      expect(typeof DEFAULT_ORCA_MACHINE_SETTINGS.machine_end_gcode).toBe('string');
     });
   });
 
-  describe('MACHINE_SETTING_TO_CATEGORY_MAP', () => {
-    const validCategories: MachineSettingsCategory[] = [
-      'general', 'extruder', 'printbed', 'capabilities', 'gcode',
+  describe('ORCA_MACHINE_CATEGORY_MAP', () => {
+    const validCategories: MachineCategory[] = [
+      'basic_information', 'machine_gcode', 'multimaterial', 'extruder', 'motion_ability', 'notes',
     ];
 
     it('covers all expected categories', () => {
-      const usedCategories = new Set(Object.values(MACHINE_SETTING_TO_CATEGORY_MAP));
-      for (const cat of validCategories) {
-        expect(usedCategories.has(cat)).toBe(true);
+      const usedCategories = new Set(Object.values(ORCA_MACHINE_CATEGORY_MAP));
+      for (const cat of ['basic_information', 'extruder', 'motion_ability', 'machine_gcode']) {
+        expect(usedCategories.has(cat as MachineCategory)).toBe(true);
       }
     });
 
     it('maps every field to a valid category', () => {
-      for (const [, category] of Object.entries(MACHINE_SETTING_TO_CATEGORY_MAP)) {
+      for (const [, category] of Object.entries(ORCA_MACHINE_CATEGORY_MAP)) {
         expect(validCategories).toContain(category);
       }
     });
 
     it('maps key fields to correct categories', () => {
-      expect(MACHINE_SETTING_TO_CATEGORY_MAP['name']).toBe('general');
-      expect(MACHINE_SETTING_TO_CATEGORY_MAP['nozzleDiameter']).toBe('extruder');
-      expect(MACHINE_SETTING_TO_CATEGORY_MAP['bedType']).toBe('printbed');
-      expect(MACHINE_SETTING_TO_CATEGORY_MAP['hasHeatedBed']).toBe('capabilities');
-      expect(MACHINE_SETTING_TO_CATEGORY_MAP['startGcode']).toBe('gcode');
+      expect(ORCA_MACHINE_CATEGORY_MAP['nozzle_diameter']).toBe('extruder');
+      expect(ORCA_MACHINE_CATEGORY_MAP['bed_type']).toBe('basic_information');
+      expect(ORCA_MACHINE_CATEGORY_MAP['has_heated_bed']).toBe('basic_information');
+      expect(ORCA_MACHINE_CATEGORY_MAP['machine_start_gcode']).toBe('machine_gcode');
+      expect(ORCA_MACHINE_CATEGORY_MAP['motion_type']).toBe('motion_ability');
     });
   });
 
@@ -324,9 +284,9 @@ describe('MachineSettingsTypes', () => {
 
     it('each preset has build volume', () => {
       for (const [, preset] of Object.entries(PRINTER_PRESETS)) {
-        expect(preset.buildVolumeX).toBeGreaterThan(0);
-        expect(preset.buildVolumeY).toBeGreaterThan(0);
-        expect(preset.buildVolumeZ).toBeGreaterThan(0);
+        expect(preset.bed_size_x).toBeGreaterThan(0);
+        expect(preset.bed_size_y).toBeGreaterThan(0);
+        expect(preset.printable_height).toBeGreaterThan(0);
       }
     });
   });
@@ -338,7 +298,7 @@ describe('MachineSettingsTypes', () => {
 describe('ProfileFieldMetadata shape', () => {
   it('accepts a valid numeric field metadata object', () => {
     const field: ProfileFieldMetadata = {
-      key: 'layerHeight',
+      key: 'layer_height',
       label: 'Layer Height',
       fieldType: 'number',
       category: 'quality',
@@ -349,7 +309,7 @@ describe('ProfileFieldMetadata shape', () => {
       unit: 'mm',
     };
 
-    expect(field.key).toBe('layerHeight');
+    expect(field.key).toBe('layer_height');
     expect(field.label).toBe('Layer Height');
     expect(field.fieldType).toBe('number');
     expect(field.category).toBe('quality');
@@ -364,7 +324,7 @@ describe('ProfileFieldMetadata shape', () => {
       { value: 'gyroid', label: 'Gyroid' },
     ];
     const field: ProfileFieldMetadata = {
-      key: 'infillPattern',
+      key: 'sparse_infill_pattern',
       label: 'Infill Pattern',
       fieldType: 'enum',
       category: 'strength',
@@ -380,7 +340,7 @@ describe('ProfileFieldMetadata shape', () => {
 
   it('accepts a boolean field metadata', () => {
     const field: ProfileFieldMetadata = {
-      key: 'enableSupports',
+      key: 'enable_support',
       label: 'Enable Supports',
       fieldType: 'boolean',
       category: 'support',
@@ -399,7 +359,7 @@ describe('ProfileTypeSchema shape', () => {
       categories: ['quality', 'strength', 'speed'],
       fields: [
         {
-          key: 'layerHeight',
+          key: 'layer_height',
           label: 'Layer Height',
           fieldType: 'number',
           category: 'quality',
@@ -411,6 +371,6 @@ describe('ProfileTypeSchema shape', () => {
     expect(schema.profileType).toBe('process');
     expect(schema.categories.length).toBe(3);
     expect(schema.fields.length).toBe(1);
-    expect(schema.fields[0].key).toBe('layerHeight');
+    expect(schema.fields[0].key).toBe('layer_height');
   });
 });

@@ -4,7 +4,7 @@
  */
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/common/components/ui';
-import { SettingRow, CompactSettingRow, SettingSection } from './SettingRow';
+import { CompactSettingRow, SettingSection } from './SettingRow';
 import {
   WallCountIcon,
   SpeedIcon,
@@ -13,16 +13,15 @@ import {
 } from './SlicerSettingIcons';
 import type {
   MachineSettingsViewMode,
-  MachineSettingsCategory,
-  BasicMachineSettings,
-  AdvancedMachineSettings,
+  MachineCategory,
+  OrcaMachineSettings,
 } from './machineSettingsTypes';
 
 interface MachineSettingsPanelProps {
   /** Current machine settings values */
-  settings: BasicMachineSettings | AdvancedMachineSettings;
+  settings: Partial<OrcaMachineSettings>;
   /** Called when any setting changes */
-  onChange: (settings: BasicMachineSettings | AdvancedMachineSettings) => void;
+  onChange: (settings: Partial<OrcaMachineSettings>) => void;
   /** Initial view mode */
   initialViewMode?: MachineSettingsViewMode;
   /** Disable all controls */
@@ -30,7 +29,7 @@ interface MachineSettingsPanelProps {
   /** Custom class name */
   className?: string;
   /** Optional function to check if a category has modified settings */
-  isCategoryDirty?: (category: MachineSettingsCategory) => boolean;
+  isCategoryDirty?: (category: MachineCategory) => boolean;
 }
 
 export function MachineSettingsPanel({
@@ -42,14 +41,13 @@ export function MachineSettingsPanel({
   isCategoryDirty,
 }: MachineSettingsPanelProps) {
   const [viewMode, setViewMode] = useState<MachineSettingsViewMode>(initialViewMode);
-  const [activeCategory, setActiveCategory] = useState<MachineSettingsCategory>('general');
+  const [activeCategory, setActiveCategory] = useState<MachineCategory>('basic_information');
 
-  const isAdvanced = (settings as AdvancedMachineSettings).printerModel !== undefined;
-  const advancedSettings = settings as AdvancedMachineSettings;
+  const advancedSettings = settings;
 
   const onUpdate = useCallback(
     (key: string, value: unknown) => {
-      const updated = { ...settings, [key]: value } as BasicMachineSettings | AdvancedMachineSettings;
+      const updated = { ...settings, [key]: value } as Partial<OrcaMachineSettings>;
       onChange(updated);
     },
     [settings, onChange]
@@ -58,18 +56,15 @@ export function MachineSettingsPanel({
   // View mode buttons
   const viewModeButtons = [
     { mode: 'simple' as const, label: 'Simple' },
-    ...(isAdvanced ? [{ mode: 'advanced' as const, label: 'Advanced' }] : []),
+    { mode: 'advanced' as const, label: 'Advanced' },
   ];
 
-  // Category tabs for advanced mode - properly typed as MachineSettingsCategory
-  const categories: Array<{ id: MachineSettingsCategory; label: string }> = [
-    { id: 'general' as const, label: 'General' },
-    ...(isAdvanced ? [
-      { id: 'extruder' as const, label: 'Extruder' },
-      { id: 'printbed' as const, label: 'Print bed' },
-      { id: 'capabilities' as const, label: 'Capabilities' },
-      { id: 'gcode' as const, label: 'G-code' },
-    ] : []),
+  // Category tabs for advanced mode
+  const categories: Array<{ id: MachineCategory; label: string }> = [
+    { id: 'basic_information', label: 'General' },
+    { id: 'extruder', label: 'Extruder' },
+    { id: 'motion_ability', label: 'Capabilities' },
+    { id: 'machine_gcode', label: 'G-code' },
   ];
 
   return (
@@ -99,8 +94,8 @@ export function MachineSettingsPanel({
               <CompactSettingRow
                 type="number"
                 label="X (mm)"
-                value={settings.buildVolumeX}
-                onChange={(v) => onUpdate('buildVolumeX', v)}
+                value={settings.bed_size_x}
+                onChange={(v) => onUpdate('bed_size_x', v)}
                 min={50}
                 max={1000}
                 step={10}
@@ -109,8 +104,8 @@ export function MachineSettingsPanel({
               <CompactSettingRow
                 type="number"
                 label="Y (mm)"
-                value={settings.buildVolumeY}
-                onChange={(v) => onUpdate('buildVolumeY', v)}
+                value={settings.bed_size_y}
+                onChange={(v) => onUpdate('bed_size_y', v)}
                 min={50}
                 max={1000}
                 step={10}
@@ -119,8 +114,8 @@ export function MachineSettingsPanel({
               <CompactSettingRow
                 type="number"
                 label="Z (mm)"
-                value={settings.buildVolumeZ}
-                onChange={(v) => onUpdate('buildVolumeZ', v)}
+                value={settings.printable_height}
+                onChange={(v) => onUpdate('printable_height', v)}
                 min={50}
                 max={1000}
                 step={10}
@@ -134,12 +129,11 @@ export function MachineSettingsPanel({
               <CompactSettingRow
                 type="number"
                 label="Diameter (mm)"
-                value={settings.nozzleDiameter}
-                onChange={(v) => onUpdate('nozzleDiameter', v)}
+                value={settings.nozzle_diameter}
+                onChange={(v) => onUpdate('nozzle_diameter', v)}
                 min={0.2}
                 max={1.0}
                 step={0.2}
-                unit="mm"
                 disabled={disabled}
               />
             </div>
@@ -149,9 +143,9 @@ export function MachineSettingsPanel({
             <div className="space-y-3">
               <CompactSettingRow
                 type="number"
-                label="Max print speed (mm/s)"
-                value={settings.maxPrintSpeed}
-                onChange={(v) => onUpdate('maxPrintSpeed', v)}
+                label="Max speed (mm/s)"
+                value={settings.max_print_speed}
+                onChange={(v) => onUpdate('max_print_speed', v)}
                 min={10}
                 max={500}
                 step={10}
@@ -186,29 +180,22 @@ export function MachineSettingsPanel({
 
           {/* Tab Content */}
           <div className="space-y-4 px-4">
-            {activeCategory === 'general' && (
+            {activeCategory === 'basic_information' && (
               <>
                 <SettingSection title="Printer identification">
                   <div className="space-y-3">
-                    <SettingRow
-                      type="text"
-                      label="Machine name"
-                      value={advancedSettings.name}
-                      onChange={(v) => onUpdate('name', v)}
-                      disabled={disabled}
-                    />
                     <CompactSettingRow
                       type="text"
                       label="Model"
-                      value={advancedSettings.printerModel}
-                      onChange={(v) => onUpdate('printerModel', v)}
+                      value={advancedSettings.printer_model}
+                      onChange={(v) => onUpdate('printer_model', v)}
                       disabled={disabled}
                     />
                     <CompactSettingRow
                       type="text"
                       label="Variant"
-                      value={advancedSettings.printerVariant}
-                      onChange={(v) => onUpdate('printerVariant', v)}
+                      value={advancedSettings.printer_variant}
+                      onChange={(v) => onUpdate('printer_variant', v)}
                       disabled={disabled}
                     />
                   </div>
@@ -219,8 +206,8 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="number"
                       label="X (mm)"
-                      value={advancedSettings.buildVolumeX}
-                      onChange={(v) => onUpdate('buildVolumeX', v)}
+                      value={advancedSettings.bed_size_x}
+                      onChange={(v) => onUpdate('bed_size_x', v)}
                       min={50}
                       max={1000}
                       step={10}
@@ -229,8 +216,8 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="number"
                       label="Y (mm)"
-                      value={advancedSettings.buildVolumeY}
-                      onChange={(v) => onUpdate('buildVolumeY', v)}
+                      value={advancedSettings.bed_size_y}
+                      onChange={(v) => onUpdate('bed_size_y', v)}
                       min={50}
                       max={1000}
                       step={10}
@@ -239,8 +226,8 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="number"
                       label="Z (mm)"
-                      value={advancedSettings.buildVolumeZ}
-                      onChange={(v) => onUpdate('buildVolumeZ', v)}
+                      value={advancedSettings.printable_height}
+                      onChange={(v) => onUpdate('printable_height', v)}
                       min={50}
                       max={1000}
                       step={10}
@@ -249,8 +236,8 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="select"
                       label="Shape"
-                      value={advancedSettings.bedShape}
-                      onChange={(v) => onUpdate('bedShape', v)}
+                      value={advancedSettings.bed_shape}
+                      onChange={(v) => onUpdate('bed_shape', v)}
                       options={[
                         { value: 'rectangular', label: 'Rectangular' },
                         { value: 'circular', label: 'Circular' },
@@ -259,108 +246,14 @@ export function MachineSettingsPanel({
                     />
                   </div>
                 </SettingSection>
-              </>
-            )}
 
-            {activeCategory === 'extruder' && (
-              <>
-                <SettingSection title="Extruder configuration">
-                  <div className="space-y-3">
-                    <CompactSettingRow
-                      type="number"
-                      label="Extruder count"
-                      value={advancedSettings.extruderCount}
-                      onChange={(v) => onUpdate('extruderCount', v)}
-                      min={1}
-                      max={8}
-                      step={1}
-                      disabled={disabled}
-                    />
-                    <CompactSettingRow
-                      type="text"
-                      label="Extruder offset (mm)"
-                      value={advancedSettings.extruderOffset}
-                      onChange={(v) => onUpdate('extruderOffset', v)}
-                      placeholder="e.g., 0x0,40x0"
-                      disabled={disabled}
-                    />
-                  </div>
-                </SettingSection>
-
-                <SettingSection title="Retraction">
-                  <div className="space-y-3">
-                    <CompactSettingRow
-                      type="number"
-                      label="Retraction length (mm)"
-                      value={advancedSettings.retractionLength}
-                      onChange={(v) => onUpdate('retractionLength', v)}
-                      min={0}
-                      max={10}
-                      step={0.5}
-                      disabled={disabled}
-                    />
-                    <CompactSettingRow
-                      type="number"
-                      label="Retraction speed (mm/s)"
-                      value={advancedSettings.retractionSpeed}
-                      onChange={(v) => onUpdate('retractionSpeed', v)}
-                      min={10}
-                      max={100}
-                      step={5}
-                      disabled={disabled}
-                    />
-                    <CompactSettingRow
-                      type="number"
-                      label="Z hop (mm)"
-                      value={advancedSettings.retractionLiftZ}
-                      onChange={(v) => onUpdate('retractionLiftZ', v)}
-                      min={0}
-                      max={5}
-                      step={0.1}
-                      disabled={disabled}
-                    />
-                  </div>
-                </SettingSection>
-
-                <SettingSection title="Nozzle">
-                  <div className="space-y-3">
-                    <CompactSettingRow
-                      type="number"
-                      label="Diameter (mm)"
-                      value={advancedSettings.nozzleDiameter}
-                      onChange={(v) => onUpdate('nozzleDiameter', v)}
-                      min={0.2}
-                      max={1.0}
-                      step={0.2}
-                      disabled={disabled}
-                    />
-                    <CompactSettingRow
-                      type="select"
-                      label="Material"
-                      value={advancedSettings.nozzleType}
-                      onChange={(v) => onUpdate('nozzleType', v)}
-                      options={[
-                        { value: 'brass', label: 'Brass' },
-                        { value: 'hardened_steel', label: 'Hardened Steel' },
-                        { value: 'stainless_steel', label: 'Stainless Steel' },
-                        { value: 'custom', label: 'Custom' },
-                      ]}
-                      disabled={disabled}
-                    />
-                  </div>
-                </SettingSection>
-              </>
-            )}
-
-            {activeCategory === 'printbed' && (
-              <>
                 <SettingSection title="Print bed">
                   <div className="space-y-3">
                     <CompactSettingRow
                       type="select"
                       label="Surface type"
-                      value={advancedSettings.bedType}
-                      onChange={(v) => onUpdate('bedType', v)}
+                      value={advancedSettings.bed_type}
+                      onChange={(v) => onUpdate('bed_type', v)}
                       options={[
                         { value: 'textured_pei', label: 'Textured PEI' },
                         { value: 'smooth_pei', label: 'Smooth PEI' },
@@ -373,16 +266,16 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="checkbox"
                       label="Heated bed"
-                      checked={advancedSettings.hasHeatedBed}
-                      onChange={(v) => onUpdate('hasHeatedBed', v)}
+                      checked={advancedSettings.has_heated_bed}
+                      onChange={(v) => onUpdate('has_heated_bed', v)}
                       disabled={disabled}
                     />
-                    {advancedSettings.hasHeatedBed && (
+                    {advancedSettings.has_heated_bed && (
                       <CompactSettingRow
                         type="number"
                         label="Max temperature (°C)"
-                        value={advancedSettings.maxBedTemperature}
-                        onChange={(v) => onUpdate('maxBedTemperature', v)}
+                        value={advancedSettings.max_bed_temperature}
+                        onChange={(v) => onUpdate('max_bed_temperature', v)}
                         min={0}
                         max={200}
                         step={10}
@@ -392,16 +285,16 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="checkbox"
                       label="Bed leveling probe"
-                      checked={advancedSettings.hasBedProbe}
-                      onChange={(v) => onUpdate('hasBedProbe', v)}
+                      checked={advancedSettings.has_bed_probe}
+                      onChange={(v) => onUpdate('has_bed_probe', v)}
                       disabled={disabled}
                     />
-                    {advancedSettings.hasBedProbe && (
+                    {advancedSettings.has_bed_probe && (
                       <CompactSettingRow
                         type="select"
                         label="Probe type"
-                        value={advancedSettings.probeType}
-                        onChange={(v) => onUpdate('probeType', v)}
+                        value={advancedSettings.probe_type}
+                        onChange={(v) => onUpdate('probe_type', v)}
                         options={[
                           { value: 'bltouch', label: 'BLTouch' },
                           { value: 'inductive', label: 'Inductive' },
@@ -417,15 +310,105 @@ export function MachineSettingsPanel({
               </>
             )}
 
-            {activeCategory === 'capabilities' && (
+            {activeCategory === 'extruder' && (
+              <>
+                <SettingSection title="Extruder configuration">
+                  <div className="space-y-3">
+                    <CompactSettingRow
+                      type="number"
+                      label="Extruder count"
+                      value={advancedSettings.extruder_count}
+                      onChange={(v) => onUpdate('extruder_count', v)}
+                      min={1}
+                      max={8}
+                      step={1}
+                      disabled={disabled}
+                    />
+                    <CompactSettingRow
+                      type="text"
+                      label="Extruder offset (mm)"
+                      value={advancedSettings.extruder_offset}
+                      onChange={(v) => onUpdate('extruder_offset', v)}
+                      placeholder="e.g., 0x0,40x0"
+                      disabled={disabled}
+                    />
+                  </div>
+                </SettingSection>
+
+                <SettingSection title="Retraction">
+                  <div className="space-y-3">
+                    <CompactSettingRow
+                      type="number"
+                      label="Retraction length (mm)"
+                      value={advancedSettings.retraction_length}
+                      onChange={(v) => onUpdate('retraction_length', v)}
+                      min={0}
+                      max={10}
+                      step={0.5}
+                      disabled={disabled}
+                    />
+                    <CompactSettingRow
+                      type="number"
+                      label="Retraction speed (mm/s)"
+                      value={advancedSettings.retraction_speed}
+                      onChange={(v) => onUpdate('retraction_speed', v)}
+                      min={10}
+                      max={100}
+                      step={5}
+                      disabled={disabled}
+                    />
+                    <CompactSettingRow
+                      type="number"
+                      label="Z hop (mm)"
+                      value={advancedSettings.z_hop}
+                      onChange={(v) => onUpdate('z_hop', v)}
+                      min={0}
+                      max={5}
+                      step={0.1}
+                      disabled={disabled}
+                    />
+                  </div>
+                </SettingSection>
+
+                <SettingSection title="Nozzle">
+                  <div className="space-y-3">
+                    <CompactSettingRow
+                      type="number"
+                      label="Diameter (mm)"
+                      value={advancedSettings.nozzle_diameter}
+                      onChange={(v) => onUpdate('nozzle_diameter', v)}
+                      min={0.2}
+                      max={1.0}
+                      step={0.2}
+                      disabled={disabled}
+                    />
+                    <CompactSettingRow
+                      type="select"
+                      label="Material"
+                      value={advancedSettings.nozzle_type}
+                      onChange={(v) => onUpdate('nozzle_type', v)}
+                      options={[
+                        { value: 'brass', label: 'Brass' },
+                        { value: 'hardened_steel', label: 'Hardened Steel' },
+                        { value: 'stainless_steel', label: 'Stainless Steel' },
+                        { value: 'custom', label: 'Custom' },
+                      ]}
+                      disabled={disabled}
+                    />
+                  </div>
+                </SettingSection>
+              </>
+            )}
+
+            {activeCategory === 'motion_ability' && (
               <>
                 <SettingSection icon={<TemperatureIcon className="w-4 h-4" />} title="Thermal">
                   <div className="space-y-3">
                     <CompactSettingRow
                       type="number"
                       label="Max hotend temp (°C)"
-                      value={advancedSettings.maxHotendTemperature}
-                      onChange={(v) => onUpdate('maxHotendTemperature', v)}
+                      value={advancedSettings.max_hotend_temperature}
+                      onChange={(v) => onUpdate('max_hotend_temperature', v)}
                       min={0}
                       max={500}
                       step={10}
@@ -434,16 +417,16 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="checkbox"
                       label="Heated chamber"
-                      checked={advancedSettings.hasHeatedChamber}
-                      onChange={(v) => onUpdate('hasHeatedChamber', v)}
+                      checked={advancedSettings.has_heated_chamber}
+                      onChange={(v) => onUpdate('has_heated_chamber', v)}
                       disabled={disabled}
                     />
-                    {advancedSettings.hasHeatedChamber && (
+                    {advancedSettings.has_heated_chamber && (
                       <CompactSettingRow
                         type="number"
                         label="Max chamber temp (°C)"
-                        value={advancedSettings.maxChamberTemperature}
-                        onChange={(v) => onUpdate('maxChamberTemperature', v)}
+                        value={advancedSettings.max_chamber_temperature}
+                        onChange={(v) => onUpdate('max_chamber_temperature', v)}
                         min={0}
                         max={150}
                         step={5}
@@ -458,8 +441,8 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="select"
                       label="Type"
-                      value={advancedSettings.motionType}
-                      onChange={(v) => onUpdate('motionType', v)}
+                      value={advancedSettings.motion_type}
+                      onChange={(v) => onUpdate('motion_type', v)}
                       options={[
                         { value: 'cartesian', label: 'Cartesian' },
                         { value: 'corexy', label: 'CoreXY' },
@@ -471,8 +454,8 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="number"
                       label="Max speed (mm/s)"
-                      value={advancedSettings.maxPrintSpeed}
-                      onChange={(v) => onUpdate('maxPrintSpeed', v)}
+                      value={advancedSettings.max_print_speed}
+                      onChange={(v) => onUpdate('max_print_speed', v)}
                       min={10}
                       max={500}
                       step={10}
@@ -486,22 +469,22 @@ export function MachineSettingsPanel({
                     <CompactSettingRow
                       type="checkbox"
                       label="G2/G3 arc movement"
-                      checked={advancedSettings.supportArcMovement}
-                      onChange={(v) => onUpdate('supportArcMovement', v)}
+                      checked={advancedSettings.support_arc_movement}
+                      onChange={(v) => onUpdate('support_arc_movement', v)}
                       disabled={disabled}
                     />
                     <CompactSettingRow
                       type="checkbox"
                       label="Multi-material support"
-                      checked={advancedSettings.supportMultiMaterial}
-                      onChange={(v) => onUpdate('supportMultiMaterial', v)}
+                      checked={advancedSettings.support_multi_material}
+                      onChange={(v) => onUpdate('support_multi_material', v)}
                       disabled={disabled}
                     />
                     <CompactSettingRow
                       type="checkbox"
                       label="Filament sensor"
-                      checked={advancedSettings.filamentSensor}
-                      onChange={(v) => onUpdate('filamentSensor', v)}
+                      checked={advancedSettings.filament_sensor}
+                      onChange={(v) => onUpdate('filament_sensor', v)}
                       disabled={disabled}
                     />
                   </div>
@@ -509,15 +492,15 @@ export function MachineSettingsPanel({
               </>
             )}
 
-            {activeCategory === 'gcode' && (
+            {activeCategory === 'machine_gcode' && (
               <>
                 <SettingSection title="G-code generation">
                   <div className="space-y-3">
                     <CompactSettingRow
                       type="select"
                       label="Dialect"
-                      value={advancedSettings.gcodeDialect}
-                      onChange={(v) => onUpdate('gcodeDialect', v)}
+                      value={advancedSettings.gcode_flavor}
+                      onChange={(v) => onUpdate('gcode_flavor', v)}
                       options={[
                         { value: 'marlin', label: 'Marlin' },
                         { value: 'marlin2', label: 'Marlin 2.0' },
