@@ -1,9 +1,10 @@
 /**
  * OrcaSlicer-style Filament Profile Editor
- * Implements Basic | Advanced view modes matching OrcaSlicer's UI
+ * 7-tab layout matching SimplyPrint: Filament | Cooling | Setting Overrides |
+ * Advanced | Multimaterial | Dependencies | Notes
  */
 import React, { useState, useCallback } from 'react';
-import { Button } from '@/common/components/ui';
+import { Button, Textarea } from '@/common/components/ui';
 import { SettingRow } from './SettingRow';
 import {
   TemperatureIcon,
@@ -14,28 +15,16 @@ import {
 } from './SlicerSettingIcons';
 import type {
   FilamentSettingsViewMode,
-  FilamentSettingsCategory,
-  BasicFilamentSettings,
-  AdvancedFilamentSettings,
+  FilamentCategory,
+  OrcaFilamentSettings,
 } from './filamentSettingsTypes';
-import { MATERIAL_PRESETS } from './filamentSettingsTypes';
+import {
+  ORCA_FILAMENT_MODE_MAP,
+  MATERIAL_PRESETS,
+} from './filamentSettingsTypes';
 
-interface FilamentProfileEditorProps {
-  /** Current settings values */
-  settings: BasicFilamentSettings | AdvancedFilamentSettings;
-  /** Called when any setting changes */
-  onChange: (settings: BasicFilamentSettings | AdvancedFilamentSettings) => void;
-  /** Initial view mode */
-  initialViewMode?: FilamentSettingsViewMode;
-  /** Disable all controls */
-  disabled?: boolean;
-  /** Custom class name */
-  className?: string;
-  /** Optional function to check if a category has modified settings */
-  isCategoryDirty?: (category: FilamentSettingsCategory) => boolean;
-}
+// -- Local icon components ---------------------------------------------------
 
-// Icon components
 const FlowIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M12 3v18" />
@@ -48,17 +37,7 @@ const FilamentIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' 
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="8" />
     <circle cx="12" cy="12" r="3" />
-    <path d="M12 4v3" />
-    <path d="M12 17v3" />
-    <path d="M4 12h3" />
-    <path d="M17 12h3" />
-  </svg>
-);
-
-const ColorIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <circle cx="12" cy="12" r="9" />
-    <path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" opacity="0.3" />
+    <path d="M12 4v3M12 17v3M4 12h3M17 12h3" />
   </svg>
 );
 
@@ -70,69 +49,97 @@ const GcodeIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) 
   </svg>
 );
 
-/**
- * FilamentProfileEditor - Full OrcaSlicer-style filament settings panel
- */
+const LinkIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </svg>
+);
+
+const NotesIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="16" y1="13" x2="8" y2="13" />
+    <line x1="16" y1="17" x2="8" y2="17" />
+    <polyline points="10 9 9 9 8 9" />
+  </svg>
+);
+
+// -- Types -------------------------------------------------------------------
+
+interface FilamentProfileEditorProps {
+  settings: Partial<OrcaFilamentSettings>;
+  onChange: (settings: Partial<OrcaFilamentSettings>) => void;
+  viewMode: FilamentSettingsViewMode;
+  onViewModeChange?: (mode: FilamentSettingsViewMode) => void;
+  disabled?: boolean;
+  className?: string;
+  isCategoryDirty?: (category: FilamentCategory) => boolean;
+}
+
+// -- Constants ---------------------------------------------------------------
+
+const CATEGORY_TABS: { id: FilamentCategory; label: string }[] = [
+  { id: 'filament', label: 'Filament' },
+  { id: 'cooling', label: 'Cooling' },
+  { id: 'setting_overrides', label: 'Setting Overrides' },
+  { id: 'advanced', label: 'Advanced' },
+  { id: 'multimaterial', label: 'Multimaterial' },
+  { id: 'dependencies', label: 'Dependencies' },
+  { id: 'notes', label: 'Notes' },
+];
+
+const VIEW_MODE_TABS: { id: FilamentSettingsViewMode; label: string }[] = [
+  { id: 'simple', label: 'Simple' },
+  { id: 'advanced', label: 'Advanced' },
+];
+
+// -- Helpers -----------------------------------------------------------------
+
+function shouldShow(key: keyof OrcaFilamentSettings, viewMode: FilamentSettingsViewMode): boolean {
+  return viewMode === 'advanced' || ORCA_FILAMENT_MODE_MAP[key as string] === 'simple';
+}
+
+// -- Main component ----------------------------------------------------------
+
 export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
   settings,
   onChange,
-  initialViewMode = 'simple',
+  viewMode,
+  onViewModeChange,
   disabled = false,
   className = '',
   isCategoryDirty,
 }) => {
-  const [viewMode, setViewMode] = useState<FilamentSettingsViewMode>(initialViewMode);
-  const [activeCategory, setActiveCategory] = useState<FilamentSettingsCategory>('temperature');
+  const [activeCategory, setActiveCategory] = useState<FilamentCategory>('filament');
 
-  // Update a single setting
-  const updateSetting = useCallback(<K extends keyof AdvancedFilamentSettings>(
+  const update = useCallback(<K extends keyof OrcaFilamentSettings>(
     key: K,
-    value: AdvancedFilamentSettings[K]
+    value: OrcaFilamentSettings[K],
   ) => {
     onChange({ ...settings, [key]: value });
   }, [settings, onChange]);
 
-  // Apply material preset
-  const applyMaterialPreset = useCallback((material: string) => {
-    const preset = MATERIAL_PRESETS[material];
-    if (preset) {
-      onChange({ ...settings, ...preset });
-    }
+  const applyPreset = useCallback((presetName: string) => {
+    const preset = MATERIAL_PRESETS[presetName];
+    if (preset) onChange({ ...settings, ...preset });
   }, [settings, onChange]);
 
-  // View mode tabs
-  const viewModes: { id: FilamentSettingsViewMode; label: string }[] = [
-    { id: 'simple', label: 'Simple' },
-    { id: 'advanced', label: 'Advanced' },
-  ];
+  const materialOptions = Object.keys(MATERIAL_PRESETS).map(mat => ({ value: mat, label: mat }));
 
-  // Category tabs for advanced mode
-  const categories: { id: FilamentSettingsCategory; label: string }[] = [
-    { id: 'temperature', label: 'Temperature' },
-    { id: 'flow', label: 'Flow' },
-    { id: 'cooling', label: 'Cooling' },
-    { id: 'retraction', label: 'Retraction' },
-    { id: 'physical', label: 'Physical' },
-    { id: 'gcode', label: 'G-code' },
-    { id: 'other', label: 'Other' },
-  ];
-
-  // Material options for dropdown
-  const materialOptions = Object.keys(MATERIAL_PRESETS).map(mat => ({
-    value: mat,
-    label: mat,
-  }));
+  const show = (key: keyof OrcaFilamentSettings) => shouldShow(key, viewMode);
 
   return (
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border ${className}`}>
       {/* View Mode Tabs */}
       <div className="flex border-b border-pf-border">
-        {viewModes.map((mode) => (
+        {VIEW_MODE_TABS.map(mode => (
           <Button
             key={mode.id}
             variant={viewMode === mode.id ? 'tab' : 'subtle'}
             type="button"
-            onClick={() => setViewMode(mode.id)}
+            onClick={() => onViewModeChange?.(mode.id)}
             disabled={disabled}
             className={`flex-1 px-4 py-3 text-sm font-medium rounded-none
                        ${viewMode === mode.id ? 'rounded-t-lg' : ''}`}
@@ -142,977 +149,1159 @@ export const FilamentProfileEditor: React.FC<FilamentProfileEditorProps> = ({
         ))}
       </div>
 
-      {/* Settings Content */}
-      <div className="p-4">
-        {viewMode === 'simple' && (
-          <BasicFilamentSettings
-            settings={settings}
-            onUpdate={updateSetting}
-            onMaterialChange={applyMaterialPreset}
-            disabled={disabled}
-            materialOptions={materialOptions}
-          />
-        )}
-
-        {viewMode === 'advanced' && (
-          <>
-            {/* Category Tabs */}
-            <div className="flex gap-1 mb-4 overflow-x-auto pb-2">
-              {categories.map((cat) => {
-                const isDirty = isCategoryDirty?.(cat.id) ?? false;
-                return (
-                  <Button
-                    key={cat.id}
-                    variant={activeCategory === cat.id ? 'tab' : 'subtle'}
-                    type="button"
-                    onClick={() => setActiveCategory(cat.id)}
-                    disabled={disabled}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
-                               ${isDirty ? 'ring-1 ring-pf-accent-orange ring-offset-1 ring-offset-pf-surface' : ''}`}
-                  >
-                    {cat.label}
-                    {isDirty && (
-                      <span
-                        className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
-                        aria-label="Has modified settings"
-                      />
-                    )}
-                  </Button>
-                );
-              })}
-            </div>
-
-            <AdvancedFilamentSettingsPanel
-              settings={settings as AdvancedFilamentSettings}
-              onUpdate={updateSetting}
+      {/* Category Tabs */}
+      <div className="flex gap-1 px-4 pt-3 overflow-x-auto pb-1">
+        {CATEGORY_TABS.map(cat => {
+          const isDirty = isCategoryDirty?.(cat.id) ?? false;
+          return (
+            <Button
+              key={cat.id}
+              variant={activeCategory === cat.id ? 'tab' : 'subtle'}
+              type="button"
+              onClick={() => setActiveCategory(cat.id)}
               disabled={disabled}
-              activeCategory={activeCategory}
-              materialOptions={materialOptions}
-              onMaterialChange={applyMaterialPreset}
-            />
-          </>
+              className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
+                         ${isDirty ? 'ring-1 ring-pf-accent-orange ring-offset-1 ring-offset-pf-surface' : ''}`}
+            >
+              {cat.label}
+              {isDirty && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
+                  aria-label="Has modified settings"
+                />
+              )}
+            </Button>
+          );
+        })}
+      </div>
+
+      {/* Tab Content */}
+      <div className="p-4">
+        {activeCategory === 'filament' && (
+          <FilamentTab settings={settings} update={update} applyPreset={applyPreset} materialOptions={materialOptions} disabled={disabled} show={show} />
+        )}
+        {activeCategory === 'cooling' && (
+          <CoolingTab settings={settings} update={update} disabled={disabled} show={show} />
+        )}
+        {activeCategory === 'setting_overrides' && (
+          <SettingOverridesTab settings={settings} update={update} disabled={disabled} show={show} />
+        )}
+        {activeCategory === 'advanced' && (
+          <AdvancedTab settings={settings} update={update} disabled={disabled} show={show} />
+        )}
+        {activeCategory === 'multimaterial' && (
+          <MultimaterialTab settings={settings} update={update} disabled={disabled} show={show} />
+        )}
+        {activeCategory === 'dependencies' && (
+          <DependenciesTab settings={settings} update={update} disabled={disabled} show={show} />
+        )}
+        {activeCategory === 'notes' && (
+          <NotesTab settings={settings} update={update} disabled={disabled} show={show} />
         )}
       </div>
     </div>
   );
 };
 
-/** Basic filament settings view */
-const BasicFilamentSettings: React.FC<{
-  settings: BasicFilamentSettings;
-  onUpdate: <K extends keyof AdvancedFilamentSettings>(key: K, value: AdvancedFilamentSettings[K]) => void;
-  onMaterialChange: (material: string) => void;
+// -- Shared sub-component props ----------------------------------------------
+
+interface TabProps {
+  settings: Partial<OrcaFilamentSettings>;
+  update: <K extends keyof OrcaFilamentSettings>(key: K, value: OrcaFilamentSettings[K]) => void;
   disabled: boolean;
-  materialOptions: Array<{ value: string; label: string }>;
-}> = ({ settings, onUpdate, onMaterialChange, disabled, materialOptions }) => (
-  <div className="divide-y divide-pf-border">
-    {/* Material Type */}
-    <SettingRow
-      type="select"
-      icon={<FilamentIcon />}
-      label="Material"
-      description="Select material type to apply preset temperatures"
-      value={settings.material}
-      onChange={(v) => onMaterialChange(v)}
-      options={materialOptions}
-      disabled={disabled}
-    />
+  show: (key: keyof OrcaFilamentSettings) => boolean;
+}
 
-    {/* Filament Name */}
-    <SettingRow
-      type="text"
-      icon={<FilamentIcon />}
-      label="Name"
-      description="Custom name for this filament profile"
-      value={settings.name}
-      onChange={(v) => onUpdate('name', v)}
-      disabled={disabled}
-    />
-
-    {/* Color */}
-    <SettingRow
-      type="color"
-      icon={<ColorIcon />}
-      label="Color"
-      description="Filament color for visualization"
-      value={settings.color ?? '#3B82F6'}
-      onChange={(v) => onUpdate('color', v)}
-      disabled={disabled}
-    />
-
-    {/* Nozzle Temperature */}
-    <SettingRow
-      type="slider"
-      icon={<TemperatureIcon />}
-      label="Nozzle Temperature"
-      description="Print temperature for this filament"
-      value={settings.nozzleTemperature}
-      onChange={(v) => onUpdate('nozzleTemperature', v)}
-      min={170}
-      max={300}
-      step={5}
-      unit="°C"
-      disabled={disabled}
-    />
-
-    {/* Bed Temperature */}
-    <SettingRow
-      type="slider"
-      icon={<TemperatureIcon />}
-      label="Bed Temperature"
-      value={settings.bedTemperature}
-      onChange={(v) => onUpdate('bedTemperature', v)}
-      min={0}
-      max={120}
-      step={5}
-      unit="°C"
-      disabled={disabled}
-    />
-  </div>
+const EmptyMode: React.FC = () => (
+  <p className="text-sm text-pf-text-secondary text-center py-6">
+    No settings visible in Simple mode for this tab.{" "}
+    Switch to <strong>Advanced</strong> to see all settings.
+  </p>
 );
 
-/** Advanced filament settings view */
-const AdvancedFilamentSettingsPanel: React.FC<{
-  settings: AdvancedFilamentSettings;
-  onUpdate: <K extends keyof AdvancedFilamentSettings>(key: K, value: AdvancedFilamentSettings[K]) => void;
-  disabled: boolean;
-  activeCategory: FilamentSettingsCategory;
+// -- Filament Tab ------------------------------------------------------------
+
+const FilamentTab: React.FC<TabProps & {
+  applyPreset: (name: string) => void;
   materialOptions: Array<{ value: string; label: string }>;
-  onMaterialChange: (material: string) => void;
-}> = ({ settings, onUpdate, disabled, activeCategory, materialOptions, onMaterialChange }) => {
-  switch (activeCategory) {
-    case 'temperature':
-      return (
-        <div className="divide-y divide-pf-border">
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="Nozzle Temperature"
-            value={settings.nozzleTemperature}
-            onChange={(v) => onUpdate('nozzleTemperature', v)}
-            min={170}
-            max={300}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="First Layer Nozzle Temp"
-            value={settings.firstLayerNozzleTemperature ?? 215}
-            onChange={(v) => onUpdate('firstLayerNozzleTemperature', v)}
-            min={170}
-            max={300}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="Bed Temperature"
-            value={settings.bedTemperature}
-            onChange={(v) => onUpdate('bedTemperature', v)}
-            min={0}
-            max={120}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="First Layer Bed Temp"
-            value={settings.firstLayerBedTemperature ?? 65}
-            onChange={(v) => onUpdate('firstLayerBedTemperature', v)}
-            min={0}
-            max={120}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="Chamber Temperature"
-            description="Heated enclosure temperature (0 = disabled)"
-            value={settings.chamberTemperature ?? 0}
-            onChange={(v) => onUpdate('chamberTemperature', v)}
-            min={0}
-            max={80}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Max Volumetric Speed"
-            description="Maximum extrusion rate for this filament"
-            value={settings.maxVolumetricSpeed ?? 12}
-            onChange={(v) => onUpdate('maxVolumetricSpeed', v)}
-            min={1}
-            max={30}
-            step={0.5}
-            unit="mm³/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="Temperature Vitrification"
-            description="Glass transition temperature"
-            value={settings.temperatureVitrification ?? 0}
-            onChange={(v) => onUpdate('temperatureVitrification', v)}
-            min={0}
-            max={300}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="Filament Flush Temp"
-            description="Temperature for flushing filament"
-            value={settings.filamentFlushTemp ?? 0}
-            onChange={(v) => onUpdate('filamentFlushTemp', v)}
-            min={0}
-            max={300}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Filament Flush Volumetric Speed"
-            value={settings.filamentFlushVolumetricSpeed ?? 0}
-            onChange={(v) => onUpdate('filamentFlushVolumetricSpeed', v)}
-            min={0}
-            max={30}
-            step={0.5}
-            unit="mm³/s"
-            disabled={disabled}
-          />
+}> = ({ settings, update, disabled, show, applyPreset, materialOptions }) => {
+  const anyVisible = [
+    'filament_type', 'name', 'filament_diameter', 'enable_pressure_advance',
+    'nozzle_temperature', 'hot_plate_temp', 'chamber_temperature',
+  ].some(k => show(k as keyof OrcaFilamentSettings));
+
+  if (!anyVisible) return <EmptyMode />;
+
+  return (
+    <div className="divide-y divide-pf-border">
+      {/* Material Preset */}
+      <SettingRow
+        type="select"
+        icon={<FilamentIcon />}
+        label="Material Preset"
+        description="Apply preset temperatures and settings"
+        value={settings.filament_type ?? ''}
+        onChange={applyPreset}
+        options={[{ value: '', label: '\u2014 select preset \u2014' }, ...materialOptions]}
+        disabled={disabled}
+      />
+      {show('name') && (
+        <SettingRow
+          type="text"
+          icon={<FilamentIcon />}
+          label="Profile Name"
+          value={settings.name ?? ''}
+          onChange={v => update('name', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_type') && (
+        <SettingRow
+          type="text"
+          icon={<FilamentIcon />}
+          label="Type"
+          description="Material type (PLA, PETG, ABS\u2026)"
+          value={settings.filament_type ?? ''}
+          onChange={v => update('filament_type', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_vendor') && (
+        <SettingRow
+          type="text"
+          icon={<FilamentIcon />}
+          label="Vendor"
+          value={settings.filament_vendor ?? ''}
+          onChange={v => update('filament_vendor', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('default_filament_colour') && (
+        <SettingRow
+          type="color"
+          icon={<FilamentIcon />}
+          label="Default Color"
+          value={settings.default_filament_colour ?? '#3B82F6'}
+          onChange={v => update('default_filament_colour', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_diameter') && (
+        <SettingRow
+          type="number"
+          icon={<PrecisionIcon />}
+          label="Diameter"
+          value={settings.filament_diameter ?? 1.75}
+          onChange={v => update('filament_diameter', v)}
+          min={1.0}
+          max={3.0}
+          step={0.05}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_density') && (
+        <SettingRow
+          type="number"
+          icon={<FilamentIcon />}
+          label="Density"
+          description="Material density for cost/weight calculations"
+          value={settings.filament_density ?? 1.24}
+          onChange={v => update('filament_density', v)}
+          min={0.5}
+          max={3.0}
+          step={0.01}
+          unit="g/cm\u00b3"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_adhesiveness_category') && (
+        <SettingRow
+          type="number"
+          icon={<FilamentIcon />}
+          label="Adhesiveness Category"
+          value={settings.filament_adhesiveness_category ?? 0}
+          onChange={v => update('filament_adhesiveness_category', v)}
+          min={0}
+          max={5}
+          step={1}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_shrink') && (
+        <SettingRow
+          type="number"
+          icon={<PrecisionIcon />}
+          label="Shrinkage (XY)"
+          value={settings.filament_shrink ?? 0}
+          onChange={v => update('filament_shrink', v)}
+          min={0}
+          max={10}
+          step={0.1}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_shrinkage_compensation_z') && (
+        <SettingRow
+          type="number"
+          icon={<PrecisionIcon />}
+          label="Shrinkage (Z)"
+          value={settings.filament_shrinkage_compensation_z ?? 0}
+          onChange={v => update('filament_shrinkage_compensation_z', v)}
+          min={0}
+          max={10}
+          step={0.1}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_soluble') && (
+        <SettingRow
+          type="checkbox"
+          icon={<FilamentIcon />}
+          label="Soluble Material"
+          description="Filament dissolves in water or solvent"
+          checked={settings.filament_soluble ?? false}
+          onChange={v => update('filament_soluble', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_is_support') && (
+        <SettingRow
+          type="checkbox"
+          icon={<FilamentIcon />}
+          label="Support Material"
+          description="This filament is used for supports"
+          checked={settings.filament_is_support ?? false}
+          onChange={v => update('filament_is_support', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('temperature_vitrification') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Softening Temperature"
+          description="Glass transition / vitrification temperature"
+          value={settings.temperature_vitrification ?? 0}
+          onChange={v => update('temperature_vitrification', v)}
+          min={0}
+          max={300}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('idle_temperature') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Idle Temperature"
+          value={settings.idle_temperature ?? 0}
+          onChange={v => update('idle_temperature', v)}
+          min={0}
+          max={300}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('nozzle_temperature_range_low') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Nozzle Temp Min"
+          value={settings.nozzle_temperature_range_low ?? 180}
+          onChange={v => update('nozzle_temperature_range_low', v)}
+          min={100}
+          max={400}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('nozzle_temperature_range_high') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Nozzle Temp Max"
+          value={settings.nozzle_temperature_range_high ?? 230}
+          onChange={v => update('nozzle_temperature_range_high', v)}
+          min={100}
+          max={400}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('required_nozzle_HRC') && (
+        <SettingRow
+          type="number"
+          icon={<FilamentIcon />}
+          label="Required Nozzle HRC"
+          description="Minimum nozzle hardness (Rockwell C)"
+          value={settings.required_nozzle_HRC ?? 0}
+          onChange={v => update('required_nozzle_HRC', v)}
+          min={0}
+          max={100}
+          step={1}
+          disabled={disabled}
+        />
+      )}
+      {show('pellet_flow_coefficient') && (
+        <SettingRow
+          type="number"
+          icon={<FlowIcon />}
+          label="Pellet Flow Coefficient"
+          value={settings.pellet_flow_coefficient ?? 0}
+          onChange={v => update('pellet_flow_coefficient', v)}
+          min={0}
+          max={10}
+          step={0.01}
+          disabled={disabled}
+        />
+      )}
+      {show('nozzle_temperature_initial_layer') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Nozzle Temp \u2013 First Layer"
+          value={settings.nozzle_temperature_initial_layer ?? 215}
+          onChange={v => update('nozzle_temperature_initial_layer', v)}
+          min={150}
+          max={400}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('nozzle_temperature') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Nozzle Temp \u2013 Other Layers"
+          value={settings.nozzle_temperature ?? 200}
+          onChange={v => update('nozzle_temperature', v)}
+          min={150}
+          max={400}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('hot_plate_temp_initial_layer') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Bed Temp \u2013 First Layer"
+          value={settings.hot_plate_temp_initial_layer ?? 65}
+          onChange={v => update('hot_plate_temp_initial_layer', v)}
+          min={0}
+          max={150}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('hot_plate_temp') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Bed Temp \u2013 Other Layers"
+          value={settings.hot_plate_temp ?? 60}
+          onChange={v => update('hot_plate_temp', v)}
+          min={0}
+          max={150}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('activate_chamber_temp_control') && (
+        <SettingRow
+          type="checkbox"
+          icon={<TemperatureIcon />}
+          label="Activate Chamber Temperature Control"
+          checked={settings.activate_chamber_temp_control ?? false}
+          onChange={v => update('activate_chamber_temp_control', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('chamber_temperature') && (
+        <SettingRow
+          type="number"
+          icon={<TemperatureIcon />}
+          label="Chamber Temperature"
+          description="Heated enclosure temperature (0 = disabled)"
+          value={settings.chamber_temperature ?? 0}
+          onChange={v => update('chamber_temperature', v)}
+          min={0}
+          max={80}
+          step={5}
+          unit="\u00b0C"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_flow_ratio') && (
+        <SettingRow
+          type="number"
+          icon={<FlowIcon />}
+          label="Flow Ratio"
+          description="Extrusion multiplier (1.0 = 100%)"
+          value={settings.filament_flow_ratio ?? 1.0}
+          onChange={v => update('filament_flow_ratio', v)}
+          min={0.5}
+          max={2.0}
+          step={0.01}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_change_length') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Filament Ramming Length"
+          value={settings.filament_change_length ?? 0}
+          onChange={v => update('filament_change_length', v)}
+          min={0}
+          max={100}
+          step={1}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('enable_pressure_advance') && (
+        <SettingRow
+          type="checkbox"
+          icon={<PrecisionIcon />}
+          label="Enable Pressure Advance"
+          description="Compensate for filament pressure lag"
+          checked={settings.enable_pressure_advance ?? false}
+          onChange={v => update('enable_pressure_advance', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('pressure_advance') && settings.enable_pressure_advance && (
+        <SettingRow
+          type="number"
+          icon={<PrecisionIcon />}
+          label="Pressure Advance"
+          description="PA value (Klipper: 0.02\u20130.08 typical)"
+          value={settings.pressure_advance ?? 0.04}
+          onChange={v => update('pressure_advance', v)}
+          min={0}
+          max={2}
+          step={0.005}
+          disabled={disabled}
+        />
+      )}
+      {show('adaptive_pressure_advance') && settings.enable_pressure_advance && (
+        <SettingRow
+          type="checkbox"
+          icon={<PrecisionIcon />}
+          label="Adaptive Pressure Advance (beta)"
+          checked={settings.adaptive_pressure_advance ?? false}
+          onChange={v => update('adaptive_pressure_advance', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('adaptive_pressure_advance_overhangs') && settings.enable_pressure_advance && (
+        <SettingRow
+          type="checkbox"
+          icon={<PrecisionIcon />}
+          label="Adaptive PA for Overhangs (beta)"
+          checked={settings.adaptive_pressure_advance_overhangs ?? false}
+          onChange={v => update('adaptive_pressure_advance_overhangs', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('adaptive_pressure_advance_bridges') && settings.enable_pressure_advance && (
+        <SettingRow
+          type="number"
+          icon={<PrecisionIcon />}
+          label="PA for Bridges"
+          value={settings.adaptive_pressure_advance_bridges ?? 0}
+          onChange={v => update('adaptive_pressure_advance_bridges', v)}
+          min={0}
+          max={2}
+          step={0.005}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_adaptive_volumetric_speed') && (
+        <SettingRow
+          type="checkbox"
+          icon={<SpeedIcon />}
+          label="Adaptive Volumetric Speed"
+          checked={settings.filament_adaptive_volumetric_speed ?? false}
+          onChange={v => update('filament_adaptive_volumetric_speed', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_max_volumetric_speed') && (
+        <SettingRow
+          type="number"
+          icon={<SpeedIcon />}
+          label="Max Volumetric Speed"
+          description="Maximum extrusion rate for this filament"
+          value={settings.filament_max_volumetric_speed ?? 12}
+          onChange={v => update('filament_max_volumetric_speed', v)}
+          min={1}
+          max={30}
+          step={0.5}
+          unit="mm\u00b3/s"
+          disabled={disabled}
+        />
+      )}
+    </div>
+  );
+};
+
+// -- Cooling Tab -------------------------------------------------------------
+
+const CoolingTab: React.FC<TabProps> = ({ settings, update, disabled, show }) => {
+  const anyVisible = [
+    'close_fan_the_first_x_layers', 'fan_min_speed', 'fan_max_speed',
+    'slow_down_layer_time', 'enable_overhang_bridge_fan', 'additional_cooling_fan_speed',
+  ].some(k => show(k as keyof OrcaFilamentSettings));
+
+  if (!anyVisible) return <EmptyMode />;
+
+  return (
+    <div className="divide-y divide-pf-border">
+      {show('close_fan_the_first_x_layers') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="No Cooling for the First N Layers"
+          description="Disable fan for initial layers"
+          value={settings.close_fan_the_first_x_layers ?? 1}
+          onChange={v => update('close_fan_the_first_x_layers', v)}
+          min={0}
+          max={20}
+          step={1}
+          unit="layers"
+          disabled={disabled}
+        />
+      )}
+      {show('full_fan_speed_layer') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Full Fan Speed at Layer"
+          value={settings.full_fan_speed_layer ?? 3}
+          onChange={v => update('full_fan_speed_layer', v)}
+          min={1}
+          max={50}
+          step={1}
+          disabled={disabled}
+        />
+      )}
+      {show('fan_min_speed') && (
+        <SettingRow
+          type="slider"
+          icon={<CoolingIcon />}
+          label="Min Fan Speed"
+          value={settings.fan_min_speed ?? 35}
+          onChange={v => update('fan_min_speed', v)}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('fan_cooling_layer_time') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Layer Time (for Min Fan)"
+          description="Activate min fan speed when layer time exceeds this"
+          value={settings.fan_cooling_layer_time ?? 10}
+          onChange={v => update('fan_cooling_layer_time', v)}
+          min={0}
+          max={120}
+          step={1}
+          unit="s"
+          disabled={disabled}
+        />
+      )}
+      {show('fan_max_speed') && (
+        <SettingRow
+          type="slider"
+          icon={<CoolingIcon />}
+          label="Max Fan Speed"
+          value={settings.fan_max_speed ?? 100}
+          onChange={v => update('fan_max_speed', v)}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('slow_down_layer_time') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Layer Time (for Slow-Down)"
+          description="Slow down and max fan when layer prints faster"
+          value={settings.slow_down_layer_time ?? 5}
+          onChange={v => update('slow_down_layer_time', v)}
+          min={0}
+          max={120}
+          step={1}
+          unit="s"
+          disabled={disabled}
+        />
+      )}
+      {show('reduce_fan_stop_start_freq') && (
+        <SettingRow
+          type="checkbox"
+          icon={<CoolingIcon />}
+          label="Keep Fan Always On"
+          checked={settings.reduce_fan_stop_start_freq ?? false}
+          onChange={v => update('reduce_fan_stop_start_freq', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('slow_down_for_layer_cooling') && (
+        <SettingRow
+          type="checkbox"
+          icon={<CoolingIcon />}
+          label="Slow Down Printing for Better Layer Cooling"
+          checked={settings.slow_down_for_layer_cooling ?? true}
+          onChange={v => update('slow_down_for_layer_cooling', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('dont_slow_down_outer_wall') && (
+        <SettingRow
+          type="checkbox"
+          icon={<CoolingIcon />}
+          label="Don't Slow Down Outer Walls"
+          checked={settings.dont_slow_down_outer_wall ?? false}
+          onChange={v => update('dont_slow_down_outer_wall', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('slow_down_min_speed') && (
+        <SettingRow
+          type="number"
+          icon={<SpeedIcon />}
+          label="Min Print Speed (when slowing for cooling)"
+          value={settings.slow_down_min_speed ?? 10}
+          onChange={v => update('slow_down_min_speed', v)}
+          min={1}
+          max={100}
+          step={1}
+          unit="mm/s"
+          disabled={disabled}
+        />
+      )}
+      {show('enable_overhang_bridge_fan') && (
+        <SettingRow
+          type="checkbox"
+          icon={<CoolingIcon />}
+          label="Force Cooling for Overhangs and Bridges"
+          checked={settings.enable_overhang_bridge_fan ?? true}
+          onChange={v => update('enable_overhang_bridge_fan', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('overhang_fan_speed') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Overhangs and External Bridges Fan Speed"
+          value={settings.overhang_fan_speed ?? 100}
+          onChange={v => update('overhang_fan_speed', v)}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('internal_bridge_fan_speed') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Internal Bridges Fan Speed"
+          value={settings.internal_bridge_fan_speed ?? 100}
+          onChange={v => update('internal_bridge_fan_speed', v)}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('support_material_interface_fan_speed') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Support Interface Fan Speed"
+          value={settings.support_material_interface_fan_speed ?? -1}
+          onChange={v => update('support_material_interface_fan_speed', v)}
+          min={-1}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('ironing_fan_speed') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Ironing Fan Speed"
+          value={settings.ironing_fan_speed ?? -1}
+          onChange={v => update('ironing_fan_speed', v)}
+          min={-1}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('additional_cooling_fan_speed') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Additional Cooling Fan Speed"
+          value={settings.additional_cooling_fan_speed ?? 0}
+          onChange={v => update('additional_cooling_fan_speed', v)}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('activate_air_filtration') && (
+        <SettingRow
+          type="checkbox"
+          icon={<CoolingIcon />}
+          label="Activate Air Filtration"
+          checked={settings.activate_air_filtration ?? false}
+          onChange={v => update('activate_air_filtration', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('during_print_exhaust_fan_speed') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Exhaust Fan Speed (During Print)"
+          value={settings.during_print_exhaust_fan_speed ?? 0}
+          onChange={v => update('during_print_exhaust_fan_speed', v)}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('complete_print_exhaust_fan_speed') && (
+        <SettingRow
+          type="number"
+          icon={<CoolingIcon />}
+          label="Exhaust Fan Speed (After Print)"
+          value={settings.complete_print_exhaust_fan_speed ?? 70}
+          onChange={v => update('complete_print_exhaust_fan_speed', v)}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+    </div>
+  );
+};
+
+// -- Setting Overrides Tab ---------------------------------------------------
+
+const SettingOverridesTab: React.FC<TabProps> = ({ settings, update, disabled, show }) => {
+  const anyVisible = [
+    'filament_retraction_length', 'filament_z_hop',
+    'filament_long_retractions_when_cut', 'filament_retraction_distances_when_cut',
+  ].some(k => show(k as keyof OrcaFilamentSettings));
+
+  if (!anyVisible) return <EmptyMode />;
+
+  return (
+    <div className="divide-y divide-pf-border">
+      {show('filament_retraction_length') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Retraction Length"
+          description="Per-filament retraction override"
+          value={settings.filament_retraction_length ?? 0.8}
+          onChange={v => update('filament_retraction_length', v)}
+          min={0}
+          max={20}
+          step={0.1}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_z_hop') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Z-Hop Height"
+          value={settings.filament_z_hop ?? 0}
+          onChange={v => update('filament_z_hop', v)}
+          min={0}
+          max={5}
+          step={0.1}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_retract_lift_above') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Only Lift Z Above"
+          value={settings.filament_retract_lift_above ?? 0}
+          onChange={v => update('filament_retract_lift_above', v)}
+          min={0}
+          max={300}
+          step={0.1}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_retract_lift_below') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Only Lift Z Below"
+          value={settings.filament_retract_lift_below ?? 0}
+          onChange={v => update('filament_retract_lift_below', v)}
+          min={0}
+          max={300}
+          step={0.1}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_retraction_speed') && (
+        <SettingRow
+          type="number"
+          icon={<SpeedIcon />}
+          label="Retraction Speed"
+          value={settings.filament_retraction_speed ?? 0}
+          onChange={v => update('filament_retraction_speed', v)}
+          min={0}
+          max={200}
+          step={5}
+          unit="mm/s"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_deretraction_speed') && (
+        <SettingRow
+          type="number"
+          icon={<SpeedIcon />}
+          label="Deretraction Speed"
+          value={settings.filament_deretraction_speed ?? 0}
+          onChange={v => update('filament_deretraction_speed', v)}
+          min={0}
+          max={200}
+          step={5}
+          unit="mm/s"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_retract_restart_extra') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Extra Length on Restart"
+          value={settings.filament_retract_restart_extra ?? 0}
+          onChange={v => update('filament_retract_restart_extra', v)}
+          min={-2}
+          max={2}
+          step={0.05}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_retraction_minimum_travel') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Travel Distance Threshold"
+          description="Minimum travel to trigger retraction"
+          value={settings.filament_retraction_minimum_travel ?? 1}
+          onChange={v => update('filament_retraction_minimum_travel', v)}
+          min={0}
+          max={20}
+          step={0.5}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_retract_when_changing_layer') && (
+        <SettingRow
+          type="checkbox"
+          icon={<RetractionIcon />}
+          label="Retract on Layer Change"
+          checked={settings.filament_retract_when_changing_layer ?? false}
+          onChange={v => update('filament_retract_when_changing_layer', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_wipe') && (
+        <SettingRow
+          type="checkbox"
+          icon={<RetractionIcon />}
+          label="Wipe While Retracting"
+          checked={settings.filament_wipe ?? false}
+          onChange={v => update('filament_wipe', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_wipe_distance') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Wipe Distance"
+          value={settings.filament_wipe_distance ?? 1}
+          onChange={v => update('filament_wipe_distance', v)}
+          min={0}
+          max={10}
+          step={0.1}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_retract_before_wipe') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Retract Amount Before Wipe"
+          value={settings.filament_retract_before_wipe ?? 0}
+          onChange={v => update('filament_retract_before_wipe', v)}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_long_retractions_when_cut') && (
+        <SettingRow
+          type="checkbox"
+          icon={<RetractionIcon />}
+          label="Long Retraction When Cut (beta)"
+          checked={settings.filament_long_retractions_when_cut ?? false}
+          onChange={v => update('filament_long_retractions_when_cut', v)}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_retraction_distances_when_cut') && (
+        <SettingRow
+          type="number"
+          icon={<RetractionIcon />}
+          label="Retraction Distance When Cut"
+          value={settings.filament_retraction_distances_when_cut ?? 0}
+          onChange={v => update('filament_retraction_distances_when_cut', v)}
+          min={0}
+          max={100}
+          step={1}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_ironing_flow') && (
+        <SettingRow
+          type="number"
+          icon={<FlowIcon />}
+          label="Ironing Flow"
+          value={settings.filament_ironing_flow ?? 0.15}
+          onChange={v => update('filament_ironing_flow', v)}
+          min={0}
+          max={2}
+          step={0.01}
+          disabled={disabled}
+        />
+      )}
+      {show('filament_ironing_spacing') && (
+        <SettingRow
+          type="number"
+          icon={<PrecisionIcon />}
+          label="Ironing Line Spacing"
+          value={settings.filament_ironing_spacing ?? 0.1}
+          onChange={v => update('filament_ironing_spacing', v)}
+          min={0}
+          max={2}
+          step={0.05}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_ironing_inset') && (
+        <SettingRow
+          type="number"
+          icon={<PrecisionIcon />}
+          label="Ironing Inset"
+          value={settings.filament_ironing_inset ?? 0.25}
+          onChange={v => update('filament_ironing_inset', v)}
+          min={0}
+          max={5}
+          step={0.1}
+          unit="mm"
+          disabled={disabled}
+        />
+      )}
+      {show('filament_ironing_speed') && (
+        <SettingRow
+          type="number"
+          icon={<SpeedIcon />}
+          label="Ironing Speed"
+          value={settings.filament_ironing_speed ?? 15}
+          onChange={v => update('filament_ironing_speed', v)}
+          min={1}
+          max={100}
+          step={5}
+          unit="mm/s"
+          disabled={disabled}
+        />
+      )}
+    </div>
+  );
+};
+
+// -- Advanced Tab ------------------------------------------------------------
+
+const AdvancedTab: React.FC<TabProps> = ({ settings, update, disabled, show }) => {
+  if (!show('filament_start_gcode')) return <EmptyMode />;
+
+  const flowRatioFields: [keyof OrcaFilamentSettings, string][] = [
+    ['outer_wall_flow_ratio', 'Outer Wall'],
+    ['inner_wall_flow_ratio', 'Inner Wall'],
+    ['top_solid_infill_flow_ratio', 'Top Solid Infill'],
+    ['bottom_solid_infill_flow_ratio', 'Bottom Solid Infill'],
+    ['internal_solid_infill_flow_ratio', 'Internal Solid Infill'],
+    ['sparse_infill_flow_ratio', 'Sparse Infill'],
+    ['gap_fill_flow_ratio', 'Gap Fill'],
+    ['support_flow_ratio', 'Support'],
+    ['support_interface_flow_ratio', 'Support Interface'],
+    ['overhang_flow_ratio', 'Overhang'],
+    ['first_layer_flow_ratio', 'First Layer'],
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="flex items-center gap-2 text-sm font-medium text-pf-text-primary mb-1">
+          <GcodeIcon className="w-4 h-4" />
+          Start G-code
+        </label>
+        <p className="text-xs text-pf-text-secondary mb-2">
+          G-code inserted at the start of each print using this filament
+        </p>
+        <Textarea
+          value={settings.filament_start_gcode ?? ''}
+          onChange={e => update('filament_start_gcode', e.target.value)}
+          rows={6}
+          disabled={disabled}
+          className="font-mono text-xs"
+          placeholder="; filament start g-code"
+        />
+      </div>
+
+      <div>
+        <label className="flex items-center gap-2 text-sm font-medium text-pf-text-primary mb-1">
+          <GcodeIcon className="w-4 h-4" />
+          End G-code
+        </label>
+        <p className="text-xs text-pf-text-secondary mb-2">
+          G-code inserted at the end of each print using this filament
+        </p>
+        <Textarea
+          value={settings.filament_end_gcode ?? ''}
+          onChange={e => update('filament_end_gcode', e.target.value)}
+          rows={6}
+          disabled={disabled}
+          className="font-mono text-xs"
+          placeholder="; filament end g-code"
+        />
+      </div>
+
+      <div className="divide-y divide-pf-border border border-pf-border rounded-lg">
+        <div className="px-4 py-2">
+          <h4 className="text-sm font-medium text-pf-text-primary">Per-Feature Flow Ratios</h4>
         </div>
-      );
-
-    case 'flow':
-      return (
         <div className="divide-y divide-pf-border">
           <SettingRow
-            type="number"
-            icon={<FlowIcon />}
-            label="Flow Ratio"
-            description="Extrusion multiplier (1.0 = 100%)"
-            value={settings.flowRatio ?? 1.0}
-            onChange={(v) => onUpdate('flowRatio', v)}
-            min={0.85}
-            max={1.15}
-            step={0.01}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Print Speed Override"
-            description="Speed override for this filament (0 = use process)"
-            value={settings.printSpeed ?? 0}
-            onChange={(v) => onUpdate('printSpeed', v)}
-            min={0}
-            max={300}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          
-          {/* Pressure Advance Section */}
-          <SettingRow
-            type="checkbox"
-            icon={<PrecisionIcon />}
-            label="Enable Pressure Advance"
-            description="Compensate for filament pressure lag"
-            checked={settings.enablePressureAdvance ?? false}
-            onChange={(v) => onUpdate('enablePressureAdvance', v)}
-            disabled={disabled}
-          />
-          {settings.enablePressureAdvance && (
-            <>
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Pressure Advance"
-                description="PA value (Klipper: 0.02-0.08 typical)"
-                value={settings.pressureAdvance ?? 0.04}
-                onChange={(v) => onUpdate('pressureAdvance', v)}
-                min={0}
-                max={2}
-                step={0.005}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="PA Smooth Time"
-                description="Smoothing time for pressure advance"
-                value={settings.pressureAdvanceSmoothTime ?? 0.04}
-                onChange={(v) => onUpdate('pressureAdvanceSmoothTime', v)}
-                min={0}
-                max={0.2}
-                step={0.005}
-                unit="s"
-                disabled={disabled}
-              />
-            </>
-          )}
-
-          {/* Volumetric Extrusion */}
-          <SettingRow
             type="checkbox"
             icon={<FlowIcon />}
-            label="Enable Volumetric Extrusion"
-            checked={settings.enableVolumetricExtrusion ?? false}
-            onChange={(v) => onUpdate('enableVolumetricExtrusion', v)}
+            label="Set Other Flow Ratios"
+            description="All feature flow ratios follow the main Flow Ratio when enabled"
+            checked={settings.set_other_flow_ratios ?? false}
+            onChange={v => update('set_other_flow_ratios', v)}
             disabled={disabled}
           />
-          {settings.enableVolumetricExtrusion && (
+          {!settings.set_other_flow_ratios && flowRatioFields.map(([key, label]) => (
             <SettingRow
+              key={key as string}
               type="number"
               icon={<FlowIcon />}
-              label="Max Volumetric Rate"
-              value={settings.maxVolumetricExtrusionRate ?? 12}
-              onChange={(v) => onUpdate('maxVolumetricExtrusionRate', v)}
-              min={1}
-              max={30}
-              step={0.5}
-              unit="mm³/s"
+              label={`${label} Flow Ratio`}
+              value={(settings[key] as number | undefined) ?? 1.0}
+              onChange={v => update(key, v as OrcaFilamentSettings[typeof key])}
+              min={0.5}
+              max={1.5}
+              step={0.01}
               disabled={disabled}
             />
-          )}
-
-          {/* Per-Feature Flow Ratios */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Per-Feature Flow Ratios</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="checkbox"
-                icon={<FlowIcon />}
-                label="Set Other Flow Ratios"
-                description="When enabled, all feature flow ratios follow the main Flow Ratio"
-                checked={settings.setOtherFlowRatios ?? false}
-                onChange={(v) => onUpdate('setOtherFlowRatios', v)}
-                disabled={disabled}
-              />
-              {!settings.setOtherFlowRatios && (
-                <>
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Outer Wall Flow Ratio"
-                    value={settings.outerWallFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('outerWallFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Inner Wall Flow Ratio"
-                    value={settings.innerWallFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('innerWallFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Top Solid Infill Flow Ratio"
-                    value={settings.topSolidInfillFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('topSolidInfillFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Bottom Solid Infill Flow Ratio"
-                    value={settings.bottomSolidInfillFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('bottomSolidInfillFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Internal Solid Infill Flow Ratio"
-                    value={settings.internalSolidInfillFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('internalSolidInfillFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Sparse Infill Flow Ratio"
-                    value={settings.sparseInfillFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('sparseInfillFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Gap Fill Flow Ratio"
-                    value={settings.gapFillFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('gapFillFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Support Flow Ratio"
-                    value={settings.supportFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('supportFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Support Interface Flow Ratio"
-                    value={settings.supportInterfaceFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('supportInterfaceFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="Overhang Flow Ratio"
-                    value={settings.overhangFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('overhangFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<FlowIcon />}
-                    label="First Layer Flow Ratio"
-                    value={settings.firstLayerFlowRatio ?? 1.0}
-                    onChange={(v) => onUpdate('firstLayerFlowRatio', v)}
-                    min={0.5}
-                    max={1.5}
-                    step={0.01}
-                    disabled={disabled}
-                  />
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Per-Filament Ironing */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Per-Filament Ironing</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="number"
-                icon={<FlowIcon />}
-                label="Ironing Flow"
-                value={settings.filamentIroningFlow ?? 0.15}
-                onChange={(v) => onUpdate('filamentIroningFlow', v)}
-                min={0}
-                max={2}
-                step={0.01}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Ironing Inset"
-                value={settings.filamentIroningInset ?? 0.25}
-                onChange={(v) => onUpdate('filamentIroningInset', v)}
-                min={0}
-                max={5}
-                step={0.1}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Ironing Spacing"
-                value={settings.filamentIroningSpacing ?? 0.1}
-                onChange={(v) => onUpdate('filamentIroningSpacing', v)}
-                min={0}
-                max={2}
-                step={0.05}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Ironing Speed"
-                value={settings.filamentIroningSpeed ?? 15}
-                onChange={(v) => onUpdate('filamentIroningSpeed', v)}
-                min={5}
-                max={100}
-                step={5}
-                unit="mm/s"
-                disabled={disabled}
-              />
-            </div>
-          </div>
+          ))}
         </div>
-      );
+      </div>
 
-    case 'cooling':
-      return (
-        <div className="divide-y divide-pf-border">
-          <SettingRow
-            type="checkbox"
-            icon={<CoolingIcon />}
-            label="Enable Fan Cooling"
-            checked={settings.enableFanCooling ?? true}
-            onChange={(v) => onUpdate('enableFanCooling', v)}
-            disabled={disabled}
-          />
-          {settings.enableFanCooling !== false && (
-            <>
-              <SettingRow
-                type="slider"
-                icon={<CoolingIcon />}
-                label="Min Fan Speed"
-                value={settings.minFanSpeed ?? 35}
-                onChange={(v) => onUpdate('minFanSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<CoolingIcon />}
-                label="Max Fan Speed"
-                value={settings.maxFanSpeed ?? 100}
-                onChange={(v) => onUpdate('maxFanSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<CoolingIcon />}
-                label="Bridge Fan Speed"
-                value={settings.bridgeFanSpeed ?? 100}
-                onChange={(v) => onUpdate('bridgeFanSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<CoolingIcon />}
-                label="Full Fan Speed at Layer"
-                description="Layer to reach full fan speed"
-                value={settings.fullFanSpeedAtLayer ?? 3}
-                onChange={(v) => onUpdate('fullFanSpeedAtLayer', v)}
-                min={1}
-                max={20}
-                step={1}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<CoolingIcon />}
-                label="Slow Down for Layer Time"
-                description="Slow down if layer prints faster"
-                value={settings.slowDownForLayerTime ?? 5}
-                onChange={(v) => onUpdate('slowDownForLayerTime', v)}
-                min={1}
-                max={60}
-                step={1}
-                unit="s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Min Print Speed"
-                description="Minimum speed when slowing for cooling"
-                value={settings.minPrintSpeed ?? 10}
-                onChange={(v) => onUpdate('minPrintSpeed', v)}
-                min={5}
-                max={50}
-                step={5}
-                unit="mm/s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<CoolingIcon />}
-                label="Auxiliary Fan Speed"
-                description="Aux/chamber fan (0 = off)"
-                value={settings.auxFanSpeed ?? 0}
-                onChange={(v) => onUpdate('auxFanSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<CoolingIcon />}
-                label="Exhaust Fan Speed"
-                description="Exhaust/enclosure fan"
-                value={settings.exhaustFanSpeed ?? 0}
-                onChange={(v) => onUpdate('exhaustFanSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-
-              {/* Advanced Cooling */}
-              <div className="py-3">
-                <h4 className="text-sm font-medium text-pf-text-primary mb-3">Advanced Cooling</h4>
-                <div className="space-y-3">
-                  <SettingRow
-                    type="number"
-                    icon={<CoolingIcon />}
-                    label="Fan Kickstart"
-                    value={settings.fanKickstart ?? 0}
-                    onChange={(v) => onUpdate('fanKickstart', v)}
-                    min={0}
-                    max={5}
-                    step={0.1}
-                    unit="s"
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<CoolingIcon />}
-                    label="Fan Speedup Time"
-                    value={settings.fanSpeedupTime ?? 0}
-                    onChange={(v) => onUpdate('fanSpeedupTime', v)}
-                    min={0}
-                    max={10}
-                    step={0.5}
-                    unit="s"
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="checkbox"
-                    icon={<CoolingIcon />}
-                    label="Fan Speedup Overhangs"
-                    checked={settings.fanSpeedupOverhangs ?? false}
-                    onChange={(v) => onUpdate('fanSpeedupOverhangs', v)}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="slider"
-                    icon={<CoolingIcon />}
-                    label="Overhang Fan Speed"
-                    value={settings.overhangFanSpeed ?? 0}
-                    onChange={(v) => onUpdate('overhangFanSpeed', v)}
-                    min={0}
-                    max={100}
-                    step={5}
-                    unit="%"
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="text"
-                    icon={<CoolingIcon />}
-                    label="Overhang Fan Threshold"
-                    description="Overhang angle threshold"
-                    value={settings.overhangFanThreshold ?? ''}
-                    onChange={(v) => onUpdate('overhangFanThreshold', v)}
-                    disabled={disabled}
-                  />
-                  <SettingRow
-                    type="number"
-                    icon={<CoolingIcon />}
-                    label="Slow Down Layers"
-                    description="Number of initial slow layers"
-                    value={settings.slowDownLayers ?? 0}
-                    onChange={(v) => onUpdate('slowDownLayers', v)}
-                    min={0}
-                    max={20}
-                    step={1}
-                    disabled={disabled}
-                  />
-                </div>
-              </div>
-            </>
-          )}
+      <div className="divide-y divide-pf-border border border-pf-border rounded-lg">
+        <div className="px-4 py-2">
+          <h4 className="text-sm font-medium text-pf-text-primary">Miscellaneous</h4>
         </div>
-      );
-
-    case 'retraction':
-      return (
         <div className="divide-y divide-pf-border">
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Retraction Length"
-            description="How much filament to retract"
-            value={settings.retractionLength ?? 0.8}
-            onChange={(v) => onUpdate('retractionLength', v)}
-            min={0}
-            max={10}
-            step={0.1}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Retraction Speed"
-            value={settings.retractionSpeed ?? 30}
-            onChange={(v) => onUpdate('retractionSpeed', v)}
-            min={5}
-            max={120}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Deretraction Speed"
-            description="Speed to push filament back"
-            value={settings.detractionSpeed ?? 30}
-            onChange={(v) => onUpdate('detractionSpeed', v)}
-            min={5}
-            max={120}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Retraction Z Lift"
-            description="Z hop during retraction"
-            value={settings.retractionLiftZ ?? 0.2}
-            onChange={(v) => onUpdate('retractionLiftZ', v)}
-            min={0}
-            max={2}
-            step={0.1}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Min Travel for Retraction"
-            description="Minimum travel to trigger retraction"
-            value={settings.retractionMinimumTravel ?? 1}
-            onChange={(v) => onUpdate('retractionMinimumTravel', v)}
-            min={0}
-            max={10}
-            step={0.5}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="checkbox"
-            icon={<RetractionIcon />}
-            label="Retract on Layer Change"
-            checked={settings.retractOnLayerChange ?? false}
-            onChange={(v) => onUpdate('retractOnLayerChange', v)}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="checkbox"
-            icon={<RetractionIcon />}
-            label="Wipe Before Retract"
-            checked={settings.wipeBeforeRetract ?? false}
-            onChange={(v) => onUpdate('wipeBeforeRetract', v)}
-            disabled={disabled}
-          />
-        </div>
-      );
-
-    case 'physical':
-      return (
-        <div className="divide-y divide-pf-border">
-          <SettingRow
-            type="number"
-            icon={<FilamentIcon />}
-            label="Density"
-            description="Material density for cost calculation"
-            value={settings.density ?? 1.24}
-            onChange={(v) => onUpdate('density', v)}
-            min={0.5}
-            max={3}
-            step={0.01}
-            unit="g/cm³"
-            disabled={disabled}
-          />
           <SettingRow
             type="number"
             icon={<FilamentIcon />}
             label="Cost per kg"
-            description="Filament cost per kilogram"
             value={settings.cost ?? 20}
-            onChange={(v) => onUpdate('cost', v)}
+            onChange={v => update('cost', v)}
             min={0}
             max={500}
             step={1}
             unit="$"
             disabled={disabled}
           />
-
-          {/* Shrinkage Compensation */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Shrinkage Compensation</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Filament Shrink XY"
-                description="XY shrinkage compensation"
-                value={settings.filamentShrink ?? 0}
-                onChange={(v) => onUpdate('filamentShrink', v)}
-                min={0}
-                max={10}
-                step={0.1}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Filament Shrinkage Compensation Z"
-                description="Z shrinkage compensation"
-                value={settings.filamentShrinkageCompensationZ ?? 0}
-                onChange={(v) => onUpdate('filamentShrinkageCompensationZ', v)}
-                min={0}
-                max={10}
-                step={0.1}
-                unit="%"
-                disabled={disabled}
-              />
-            </div>
-          </div>
-
-          {/* Material Properties */}
-          <div className="py-3">
-            <div className="space-y-3">
-              <SettingRow
-                type="checkbox"
-                icon={<FilamentIcon />}
-                label="Filament Is Support"
-                description="This filament is a support material"
-                checked={settings.filamentIsSupport ?? false}
-                onChange={(v) => onUpdate('filamentIsSupport', v)}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="checkbox"
-                icon={<FilamentIcon />}
-                label="Filament Soluble"
-                description="This filament is water/solvent soluble"
-                checked={settings.filamentSoluble ?? false}
-                onChange={(v) => onUpdate('filamentSoluble', v)}
-                disabled={disabled}
-              />
-            </div>
-          </div>
-        </div>
-      );
-
-    case 'gcode':
-      return (
-        <div className="divide-y divide-pf-border">
           <SettingRow
-            type="text"
-            icon={<GcodeIcon />}
-            label="Start G-code"
-            description="Filament-specific start G-code"
-            value={settings.startGcode ?? ''}
-            onChange={(v) => onUpdate('startGcode', v)}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="text"
-            icon={<GcodeIcon />}
-            label="End G-code"
-            description="Filament-specific end G-code"
-            value={settings.endGcode ?? ''}
-            onChange={(v) => onUpdate('endGcode', v)}
-            disabled={disabled}
-          />
-        </div>
-      );
-
-    case 'other':
-      return (
-        <div className="divide-y divide-pf-border">
-          <SettingRow
-            type="select"
-            icon={<FilamentIcon />}
-            label="Material"
-            value={settings.material}
-            onChange={(v) => onMaterialChange(v)}
-            options={materialOptions}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="text"
-            icon={<FilamentIcon />}
-            label="Name"
-            value={settings.name}
-            onChange={(v) => onUpdate('name', v)}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="color"
-            icon={<ColorIcon />}
-            label="Color"
-            value={settings.color ?? '#3B82F6'}
-            onChange={(v) => onUpdate('color', v)}
+            type="number"
+            icon={<PrecisionIcon />}
+            label="PA Smooth Time"
+            value={settings.pressure_advance_smooth_time ?? 0.04}
+            onChange={v => update('pressure_advance_smooth_time', v)}
+            min={0}
+            max={0.2}
+            step={0.005}
+            unit="s"
             disabled={disabled}
           />
           <SettingRow
             type="number"
             icon={<RetractionIcon />}
             label="Filament Load Time"
-            description="Time to load filament"
-            value={settings.filamentLoadTime ?? 0}
-            onChange={(v) => onUpdate('filamentLoadTime', v)}
+            value={settings.filament_load_time ?? 0}
+            onChange={v => update('filament_load_time', v)}
             min={0}
             max={60}
             step={1}
@@ -1123,9 +1312,8 @@ const AdvancedFilamentSettingsPanel: React.FC<{
             type="number"
             icon={<RetractionIcon />}
             label="Filament Unload Time"
-            description="Time to unload filament"
-            value={settings.filamentUnloadTime ?? 0}
-            onChange={(v) => onUpdate('filamentUnloadTime', v)}
+            value={settings.filament_unload_time ?? 0}
+            onChange={v => update('filament_unload_time', v)}
             min={0}
             max={60}
             step={1}
@@ -1133,360 +1321,423 @@ const AdvancedFilamentSettingsPanel: React.FC<{
             disabled={disabled}
           />
           <SettingRow
+            type="checkbox"
+            icon={<CoolingIcon />}
+            label="Enable Volumetric Extrusion"
+            checked={settings.enable_volumetric_extrusion ?? false}
+            onChange={v => update('enable_volumetric_extrusion', v)}
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<CoolingIcon />}
+            label="Close-Loop Fan Power"
+            value={settings.close_loop_fan_power ?? 0}
+            onChange={v => update('close_loop_fan_power', v)}
+            min={0}
+            max={100}
+            step={5}
+            unit="%"
+            disabled={disabled}
+          />
+          <SettingRow
             type="number"
             icon={<SpeedIcon />}
-            label="Toolchange Delay"
-            description="Extra delay after toolchange"
-            value={settings.toolchangeDelay ?? 0}
-            onChange={(v) => onUpdate('toolchangeDelay', v)}
+            label="Wipe Tower Interface Speed"
+            value={settings.wipe_tower_interface_speed ?? 0}
+            onChange={v => update('wipe_tower_interface_speed', v)}
+            min={0}
+            max={200}
+            step={5}
+            unit="mm/s"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<FlowIcon />}
+            label="Wipe Tower Interface Flow Ratio"
+            value={settings.wipe_tower_interface_flow_ratio ?? 1.0}
+            onChange={v => update('wipe_tower_interface_flow_ratio', v)}
+            min={0}
+            max={2}
+            step={0.05}
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<TemperatureIcon />}
+            label="Flush Temperature"
+            value={settings.filament_flush_temp ?? 0}
+            onChange={v => update('filament_flush_temp', v)}
+            min={0}
+            max={400}
+            step={5}
+            unit="\u00b0C"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<SpeedIcon />}
+            label="Flush Volumetric Speed"
+            value={settings.filament_flush_volumetric_speed ?? 0}
+            onChange={v => update('filament_flush_volumetric_speed', v)}
             min={0}
             max={30}
             step={0.5}
-            unit="s"
+            unit="mm\u00b3/s"
             disabled={disabled}
           />
-
-          {/* Metadata */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Metadata</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="text"
-                icon={<FilamentIcon />}
-                label="Filament Vendor"
-                value={settings.filamentVendor ?? ''}
-                onChange={(v) => onUpdate('filamentVendor', v)}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="text"
-                icon={<FilamentIcon />}
-                label="Filament Notes"
-                description="Notes about this filament"
-                value={settings.filamentNotes ?? ''}
-                onChange={(v) => onUpdate('filamentNotes', v)}
-                disabled={disabled}
-              />
-            </div>
-          </div>
-
-          {/* MMU / Multi-Tool */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">MMU / Multi-Tool</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="number"
-                icon={<RetractionIcon />}
-                label="Filament Cooling Moves"
-                value={settings.filamentCoolingMoves ?? 0}
-                onChange={(v) => onUpdate('filamentCoolingMoves', v)}
-                min={0}
-                max={10}
-                step={1}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Filament Cooling Initial Speed"
-                value={settings.filamentCoolingInitialSpeed ?? 0}
-                onChange={(v) => onUpdate('filamentCoolingInitialSpeed', v)}
-                min={0}
-                max={50}
-                step={1}
-                unit="mm/s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Filament Cooling Final Speed"
-                value={settings.filamentCoolingFinalSpeed ?? 0}
-                onChange={(v) => onUpdate('filamentCoolingFinalSpeed', v)}
-                min={0}
-                max={50}
-                step={1}
-                unit="mm/s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<RetractionIcon />}
-                label="Filament Change Length"
-                value={settings.filamentChangeLength ?? 0}
-                onChange={(v) => onUpdate('filamentChangeLength', v)}
-                min={0}
-                max={100}
-                step={1}
-                unit="mm"
-                disabled={disabled}
-              />
-            </div>
-          </div>
-
-          {/* Ramming & Stamping */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Ramming & Stamping</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Filament Stamping Distance"
-                value={settings.filamentStampingDistance ?? 0}
-                onChange={(v) => onUpdate('filamentStampingDistance', v)}
-                min={0}
-                max={50}
-                step={0.5}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Filament Stamping Loading Speed"
-                value={settings.filamentStampingLoadingSpeed ?? 0}
-                onChange={(v) => onUpdate('filamentStampingLoadingSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="mm/s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="checkbox"
-                icon={<PrecisionIcon />}
-                label="Filament Multitool Ramming"
-                checked={settings.filamentMultitoolRamming ?? false}
-                onChange={(v) => onUpdate('filamentMultitoolRamming', v)}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<FlowIcon />}
-                label="Filament Multitool Ramming Flow"
-                value={settings.filamentMultitoolRammingFlow ?? 0}
-                onChange={(v) => onUpdate('filamentMultitoolRammingFlow', v)}
-                min={0}
-                max={5}
-                step={0.1}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<FlowIcon />}
-                label="Filament Multitool Ramming Volume"
-                value={settings.filamentMultitoolRammingVolume ?? 0}
-                onChange={(v) => onUpdate('filamentMultitoolRammingVolume', v)}
-                min={0}
-                max={500}
-                step={10}
-                unit="mm³"
-                disabled={disabled}
-              />
-            </div>
-          </div>
-
-          {/* Wipe Tower (Per-Filament) */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Wipe Tower (Per-Filament)</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="number"
-                icon={<FlowIcon />}
-                label="Filament Minimal Purge"
-                value={settings.filamentMinimalPurge ?? 0}
-                onChange={(v) => onUpdate('filamentMinimalPurge', v)}
-                min={0}
-                max={100}
-                step={1}
-                unit="mm³"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<FlowIcon />}
-                label="Wipe Tower Interface Flow Ratio"
-                value={settings.wipeTowerInterfaceFlowRatio ?? 1.0}
-                onChange={(v) => onUpdate('wipeTowerInterfaceFlowRatio', v)}
-                min={0}
-                max={2}
-                step={0.05}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Wipe Tower Interface Speed"
-                value={settings.wipeTowerInterfaceSpeed ?? 0}
-                onChange={(v) => onUpdate('wipeTowerInterfaceSpeed', v)}
-                min={0}
-                max={200}
-                step={5}
-                unit="mm/s"
-                disabled={disabled}
-              />
-            </div>
-          </div>
-
-          {/* Loading / Unloading Speeds */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Loading / Unloading Speeds</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Filament Loading Speed"
-                value={settings.filamentLoadingSpeed ?? 0}
-                onChange={(v) => onUpdate('filamentLoadingSpeed', v)}
-                min={0}
-                max={100}
-                step={1}
-                unit="mm/s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Filament Loading Speed Start"
-                value={settings.filamentLoadingSpeedStart ?? 0}
-                onChange={(v) => onUpdate('filamentLoadingSpeedStart', v)}
-                min={0}
-                max={100}
-                step={1}
-                unit="mm/s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Filament Unloading Speed"
-                value={settings.filamentUnloadingSpeed ?? 0}
-                onChange={(v) => onUpdate('filamentUnloadingSpeed', v)}
-                min={0}
-                max={100}
-                step={1}
-                unit="mm/s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SpeedIcon />}
-                label="Filament Unloading Speed Start"
-                value={settings.filamentUnloadingSpeedStart ?? 0}
-                onChange={(v) => onUpdate('filamentUnloadingSpeedStart', v)}
-                min={0}
-                max={100}
-                step={1}
-                unit="mm/s"
-                disabled={disabled}
-              />
-            </div>
-          </div>
-
-          {/* Interlocking Beam */}
-          <div className="py-3">
-            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Interlocking Beam</h4>
-            <div className="space-y-3">
-              <SettingRow
-                type="checkbox"
-                icon={<PrecisionIcon />}
-                label="Interlocking Beam"
-                description="Enable interlocking beams between materials"
-                checked={settings.interlockingBeam ?? false}
-                onChange={(v) => onUpdate('interlockingBeam', v)}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Interlocking Beam Layer Count"
-                value={settings.interlockingBeamLayerCount ?? 2}
-                onChange={(v) => onUpdate('interlockingBeamLayerCount', v)}
-                min={0}
-                max={20}
-                step={1}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Interlocking Beam Width"
-                value={settings.interlockingBeamWidth ?? 0.8}
-                onChange={(v) => onUpdate('interlockingBeamWidth', v)}
-                min={0}
-                max={5}
-                step={0.1}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Interlocking Boundary Avoidance"
-                value={settings.interlockingBoundaryAvoidance ?? 2}
-                onChange={(v) => onUpdate('interlockingBoundaryAvoidance', v)}
-                min={0}
-                max={5}
-                step={0.1}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Interlocking Depth"
-                value={settings.interlockingDepth ?? 0.4}
-                onChange={(v) => onUpdate('interlockingDepth', v)}
-                min={0}
-                max={5}
-                step={0.1}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<PrecisionIcon />}
-                label="Interlocking Orientation"
-                value={settings.interlockingOrientation ?? 22.5}
-                onChange={(v) => onUpdate('interlockingOrientation', v)}
-                min={0}
-                max={360}
-                step={15}
-                unit="°"
-                disabled={disabled}
-              />
-            </div>
-          </div>
-
-          {/* Air Filtration */}
-          <div className="py-3">
-            <div className="space-y-3">
-              <SettingRow
-                type="checkbox"
-                icon={<CoolingIcon />}
-                label="Activate Air Filtration"
-                description="Enable air filtration during print"
-                checked={settings.activateAirFiltration ?? false}
-                onChange={(v) => onUpdate('activateAirFiltration', v)}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="text"
-                icon={<TemperatureIcon />}
-                label="Bed Temperature Formula"
-                description="Custom bed temp formula"
-                value={settings.bedTemperatureFormula ?? ''}
-                onChange={(v) => onUpdate('bedTemperatureFormula', v)}
-                disabled={disabled}
-              />
-            </div>
-          </div>
+          <SettingRow
+            type="text"
+            icon={<TemperatureIcon />}
+            label="Bed Temperature Formula"
+            value={settings.bed_temperature_formula ?? ''}
+            onChange={v => update('bed_temperature_formula', v)}
+            disabled={disabled}
+          />
         </div>
-      );
+      </div>
+    </div>
+  );
+};
 
-    default:
-      return null;
-  }
+// -- Multimaterial Tab -------------------------------------------------------
+
+const MultimaterialTab: React.FC<TabProps> = ({ settings, update, disabled, show }) => {
+  if (!show('filament_minimal_purge_on_wipe_tower')) return <EmptyMode />;
+
+  return (
+    <div className="divide-y divide-pf-border">
+      <SettingRow
+        type="number"
+        icon={<FlowIcon />}
+        label="Minimal Purge on Wipe Tower"
+        value={settings.filament_minimal_purge_on_wipe_tower ?? 15}
+        onChange={v => update('filament_minimal_purge_on_wipe_tower', v)}
+        min={0}
+        max={500}
+        step={1}
+        unit="mm\u00b3"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<PrecisionIcon />}
+        label="Interface Layer Pre-extrusion Distance"
+        value={settings.filament_tower_interface_pre_extrusion_dist ?? 0}
+        onChange={v => update('filament_tower_interface_pre_extrusion_dist', v)}
+        min={0}
+        max={50}
+        step={0.5}
+        unit="mm"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<PrecisionIcon />}
+        label="Interface Layer Pre-extrusion Length"
+        value={settings.filament_tower_interface_pre_extrusion_length ?? 0}
+        onChange={v => update('filament_tower_interface_pre_extrusion_length', v)}
+        min={0}
+        max={50}
+        step={0.5}
+        unit="mm"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<FlowIcon />}
+        label="Tower Ironing Area"
+        value={settings.filament_tower_ironing_area ?? 0}
+        onChange={v => update('filament_tower_ironing_area', v)}
+        min={0}
+        max={100}
+        step={1}
+        unit="%"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<FlowIcon />}
+        label="Interface Layer Purge Length"
+        value={settings.filament_tower_interface_purge_volume ?? 0}
+        onChange={v => update('filament_tower_interface_purge_volume', v)}
+        min={0}
+        max={500}
+        step={1}
+        unit="mm"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<TemperatureIcon />}
+        label="Interface Layer Print Temperature"
+        value={settings.filament_tower_interface_print_temp ?? 0}
+        onChange={v => update('filament_tower_interface_print_temp', v)}
+        min={0}
+        max={400}
+        step={5}
+        unit="\u00b0C"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="checkbox"
+        icon={<RetractionIcon />}
+        label="Long Retraction When Extruder Change"
+        checked={settings.long_retractions_when_ec ?? false}
+        onChange={v => update('long_retractions_when_ec', v)}
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<RetractionIcon />}
+        label="Retraction Distance When Extruder Change"
+        value={settings.retraction_distances_when_ec ?? 0}
+        onChange={v => update('retraction_distances_when_ec', v)}
+        min={0}
+        max={100}
+        step={1}
+        unit="mm"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<SpeedIcon />}
+        label="Loading Speed at Start"
+        value={settings.filament_loading_speed_start ?? 0}
+        onChange={v => update('filament_loading_speed_start', v)}
+        min={0}
+        max={100}
+        step={1}
+        unit="mm/s"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<SpeedIcon />}
+        label="Loading Speed"
+        value={settings.filament_loading_speed ?? 0}
+        onChange={v => update('filament_loading_speed', v)}
+        min={0}
+        max={100}
+        step={1}
+        unit="mm/s"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<SpeedIcon />}
+        label="Unloading Speed at Start"
+        value={settings.filament_unloading_speed_start ?? 0}
+        onChange={v => update('filament_unloading_speed_start', v)}
+        min={0}
+        max={100}
+        step={1}
+        unit="mm/s"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<SpeedIcon />}
+        label="Unloading Speed"
+        value={settings.filament_unloading_speed ?? 0}
+        onChange={v => update('filament_unloading_speed', v)}
+        min={0}
+        max={100}
+        step={1}
+        unit="mm/s"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<SpeedIcon />}
+        label="Delay After Unloading"
+        value={settings.filament_toolchange_delay ?? 0}
+        onChange={v => update('filament_toolchange_delay', v)}
+        min={0}
+        max={30}
+        step={0.5}
+        unit="s"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<CoolingIcon />}
+        label="Number of Cooling Moves"
+        value={settings.filament_cooling_moves ?? 4}
+        onChange={v => update('filament_cooling_moves', v)}
+        min={0}
+        max={20}
+        step={1}
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<SpeedIcon />}
+        label="Speed of First Cooling Move"
+        value={settings.filament_cooling_initial_speed ?? 2.2}
+        onChange={v => update('filament_cooling_initial_speed', v)}
+        min={0}
+        max={50}
+        step={0.1}
+        unit="mm/s"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<SpeedIcon />}
+        label="Speed of Last Cooling Move"
+        value={settings.filament_cooling_final_speed ?? 3.4}
+        onChange={v => update('filament_cooling_final_speed', v)}
+        min={0}
+        max={50}
+        step={0.1}
+        unit="mm/s"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<SpeedIcon />}
+        label="Stamping Loading Speed"
+        value={settings.filament_stamping_loading_speed ?? 0}
+        onChange={v => update('filament_stamping_loading_speed', v)}
+        min={0}
+        max={100}
+        step={1}
+        unit="mm/s"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<PrecisionIcon />}
+        label="Stamping Distance"
+        description="Measured from the center of the cooling tube"
+        value={settings.filament_stamping_distance ?? 0}
+        onChange={v => update('filament_stamping_distance', v)}
+        min={0}
+        max={100}
+        step={0.5}
+        unit="mm"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="text"
+        icon={<PrecisionIcon />}
+        label="Ramming Parameters"
+        value={settings.filament_ramming_parameters ?? ''}
+        onChange={v => update('filament_ramming_parameters', v)}
+        disabled={disabled}
+      />
+      <SettingRow
+        type="checkbox"
+        icon={<PrecisionIcon />}
+        label="Enable Ramming for Multi-Tool Setups"
+        checked={settings.filament_multitool_ramming ?? false}
+        onChange={v => update('filament_multitool_ramming', v)}
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<FlowIcon />}
+        label="Multi-Tool Ramming Volume"
+        value={settings.filament_multitool_ramming_volume ?? 0}
+        onChange={v => update('filament_multitool_ramming_volume', v)}
+        min={0}
+        max={500}
+        step={10}
+        unit="mm\u00b3"
+        disabled={disabled}
+      />
+      <SettingRow
+        type="number"
+        icon={<FlowIcon />}
+        label="Multi-Tool Ramming Flow"
+        value={settings.filament_multitool_ramming_flow ?? 0}
+        onChange={v => update('filament_multitool_ramming_flow', v)}
+        min={0}
+        max={5}
+        step={0.1}
+        unit="mm\u00b3/s"
+        disabled={disabled}
+      />
+    </div>
+  );
+};
+
+// -- Dependencies Tab --------------------------------------------------------
+
+const DependenciesTab: React.FC<TabProps> = ({ settings, update, disabled, show }) => {
+  if (!show('compatible_printers')) return <EmptyMode />;
+
+  const printersValue = Array.isArray(settings.compatible_printers)
+    ? settings.compatible_printers.join(', ')
+    : '';
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="flex items-center gap-2 text-sm font-medium text-pf-text-primary mb-1">
+          <LinkIcon className="w-4 h-4" />
+          Compatible Printers
+        </label>
+        <p className="text-xs text-pf-text-secondary mb-2">
+          Comma-separated list of compatible printer profile names
+        </p>
+        <Textarea
+          value={printersValue}
+          onChange={e => {
+            const raw = e.target.value;
+            update('compatible_printers', raw.split(',').map(s => s.trim()).filter(Boolean));
+          }}
+          rows={4}
+          disabled={disabled}
+          placeholder="Bambu Lab X1C 0.4 nozzle, Bambu Lab P1S 0.4 nozzle"
+        />
+      </div>
+
+      <div>
+        <label className="flex items-center gap-2 text-sm font-medium text-pf-text-primary mb-1">
+          <LinkIcon className="w-4 h-4" />
+          Condition
+        </label>
+        <p className="text-xs text-pf-text-secondary mb-2">
+          Boolean expression to filter printer compatibility
+        </p>
+        <Textarea
+          value={settings.compatible_printers_condition ?? ''}
+          onChange={e => update('compatible_printers_condition', e.target.value)}
+          rows={3}
+          disabled={disabled}
+          placeholder="printer_notes=~/.*PRINTER_VENDOR_BAMBULAB.*/i"
+        />
+      </div>
+    </div>
+  );
+};
+
+// -- Notes Tab ---------------------------------------------------------------
+
+const NotesTab: React.FC<TabProps> = ({ settings, update, disabled, show }) => {
+  if (!show('filament_notes')) return <EmptyMode />;
+
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-sm font-medium text-pf-text-primary mb-1">
+        <NotesIcon className="w-4 h-4" />
+        Filament Notes
+      </label>
+      <p className="text-xs text-pf-text-secondary mb-2">
+        Free-form notes about this filament profile
+      </p>
+      <Textarea
+        value={settings.filament_notes ?? ''}
+        onChange={e => update('filament_notes', e.target.value)}
+        rows={10}
+        disabled={disabled}
+        placeholder="Print notes, recommended settings, tips\u2026"
+      />
+    </div>
+  );
 };
 
 export default FilamentProfileEditor;
