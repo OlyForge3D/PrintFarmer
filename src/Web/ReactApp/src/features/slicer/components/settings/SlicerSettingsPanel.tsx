@@ -222,64 +222,64 @@ interface CategorySettingsProps {
 const QualitySettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, disabled, isAdvanced }) => (
   <div className="space-y-4">
     <SettingSection icon={<LayerHeightIcon className="w-4 h-4" />} title="Layer height">
-      <CompactSettingRow type="number" label="Layer height" value={settings.layerHeight ?? 0.2} onChange={(v) => onUpdate('layerHeight', v)} min={0.04} max={0.4} step={0.01} unit="mm" disabled={disabled} />
-      <CompactSettingRow type="number" label="First layer height" value={settings.firstLayerHeight ?? 0.2} onChange={(v) => onUpdate('firstLayerHeight', v)} min={0.1} max={0.4} step={0.01} unit="mm" disabled={disabled} />
+      <CompactSettingRow type="number" label="Layer height" value={settings.layer_height ?? 0.2} onChange={(v) => onUpdate('layer_height', v)} min={0.04} max={0.4} step={0.01} unit="mm" disabled={disabled} />
+      <CompactSettingRow type="number" label="First layer height" value={settings.initial_layer_print_height ?? 0.2} onChange={(v) => onUpdate('initial_layer_print_height', v)} min={0.1} max={0.4} step={0.01} unit="mm" disabled={disabled} />
     </SettingSection>
 
     {isAdvanced && (
       <SettingSection icon={<LineWidthIcon className="w-4 h-4" />} title="Line width">
-        <CompactSettingRow type="number" label="Default" value={settings.lineWidthDefault ?? 0.45} onChange={(v) => onUpdate('lineWidthDefault', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-        <CompactSettingRow type="number" label="First layer" value={settings.lineWidthFirstLayer ?? 0.5} onChange={(v) => onUpdate('lineWidthFirstLayer', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-        <CompactSettingRow type="number" label="Outer wall" value={settings.lineWidthOuterWall ?? 0.45} onChange={(v) => onUpdate('lineWidthOuterWall', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-        <CompactSettingRow type="number" label="Inner wall" value={settings.lineWidthInnerWall ?? 0.45} onChange={(v) => onUpdate('lineWidthInnerWall', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-        <CompactSettingRow type="number" label="Top surface" value={settings.lineWidthTopSurface ?? 0.45} onChange={(v) => onUpdate('lineWidthTopSurface', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-        <CompactSettingRow type="number" label="Sparse infill" value={settings.lineWidthSparseInfill ?? 0.45} onChange={(v) => onUpdate('lineWidthSparseInfill', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-        <CompactSettingRow type="number" label="Internal solid infill" value={settings.lineWidthInternalSolidInfill ?? 0.45} onChange={(v) => onUpdate('lineWidthInternalSolidInfill', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
-        <CompactSettingRow type="number" label="Support" value={settings.lineWidthSupport ?? 0.45} onChange={(v) => onUpdate('lineWidthSupport', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Default" value={settings.line_width ?? 0.45} onChange={(v) => onUpdate('line_width', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="First layer" value={settings.initial_layer_line_width ?? 0.5} onChange={(v) => onUpdate('initial_layer_line_width', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Outer wall" value={settings.outer_wall_line_width ?? 0.45} onChange={(v) => onUpdate('outer_wall_line_width', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Inner wall" value={settings.inner_wall_line_width ?? 0.45} onChange={(v) => onUpdate('inner_wall_line_width', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Top surface" value={settings.top_surface_line_width ?? 0.45} onChange={(v) => onUpdate('top_surface_line_width', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Sparse infill" value={settings.sparse_infill_line_width ?? 0.45} onChange={(v) => onUpdate('sparse_infill_line_width', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Internal solid infill" value={settings.internal_solid_infill_line_width ?? 0.45} onChange={(v) => onUpdate('internal_solid_infill_line_width', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
+        <CompactSettingRow type="number" label="Support" value={settings.support_line_width ?? 0.45} onChange={(v) => onUpdate('support_line_width', v)} min={0.2} max={1.0} step={0.01} unit="mm or %" disabled={disabled} />
       </SettingSection>
     )}
 
     <SettingSection icon={<SeamIcon className="w-4 h-4" />} title="Seam">
-      <CompactSettingRow type="select" label="Seam position" value={settings.seamPosition ?? 'aligned'} onChange={(v) => onUpdate('seamPosition', v as 'random' | 'aligned' | 'back' | 'nearest')} options={[{ value: 'aligned', label: 'Aligned' }, { value: 'back', label: 'Back' }, { value: 'nearest', label: 'Nearest' }, { value: 'random', label: 'Random' }]} disabled={disabled} />
-      <CompactSettingRow type="number" label="Scarf joint flow ratio" value={settings.scarfJointFlowRatio ?? 1.0} onChange={(v) => onUpdate('scarfJointFlowRatio', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
+      <CompactSettingRow type="select" label="Seam position" value={settings.seam_position ?? 'aligned'} onChange={(v) => onUpdate('seam_position', v as 'random' | 'aligned' | 'back' | 'nearest')} options={[{ value: 'aligned', label: 'Aligned' }, { value: 'back', label: 'Back' }, { value: 'nearest', label: 'Nearest' }, { value: 'random', label: 'Random' }]} disabled={disabled} />
+      <CompactSettingRow type="number" label="Scarf joint flow ratio" value={settings.scarf_joint_flow_ratio ?? 1.0} onChange={(v) => onUpdate('scarf_joint_flow_ratio', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
     </SettingSection>
 
     <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Surface quality">
-      <CompactSettingRow type="checkbox" label="Only one wall on first layer" checked={settings.onlyOneWallFirstLayer ?? false} onChange={(v) => onUpdate('onlyOneWallFirstLayer', v)} disabled={disabled} />
-      <CompactSettingRow type="checkbox" label="Only one wall on top surfaces" checked={settings.onlyOneWallTop ?? false} onChange={(v) => onUpdate('onlyOneWallTop', v)} disabled={disabled} />
-      <CompactSettingRow type="checkbox" label="Precise outer wall" checked={settings.preciseWall ?? false} onChange={(v) => onUpdate('preciseWall', v)} disabled={disabled} />
+      <CompactSettingRow type="checkbox" label="Only one wall on first layer" checked={settings.only_one_wall_first_layer ?? false} onChange={(v) => onUpdate('only_one_wall_first_layer', v)} disabled={disabled} />
+      <CompactSettingRow type="checkbox" label="Only one wall on top surfaces" checked={settings.only_one_wall_top ?? false} onChange={(v) => onUpdate('only_one_wall_top', v)} disabled={disabled} />
+      <CompactSettingRow type="checkbox" label="Precise outer wall" checked={settings.precise_outer_wall ?? false} onChange={(v) => onUpdate('precise_outer_wall', v)} disabled={disabled} />
     </SettingSection>
 
     {isAdvanced && (
       <SettingSection icon={<LayerHeightIcon className="w-4 h-4" />} title="Sequence">
-        <CompactSettingRow type="select" label="First layer filament sequence" value={settings.firstLayerSequenceChoice ?? 'default'} onChange={(v) => onUpdate('firstLayerSequenceChoice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
-        <CompactSettingRow type="select" label="Other layers filament sequence" value={settings.otherLayersSequenceChoice ?? 'default'} onChange={(v) => onUpdate('otherLayersSequenceChoice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
+        <CompactSettingRow type="select" label="First layer filament sequence" value={settings.first_layer_sequence_choice ?? 'default'} onChange={(v) => onUpdate('first_layer_sequence_choice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
+        <CompactSettingRow type="select" label="Other layers filament sequence" value={settings.other_layers_sequence_choice ?? 'default'} onChange={(v) => onUpdate('other_layers_sequence_choice', v)} options={[{ value: 'default', label: 'Default' }, { value: 'customizable', label: 'Customizable' }]} disabled={disabled} />
       </SettingSection>
     )}
 
     {isAdvanced && (
       <>
         <SettingSection icon={<SeamIcon className="w-4 h-4" />} title="Seam (advanced)">
-          <CompactSettingRow type="number" label="Seam gap" value={settings.seamGap ?? 0} onChange={(v) => onUpdate('seamGap', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Staggered inner seams" checked={settings.staggeredInnerSeams ?? false} onChange={(v) => onUpdate('staggeredInnerSeams', v)} disabled={disabled} />
+          <CompactSettingRow type="number" label="Seam gap" value={settings.seam_gap ?? 0} onChange={(v) => onUpdate('seam_gap', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Staggered inner seams" checked={settings.staggered_inner_seams ?? false} onChange={(v) => onUpdate('staggered_inner_seams', v)} disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<SeamIcon className="w-4 h-4" />} title="Scarf joint seam">
-          <CompactSettingRow type="select" label="Scarf joint seam" value={settings.scarfJointSeam ?? 'none'} onChange={(v) => onUpdate('scarfJointSeam', v as ScarfJointSeam)} options={[{ value: 'none', label: 'None' }, { value: 'contour', label: 'Contour' }, { value: 'all', label: 'All walls' }]} disabled={disabled} />
-          {settings.scarfJointSeam !== 'none' && (
+          <CompactSettingRow type="select" label="Scarf joint seam" value={settings.seam_slope_type ?? 'none'} onChange={(v) => onUpdate('seam_slope_type', v as ScarfJointSeam)} options={[{ value: 'none', label: 'None' }, { value: 'contour', label: 'Contour' }, { value: 'all', label: 'All walls' }]} disabled={disabled} />
+          {settings.seam_slope_type !== 'none' && (
             <>
-              <CompactSettingRow type="number" label="Scarf length" value={settings.scarfLength ?? 10} onChange={(v) => onUpdate('scarfLength', v)} min={1} max={50} step={1} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Scarf steps" value={settings.scarfSteps ?? 10} onChange={(v) => onUpdate('scarfSteps', v)} min={1} max={50} step={1} disabled={disabled} />
-              <CompactSettingRow type="number" label="Scarf start height" value={settings.scarfStartHeight ?? 0} onChange={(v) => onUpdate('scarfStartHeight', v)} min={0} max={10} step={0.1} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Scarf joint speed" value={settings.scarfJointSpeed ?? 0} onChange={(v) => onUpdate('scarfJointSpeed', v)} min={0} max={200} step={5} unit="mm/s" disabled={disabled} />
-              <CompactSettingRow type="number" label="Scarf joint flow ratio" value={settings.scarfJointFlowRatio ?? 1.0} onChange={(v) => onUpdate('scarfJointFlowRatio', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
-              <CompactSettingRow type="checkbox" label="Scarf around entire wall" checked={settings.scarfAroundEntireWall ?? false} onChange={(v) => onUpdate('scarfAroundEntireWall', v)} disabled={disabled} />
-              <CompactSettingRow type="checkbox" label="Scarf joint for inner walls" checked={settings.scarfJointForInnerWalls ?? false} onChange={(v) => onUpdate('scarfJointForInnerWalls', v)} disabled={disabled} />
-              <CompactSettingRow type="checkbox" label="Conditional scarf joint" checked={settings.conditionalScarfJoint ?? false} onChange={(v) => onUpdate('conditionalScarfJoint', v)} disabled={disabled} />
-              {settings.conditionalScarfJoint && (
+              <CompactSettingRow type="number" label="Scarf min length" value={settings.seam_slope_min_length ?? 10} onChange={(v) => onUpdate('seam_slope_min_length', v)} min={1} max={50} step={1} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="Scarf steps" value={settings.seam_slope_steps ?? 10} onChange={(v) => onUpdate('seam_slope_steps', v)} min={1} max={50} step={1} disabled={disabled} />
+              <CompactSettingRow type="number" label="Scarf start height" value={settings.seam_slope_start_height ?? 0} onChange={(v) => onUpdate('seam_slope_start_height', v)} min={0} max={10} step={0.1} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="Scarf joint speed" value={settings.scarf_joint_speed ?? 0} onChange={(v) => onUpdate('scarf_joint_speed', v)} min={0} max={200} step={5} unit="mm/s" disabled={disabled} />
+              <CompactSettingRow type="number" label="Scarf joint flow ratio" value={settings.scarf_joint_flow_ratio ?? 1.0} onChange={(v) => onUpdate('scarf_joint_flow_ratio', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
+              <CompactSettingRow type="checkbox" label="Scarf around entire wall" checked={settings.seam_slope_entire_loop ?? false} onChange={(v) => onUpdate('seam_slope_entire_loop', v)} disabled={disabled} />
+              <CompactSettingRow type="checkbox" label="Scarf joint for inner walls" checked={settings.seam_slope_inner_walls ?? false} onChange={(v) => onUpdate('seam_slope_inner_walls', v)} disabled={disabled} />
+              <CompactSettingRow type="checkbox" label="Conditional scarf joint" checked={settings.seam_slope_conditional ?? false} onChange={(v) => onUpdate('seam_slope_conditional', v)} disabled={disabled} />
+              {settings.seam_slope_conditional && (
                 <>
-                  <CompactSettingRow type="number" label="Angle threshold" value={settings.conditionalAngleThreshold ?? 0} onChange={(v) => onUpdate('conditionalAngleThreshold', v)} min={0} max={180} step={5} unit="°" disabled={disabled} />
-                  <CompactSettingRow type="number" label="Overhang threshold" value={settings.conditionalOverhangThreshold ?? 0} onChange={(v) => onUpdate('conditionalOverhangThreshold', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
+                  <CompactSettingRow type="number" label="Angle threshold" value={settings.scarf_angle_threshold ?? 0} onChange={(v) => onUpdate('scarf_angle_threshold', v)} min={0} max={180} step={5} unit="°" disabled={disabled} />
+                  <CompactSettingRow type="number" label="Overhang threshold" value={settings.scarf_overhang_threshold ?? 0} onChange={(v) => onUpdate('scarf_overhang_threshold', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
                 </>
               )}
             </>
@@ -287,109 +287,105 @@ const QualitySettings: React.FC<CategorySettingsProps> = ({ settings, onUpdate, 
         </SettingSection>
 
         <SettingSection icon={<SpeedIcon className="w-4 h-4" />} title="Wipe">
-          <CompactSettingRow type="checkbox" label="Role-based wipe speed" checked={settings.roleBaseWipeSpeed ?? false} onChange={(v) => onUpdate('roleBaseWipeSpeed', v)} disabled={disabled} />
-          <CompactSettingRow type="number" label="Wipe speed" value={settings.wipeSpeed ?? 80} onChange={(v) => onUpdate('wipeSpeed', v)} min={10} max={200} step={5} unit="mm/s" disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Wipe on loops" checked={settings.wipeOnLoops ?? true} onChange={(v) => onUpdate('wipeOnLoops', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Wipe before external loop" checked={settings.wipeBeforeExternalLoop ?? false} onChange={(v) => onUpdate('wipeBeforeExternalLoop', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Role-based wipe speed" checked={settings.role_based_wipe_speed ?? false} onChange={(v) => onUpdate('role_based_wipe_speed', v)} disabled={disabled} />
+          <CompactSettingRow type="number" label="Wipe speed" value={settings.wipe_speed ?? 80} onChange={(v) => onUpdate('wipe_speed', v)} min={10} max={200} step={5} unit="mm/s" disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Wipe on loops" checked={settings.wipe_on_loops ?? true} onChange={(v) => onUpdate('wipe_on_loops', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Wipe before external loop" checked={settings.wipe_before_external_loop ?? false} onChange={(v) => onUpdate('wipe_before_external_loop', v)} disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<PrecisionIcon className="w-4 h-4" />} title="Precision">
           <CompactSettingRow type="number" label="Resolution" value={settings.resolution ?? 0.0125} onChange={(v) => onUpdate('resolution', v)} min={0.001} max={0.1} step={0.001} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Slice gap closing radius" value={settings.sliceGapClosingRadius ?? 0.05} onChange={(v) => onUpdate('sliceGapClosingRadius', v)} min={0} max={1} step={0.01} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Elephant foot compensation" value={settings.elephantFootCompensation ?? 0.1} onChange={(v) => onUpdate('elephantFootCompensation', v)} min={0} max={1} step={0.01} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Elephant foot comp. layers" value={settings.elephantFootCompensationLayers ?? 1} onChange={(v) => onUpdate('elephantFootCompensationLayers', v)} min={0} max={10} step={1} disabled={disabled} />
+          <CompactSettingRow type="number" label="Slice gap closing radius" value={settings.slice_closing_radius ?? 0.05} onChange={(v) => onUpdate('slice_closing_radius', v)} min={0} max={1} step={0.01} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Elephant foot compensation" value={settings.elefant_foot_compensation ?? 0.1} onChange={(v) => onUpdate('elefant_foot_compensation', v)} min={0} max={1} step={0.01} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Elephant foot comp. layers" value={settings.elefant_foot_compensation_layers ?? 1} onChange={(v) => onUpdate('elefant_foot_compensation_layers', v)} min={0} max={10} step={1} disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Wall generator">
-          <CompactSettingRow type="number" label="Min wall thickness" value={settings.minWallThickness ?? 0.8} onChange={(v) => onUpdate('minWallThickness', v)} min={0.4} max={2} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Min wall thickness" value={settings.min_wall_thickness ?? 0.8} onChange={(v) => onUpdate('min_wall_thickness', v)} min={0.4} max={2} step={0.1} unit="mm" disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Walls & surfaces">
-          <CompactSettingRow type="checkbox" label="Precise outer wall" checked={settings.preciseWall ?? false} onChange={(v) => onUpdate('preciseWall', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Precise Z height" checked={settings.preciseZHeight ?? false} onChange={(v) => onUpdate('preciseZHeight', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Convert holes to polyholes" checked={settings.convertHolesToPolyholes ?? false} onChange={(v) => onUpdate('convertHolesToPolyholes', v)} disabled={disabled} />
-          {settings.convertHolesToPolyholes && (
-            <CompactSettingRow type="number" label="Polyhole detection margin" value={settings.polyholeDetectionMargin ?? 0.01} onChange={(v) => onUpdate('polyholeDetectionMargin', v)} min={0} max={0.1} step={0.005} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Precise outer wall" checked={settings.precise_outer_wall ?? false} onChange={(v) => onUpdate('precise_outer_wall', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Precise Z height" checked={settings.precise_z_height ?? false} onChange={(v) => onUpdate('precise_z_height', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Convert holes to polyholes" checked={settings.hole_to_polyhole ?? false} onChange={(v) => onUpdate('hole_to_polyhole', v)} disabled={disabled} />
+          {settings.hole_to_polyhole && (
+            <>
+              <CompactSettingRow type="number" label="Polyhole detection margin" value={settings.hole_to_polyhole_threshold ?? 0.01} onChange={(v) => onUpdate('hole_to_polyhole_threshold', v)} min={0} max={0.1} step={0.005} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="checkbox" label="Polyhole twist" checked={settings.hole_to_polyhole_twisted ?? true} onChange={(v) => onUpdate('hole_to_polyhole_twisted', v)} disabled={disabled} />
+            </>
           )}
         </SettingSection>
 
         <SettingSection icon={<InfillDensityIcon className="w-4 h-4" />} title="Flow ratio">
-          <CompactSettingRow type="number" label="Outer wall flow ratio" value={settings.outerWallFlowRatio ?? 100} onChange={(v) => onUpdate('outerWallFlowRatio', v)} min={50} max={150} step={5} unit="%" disabled={disabled} />
-          <CompactSettingRow type="number" label="Inner wall flow ratio" value={settings.innerWallFlowRatio ?? 100} onChange={(v) => onUpdate('innerWallFlowRatio', v)} min={50} max={150} step={5} unit="%" disabled={disabled} />
+          <CompactSettingRow type="number" label="Outer wall flow ratio" value={settings.outer_wall_flow_ratio ?? 1.0} onChange={(v) => onUpdate('outer_wall_flow_ratio', v)} min={0.5} max={1.5} step={0.05} disabled={disabled} />
+          <CompactSettingRow type="number" label="Inner wall flow ratio" value={settings.inner_wall_flow_ratio ?? 1.0} onChange={(v) => onUpdate('inner_wall_flow_ratio', v)} min={0.5} max={1.5} step={0.05} disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<SpeedIcon className="w-4 h-4" />} title="Bridging">
-          <CompactSettingRow type="number" label="Max bridge length" value={settings.maxBridgeLength ?? 10} onChange={(v) => onUpdate('maxBridgeLength', v)} min={5} max={50} step={1} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Bridge speed reduction" value={settings.bridgeSpeedReduction ?? 50} onChange={(v) => onUpdate('bridgeSpeedReduction', v)} min={10} max={90} step={5} unit="%" disabled={disabled} />
-        </SettingSection>
-
-        <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Overhangs">
-          <CompactSettingRow type="number" label="Overhang angle threshold" value={settings.overhangAngle ?? 45} onChange={(v) => onUpdate('overhangAngle', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
-          <CompactSettingRow type="number" label="Overhang perimeter speed" value={settings.overhangPerimeterSpeed ?? 50} onChange={(v) => onUpdate('overhangPerimeterSpeed', v)} min={10} max={100} step={5} unit="%" disabled={disabled} />
+          <CompactSettingRow type="number" label="Max bridge length" value={settings.max_bridge_length ?? 10} onChange={(v) => onUpdate('max_bridge_length', v)} min={5} max={50} step={1} unit="mm" disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Wall generator (Arachne)">
-          <CompactSettingRow type="select" label="Wall generator" value={settings.wallGenerator ?? 'arachne'} onChange={(v) => onUpdate('wallGenerator', v as WallGenerator)} options={[{ value: 'classic', label: 'Classic' }, { value: 'arachne', label: 'Arachne' }]} disabled={disabled} />
-          <CompactSettingRow type="select" label="Wall printing order" value={settings.wallSequence ?? 'inner wall/outer wall'} onChange={(v) => onUpdate('wallSequence', v as WallSequence)} options={[{ value: 'inner wall/outer wall', label: 'Inner/Outer' }, { value: 'outer wall/inner wall', label: 'Outer/Inner' }, { value: 'inner-outer-inner wall', label: 'Inner-Outer-Inner' }]} disabled={disabled} />
-          <CompactSettingRow type="number" label="Min wall width" value={settings.minBeadWidth ?? 0.85} onChange={(v) => onUpdate('minBeadWidth', v)} min={0} max={2} step={0.01} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Min feature size" value={settings.minFeatureSize ?? 0.25} onChange={(v) => onUpdate('minFeatureSize', v)} min={0} max={1} step={0.01} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="First layer min wall width" value={settings.initialLayerMinBeadWidth ?? 0.85} onChange={(v) => onUpdate('initialLayerMinBeadWidth', v)} min={0} max={2} step={0.01} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Wall distribution count" value={settings.wallDistributionCount ?? 1} onChange={(v) => onUpdate('wallDistributionCount', v)} min={1} max={10} step={1} disabled={disabled} />
-          <CompactSettingRow type="number" label="Min wall length" value={settings.minLengthFactor ?? 0.5} onChange={(v) => onUpdate('minLengthFactor', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Wall transition length" value={settings.wallTransitionLength ?? 0.4} onChange={(v) => onUpdate('wallTransitionLength', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="number" label="Wall transition angle" value={settings.wallTransitionAngle ?? 10} onChange={(v) => onUpdate('wallTransitionAngle', v)} min={1} max={45} step={1} unit="°" disabled={disabled} />
-          <CompactSettingRow type="number" label="Wall transition filter margin" value={settings.wallTransitionFilterDeviation ?? 25} onChange={(v) => onUpdate('wallTransitionFilterDeviation', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
+          <CompactSettingRow type="select" label="Wall generator" value={settings.wall_generator ?? 'arachne'} onChange={(v) => onUpdate('wall_generator', v as WallGenerator)} options={[{ value: 'classic', label: 'Classic' }, { value: 'arachne', label: 'Arachne' }]} disabled={disabled} />
+          <CompactSettingRow type="select" label="Wall printing order" value={settings.wall_sequence ?? 'inner wall/outer wall'} onChange={(v) => onUpdate('wall_sequence', v as WallSequence)} options={[{ value: 'inner wall/outer wall', label: 'Inner/Outer' }, { value: 'outer wall/inner wall', label: 'Outer/Inner' }, { value: 'inner-outer-inner wall', label: 'Inner-Outer-Inner' }]} disabled={disabled} />
+          <CompactSettingRow type="number" label="Min wall width" value={settings.min_bead_width ?? 0.85} onChange={(v) => onUpdate('min_bead_width', v)} min={0} max={2} step={0.01} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Min feature size" value={settings.min_feature_size ?? 0.25} onChange={(v) => onUpdate('min_feature_size', v)} min={0} max={1} step={0.01} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="First layer min wall width" value={settings.initial_layer_min_bead_width ?? 0.85} onChange={(v) => onUpdate('initial_layer_min_bead_width', v)} min={0} max={2} step={0.01} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Wall distribution count" value={settings.wall_distribution_count ?? 1} onChange={(v) => onUpdate('wall_distribution_count', v)} min={1} max={10} step={1} disabled={disabled} />
+          <CompactSettingRow type="number" label="Min wall length" value={settings.min_length_factor ?? 0.5} onChange={(v) => onUpdate('min_length_factor', v)} min={0} max={5} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Wall transition length" value={settings.wall_transition_length ?? 0.4} onChange={(v) => onUpdate('wall_transition_length', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="number" label="Wall transition angle" value={settings.wall_transition_angle ?? 10} onChange={(v) => onUpdate('wall_transition_angle', v)} min={1} max={45} step={1} unit="°" disabled={disabled} />
+          <CompactSettingRow type="number" label="Wall transition filter margin" value={settings.wall_transition_filter_deviation ?? 25} onChange={(v) => onUpdate('wall_transition_filter_deviation', v)} min={0} max={100} step={5} unit="%" disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<LayerHeightIcon className="w-4 h-4" />} title="Advanced quality">
-          <CompactSettingRow type="number" label="Flow ratio" value={settings.printFlowRatio ?? 1.0} onChange={(v) => onUpdate('printFlowRatio', v)} min={0.5} max={2.0} step={0.01} disabled={disabled} />
-          <CompactSettingRow type="number" label="Bridge flow ratio" value={settings.bridgeFlow ?? 1.0} onChange={(v) => onUpdate('bridgeFlow', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
-          <CompactSettingRow type="number" label="Internal bridge flow" value={settings.internalBridgeFlow ?? 1.0} onChange={(v) => onUpdate('internalBridgeFlow', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
-          <CompactSettingRow type="number" label="One wall threshold" value={settings.minWidthTopSurface ?? 0} onChange={(v) => onUpdate('minWidthTopSurface', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Interface shells" checked={settings.interfaceShells ?? false} onChange={(v) => onUpdate('interfaceShells', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Print infill first" checked={settings.isInfillFirst ?? false} onChange={(v) => onUpdate('isInfillFirst', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Thick external bridges" checked={settings.thickBridges ?? false} onChange={(v) => onUpdate('thickBridges', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Thick internal bridges" checked={settings.thickInternalBridges ?? false} onChange={(v) => onUpdate('thickInternalBridges', v)} disabled={disabled} />
-          <CompactSettingRow type="select" label="Bridge counterbore holes" value={settings.counterboreHoleBridging ?? 'none'} onChange={(v) => onUpdate('counterboreHoleBridging', v)} options={[{ value: 'none', label: 'None' }, { value: 'partially', label: 'Partially bridged' }, { value: 'sacrificial', label: 'Sacrificial layer' }]} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Extra bridge layers (beta)" checked={settings.enableExtraBridgeLayer ?? false} onChange={(v) => onUpdate('enableExtraBridgeLayer', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Filter internal bridges" checked={settings.dontFilterInternalBridges ?? false} onChange={(v) => onUpdate('dontFilterInternalBridges', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Small area flow compensation" checked={settings.smallAreaInfillFlowCompensation ?? false} onChange={(v) => onUpdate('smallAreaInfillFlowCompensation', v)} disabled={disabled} />
+          <CompactSettingRow type="number" label="Flow ratio" value={settings.print_flow_ratio ?? 1.0} onChange={(v) => onUpdate('print_flow_ratio', v)} min={0.5} max={2.0} step={0.01} disabled={disabled} />
+          <CompactSettingRow type="number" label="Bridge flow ratio" value={settings.bridge_flow ?? 1.0} onChange={(v) => onUpdate('bridge_flow', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
+          <CompactSettingRow type="number" label="Internal bridge flow" value={settings.internal_bridge_flow ?? 1.0} onChange={(v) => onUpdate('internal_bridge_flow', v)} min={0.5} max={2.0} step={0.05} disabled={disabled} />
+          <CompactSettingRow type="number" label="One wall threshold" value={settings.min_width_top_surface ?? 0} onChange={(v) => onUpdate('min_width_top_surface', v)} min={0} max={2} step={0.1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Interface shells" checked={settings.interface_shells ?? false} onChange={(v) => onUpdate('interface_shells', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Print infill first" checked={settings.is_infill_first ?? false} onChange={(v) => onUpdate('is_infill_first', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Thick external bridges" checked={settings.thick_bridges ?? false} onChange={(v) => onUpdate('thick_bridges', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Thick internal bridges" checked={settings.thick_internal_bridges ?? false} onChange={(v) => onUpdate('thick_internal_bridges', v)} disabled={disabled} />
+          <CompactSettingRow type="select" label="Bridge counterbore holes" value={settings.counterbore_hole_bridging ?? 'none'} onChange={(v) => onUpdate('counterbore_hole_bridging', v)} options={[{ value: 'none', label: 'None' }, { value: 'partially', label: 'Partially bridged' }, { value: 'sacrificial', label: 'Sacrificial layer' }]} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Extra bridge layers (beta)" checked={settings.enable_extra_bridge_layer ?? false} onChange={(v) => onUpdate('enable_extra_bridge_layer', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Filter internal bridges" checked={settings.dont_filter_internal_bridges ?? false} onChange={(v) => onUpdate('dont_filter_internal_bridges', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Small area flow compensation" checked={settings.small_area_infill_flow_compensation ?? false} onChange={(v) => onUpdate('small_area_infill_flow_compensation', v)} disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Overhang handling">
-          <CompactSettingRow type="checkbox" label="Detect overhang walls" checked={settings.detectOverhangWall ?? true} onChange={(v) => onUpdate('detectOverhangWall', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Extra perimeters on overhangs" checked={settings.extraPerimetersOnOverhangs ?? false} onChange={(v) => onUpdate('extraPerimetersOnOverhangs', v)} disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Make overhangs printable" checked={settings.makeOverhangPrintable ?? false} onChange={(v) => onUpdate('makeOverhangPrintable', v)} disabled={disabled} />
-          {settings.makeOverhangPrintable && (
+          <CompactSettingRow type="checkbox" label="Detect overhang walls" checked={settings.detect_overhang_wall ?? true} onChange={(v) => onUpdate('detect_overhang_wall', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Extra perimeters on overhangs" checked={settings.extra_perimeters_on_overhangs ?? false} onChange={(v) => onUpdate('extra_perimeters_on_overhangs', v)} disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Make overhangs printable" checked={settings.make_overhang_printable ?? false} onChange={(v) => onUpdate('make_overhang_printable', v)} disabled={disabled} />
+          {settings.make_overhang_printable && (
             <>
-              <CompactSettingRow type="number" label="Max overhang angle" value={settings.makeOverhangPrintableAngle ?? 55} onChange={(v) => onUpdate('makeOverhangPrintableAngle', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
-              <CompactSettingRow type="number" label="Hole area threshold" value={settings.makeOverhangPrintableHoleSize ?? 0} onChange={(v) => onUpdate('makeOverhangPrintableHoleSize', v)} min={0} max={100} step={1} unit="mm²" disabled={disabled} />
+              <CompactSettingRow type="number" label="Max overhang angle" value={settings.make_overhang_printable_angle ?? 55} onChange={(v) => onUpdate('make_overhang_printable_angle', v)} min={0} max={90} step={5} unit="°" disabled={disabled} />
+              <CompactSettingRow type="number" label="Hole area threshold" value={settings.make_overhang_printable_hole_size ?? 0} onChange={(v) => onUpdate('make_overhang_printable_hole_size', v)} min={0} max={100} step={1} unit="mm²" disabled={disabled} />
             </>
           )}
-          <CompactSettingRow type="checkbox" label="Reverse on even" checked={settings.overhangReverse ?? false} onChange={(v) => onUpdate('overhangReverse', v)} disabled={disabled} />
-          {settings.overhangReverse && (
+          <CompactSettingRow type="checkbox" label="Reverse on even" checked={settings.overhang_reverse ?? false} onChange={(v) => onUpdate('overhang_reverse', v)} disabled={disabled} />
+          {settings.overhang_reverse && (
             <>
-              <CompactSettingRow type="checkbox" label="Reverse internal only" checked={settings.overhangReverseInternalOnly ?? false} onChange={(v) => onUpdate('overhangReverseInternalOnly', v)} disabled={disabled} />
-              <CompactSettingRow type="number" label="Reverse threshold" value={settings.overhangReverseThreshold ?? 0} onChange={(v) => onUpdate('overhangReverseThreshold', v)} min={0} max={100} step={5} unit="mm/s" disabled={disabled} />
+              <CompactSettingRow type="checkbox" label="Reverse internal only" checked={settings.overhang_reverse_internal_only ?? false} onChange={(v) => onUpdate('overhang_reverse_internal_only', v)} disabled={disabled} />
+              <CompactSettingRow type="number" label="Reverse threshold" value={settings.overhang_reverse_threshold ?? 0} onChange={(v) => onUpdate('overhang_reverse_threshold', v)} min={0} max={100} step={5} unit="mm/s" disabled={disabled} />
             </>
           )}
-          <CompactSettingRow type="checkbox" label="Avoid crossing walls" checked={settings.reduceCrossingWall ?? false} onChange={(v) => onUpdate('reduceCrossingWall', v)} disabled={disabled} />
-          {settings.reduceCrossingWall && (
-            <CompactSettingRow type="number" label="Max detour length" value={settings.maxTravelDetourDistance ?? 0} onChange={(v) => onUpdate('maxTravelDetourDistance', v)} min={0} max={100} step={1} unit="mm" disabled={disabled} />
+          <CompactSettingRow type="checkbox" label="Avoid crossing walls" checked={settings.reduce_crossing_wall ?? false} onChange={(v) => onUpdate('reduce_crossing_wall', v)} disabled={disabled} />
+          {settings.reduce_crossing_wall && (
+            <CompactSettingRow type="number" label="Max detour length" value={settings.max_travel_detour_distance ?? 0} onChange={(v) => onUpdate('max_travel_detour_distance', v)} min={0} max={100} step={1} unit="mm" disabled={disabled} />
           )}
-          <CompactSettingRow type="number" label="Wall loop direction" value={settings.wallDirection ?? 0} onChange={(v) => onUpdate('wallDirection', v)} min={0} max={360} step={15} unit="°" disabled={disabled} />
-          <CompactSettingRow type="checkbox" label="Polyhole twist" checked={settings.holeToPolyholeTwisted ?? true} onChange={(v) => onUpdate('holeToPolyholeTwisted', v)} disabled={disabled} />
+          <CompactSettingRow type="number" label="Wall direction" value={settings.wall_direction ?? 0} onChange={(v) => onUpdate('wall_direction', v)} min={0} max={360} step={15} unit="°" disabled={disabled} />
         </SettingSection>
 
         <SettingSection icon={<IroningIcon className="w-4 h-4" />} title="Ironing (quality)">
-          <CompactSettingRow type="select" label="Ironing type" value={settings.ironingType ?? 'no_ironing'} onChange={(v) => onUpdate('ironingType', v as IroningType)} options={[{ value: 'no_ironing', label: 'No ironing' }, { value: 'top', label: 'Top surfaces' }, { value: 'topmost', label: 'Topmost surface' }, { value: 'all_solid', label: 'All solid layers' }]} disabled={disabled} />
-          {settings.ironingType && settings.ironingType !== 'no_ironing' && (
+          <CompactSettingRow type="select" label="Ironing type" value={settings.ironing_type ?? 'no_ironing'} onChange={(v) => onUpdate('ironing_type', v as IroningType)} options={[{ value: 'no_ironing', label: 'No ironing' }, { value: 'top', label: 'Top surfaces' }, { value: 'topmost', label: 'Topmost surface' }, { value: 'all_solid', label: 'All solid layers' }]} disabled={disabled} />
+          {settings.ironing_type && settings.ironing_type !== 'no_ironing' && (
             <>
-              <CompactSettingRow type="number" label="Ironing flow" value={settings.filamentIroningFlow ?? 15} onChange={(v) => onUpdate('filamentIroningFlow', v)} min={0} max={100} step={1} unit="%" disabled={disabled} />
-              <CompactSettingRow type="number" label="Ironing spacing" value={settings.filamentIroningSpacing ?? 0.1} onChange={(v) => onUpdate('filamentIroningSpacing', v)} min={0.01} max={1} step={0.01} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Ironing inset" value={settings.ironingInset ?? 0.25} onChange={(v) => onUpdate('ironingInset', v)} min={0} max={2} step={0.05} unit="mm" disabled={disabled} />
-              <CompactSettingRow type="number" label="Fixed ironing angle" value={settings.ironingAngleFixed ?? 45} onChange={(v) => onUpdate('ironingAngleFixed', v)} min={0} max={360} step={5} unit="°" disabled={disabled} />
-              <CompactSettingRow type="number" label="Filament ironing inset" value={settings.filamentIroningInset ?? 0} onChange={(v) => onUpdate('filamentIroningInset', v)} min={0} max={2} step={0.05} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="Ironing flow" value={settings.filament_ironing_flow ?? 15} onChange={(v) => onUpdate('filament_ironing_flow', v)} min={0} max={100} step={1} unit="%" disabled={disabled} />
+              <CompactSettingRow type="number" label="Ironing spacing" value={settings.filament_ironing_spacing ?? 0.1} onChange={(v) => onUpdate('filament_ironing_spacing', v)} min={0.01} max={1} step={0.01} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="Ironing inset" value={settings.ironing_inset ?? 0.25} onChange={(v) => onUpdate('ironing_inset', v)} min={0} max={2} step={0.05} unit="mm" disabled={disabled} />
+              <CompactSettingRow type="number" label="Fixed ironing angle" value={settings.ironing_angle_fixed ?? 45} onChange={(v) => onUpdate('ironing_angle_fixed', v)} min={0} max={360} step={5} unit="°" disabled={disabled} />
+              <CompactSettingRow type="number" label="Filament ironing inset" value={settings.filament_ironing_inset ?? 0} onChange={(v) => onUpdate('filament_ironing_inset', v)} min={0} max={2} step={0.05} unit="mm" disabled={disabled} />
             </>
           )}
         </SettingSection>
