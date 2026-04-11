@@ -29,7 +29,7 @@ import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, Input, Select } from '@/common/components/ui';
-import { LayersIcon, EyeIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon, CubeIcon } from '@/common/components/icons/MdiIcons';
+import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
@@ -668,7 +668,7 @@ export const NewSliceJobPage: React.FC = () => {
   }, [customProcessProfiles, selectedProcessPresetId]);
 
   // Fetch models for picker
-  const { data: models = [], error: modelsError, isLoading: isLoadingModels } = useQuery<ModelListItem[], Error>({
+  const { data: models = [], isLoading: isLoadingModels } = useQuery<ModelListItem[], Error>({
     queryKey: ['modelsListBasic'],
     queryFn: async () => {
       const response = await apiClient.get<unknown[]>('/3d-models');
@@ -686,11 +686,6 @@ export const NewSliceJobPage: React.FC = () => {
     },
     staleTime: 20_000
   });
-
-  const selectedModel = useMemo(
-    () => models.find(m => m.id === selectedModelId),
-    [models, selectedModelId]
-  );
 
   // Connect to SlicerHub for real-time updates
   useEffect(() => {
@@ -1414,64 +1409,30 @@ export const NewSliceJobPage: React.FC = () => {
             />
           </div>
 
-          {/* MODEL SELECTION - Picker button opens SearchablePickerModal with URL tab */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
-            <label className="block text-sm font-semibold text-pf-text-primary">3D Model</label>
-            {modelsError ? (
-              <p className="text-sm text-pf-error">{modelsError.message}</p>
-            ) : (
-              <>
-                <Button
-                  variant="secondary"
-                  onClick={() => setModelPickerOpen(true)}
-                  iconLeft={<CubeIcon className="w-4 h-4" />}
-                  className="w-full justify-start text-left"
-                >
-                  <span className={selectedModelId || modelFileUrl ? 'text-pf-text-primary' : 'text-pf-text-muted'}>
-                    {selectedModel?.originalFileName ?? (modelFileUrl ? modelFileName || modelFileUrl : 'Select a model...')}
-                  </span>
-                </Button>
-
-                <SearchablePickerModal<Model3DBasic>
-                  isOpen={modelPickerOpen}
-                  onClose={() => setModelPickerOpen(false)}
-                  onSelect={(model) => {
-                    setSelectedModelId(model.id);
-                    setModelFileUrl('');
-                    setModelFileName('');
-                  }}
-                  items={models ?? []}
-                  getItemId={(m) => m.id}
-                  getLabel={(m) => m.originalFileName}
-                  selectedId={selectedModelId}
-                  title="Select 3D Model"
-                  searchPlaceholder="Search models by filename..."
-                  emptyMessage="No models match your search."
-                  isLoading={isLoadingModels}
-                  onUrlSubmit={(url, name) => {
-                    setModelFileUrl(url);
-                    setModelFileName(name);
-                    setSelectedModelId('');
-                    setBedModels([]);
-                  }}
-                />
-              </>
-            )}
-          </div>
-
-          {/* STL Preview Button */}
-          {(selectedModelId || modelFileUrl) && (
-            <Button
-              type="button"
-              onClick={() => setIsSTLPreviewOpen(true)}
-              variant="secondary"
-              size="sm"
-              className="w-full"
-              iconLeft={<EyeIcon className="w-4 h-4" />}
-            >
-              Preview 3D Model
-            </Button>
-          )}
+          {/* Model picker modal — opened by workspace "+" button */}
+          <SearchablePickerModal<Model3DBasic>
+            isOpen={modelPickerOpen}
+            onClose={() => setModelPickerOpen(false)}
+            onSelect={(model) => {
+              setSelectedModelId(model.id);
+              setModelFileUrl('');
+              setModelFileName('');
+            }}
+            items={models ?? []}
+            getItemId={(m) => m.id}
+            getLabel={(m) => m.originalFileName}
+            selectedId={selectedModelId}
+            title="Select 3D Model"
+            searchPlaceholder="Search models by filename..."
+            emptyMessage="No models match your search."
+            isLoading={isLoadingModels}
+            onUrlSubmit={(url, name) => {
+              setModelFileUrl(url);
+              setModelFileName(name);
+              setSelectedModelId('');
+              setBedModels([]);
+            }}
+          />
 
           {/* STATUS MESSAGES */}
           {error && <Alert type="error">{error}</Alert>}
