@@ -1,9 +1,11 @@
 /**
  * OrcaSlicer-style Settings Panel
  *
- * Category tabs (Quality, Strength, Speed, Support, Multimaterial, Other)
+ * Category tabs (Quality, Strength, Speed, Support, Multimaterial, Others)
  * are the primary navigation. A Simple/Advanced toggle controls how many
  * settings appear within each tab.
+ *
+ * Uses OrcaProcessSettings (native snake_case keys) from slicerSettingsTypes.ts.
  */
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/common/components/ui';
@@ -26,10 +28,9 @@ import {
   AccelerationIcon,
 } from './SlicerSettingIcons';
 import {
-  SettingsViewMode,
+  ProcessSettingsViewMode,
   SettingsCategory,
-  SimpleSlicerSettings,
-  AdvancedSlicerSettings,
+  OrcaProcessSettings,
   INFILL_PATTERN_INFO,
   InfillPattern,
   ScarfJointSeam,
@@ -46,11 +47,11 @@ import {
 
 interface SlicerSettingsPanelProps {
   /** Current settings values */
-  settings: SimpleSlicerSettings | AdvancedSlicerSettings;
+  settings: OrcaProcessSettings;
   /** Called when any setting changes */
-  onChange: (settings: SimpleSlicerSettings | AdvancedSlicerSettings) => void;
+  onChange: (settings: Partial<OrcaProcessSettings>) => void;
   /** Initial view mode */
-  initialViewMode?: SettingsViewMode;
+  initialViewMode?: ProcessSettingsViewMode;
   /** Disable all controls */
   disabled?: boolean;
   /** Custom class name */
@@ -69,13 +70,13 @@ const ALL_CATEGORIES: { id: SettingsCategory; label: string }[] = [
   { id: 'speed', label: 'Speed' },
   { id: 'support', label: 'Support' },
   { id: 'multimaterial', label: 'Multimaterial' },
-  { id: 'other', label: 'Other' },
+  { id: 'others', label: 'Others' },
 ];
 
 /** Simple mode hides Speed tab (matches SimplyPrint/OrcaSlicer Simple mode) */
 const SIMPLE_CATEGORIES = ALL_CATEGORIES.filter((c) => c.id !== 'speed');
 
-function getCategoriesForMode(mode: SettingsViewMode) {
+function getCategoriesForMode(mode: ProcessSettingsViewMode) {
   if (mode === 'advanced') return ALL_CATEGORIES;
   return SIMPLE_CATEGORIES;
 }
@@ -96,7 +97,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   advancedSettings,
   onAdvancedSettingsChange,
 }) => {
-  const [viewMode, setViewMode] = useState<SettingsViewMode>(initialViewMode);
+  const [viewMode, setViewMode] = useState<ProcessSettingsViewMode>(initialViewMode);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('quality');
 
   const isAdvanced = viewMode === 'advanced';
@@ -109,9 +110,9 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
     }
   }, [viewMode, categories, activeCategory]);
 
-  const updateSetting = useCallback(<K extends keyof AdvancedSlicerSettings>(
+  const updateSetting = useCallback(<K extends keyof OrcaProcessSettings>(
     key: K,
-    value: AdvancedSlicerSettings[K]
+    value: OrcaProcessSettings[K]
   ) => {
     onChange({ ...settings, [key]: value });
   }, [settings, onChange]);
@@ -123,7 +124,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   }));
 
   const categoryProps = {
-    settings: settings as AdvancedSlicerSettings,
+    settings,
     onUpdate: updateSetting,
     disabled,
     isAdvanced,
@@ -132,7 +133,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
     onAdvancedSettingsChange,
   };
 
-  const modeButtonClass = (mode: SettingsViewMode, pos: 'left' | 'right') => {
+  const modeButtonClass = (mode: ProcessSettingsViewMode, pos: 'left' | 'right') => {
     const roundCls = pos === 'left' ? 'rounded-l-md' : 'rounded-r-md -ml-px';
     const active = viewMode === mode;
     return `px-2 py-0.5 text-[10px] font-medium ${roundCls} border transition-colors ${
@@ -200,7 +201,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
         {activeCategory === 'speed' && <SpeedSettings {...categoryProps} />}
         {activeCategory === 'support' && <SupportSettings {...categoryProps} />}
         {activeCategory === 'multimaterial' && <MultimaterialSettings {...categoryProps} />}
-        {activeCategory === 'other' && <OtherSettings {...categoryProps} />}
+        {activeCategory === 'others' && <OtherSettings {...categoryProps} />}
       </div>
     </div>
   );
@@ -208,8 +209,8 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
 
 /* ─── shared prop shape for every category ─── */
 interface CategorySettingsProps {
-  settings: AdvancedSlicerSettings;
-  onUpdate: <K extends keyof AdvancedSlicerSettings>(key: K, value: AdvancedSlicerSettings[K]) => void;
+  settings: OrcaProcessSettings;
+  onUpdate: <K extends keyof OrcaProcessSettings>(key: K, value: OrcaProcessSettings[K]) => void;
   disabled: boolean;
   isAdvanced: boolean;
   infillPatternOptions: Array<{ value: string; label: string; icon?: React.ReactNode }>;

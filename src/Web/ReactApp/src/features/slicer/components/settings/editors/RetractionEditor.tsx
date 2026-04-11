@@ -5,15 +5,15 @@
 import React from 'react';
 import { SettingRow, SettingSection } from '../SettingRow';
 import { RetractionIcon } from '../SlicerSettingIcons';
-import type { AdvancedSlicerSettings } from '../slicerSettingsTypes';
+import type { OrcaProcessSettings } from '../slicerSettingsTypes';
 
 interface RetractionEditorProps {
-  settings: AdvancedSlicerSettings;
-  onChange: <K extends keyof AdvancedSlicerSettings>(key: K, value: AdvancedSlicerSettings[K]) => void;
+  settings: OrcaProcessSettings;
+  onChange: <K extends keyof OrcaProcessSettings>(key: K, value: OrcaProcessSettings[K]) => void;
   disabled?: boolean;
-  hasChanges?: (key: keyof AdvancedSlicerSettings) => boolean;
-  onReset?: (key: keyof AdvancedSlicerSettings) => void;
-  getOriginalValue?: <K extends keyof AdvancedSlicerSettings>(key: K) => AdvancedSlicerSettings[K];
+  hasChanges?: (key: keyof OrcaProcessSettings) => boolean;
+  onReset?: (key: keyof OrcaProcessSettings) => void;
+  getOriginalValue?: <K extends keyof OrcaProcessSettings>(key: K) => OrcaProcessSettings[K];
 }
 
 export const RetractionEditor: React.FC<RetractionEditorProps> = ({
@@ -31,64 +31,64 @@ export const RetractionEditor: React.FC<RetractionEditorProps> = ({
           type="slider"
           icon={<RetractionIcon />}
           label="Retraction Length"
-          value={settings.retractionLength}
-          onChange={(v) => onChange('retractionLength', v)}
+          value={settings.filament_retraction_length}
+          onChange={(v) => onChange('filament_retraction_length', v)}
           min={0}
           max={10}
           step={0.1}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('retractionLength')}
-          onReset={() => onReset?.('retractionLength')}
-          originalValue={getOriginalValue?.('retractionLength')}
+          isModified={hasChanges?.('filament_retraction_length')}
+          onReset={() => onReset?.('filament_retraction_length')}
+          originalValue={getOriginalValue?.('filament_retraction_length')}
           tooltip="How much filament to retract (Bowden: 4-6mm, Direct: 0.5-2mm)"
         />
         <SettingRow
           type="slider"
           icon={<RetractionIcon />}
           label="Retraction Speed"
-          value={settings.retractionSpeed}
-          onChange={(v) => onChange('retractionSpeed', v)}
+          value={settings.filament_retraction_speed}
+          onChange={(v) => onChange('filament_retraction_speed', v)}
           min={10}
           max={100}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('retractionSpeed')}
-          onReset={() => onReset?.('retractionSpeed')}
-          originalValue={getOriginalValue?.('retractionSpeed')}
+          isModified={hasChanges?.('filament_retraction_speed')}
+          onReset={() => onReset?.('filament_retraction_speed')}
+          originalValue={getOriginalValue?.('filament_retraction_speed')}
           tooltip="Speed for pulling filament back"
         />
         <SettingRow
           type="slider"
           icon={<RetractionIcon />}
           label="Detraction Speed"
-          value={settings.detractionSpeed}
-          onChange={(v) => onChange('detractionSpeed', v)}
+          value={settings.filament_deretraction_speed}
+          onChange={(v) => onChange('filament_deretraction_speed', v)}
           min={10}
           max={100}
           step={5}
           unit="mm/s"
           disabled={disabled}
-          isModified={hasChanges?.('detractionSpeed')}
-          onReset={() => onReset?.('detractionSpeed')}
-          originalValue={getOriginalValue?.('detractionSpeed')}
+          isModified={hasChanges?.('filament_deretraction_speed')}
+          onReset={() => onReset?.('filament_deretraction_speed')}
+          originalValue={getOriginalValue?.('filament_deretraction_speed')}
           tooltip="Speed for re-priming filament after retraction"
         />
         <SettingRow
           type="slider"
           icon={<RetractionIcon />}
           label="Minimum Travel Distance"
-          value={settings.retractionMinimumTravel}
-          onChange={(v) => onChange('retractionMinimumTravel', v)}
+          value={settings.filament_retraction_minimum_travel}
+          onChange={(v) => onChange('filament_retraction_minimum_travel', v)}
           min={0}
           max={10}
           step={0.1}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('retractionMinimumTravel')}
-          onReset={() => onReset?.('retractionMinimumTravel')}
-          originalValue={getOriginalValue?.('retractionMinimumTravel')}
+          isModified={hasChanges?.('filament_retraction_minimum_travel')}
+          onReset={() => onReset?.('filament_retraction_minimum_travel')}
+          originalValue={getOriginalValue?.('filament_retraction_minimum_travel')}
           tooltip="Only retract if travel distance exceeds this threshold"
         />
       </SettingSection>
@@ -98,40 +98,40 @@ export const RetractionEditor: React.FC<RetractionEditorProps> = ({
           type="slider"
           icon={<RetractionIcon />}
           label="Retraction Lift Z"
-          value={settings.retractionLiftZ}
-          onChange={(v) => onChange('retractionLiftZ', v)}
+          value={settings.filament_z_hop}
+          onChange={(v) => onChange('filament_z_hop', v)}
           min={0}
           max={2}
           step={0.1}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('retractionLiftZ')}
-          onReset={() => onReset?.('retractionLiftZ')}
-          originalValue={getOriginalValue?.('retractionLiftZ')}
+          isModified={hasChanges?.('filament_z_hop')}
+          onReset={() => onReset?.('filament_z_hop')}
+          originalValue={getOriginalValue?.('filament_z_hop')}
           tooltip="Lift nozzle during travel to avoid collisions (Z-hop)"
         />
         <SettingRow
           type="checkbox"
           icon={<RetractionIcon />}
           label="Retract on Layer Change"
-          value={settings.retractOnLayerChange}
-          onChange={(v) => onChange('retractOnLayerChange', v)}
+          value={settings.filament_retract_when_changing_layer}
+          onChange={(v) => onChange('filament_retract_when_changing_layer', v)}
           disabled={disabled}
-          isModified={hasChanges?.('retractOnLayerChange')}
-          onReset={() => onReset?.('retractOnLayerChange')}
-          originalValue={getOriginalValue?.('retractOnLayerChange')}
+          isModified={hasChanges?.('filament_retract_when_changing_layer')}
+          onReset={() => onReset?.('filament_retract_when_changing_layer')}
+          originalValue={getOriginalValue?.('filament_retract_when_changing_layer')}
           tooltip="Always retract when moving to next layer"
         />
         <SettingRow
           type="checkbox"
           icon={<RetractionIcon />}
           label="Wipe Before Retract"
-          value={settings.wipeBeforeRetract}
-          onChange={(v) => onChange('wipeBeforeRetract', v)}
+          value={settings.filament_retract_before_wipe}
+          onChange={(v) => onChange('filament_retract_before_wipe', v)}
           disabled={disabled}
-          isModified={hasChanges?.('wipeBeforeRetract')}
-          onReset={() => onReset?.('wipeBeforeRetract')}
-          originalValue={getOriginalValue?.('wipeBeforeRetract')}
+          isModified={hasChanges?.('filament_retract_before_wipe')}
+          onReset={() => onReset?.('filament_retract_before_wipe')}
+          originalValue={getOriginalValue?.('filament_retract_before_wipe')}
           tooltip="Wipe nozzle on perimeter before retracting"
         />
       </SettingSection>

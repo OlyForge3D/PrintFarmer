@@ -1,6 +1,6 @@
 /**
  * OrcaSlicer-style Machine Profile Editor
- * Implements Basic | Advanced view modes matching OrcaSlicer's UI
+ * Implements Simple | Advanced view modes with 6-tab SimplyPrint-style layout.
  */
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/common/components/ui';
@@ -11,9 +11,8 @@ import {
 } from './SlicerSettingIcons';
 import type {
   MachineSettingsViewMode,
-  MachineSettingsCategory,
-  BasicMachineSettings,
-  AdvancedMachineSettings,
+  MachineCategory,
+  OrcaMachineSettings,
 } from './machineSettingsTypes';
 import {
   PRINTER_PRESETS,
@@ -26,9 +25,9 @@ import {
 
 interface MachineProfileEditorProps {
   /** Current settings values */
-  settings: BasicMachineSettings | AdvancedMachineSettings;
+  settings: Partial<OrcaMachineSettings>;
   /** Called when any setting changes */
-  onChange: (settings: BasicMachineSettings | AdvancedMachineSettings) => void;
+  onChange: (settings: Partial<OrcaMachineSettings>) => void;
   /** Initial view mode */
   initialViewMode?: MachineSettingsViewMode;
   /** Disable all controls */
@@ -36,7 +35,7 @@ interface MachineProfileEditorProps {
   /** Custom class name */
   className?: string;
   /** Optional function to check if a category has modified settings */
-  isCategoryDirty?: (category: MachineSettingsCategory) => boolean;
+  isCategoryDirty?: (category: MachineCategory) => boolean;
 }
 
 // Icon components for Machine settings

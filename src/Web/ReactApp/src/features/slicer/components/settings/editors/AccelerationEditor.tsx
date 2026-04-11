@@ -5,15 +5,15 @@
 import React from 'react';
 import { SettingRow, SettingSection } from '../SettingRow';
 import { AccelerationIcon } from '../SlicerSettingIcons';
-import type { AdvancedSlicerSettings } from '../slicerSettingsTypes';
+import type { OrcaProcessSettings } from '../slicerSettingsTypes';
 
 interface AccelerationEditorProps {
-  settings: AdvancedSlicerSettings;
-  onChange: <K extends keyof AdvancedSlicerSettings>(key: K, value: AdvancedSlicerSettings[K]) => void;
+  settings: OrcaProcessSettings;
+  onChange: <K extends keyof OrcaProcessSettings>(key: K, value: OrcaProcessSettings[K]) => void;
   disabled?: boolean;
-  hasChanges?: (key: keyof AdvancedSlicerSettings) => boolean;
-  onReset?: (key: keyof AdvancedSlicerSettings) => void;
-  getOriginalValue?: <K extends keyof AdvancedSlicerSettings>(key: K) => AdvancedSlicerSettings[K];
+  hasChanges?: (key: keyof OrcaProcessSettings) => boolean;
+  onReset?: (key: keyof OrcaProcessSettings) => void;
+  getOriginalValue?: <K extends keyof OrcaProcessSettings>(key: K) => OrcaProcessSettings[K];
 }
 
 export const AccelerationEditor: React.FC<AccelerationEditorProps> = ({
@@ -31,96 +31,96 @@ export const AccelerationEditor: React.FC<AccelerationEditorProps> = ({
           type="slider"
           icon={<AccelerationIcon />}
           label="Default Acceleration"
-          value={settings.defaultAcceleration}
-          onChange={(v) => onChange('defaultAcceleration', v)}
+          value={settings.default_acceleration}
+          onChange={(v) => onChange('default_acceleration', v)}
           min={100}
           max={10000}
           step={100}
           unit="mm/s²"
           disabled={disabled}
-          isModified={hasChanges?.('defaultAcceleration')}
-          onReset={() => onReset?.('defaultAcceleration')}
-          originalValue={getOriginalValue?.('defaultAcceleration')}
+          isModified={hasChanges?.('default_acceleration')}
+          onReset={() => onReset?.('default_acceleration')}
+          originalValue={getOriginalValue?.('default_acceleration')}
           tooltip="Default acceleration for all features"
         />
         <SettingRow
           type="slider"
           icon={<AccelerationIcon />}
           label="Outer Wall Acceleration"
-          value={settings.outerWallAcceleration}
-          onChange={(v) => onChange('outerWallAcceleration', v)}
+          value={settings.outer_wall_acceleration}
+          onChange={(v) => onChange('outer_wall_acceleration', v)}
           min={100}
           max={10000}
           step={100}
           unit="mm/s²"
           disabled={disabled}
-          isModified={hasChanges?.('outerWallAcceleration')}
-          onReset={() => onReset?.('outerWallAcceleration')}
-          originalValue={getOriginalValue?.('outerWallAcceleration')}
+          isModified={hasChanges?.('outer_wall_acceleration')}
+          onReset={() => onReset?.('outer_wall_acceleration')}
+          originalValue={getOriginalValue?.('outer_wall_acceleration')}
           tooltip="Acceleration for outer perimeter (lower = smoother surface)"
         />
         <SettingRow
           type="slider"
           icon={<AccelerationIcon />}
           label="Inner Wall Acceleration"
-          value={settings.innerWallAcceleration}
-          onChange={(v) => onChange('innerWallAcceleration', v)}
+          value={settings.inner_wall_acceleration}
+          onChange={(v) => onChange('inner_wall_acceleration', v)}
           min={100}
           max={10000}
           step={100}
           unit="mm/s²"
           disabled={disabled}
-          isModified={hasChanges?.('innerWallAcceleration')}
-          onReset={() => onReset?.('innerWallAcceleration')}
-          originalValue={getOriginalValue?.('innerWallAcceleration')}
+          isModified={hasChanges?.('inner_wall_acceleration')}
+          onReset={() => onReset?.('inner_wall_acceleration')}
+          originalValue={getOriginalValue?.('inner_wall_acceleration')}
           tooltip="Acceleration for inner perimeters"
         />
         <SettingRow
           type="slider"
           icon={<AccelerationIcon />}
           label="Top Surface Acceleration"
-          value={settings.topSurfaceAcceleration}
-          onChange={(v) => onChange('topSurfaceAcceleration', v)}
+          value={settings.top_surface_acceleration}
+          onChange={(v) => onChange('top_surface_acceleration', v)}
           min={100}
           max={10000}
           step={100}
           unit="mm/s²"
           disabled={disabled}
-          isModified={hasChanges?.('topSurfaceAcceleration')}
-          onReset={() => onReset?.('topSurfaceAcceleration')}
-          originalValue={getOriginalValue?.('topSurfaceAcceleration')}
+          isModified={hasChanges?.('top_surface_acceleration')}
+          onReset={() => onReset?.('top_surface_acceleration')}
+          originalValue={getOriginalValue?.('top_surface_acceleration')}
           tooltip="Acceleration for top surface finish"
         />
         <SettingRow
           type="slider"
           icon={<AccelerationIcon />}
           label="Infill Acceleration"
-          value={settings.infillAcceleration}
-          onChange={(v) => onChange('infillAcceleration', v)}
+          value={settings.sparse_infill_acceleration}
+          onChange={(v) => onChange('sparse_infill_acceleration', v)}
           min={100}
           max={10000}
           step={100}
           unit="mm/s²"
           disabled={disabled}
-          isModified={hasChanges?.('infillAcceleration')}
-          onReset={() => onReset?.('infillAcceleration')}
-          originalValue={getOriginalValue?.('infillAcceleration')}
+          isModified={hasChanges?.('sparse_infill_acceleration')}
+          onReset={() => onReset?.('sparse_infill_acceleration')}
+          originalValue={getOriginalValue?.('sparse_infill_acceleration')}
           tooltip="Acceleration for infill patterns (can be higher for speed)"
         />
         <SettingRow
           type="slider"
           icon={<AccelerationIcon />}
           label="Travel Acceleration"
-          value={settings.travelAcceleration}
-          onChange={(v) => onChange('travelAcceleration', v)}
+          value={settings.travel_acceleration}
+          onChange={(v) => onChange('travel_acceleration', v)}
           min={100}
           max={10000}
           step={100}
           unit="mm/s²"
           disabled={disabled}
-          isModified={hasChanges?.('travelAcceleration')}
-          onReset={() => onReset?.('travelAcceleration')}
-          originalValue={getOriginalValue?.('travelAcceleration')}
+          isModified={hasChanges?.('travel_acceleration')}
+          onReset={() => onReset?.('travel_acceleration')}
+          originalValue={getOriginalValue?.('travel_acceleration')}
           tooltip="Acceleration for travel moves (typically highest)"
         />
       </SettingSection>

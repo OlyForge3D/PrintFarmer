@@ -5,15 +5,15 @@
 import React from 'react';
 import { SettingRow, SettingSection } from '../SettingRow';
 import { LineWidthIcon } from '../SlicerSettingIcons';
-import type { AdvancedSlicerSettings } from '../slicerSettingsTypes';
+import type { OrcaProcessSettings } from '../slicerSettingsTypes';
 
 interface LineWidthEditorProps {
-  settings: AdvancedSlicerSettings;
-  onChange: <K extends keyof AdvancedSlicerSettings>(key: K, value: AdvancedSlicerSettings[K]) => void;
+  settings: OrcaProcessSettings;
+  onChange: <K extends keyof OrcaProcessSettings>(key: K, value: OrcaProcessSettings[K]) => void;
   disabled?: boolean;
-  hasChanges?: (key: keyof AdvancedSlicerSettings) => boolean;
-  onReset?: (key: keyof AdvancedSlicerSettings) => void;
-  getOriginalValue?: <K extends keyof AdvancedSlicerSettings>(key: K) => AdvancedSlicerSettings[K];
+  hasChanges?: (key: keyof OrcaProcessSettings) => boolean;
+  onReset?: (key: keyof OrcaProcessSettings) => void;
+  getOriginalValue?: <K extends keyof OrcaProcessSettings>(key: K) => OrcaProcessSettings[K];
 }
 
 export const LineWidthEditor: React.FC<LineWidthEditorProps> = ({
@@ -31,32 +31,32 @@ export const LineWidthEditor: React.FC<LineWidthEditorProps> = ({
           type="slider"
           icon={<LineWidthIcon />}
           label="Default Line Width"
-          value={settings.lineWidthDefault}
-          onChange={(v) => onChange('lineWidthDefault', v)}
+          value={settings.line_width}
+          onChange={(v) => onChange('line_width', v)}
           min={0.1}
           max={1.0}
           step={0.01}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('lineWidthDefault')}
-          onReset={() => onReset?.('lineWidthDefault')}
-          originalValue={getOriginalValue?.('lineWidthDefault')}
+          isModified={hasChanges?.('line_width')}
+          onReset={() => onReset?.('line_width')}
+          originalValue={getOriginalValue?.('line_width')}
           tooltip="Default extrusion width (typically nozzle diameter or slightly larger)"
         />
         <SettingRow
           type="slider"
           icon={<LineWidthIcon />}
           label="First Layer Line Width"
-          value={settings.lineWidthFirstLayer}
-          onChange={(v) => onChange('lineWidthFirstLayer', v)}
+          value={settings.initial_layer_line_width}
+          onChange={(v) => onChange('initial_layer_line_width', v)}
           min={0.1}
           max={1.0}
           step={0.01}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('lineWidthFirstLayer')}
-          onReset={() => onReset?.('lineWidthFirstLayer')}
-          originalValue={getOriginalValue?.('lineWidthFirstLayer')}
+          isModified={hasChanges?.('initial_layer_line_width')}
+          onReset={() => onReset?.('initial_layer_line_width')}
+          originalValue={getOriginalValue?.('initial_layer_line_width')}
           tooltip="Extrusion width for first layer (wider = better adhesion)"
         />
       </SettingSection>
@@ -66,32 +66,32 @@ export const LineWidthEditor: React.FC<LineWidthEditorProps> = ({
           type="slider"
           icon={<LineWidthIcon />}
           label="Outer Wall Line Width"
-          value={settings.lineWidthOuterWall}
-          onChange={(v) => onChange('lineWidthOuterWall', v)}
+          value={settings.outer_wall_line_width}
+          onChange={(v) => onChange('outer_wall_line_width', v)}
           min={0.1}
           max={1.0}
           step={0.01}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('lineWidthOuterWall')}
-          onReset={() => onReset?.('lineWidthOuterWall')}
-          originalValue={getOriginalValue?.('lineWidthOuterWall')}
+          isModified={hasChanges?.('outer_wall_line_width')}
+          onReset={() => onReset?.('outer_wall_line_width')}
+          originalValue={getOriginalValue?.('outer_wall_line_width')}
           tooltip="Extrusion width for outer perimeter (affects surface quality)"
         />
         <SettingRow
           type="slider"
           icon={<LineWidthIcon />}
           label="Inner Wall Line Width"
-          value={settings.lineWidthInnerWall}
-          onChange={(v) => onChange('lineWidthInnerWall', v)}
+          value={settings.inner_wall_line_width}
+          onChange={(v) => onChange('inner_wall_line_width', v)}
           min={0.1}
           max={1.0}
           step={0.01}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('lineWidthInnerWall')}
-          onReset={() => onReset?.('lineWidthInnerWall')}
-          originalValue={getOriginalValue?.('lineWidthInnerWall')}
+          isModified={hasChanges?.('inner_wall_line_width')}
+          onReset={() => onReset?.('inner_wall_line_width')}
+          originalValue={getOriginalValue?.('inner_wall_line_width')}
           tooltip="Extrusion width for inner perimeters"
         />
       </SettingSection>
@@ -101,48 +101,48 @@ export const LineWidthEditor: React.FC<LineWidthEditorProps> = ({
           type="slider"
           icon={<LineWidthIcon />}
           label="Sparse Infill Line Width"
-          value={settings.lineWidthSparseInfill}
-          onChange={(v) => onChange('lineWidthSparseInfill', v)}
+          value={settings.sparse_infill_line_width}
+          onChange={(v) => onChange('sparse_infill_line_width', v)}
           min={0.1}
           max={1.0}
           step={0.01}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('lineWidthSparseInfill')}
-          onReset={() => onReset?.('lineWidthSparseInfill')}
-          originalValue={getOriginalValue?.('lineWidthSparseInfill')}
+          isModified={hasChanges?.('sparse_infill_line_width')}
+          onReset={() => onReset?.('sparse_infill_line_width')}
+          originalValue={getOriginalValue?.('sparse_infill_line_width')}
           tooltip="Extrusion width for sparse infill patterns"
         />
         <SettingRow
           type="slider"
           icon={<LineWidthIcon />}
           label="Internal Solid Infill Width"
-          value={settings.lineWidthInternalSolidInfill}
-          onChange={(v) => onChange('lineWidthInternalSolidInfill', v)}
+          value={settings.internal_solid_infill_line_width}
+          onChange={(v) => onChange('internal_solid_infill_line_width', v)}
           min={0.1}
           max={1.0}
           step={0.01}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('lineWidthInternalSolidInfill')}
-          onReset={() => onReset?.('lineWidthInternalSolidInfill')}
-          originalValue={getOriginalValue?.('lineWidthInternalSolidInfill')}
+          isModified={hasChanges?.('internal_solid_infill_line_width')}
+          onReset={() => onReset?.('internal_solid_infill_line_width')}
+          originalValue={getOriginalValue?.('internal_solid_infill_line_width')}
           tooltip="Extrusion width for solid internal infill"
         />
         <SettingRow
           type="slider"
           icon={<LineWidthIcon />}
           label="Top Surface Line Width"
-          value={settings.lineWidthTopSurface}
-          onChange={(v) => onChange('lineWidthTopSurface', v)}
+          value={settings.top_surface_line_width}
+          onChange={(v) => onChange('top_surface_line_width', v)}
           min={0.1}
           max={1.0}
           step={0.01}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('lineWidthTopSurface')}
-          onReset={() => onReset?.('lineWidthTopSurface')}
-          originalValue={getOriginalValue?.('lineWidthTopSurface')}
+          isModified={hasChanges?.('top_surface_line_width')}
+          onReset={() => onReset?.('top_surface_line_width')}
+          originalValue={getOriginalValue?.('top_surface_line_width')}
           tooltip="Extrusion width for top surface finish"
         />
       </SettingSection>
@@ -152,16 +152,16 @@ export const LineWidthEditor: React.FC<LineWidthEditorProps> = ({
           type="slider"
           icon={<LineWidthIcon />}
           label="Support Line Width"
-          value={settings.lineWidthSupport}
-          onChange={(v) => onChange('lineWidthSupport', v)}
+          value={settings.support_line_width}
+          onChange={(v) => onChange('support_line_width', v)}
           min={0.1}
           max={1.0}
           step={0.01}
           unit="mm"
           disabled={disabled}
-          isModified={hasChanges?.('lineWidthSupport')}
-          onReset={() => onReset?.('lineWidthSupport')}
-          originalValue={getOriginalValue?.('lineWidthSupport')}
+          isModified={hasChanges?.('support_line_width')}
+          onReset={() => onReset?.('support_line_width')}
+          originalValue={getOriginalValue?.('support_line_width')}
           tooltip="Extrusion width for support structures"
         />
       </SettingSection>
