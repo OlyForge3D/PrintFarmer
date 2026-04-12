@@ -171,7 +171,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
               variant="unstyled"
               type="button"
               role="tab"
-              aria-selected={isActive}
+              aria-selected={isActive ? 'true' : undefined}
               aria-controls={`panel-${cat.id}`}
               onClick={() => setActiveCategory(cat.id)}
               disabled={disabled}
@@ -669,9 +669,9 @@ const MultimaterialSettings: React.FC<CategorySettingsProps> = ({ settings, onUp
             <p className="text-xs text-pf-text-muted px-3 py-1">
               Assign filament slot numbers for each zone type. 0 means use the active filament.
             </p>
-            <CompactSettingRow type="number" label="Wall filament" value={settings.wall_filament ?? 0} onChange={(v) => onUpdate('wall_filament', v)} min={0} max={10} step={1} disabled={disabled} />
-            <CompactSettingRow type="number" label="Sparse infill filament" value={settings.sparse_infill_filament ?? 0} onChange={(v) => onUpdate('sparse_infill_filament', v)} min={0} max={10} step={1} disabled={disabled} />
-            <CompactSettingRow type="number" label="Solid infill filament" value={settings.solid_infill_filament ?? 0} onChange={(v) => onUpdate('solid_infill_filament', v)} min={0} max={10} step={1} disabled={disabled} />
+            <CompactSettingRow type="number" label="Wall filament" value={Number(settings.wall_filament ?? 0)} onChange={(v) => onUpdate('wall_filament', String(v))} min={0} max={10} step={1} disabled={disabled} />
+            <CompactSettingRow type="number" label="Sparse infill filament" value={Number(settings.sparse_infill_filament ?? 0)} onChange={(v) => onUpdate('sparse_infill_filament', String(v))} min={0} max={10} step={1} disabled={disabled} />
+            <CompactSettingRow type="number" label="Solid infill filament" value={Number(settings.solid_infill_filament ?? 0)} onChange={(v) => onUpdate('solid_infill_filament', String(v))} min={0} max={10} step={1} disabled={disabled} />
           </div>
         </SettingSection>
       </>

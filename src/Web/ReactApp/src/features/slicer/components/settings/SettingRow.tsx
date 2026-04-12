@@ -241,6 +241,7 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
                      [&::-moz-range-thumb]:border-pf-bg-0
                      [&::-moz-range-thumb]:cursor-pointer
                      disabled:opacity-50 disabled:cursor-not-allowed"
+          // eslint-disable-next-line react/forbid-dom-props -- dynamic gradient requires inline style
           style={{
             background: `linear-gradient(to right, var(--pf-accent-2) 0%, var(--pf-accent-2) ${percentage}%, var(--pf-border) ${percentage}%, var(--pf-border) 100%)`
           }}
@@ -249,6 +250,7 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
         {/* Current value indicator below thumb */}
         <div 
           className="absolute top-5 transform -translate-x-1/2 text-xs font-bold text-pf-text"
+          // eslint-disable-next-line react/forbid-dom-props -- dynamic position requires inline style
           style={{ left: `${percentage}%` }}
         >
           {value}{unit}
