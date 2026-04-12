@@ -75,6 +75,58 @@ public class SettingsSerializationTests
     }
 
     [Fact]
+    public void JsonElement_Values_ConvertedToStrings()
+    {
+        // Simulate what happens when Dictionary<string, object> is deserialized from JSON:
+        // values arrive as JsonElement, not string
+        var dict = new Dictionary<string, object>();
+        using var doc = JsonDocument.Parse(SampleMachineProfile);
+        foreach (var prop in doc.RootElement.EnumerateObject())
+        {
+            // Store as JsonElement (this is what System.Text.Json deserializer does for object)
+            dict[prop.Name] = prop.Value.Clone();
+        }
+
+        string json = OrcaSlicingPipelineService.SettingsDictToNativeJson(dict);
+        using var output = JsonDocument.Parse(json);
+        var root = output.RootElement;
+
+        // Numbers should be strings
+        root.GetProperty("adaptive_bed_mesh_margin").GetString().Should().Be("0");
+        root.GetProperty("auxiliary_fan").GetString().Should().Be("1");
+        root.GetProperty("z_offset").GetString().Should().Be("0");
+
+        // Arrays should stay as arrays
+        root.GetProperty("nozzle_diameter").ValueKind.Should().Be(JsonValueKind.Array);
+    }
+
+    [Fact]
+    public void String_Values_WithEmbeddedQuotes_Stripped()
+    {
+        // Simulate the bug: ToString() on a string value returned '"1"' with literal quotes
+        var dict = new Dictionary<string, object>
+        {
+            ["accel_to_decel_enable"] = "\"1\"",
+            ["accel_to_decel_factor"] = "\"50%\"",
+            ["sparse_infill_pattern"] = "\"crosshatch\"",
+            ["layer_height"] = "\"0.2\"",
+            ["normal_value"] = "klipper",  // no quotes — should pass through
+        };
+
+        string json = OrcaSlicingPipelineService.SettingsDictToNativeJson(dict);
+        using var output = JsonDocument.Parse(json);
+        var root = output.RootElement;
+
+        root.GetProperty("accel_to_decel_enable").GetString().Should().Be("1");
+        root.GetProperty("accel_to_decel_factor").GetString().Should().Be("50%");
+        root.GetProperty("sparse_infill_pattern").GetString().Should().Be("crosshatch");
+        root.GetProperty("layer_height").GetString().Should().Be("0.2");
+        root.GetProperty("normal_value").GetString().Should().Be("klipper");
+
+        json.Should().NotContain("\\u0022");
+    }
+
+    [Fact]
     public void ProcessProfile_StringValues_NotDoubleQuoted()
     {
         string json = RoundTrip(SampleProcessProfile);

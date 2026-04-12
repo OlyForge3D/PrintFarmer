@@ -1,0 +1,1297 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e6]:
+      - link [ref=e10] [cursor=pointer]:
+        - /url: https://simplyprint.io/panel/
+        - img [ref=e26]:
+          - generic [ref=e27]:
+            - generic [ref=e28]:
+              - generic [ref=e30]: i
+              - generic [ref=e31]: m
+              - generic [ref=e32]: p
+              - generic [ref=e33]: l
+              - generic [ref=e34]: "y"
+            - generic [ref=e36]: P
+            - generic [ref=e37]:
+              - generic [ref=e38]: P
+              - generic [ref=e39]: r
+              - generic [ref=e40]: i
+              - generic [ref=e41]: "n"
+              - generic [ref=e42]: t
+            - generic [ref=e44]: S
+      - list [ref=e12]:
+        - listitem [ref=e49]:
+          - link "Printer icon" [ref=e2170] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/printers
+            - img "Printer icon" [ref=e52]
+        - listitem [ref=e53]:
+          - link [ref=e2171] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/files
+        - listitem [ref=e57]:
+          - link [ref=e2172] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/queue
+        - listitem [ref=e61]:
+          - link [ref=e2173] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/statistics
+        - listitem [ref=e65]:
+          - link "Print jobs icon (Benchy)" [ref=e2174] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/jobs
+            - img "Print jobs icon (Benchy)" [ref=e68]
+        - listitem [ref=e69]:
+          - link "Filament icon" [ref=e2175] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/filament
+            - img "Filament icon" [ref=e72]
+        - listitem [ref=e73]:
+          - link [ref=e2176] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/slicer
+        - listitem [ref=e77]:
+          - link [ref=e2177] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/maintenance
+          - button [ref=e81] [cursor=pointer]
+        - listitem [ref=e83]:
+          - link [ref=e2178] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/academy
+        - listitem [ref=e87]:
+          - separator [ref=e89]
+        - listitem [ref=e90]:
+          - link [ref=e2179] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/settings
+        - listitem [ref=e94]:
+          - link [ref=e2180] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/users
+        - listitem [ref=e98]:
+          - link [ref=e2181] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/integrations
+        - listitem [ref=e102]:
+          - link [ref=e2182] [cursor=pointer]:
+            - /url: https://simplyprint.io/panel/refer-a-friend
+        - listitem [ref=e107]
+        - listitem [ref=e111]:
+          - separator [ref=e113]
+        - listitem [ref=e114]:
+          - generic [ref=e117] [cursor=pointer]: 
+        - listitem [ref=e118]
+        - listitem [ref=e122]:
+          - generic [ref=e126] [cursor=pointer]: 
+    - generic [ref=e13]:
+      - generic [ref=e15]:
+        - list [ref=e127]:
+          - listitem [ref=e128]
+        - list [ref=e131]:
+          - listitem [ref=e412]
+          - listitem [ref=e132]:
+            - link [ref=e133] [cursor=pointer]:
+              - /url: https://simplyprint.io/discord
+          - listitem [ref=e136]
+          - listitem [ref=e140]
+          - listitem [ref=e144]
+          - listitem [ref=e148]:
+            - generic [ref=e152] [cursor=pointer]: "1"
+          - listitem [ref=e153]:
+            - generic [ref=e155] [cursor=pointer]:
+              - img "JEFFREY PAPIEZ avatar" [ref=e158]
+              - generic [ref=e160]: JEFFREY PAPIEZ
+      - main [ref=e16]:
+        - generic [ref=e418]:
+          - generic [ref=e420]:
+            - generic [ref=e421]:
+              - button "OrcaSlicer OrcaSlicer · Pre-release" [ref=e423] [cursor=pointer]:
+                - img "OrcaSlicer" [ref=e424]
+                - generic [ref=e425]:
+                  - generic [ref=e426]: OrcaSlicer
+                  - generic [ref=e427]: ·
+                  - generic [ref=e428]: Pre-release
+              - generic [ref=e430]:
+                - button "Printer Rat Rig V-Core 4.0 (400mm) Offline" [ref=e2183] [cursor=pointer]:
+                  - img "Printer" [ref=e433]
+                  - generic [ref=e434]:
+                    - generic [ref=e435]: Rat Rig V-Core 4.0 (400mm)
+                    - generic [ref=e436]: Offline
+                - combobox [ref=e439] [cursor=pointer]:
+                  - generic [ref=e441]: RatRig V-Core 4 HYBRID 400
+                  - generic "Edit machine profile" [ref=e442]:
+                    - button "Edit machine profile" [ref=e443]
+                - generic [ref=e447]:
+                  - heading "Nozzle diameter" [level=6] [ref=e448]
+                  - combobox [ref=e449] [cursor=pointer]:
+                    - generic [ref=e451]: "0.4"
+              - generic [ref=e453]:
+                - generic [ref=e454]:
+                  - generic [ref=e455]:
+                    - heading "Filaments" [level=3] [ref=e456]
+                    - button "Add extruder" [ref=e458] [cursor=pointer]: +
+                  - generic [ref=e460]:
+                    - button "1 PLA RatRig Generic PLA" [ref=e462] [cursor=pointer]:
+                      - generic [ref=e463]:
+                        - generic [ref=e464]: "1"
+                        - generic [ref=e465]:
+                          - generic [ref=e466]: PLA
+                          - generic [ref=e467]: RatRig Generic PLA
+                    - button "Add filament" [ref=e469] [cursor=pointer]:
+                      - generic [ref=e474]: Add Filament
+                - generic [ref=e475]:
+                  - button "Change color PLA 200° / 60°" [expanded] [ref=e476] [cursor=pointer]:
+                    - generic "Change color" [ref=e477]:
+                      - button "Change color" [expanded] [ref=e478]:
+                        - img [ref=e479]
+                    - generic [ref=e484]:
+                      - generic [ref=e485]: PLA
+                      - generic [ref=e486]: 200° / 60°
+                  - combobox [ref=e487] [cursor=pointer]:
+                    - generic [ref=e489]: RatRig Generic PLA
+                    - generic "Edit filament profile" [ref=e490]:
+                      - button "Edit filament profile" [ref=e491]
+                  - iframe [ref=e494]:
+                    
+              - generic [ref=e495]:
+                - combobox [ref=e496] [cursor=pointer]:
+                  - generic "0.25mm Quality Speed @RatRig V-Core 4 HYBRID 0.4" [ref=e498]
+                - generic "Create alterable copy" [ref=e500]:
+                  - button "Save profile" [ref=e501] [cursor=pointer]
+            - generic [ref=e504]:
+              - tablist [ref=e508]:
+                - tab "Basic" [ref=e509] [cursor=pointer]
+                - tab "Simple" [ref=e510] [cursor=pointer]
+                - tab "Advanced" [ref=e511] [cursor=pointer]
+              - textbox "Search for a setting" [ref=e513]
+              - generic [ref=e515]:
+                - tablist [ref=e517]:
+                  - tab "Quality" [ref=e518] [cursor=pointer]
+                  - tab "Strength" [ref=e519] [cursor=pointer]
+                  - tab "Speed" [ref=e520] [cursor=pointer]
+                  - tab "Support" [ref=e521] [cursor=pointer]
+                  - tab "Multimaterial" [ref=e522] [cursor=pointer]
+                  - tab "Others" [ref=e7661] [cursor=pointer]
+                - button [ref=e7663] [cursor=pointer]
+              - generic [ref=e527]:
+                - generic [ref=e7665]:
+                  - heading "Skirt" [level=6] [ref=e7666]
+                  - generic [ref=e7667]:
+                    - generic [ref=e7668]:
+                      - generic "This is the number of loops for the skirt. 0 means the skirt is disabled." [ref=e7670]:
+                        - generic [ref=e7671]: Skirt loops
+                      - spinbutton "Skirt loops Skirt loops" [ref=e7674]: "2"
+                    - generic [ref=e7675]:
+                      - generic "Combined - single skirt for all objects, Per object - individual object skirt." [ref=e7677]:
+                        - generic [ref=e7678]: Skirt type
+                      - combobox [ref=e7680] [cursor=pointer]:
+                        - generic [ref=e7681]: Select
+                    - generic [ref=e7683]:
+                      - generic "Minimum filament extrusion length in mm when printing the skirt. Zero means this feature is disabled. Using a non-zero value is useful if the printer is set up to print without a prime line. Final number of loops is not taking into account while arranging or validating objects distance. Increase loop number in such case." [ref=e7685]:
+                        - generic [ref=e7686]: Skirt minimum extrusion length
+                      - generic [ref=e7688]:
+                        - textbox "Skirt minimum extrusion length Skirt minimum extrusion length" [ref=e7689]
+                        - generic [ref=e7691]: mm
+                    - generic [ref=e7692]:
+                      - generic "This is the distance from the skirt to the brim or the object." [ref=e7694]:
+                        - generic [ref=e7695]: Skirt distance
+                      - generic [ref=e7697]:
+                        - textbox "Skirt distance Skirt distance" [ref=e7698]: "10"
+                        - generic [ref=e7700]: mm
+                    - generic [ref=e7701]:
+                      - generic "Angle from the object center to skirt start point. Zero is the most right position, counter clockwise is positive angle." [ref=e7703]:
+                        - generic [ref=e7704]: Skirt start point
+                      - generic [ref=e7706]:
+                        - textbox "Skirt start point Skirt start point" [ref=e7707]: "-135"
+                        - generic [ref=e7709]: °
+                    - generic [ref=e7710]:
+                      - generic "Speed of skirt, in mm/s. Zero means use default layer extrusion speed." [ref=e7712]:
+                        - generic [ref=e7713]: Skirt speed
+                      - generic [ref=e7715]:
+                        - textbox "Skirt speed Skirt speed" [ref=e7716]: "50"
+                        - generic [ref=e7718]: mm/s
+                    - generic [ref=e7719]:
+                      - 'generic "Number of skirt layers: usually only one" [ref=e7721]':
+                        - generic [ref=e7722]: Skirt height
+                      - generic [ref=e7724]:
+                        - spinbutton "Skirt height Skirt height" [ref=e7725]: "1"
+                        - generic [ref=e7727]: layers
+                    - generic [ref=e7728]:
+                      - 'generic "A draft shield is useful to protect an ABS or ASA print from warping and detaching from print bed due to wind draft. It is usually needed only with open frame printers, i.e. without an enclosure. Enabled = skirt is as tall as the highest printed object. Otherwise ''Skirt height'' is used. Note: With the draft shield active, the skirt will be printed at skirt distance from the object. Therefore, if brims are active it may intersect with them. To avoid this, increase the skirt distance value." [ref=e7730]':
+                        - generic [ref=e7731]: Draft shield
+                      - combobox [ref=e7733] [cursor=pointer]:
+                        - generic [ref=e7734]: Disabled
+                    - generic [ref=e7736]:
+                      - generic "Limits the skirt/draft shield loops to one wall after the first layer. This is useful, on occasion, to conserve filament but may cause the draft shield/skirt to warp / crack." [ref=e7738]:
+                        - generic [ref=e7739]: Single loop after first layer
+                      - checkbox "Single loop after first layer Single loop after first layer" [ref=e7741] [cursor=pointer]
+                - generic [ref=e7742]:
+                  - heading "Brim" [level=6] [ref=e7743]
+                  - generic [ref=e7744]:
+                    - generic [ref=e7745]:
+                      - generic "This controls the generation of the brim at outer and/or inner side of models. Auto means the brim width is analyzed and calculated automatically." [ref=e7747]:
+                        - generic [ref=e7748]: Brim type
+                      - combobox [ref=e7750] [cursor=pointer]:
+                        - generic [ref=e7751]: Select
+                    - generic [ref=e7753]:
+                      - generic "This is the distance from the model to the outermost brim line." [ref=e7755]:
+                        - generic: Brim width
+                      - generic [ref=e7757]:
+                        - textbox "Brim width Brim width" [disabled] [ref=e7758]: "5"
+                        - generic [ref=e7760]: mm
+                    - generic [ref=e7761]:
+                      - generic "This creates a gap between the innermost brim line and the object and can make the brim easier to remove." [ref=e7763]:
+                        - generic: Brim-object gap
+                      - generic [ref=e7765]:
+                        - textbox "Brim-object gap Brim-object gap" [disabled] [ref=e7766]: "0.1"
+                        - generic [ref=e7768]: mm
+                    - generic [ref=e7769]:
+                      - generic "When enabled, the brim is aligned with the first-layer perimeter geometry after Elephant Foot Compensation is applied. This option is intended for cases where Elephant Foot Compensation significantly alters the first-layer footprint. If your current setup already works well, enabling it may be unnecessary and can cause the brim to fuse with upper layers." [ref=e7771]:
+                        - generic: Brim follows compensated outline
+                      - checkbox "Brim follows compensated outline Brim follows compensated outline" [disabled] [ref=e7773]
+                    - generic [ref=e7774]:
+                      - generic "Combine multiple brims into one when they are close to each other. This can improve brim adhesion." [ref=e7776]:
+                        - generic: Combine brims
+                      - checkbox "Combine brims Combine brims" [disabled] [ref=e7778]
+                    - generic [ref=e7779]:
+                      - generic "Maximum angle to let a brim ear appear. If set to 0, no brim will be created. If set to ~180, brim will be created on everything but straight sections." [ref=e7781]:
+                        - generic [ref=e7782]: Brim ear max angle
+                      - generic [ref=e7784]:
+                        - textbox "Brim ear max angle Brim ear max angle" [ref=e7785]: "125"
+                        - generic [ref=e7787]: °
+                    - generic [ref=e7788]:
+                      - generic "The geometry will be decimated before detecting sharp angles. This parameter indicates the minimum length of the deviation for the decimation. 0 to deactivate." [ref=e7790]:
+                        - generic [ref=e7791]: Brim ear detection radius
+                      - generic [ref=e7793]:
+                        - textbox "Brim ear detection radius Brim ear detection radius" [ref=e7794]: "1"
+                        - generic [ref=e7796]: mm
+                - generic [ref=e7797]:
+                  - heading "Special mode" [level=6] [ref=e7798]
+                  - generic [ref=e7799]:
+                    - generic [ref=e7800]:
+                      - generic "Use \"Even-odd\" for 3DLabPrint airplane models. Use \"Close holes\" to close all holes in the model." [ref=e7802]:
+                        - generic [ref=e7803]: Slicing Mode
+                      - combobox [ref=e7805] [cursor=pointer]:
+                        - generic [ref=e7806]: Select
+                    - generic [ref=e7808]:
+                      - generic "This determines the print sequence, allowing you to print layer-by-layer or object-by-object." [ref=e7810]:
+                        - generic [ref=e7811]: Print sequence
+                      - combobox [ref=e7813] [cursor=pointer]:
+                        - generic [ref=e7814]: By layer
+                    - generic [ref=e7816]:
+                      - generic "Print order within a single layer." [ref=e7818]:
+                        - generic [ref=e7819]: Intra-layer order
+                      - combobox [ref=e7821] [cursor=pointer]:
+                        - generic [ref=e7822]: Select
+                    - generic [ref=e7824]:
+                      - generic "This enables spiraling, which smooths out the Z moves of the outer contour and turns a solid model into a single walled print with solid bottom layers. The final generated model has no seam." [ref=e7826]:
+                        - generic [ref=e7827]: Spiral vase
+                      - checkbox "Spiral vase Spiral vase" [ref=e7829] [cursor=pointer]
+                    - generic [ref=e7830]:
+                      - generic "Smooth Spiral smooths out X and Y moves as well, resulting in no visible seam at all, even in the XY directions on walls that are not vertical." [ref=e7832]:
+                        - generic: Smooth Spiral
+                      - checkbox "Smooth Spiral Smooth Spiral" [disabled] [ref=e7834]
+                    - generic [ref=e7835]:
+                      - generic "Maximum distance to move points in XY to try to achieve a smooth spiral. If expressed as a %, it will be computed over nozzle diameter." [ref=e7837]:
+                        - generic: Max XY Smoothing
+                      - generic [ref=e7839]:
+                        - textbox "Max XY Smoothing Max XY Smoothing" [disabled] [ref=e7840]
+                        - generic [ref=e7842]: mm or %
+                    - generic [ref=e7843]:
+                      - generic "Sets the starting flow ratio while transitioning from the last bottom layer to the spiral. Normally the spiral transition scales the flow ratio from 0% to 100% during the first loop which can in some cases lead to under extrusion at the start of the spiral." [ref=e7845]:
+                        - generic: Spiral starting flow ratio
+                      - textbox "Spiral starting flow ratio Spiral starting flow ratio" [disabled] [ref=e7848]
+                    - generic [ref=e7849]:
+                      - generic "Sets the finishing flow ratio while ending the spiral. Normally the spiral transition scales the flow ratio from 100% to 0% during the last loop which can in some cases lead to under extrusion at the end of the spiral." [ref=e7851]:
+                        - generic: Spiral finishing flow ratio
+                      - textbox "Spiral finishing flow ratio Spiral finishing flow ratio" [disabled] [ref=e7854]
+                    - generic [ref=e7855]:
+                      - generic "If smooth or traditional mode is selected, a timelapse video will be generated for each print. After each layer is printed, a snapshot is taken with the chamber camera. All of these snapshots are composed into a timelapse video when printing completes. If smooth mode is selected, the toolhead will move to the excess chute after each layer is printed and then take a snapshot. Since the melt filament may leak from the nozzle during the process of taking a snapshot, a prime tower is required for smooth mode to wipe the nozzle." [ref=e7857]:
+                        - generic: Timelapse
+                      - combobox [disabled] [ref=e7859]:
+                        - generic [ref=e7860]: Select
+                    - generic [ref=e7862]:
+                      - generic "Enable clumping detection" [ref=e7864]:
+                        - generic: Enable clumping detection
+                      - checkbox "Enable clumping detection Enable clumping detection" [disabled] [ref=e7866]
+                - generic [ref=e7867]:
+                  - heading "Fuzzy Skin" [level=6] [ref=e7868]
+                  - generic [ref=e7869]:
+                    - generic [ref=e7870]:
+                      - generic "This setting makes the toolhead randomly jitter while printing walls so that the surface has a rough textured look. This setting controls the fuzzy position." [ref=e7872]:
+                        - generic [ref=e7873]: Fuzzy skin
+                      - combobox [ref=e7875] [cursor=pointer]:
+                        - generic [ref=e7876]: Select
+                    - generic [ref=e7878]:
+                      - generic [ref=e7880]:
+                        - generic: Fuzzy skin generator mode
+                      - combobox [disabled] [ref=e7882]:
+                        - generic [ref=e7883]: Select
+                    - generic [ref=e7885]:
+                      - 'generic "Noise type to use for fuzzy skin generation: Classic: Classic uniform random noise. Perlin: Perlin noise, which gives a more consistent texture. Billow: Similar to perlin noise, but clumpier. Ridged Multifractal: Ridged noise with sharp, jagged features. Creates marble-like textures. Voronoi: Divides the surface into voronoi cells, and displaces each one by a random amount. Creates a patchwork texture." [ref=e7887]':
+                        - generic: Fuzzy skin noise type
+                      - combobox [disabled] [ref=e7889]:
+                        - generic [ref=e7890]: Select
+                    - generic [ref=e7892]:
+                      - generic "The average distance between the random points introduced on each line segment." [ref=e7894]:
+                        - generic: Fuzzy skin point distance
+                      - generic [ref=e7896]:
+                        - textbox "Fuzzy skin point distance Fuzzy skin point distance" [disabled] [ref=e7897]: "0.3"
+                        - generic [ref=e7899]: mm
+                    - generic [ref=e7900]:
+                      - 'generic "The width of jittering: it’s recommended to keep this lower than the outer wall line width." [ref=e7902]':
+                        - generic: Fuzzy skin thickness
+                      - generic [ref=e7904]:
+                        - textbox "Fuzzy skin thickness Fuzzy skin thickness" [disabled] [ref=e7905]: "0.2"
+                        - generic [ref=e7907]: mm
+                    - generic [ref=e7908]:
+                      - generic "The base size of the coherent noise features, in mm. Higher values will result in larger features." [ref=e7910]:
+                        - generic: Fuzzy skin feature size
+                      - generic [ref=e7912]:
+                        - textbox "Fuzzy skin feature size Fuzzy skin feature size" [disabled] [ref=e7913]: "1"
+                        - generic [ref=e7915]: mm
+                    - generic [ref=e7916]:
+                      - generic "The number of octaves of coherent noise to use. Higher values increase the detail of the noise, but also increase computation time." [ref=e7918]:
+                        - generic: Fuzzy Skin Noise Octaves
+                      - spinbutton "Fuzzy Skin Noise Octaves Fuzzy Skin Noise Octaves" [disabled] [ref=e7921]: "4"
+                    - generic [ref=e7922]:
+                      - generic "The decay rate for higher octaves of the coherent noise. Lower values will result in smoother noise." [ref=e7924]:
+                        - generic: Fuzzy skin noise persistence
+                      - textbox "Fuzzy skin noise persistence Fuzzy skin noise persistence" [disabled] [ref=e7927]: "0.5"
+                    - generic [ref=e7928]:
+                      - generic "Whether to apply fuzzy skin on the first layer." [ref=e7930]:
+                        - generic: Apply fuzzy skin to first layer
+                      - checkbox "Apply fuzzy skin to first layer Apply fuzzy skin to first layer" [disabled] [ref=e7932]
+                - generic [ref=e7933]:
+                  - heading "G-code output" [level=6] [ref=e7934]
+                  - generic [ref=e7935]:
+                    - generic [ref=e7936]:
+                      - generic "Don't retract when the travel is entirely in an infill area. That means the oozing can't been seen. This can reduce times of retraction for complex model and save printing time, but make slicing and G-code generation slower." [ref=e7938]:
+                        - generic [ref=e7939]: Reduce infill retraction
+                      - checkbox "Reduce infill retraction Reduce infill retraction" [checked] [ref=e7941] [cursor=pointer]
+                    - generic [ref=e7944]:
+                      - generic "Enable this to add line number(Nx) at the beginning of each G-code line." [ref=e7946]:
+                        - generic [ref=e7947]: Add line number
+                      - checkbox "Add line number Add line number" [ref=e7949] [cursor=pointer]
+                    - generic [ref=e7950]:
+                      - generic "Enable this to get a commented G-code file, with each line explained by a descriptive text. If you print from SD card, the additional weight of the file could make your firmware slow down." [ref=e7952]:
+                        - generic [ref=e7953]: Verbose G-code
+                      - checkbox "Verbose G-code Verbose G-code" [ref=e7955] [cursor=pointer]
+                    - generic [ref=e7956]:
+                      - generic "Enable this to add comments into the G-code labeling print moves with what object they belong to, which is useful for the Octoprint CancelObject plug-in. This setting is NOT compatible with Single Extruder Multi Material setup and Wipe into Object / Wipe into Infill." [ref=e7958]:
+                        - generic [ref=e7959]: Label objects
+                      - checkbox "Label objects Label objects" [ref=e7961] [cursor=pointer]
+                    - generic [ref=e7962]:
+                      - generic "Enable this option to add EXCLUDE OBJECT command in G-code." [ref=e7964]:
+                        - generic [ref=e7965]: Exclude objects
+                      - checkbox "Exclude objects Exclude objects" [checked] [ref=e7967] [cursor=pointer]
+                - generic [ref=e7970]:
+                  - heading "Notes" [level=6] [ref=e7971]
+                  - generic [ref=e7973]:
+                    - generic "You can put here your personal notes. This text will be added to the G-code header comments." [ref=e7975]:
+                      - generic [ref=e7976]: Configuration notes
+                    - textbox "Configuration notes Configuration notes" [ref=e7979]
+          - generic [ref=e1261]:
+            - generic [ref=e1262]:
+              - generic "Add object" [ref=e1263]:
+                - button "Add object" [ref=e1264] [cursor=pointer]
+              - generic "Add plate" [ref=e1266]:
+                - button "Add plate" [ref=e1267] [cursor=pointer]
+              - generic "Arrange objects" [ref=e1269]:
+                - button "Arrange objects" [disabled]
+              - generic "Lay on side" [ref=e1270]:
+                - button "Lay on side" [disabled]
+              - generic "Color painting" [ref=e1271]:
+                - button "Color painting" [disabled]:
+                  - img
+              - generic "Support painting" [ref=e1272]:
+                - button "Support painting" [disabled]:
+                  - img
+              - generic "Seam painting" [ref=e1273]:
+                - button "Seam painting" [disabled]:
+                  - img
+              - generic "Fuzzy skin painting" [ref=e1274]:
+                - button "Fuzzy skin painting" [disabled]:
+                  - img
+              - generic "Add text" [ref=e1275]:
+                - button "Add text" [ref=e1276] [cursor=pointer]
+              - generic "Measure distance" [ref=e1278]:
+                - button "Measure distance" [ref=e1279] [cursor=pointer]
+              - generic "Smart rotate" [ref=e1282]:
+                - button "Smart rotate" [disabled]
+              - generic [ref=e1284]:
+                - generic "Undo" [ref=e1285]:
+                  - button "Undo" [disabled]
+                - generic "Redo" [ref=e1286]:
+                  - button "Redo" [disabled]
+              - generic "Show history" [ref=e1287]:
+                - button "Show history" [expanded] [ref=e1288] [cursor=pointer]
+              - generic "Snap settings" [ref=e1291]:
+                - button "Snap settings" [expanded] [ref=e1292] [cursor=pointer]
+              - generic "Slicer preferences and profile settings" [ref=e1295]:
+                - button "Open settings" [ref=e1296] [cursor=pointer]: Settings & Profiles
+              - generic "Keyboard shortcuts" [ref=e1298]:
+                - button "Open keyboard shortcuts" [ref=e1299] [cursor=pointer]
+              - generic "Beta feature; potentially buggy" [ref=e1302]:
+                - generic [ref=e1303]: Beta
+            - generic [ref=e1304]:
+              - generic [ref=e1305]:
+                - generic "Move" [ref=e1306]:
+                  - button "Move" [disabled] [expanded]
+                - generic "Rotate" [ref=e1307]:
+                  - button "Rotate" [disabled] [expanded]
+                - generic "Scale" [ref=e1308]:
+                  - button "Scale" [disabled] [expanded]
+              - generic "Objects" [ref=e1310]:
+                - button "Objects" [disabled] [expanded]
+            - generic [ref=e1315]:
+              - generic [ref=e1316]:
+                - generic [ref=e1317]: 0 objects
+                - generic [ref=e1318]: 400 x 400 x 400 mm
+              - generic [ref=e1319]:
+                - button "30 / 30 left" [expanded] [ref=e1320] [cursor=pointer]:
+                  - generic [ref=e1321]: 30 / 30 left
+                - button "Slice" [disabled] [ref=e1323]
+  - log [ref=e25]
+  - generic [ref=e379]: giItT1WQy@!-/#
+  - generic [ref=e380]: giItT1WQy@!-/#
+  - dialog [ref=e1324]:
+    - generic [ref=e1325]:
+      - generic [ref=e1326]:
+        - generic [ref=e1327]:
+          - generic [ref=e1328]: Slicer Settings
+          - button "Close" [ref=e1329] [cursor=pointer]
+        - button "OrcaSlicer OrcaSlicer · Pre-release" [ref=e1332] [cursor=pointer]:
+          - img "OrcaSlicer" [ref=e1333]
+          - generic [ref=e1334]:
+            - generic [ref=e1335]: OrcaSlicer
+            - generic [ref=e1336]: ·
+            - generic [ref=e1337]: Pre-release
+        - generic [ref=e1339]:
+          - button "Printer Rat Rig V-Core 4.0 (400mm) Offline" [ref=e2185] [cursor=pointer]:
+            - img "Printer" [ref=e1342]
+            - generic [ref=e1343]:
+              - generic [ref=e1344]: Rat Rig V-Core 4.0 (400mm)
+              - generic [ref=e1345]: Offline
+          - combobox [ref=e1348] [cursor=pointer]:
+            - generic [ref=e1350]: RatRig V-Core 4 HYBRID 400
+            - generic "Edit machine profile" [ref=e1351]:
+              - button "Edit machine profile" [ref=e1352]
+          - generic [ref=e1356]:
+            - heading "Nozzle diameter" [level=6] [ref=e1357]
+            - combobox [ref=e1358] [cursor=pointer]:
+              - generic [ref=e1360]: "0.4"
+        - generic [ref=e1362]:
+          - generic [ref=e1363]:
+            - generic [ref=e1364]:
+              - heading "Filaments" [level=3] [ref=e1365]
+              - button "Add extruder" [ref=e1367] [cursor=pointer]: +
+            - generic [ref=e1369]:
+              - button "1 PLA RatRig Generic PLA" [ref=e1371] [cursor=pointer]:
+                - generic [ref=e1372]:
+                  - generic [ref=e1373]: "1"
+                  - generic [ref=e1374]:
+                    - generic [ref=e1375]: PLA
+                    - generic [ref=e1376]: RatRig Generic PLA
+              - button "Add filament" [ref=e1378] [cursor=pointer]:
+                - generic [ref=e1383]: Add Filament
+          - generic [ref=e1384]:
+            - button "Change color PLA 200° / 60°" [expanded] [ref=e1385] [cursor=pointer]:
+              - generic "Change color" [ref=e1386]:
+                - button "Change color" [expanded] [ref=e1387]:
+                  - img [ref=e1388]
+              - generic [ref=e1393]:
+                - generic [ref=e1394]: PLA
+                - generic [ref=e1395]: 200° / 60°
+            - combobox [ref=e1396] [cursor=pointer]:
+              - generic [ref=e1398]: RatRig Generic PLA
+              - generic "Edit filament profile" [ref=e1399]:
+                - button "Edit filament profile" [ref=e1400]
+            - iframe [ref=e1403]:
+              
+        - generic [ref=e1404]:
+          - combobox [ref=e1405] [cursor=pointer]:
+            - generic "0.25mm Quality Speed @RatRig V-Core 4 HYBRID 0.4" [ref=e1407]
+          - generic "Create alterable copy" [ref=e1409]:
+            - button "Save profile" [ref=e1410] [cursor=pointer]
+      - generic [ref=e1413]:
+        - tablist [ref=e1417]:
+          - tab "Basic" [ref=e1418] [cursor=pointer]
+          - tab "Simple" [ref=e1419] [cursor=pointer]
+          - tab "Advanced" [ref=e1420] [cursor=pointer]
+        - textbox "Search for a setting" [ref=e1422]
+        - generic [ref=e1424]:
+          - tablist [ref=e1426]:
+            - tab "Quality" [ref=e1427] [cursor=pointer]
+            - tab "Strength" [ref=e1428] [cursor=pointer]
+            - tab "Speed" [ref=e1429] [cursor=pointer]
+            - tab "Support" [ref=e1430] [cursor=pointer]
+            - tab "Multimaterial" [ref=e1431] [cursor=pointer]
+            - tab "Others" [ref=e7980] [cursor=pointer]
+          - button [ref=e7982] [cursor=pointer]
+        - generic [ref=e1436]:
+          - generic [ref=e7984]:
+            - heading "Skirt" [level=6] [ref=e7985]
+            - generic [ref=e7986]:
+              - generic [ref=e7987]:
+                - generic "This is the number of loops for the skirt. 0 means the skirt is disabled." [ref=e7989]:
+                  - generic [ref=e7990]: Skirt loops
+                - spinbutton "This is the number of loops for the skirt. 0 means the skirt is disabled." [ref=e7993]: "2"
+              - generic [ref=e7994]:
+                - generic "Combined - single skirt for all objects, Per object - individual object skirt." [ref=e7996]:
+                  - generic [ref=e7997]: Skirt type
+                - combobox [ref=e7999] [cursor=pointer]:
+                  - generic [ref=e8000]: Select
+              - generic [ref=e8002]:
+                - generic "Minimum filament extrusion length in mm when printing the skirt. Zero means this feature is disabled. Using a non-zero value is useful if the printer is set up to print without a prime line. Final number of loops is not taking into account while arranging or validating objects distance. Increase loop number in such case." [ref=e8004]:
+                  - generic [ref=e8005]: Skirt minimum extrusion length
+                - generic [ref=e8007]:
+                  - textbox "Minimum filament extrusion length in mm when printing the skirt. Zero means this feature is disabled. Using a non-zero value is useful if the printer is set up to print without a prime line. Final number of loops is not taking into account while arranging or validating objects distance. Increase loop number in such case." [ref=e8008]
+                  - generic [ref=e8010]: mm
+              - generic [ref=e8011]:
+                - generic "This is the distance from the skirt to the brim or the object." [ref=e8013]:
+                  - generic [ref=e8014]: Skirt distance
+                - generic [ref=e8016]:
+                  - textbox "This is the distance from the skirt to the brim or the object." [ref=e8017]: "10"
+                  - generic [ref=e8019]: mm
+              - generic [ref=e8020]:
+                - generic "Angle from the object center to skirt start point. Zero is the most right position, counter clockwise is positive angle." [ref=e8022]:
+                  - generic [ref=e8023]: Skirt start point
+                - generic [ref=e8025]:
+                  - textbox "Angle from the object center to skirt start point. Zero is the most right position, counter clockwise is positive angle." [ref=e8026]: "-135"
+                  - generic [ref=e8028]: °
+              - generic [ref=e8029]:
+                - generic "Speed of skirt, in mm/s. Zero means use default layer extrusion speed." [ref=e8031]:
+                  - generic [ref=e8032]: Skirt speed
+                - generic [ref=e8034]:
+                  - textbox "Speed of skirt, in mm/s. Zero means use default layer extrusion speed." [ref=e8035]: "50"
+                  - generic [ref=e8037]: mm/s
+              - generic [ref=e8038]:
+                - 'generic "Number of skirt layers: usually only one" [ref=e8040]':
+                  - generic [ref=e8041]: Skirt height
+                - generic [ref=e8043]:
+                  - 'spinbutton "Number of skirt layers: usually only one" [ref=e8044]': "1"
+                  - generic [ref=e8046]: layers
+              - generic [ref=e8047]:
+                - 'generic "A draft shield is useful to protect an ABS or ASA print from warping and detaching from print bed due to wind draft. It is usually needed only with open frame printers, i.e. without an enclosure. Enabled = skirt is as tall as the highest printed object. Otherwise ''Skirt height'' is used. Note: With the draft shield active, the skirt will be printed at skirt distance from the object. Therefore, if brims are active it may intersect with them. To avoid this, increase the skirt distance value." [ref=e8049]':
+                  - generic [ref=e8050]: Draft shield
+                - combobox [ref=e8052] [cursor=pointer]:
+                  - generic [ref=e8053]: Disabled
+              - generic [ref=e8055]:
+                - generic "Limits the skirt/draft shield loops to one wall after the first layer. This is useful, on occasion, to conserve filament but may cause the draft shield/skirt to warp / crack." [ref=e8057]:
+                  - generic [ref=e8058]: Single loop after first layer
+                - checkbox "Single loop after first layer" [ref=e8060] [cursor=pointer]
+          - generic [ref=e8061]:
+            - heading "Brim" [level=6] [ref=e8062]
+            - generic [ref=e8063]:
+              - generic [ref=e8064]:
+                - generic "This controls the generation of the brim at outer and/or inner side of models. Auto means the brim width is analyzed and calculated automatically." [ref=e8066]:
+                  - generic [ref=e8067]: Brim type
+                - combobox [ref=e8069] [cursor=pointer]:
+                  - generic [ref=e8070]: Select
+              - generic [ref=e8072]:
+                - generic "This is the distance from the model to the outermost brim line." [ref=e8074]:
+                  - generic: Brim width
+                - generic [ref=e8076]:
+                  - textbox "This is the distance from the model to the outermost brim line." [disabled] [ref=e8077]: "5"
+                  - generic [ref=e8079]: mm
+              - generic [ref=e8080]:
+                - generic "This creates a gap between the innermost brim line and the object and can make the brim easier to remove." [ref=e8082]:
+                  - generic: Brim-object gap
+                - generic [ref=e8084]:
+                  - textbox "This creates a gap between the innermost brim line and the object and can make the brim easier to remove." [disabled] [ref=e8085]: "0.1"
+                  - generic [ref=e8087]: mm
+              - generic [ref=e8088]:
+                - generic "When enabled, the brim is aligned with the first-layer perimeter geometry after Elephant Foot Compensation is applied. This option is intended for cases where Elephant Foot Compensation significantly alters the first-layer footprint. If your current setup already works well, enabling it may be unnecessary and can cause the brim to fuse with upper layers." [ref=e8090]:
+                  - generic: Brim follows compensated outline
+                - checkbox "Brim follows compensated outline" [disabled] [ref=e8092]
+              - generic [ref=e8093]:
+                - generic "Combine multiple brims into one when they are close to each other. This can improve brim adhesion." [ref=e8095]:
+                  - generic: Combine brims
+                - checkbox "Combine brims" [disabled] [ref=e8097]
+              - generic [ref=e8098]:
+                - generic "Maximum angle to let a brim ear appear. If set to 0, no brim will be created. If set to ~180, brim will be created on everything but straight sections." [ref=e8100]:
+                  - generic [ref=e8101]: Brim ear max angle
+                - generic [ref=e8103]:
+                  - textbox "Maximum angle to let a brim ear appear. If set to 0, no brim will be created. If set to ~180, brim will be created on everything but straight sections." [ref=e8104]: "125"
+                  - generic [ref=e8106]: °
+              - generic [ref=e8107]:
+                - generic "The geometry will be decimated before detecting sharp angles. This parameter indicates the minimum length of the deviation for the decimation. 0 to deactivate." [ref=e8109]:
+                  - generic [ref=e8110]: Brim ear detection radius
+                - generic [ref=e8112]:
+                  - textbox "The geometry will be decimated before detecting sharp angles. This parameter indicates the minimum length of the deviation for the decimation. 0 to deactivate." [ref=e8113]: "1"
+                  - generic [ref=e8115]: mm
+          - generic [ref=e8116]:
+            - heading "Special mode" [level=6] [ref=e8117]
+            - generic [ref=e8118]:
+              - generic [ref=e8119]:
+                - generic "Use \"Even-odd\" for 3DLabPrint airplane models. Use \"Close holes\" to close all holes in the model." [ref=e8121]:
+                  - generic [ref=e8122]: Slicing Mode
+                - combobox [ref=e8124] [cursor=pointer]:
+                  - generic [ref=e8125]: Select
+              - generic [ref=e8127]:
+                - generic "This determines the print sequence, allowing you to print layer-by-layer or object-by-object." [ref=e8129]:
+                  - generic [ref=e8130]: Print sequence
+                - combobox [ref=e8132] [cursor=pointer]:
+                  - generic [ref=e8133]: By layer
+              - generic [ref=e8135]:
+                - generic "Print order within a single layer." [ref=e8137]:
+                  - generic [ref=e8138]: Intra-layer order
+                - combobox [ref=e8140] [cursor=pointer]:
+                  - generic [ref=e8141]: Select
+              - generic [ref=e8143]:
+                - generic "This enables spiraling, which smooths out the Z moves of the outer contour and turns a solid model into a single walled print with solid bottom layers. The final generated model has no seam." [ref=e8145]:
+                  - generic [ref=e8146]: Spiral vase
+                - checkbox "Spiral vase" [ref=e8148] [cursor=pointer]
+              - generic [ref=e8149]:
+                - generic "Smooth Spiral smooths out X and Y moves as well, resulting in no visible seam at all, even in the XY directions on walls that are not vertical." [ref=e8151]:
+                  - generic: Smooth Spiral
+                - checkbox "Smooth Spiral" [disabled] [ref=e8153]
+              - generic [ref=e8154]:
+                - generic "Maximum distance to move points in XY to try to achieve a smooth spiral. If expressed as a %, it will be computed over nozzle diameter." [ref=e8156]:
+                  - generic: Max XY Smoothing
+                - generic [ref=e8158]:
+                  - textbox "Maximum distance to move points in XY to try to achieve a smooth spiral. If expressed as a %, it will be computed over nozzle diameter." [disabled] [ref=e8159]
+                  - generic [ref=e8161]: mm or %
+              - generic [ref=e8162]:
+                - generic "Sets the starting flow ratio while transitioning from the last bottom layer to the spiral. Normally the spiral transition scales the flow ratio from 0% to 100% during the first loop which can in some cases lead to under extrusion at the start of the spiral." [ref=e8164]:
+                  - generic: Spiral starting flow ratio
+                - textbox "Sets the starting flow ratio while transitioning from the last bottom layer to the spiral. Normally the spiral transition scales the flow ratio from 0% to 100% during the first loop which can in some cases lead to under extrusion at the start of the spiral." [disabled] [ref=e8167]
+              - generic [ref=e8168]:
+                - generic "Sets the finishing flow ratio while ending the spiral. Normally the spiral transition scales the flow ratio from 100% to 0% during the last loop which can in some cases lead to under extrusion at the end of the spiral." [ref=e8170]:
+                  - generic: Spiral finishing flow ratio
+                - textbox "Sets the finishing flow ratio while ending the spiral. Normally the spiral transition scales the flow ratio from 100% to 0% during the last loop which can in some cases lead to under extrusion at the end of the spiral." [disabled] [ref=e8173]
+              - generic [ref=e8174]:
+                - generic "If smooth or traditional mode is selected, a timelapse video will be generated for each print. After each layer is printed, a snapshot is taken with the chamber camera. All of these snapshots are composed into a timelapse video when printing completes. If smooth mode is selected, the toolhead will move to the excess chute after each layer is printed and then take a snapshot. Since the melt filament may leak from the nozzle during the process of taking a snapshot, a prime tower is required for smooth mode to wipe the nozzle." [ref=e8176]:
+                  - generic: Timelapse
+                - combobox [disabled] [ref=e8178]:
+                  - generic [ref=e8179]: Select
+              - generic [ref=e8181]:
+                - generic "Enable clumping detection" [ref=e8183]:
+                  - generic: Enable clumping detection
+                - checkbox "Enable clumping detection" [disabled] [ref=e8185]
+          - generic [ref=e8186]:
+            - heading "Fuzzy Skin" [level=6] [ref=e8187]
+            - generic [ref=e8188]:
+              - generic [ref=e8189]:
+                - generic "This setting makes the toolhead randomly jitter while printing walls so that the surface has a rough textured look. This setting controls the fuzzy position." [ref=e8191]:
+                  - generic [ref=e8192]: Fuzzy skin
+                - combobox [ref=e8194] [cursor=pointer]:
+                  - generic [ref=e8195]: Select
+              - generic [ref=e8197]:
+                - generic [ref=e8199]:
+                  - generic: Fuzzy skin generator mode
+                - combobox [disabled] [ref=e8201]:
+                  - generic [ref=e8202]: Select
+              - generic [ref=e8204]:
+                - 'generic "Noise type to use for fuzzy skin generation: Classic: Classic uniform random noise. Perlin: Perlin noise, which gives a more consistent texture. Billow: Similar to perlin noise, but clumpier. Ridged Multifractal: Ridged noise with sharp, jagged features. Creates marble-like textures. Voronoi: Divides the surface into voronoi cells, and displaces each one by a random amount. Creates a patchwork texture." [ref=e8206]':
+                  - generic: Fuzzy skin noise type
+                - combobox [disabled] [ref=e8208]:
+                  - generic [ref=e8209]: Select
+              - generic [ref=e8211]:
+                - generic "The average distance between the random points introduced on each line segment." [ref=e8213]:
+                  - generic: Fuzzy skin point distance
+                - generic [ref=e8215]:
+                  - textbox "The average distance between the random points introduced on each line segment." [disabled] [ref=e8216]: "0.3"
+                  - generic [ref=e8218]: mm
+              - generic [ref=e8219]:
+                - 'generic "The width of jittering: it’s recommended to keep this lower than the outer wall line width." [ref=e8221]':
+                  - generic: Fuzzy skin thickness
+                - generic [ref=e8223]:
+                  - 'textbox "The width of jittering: it’s recommended to keep this lower than the outer wall line width." [disabled] [ref=e8224]': "0.2"
+                  - generic [ref=e8226]: mm
+              - generic [ref=e8227]:
+                - generic "The base size of the coherent noise features, in mm. Higher values will result in larger features." [ref=e8229]:
+                  - generic: Fuzzy skin feature size
+                - generic [ref=e8231]:
+                  - textbox "The base size of the coherent noise features, in mm. Higher values will result in larger features." [disabled] [ref=e8232]: "1"
+                  - generic [ref=e8234]: mm
+              - generic [ref=e8235]:
+                - generic "The number of octaves of coherent noise to use. Higher values increase the detail of the noise, but also increase computation time." [ref=e8237]:
+                  - generic: Fuzzy Skin Noise Octaves
+                - spinbutton "The number of octaves of coherent noise to use. Higher values increase the detail of the noise, but also increase computation time." [disabled] [ref=e8240]: "4"
+              - generic [ref=e8241]:
+                - generic "The decay rate for higher octaves of the coherent noise. Lower values will result in smoother noise." [ref=e8243]:
+                  - generic: Fuzzy skin noise persistence
+                - textbox "The decay rate for higher octaves of the coherent noise. Lower values will result in smoother noise." [disabled] [ref=e8246]: "0.5"
+              - generic [ref=e8247]:
+                - generic "Whether to apply fuzzy skin on the first layer." [ref=e8249]:
+                  - generic: Apply fuzzy skin to first layer
+                - checkbox "Apply fuzzy skin to first layer" [disabled] [ref=e8251]
+          - generic [ref=e8252]:
+            - heading "G-code output" [level=6] [ref=e8253]
+            - generic [ref=e8254]:
+              - generic [ref=e8255]:
+                - generic "Don't retract when the travel is entirely in an infill area. That means the oozing can't been seen. This can reduce times of retraction for complex model and save printing time, but make slicing and G-code generation slower." [ref=e8257]:
+                  - generic [ref=e8258]: Reduce infill retraction
+                - checkbox "Reduce infill retraction" [checked] [ref=e8260] [cursor=pointer]
+              - generic [ref=e8263]:
+                - generic "Enable this to add line number(Nx) at the beginning of each G-code line." [ref=e8265]:
+                  - generic [ref=e8266]: Add line number
+                - checkbox "Add line number" [ref=e8268] [cursor=pointer]
+              - generic [ref=e8269]:
+                - generic "Enable this to get a commented G-code file, with each line explained by a descriptive text. If you print from SD card, the additional weight of the file could make your firmware slow down." [ref=e8271]:
+                  - generic [ref=e8272]: Verbose G-code
+                - checkbox "Verbose G-code" [ref=e8274] [cursor=pointer]
+              - generic [ref=e8275]:
+                - generic "Enable this to add comments into the G-code labeling print moves with what object they belong to, which is useful for the Octoprint CancelObject plug-in. This setting is NOT compatible with Single Extruder Multi Material setup and Wipe into Object / Wipe into Infill." [ref=e8277]:
+                  - generic [ref=e8278]: Label objects
+                - checkbox "Label objects" [ref=e8280] [cursor=pointer]
+              - generic [ref=e8281]:
+                - generic "Enable this option to add EXCLUDE OBJECT command in G-code." [ref=e8283]:
+                  - generic [ref=e8284]: Exclude objects
+                - checkbox "Exclude objects" [checked] [ref=e8286] [cursor=pointer]
+          - generic [ref=e8289]:
+            - heading "Notes" [level=6] [ref=e8290]
+            - generic [ref=e8292]:
+              - generic "You can put here your personal notes. This text will be added to the G-code header comments." [ref=e8294]:
+                - generic [ref=e8295]: Configuration notes
+              - textbox "You can put here your personal notes. This text will be added to the G-code header comments." [ref=e8298]
+  - dialog [ref=e2187]:
+    - document:
+      - generic [ref=e2188]:
+        - generic [ref=e2189]:
+          - heading "Set up new printer" [level=5] [ref=e2190]
+          - button "Close" [ref=e2191] [cursor=pointer]: ×
+        - generic [ref=e2192]:
+          - tablist [ref=e2193]:
+            - listitem [ref=e2194] [cursor=pointer]:
+              - tab "1. Setup guide" [ref=e2195]
+            - listitem [ref=e2196] [cursor=pointer]:
+              - tab "2. Add printer (after setup guide)" [ref=e2197]:
+                - text: 2. Add printer
+                - generic [ref=e2198]: (after setup guide)
+          - tabpanel [ref=e2200]:
+            - generic [ref=e2201]:
+              - group "Setup view toggle" [ref=e2204]:
+                - link "Browse by Brand" [ref=e2205] [cursor=pointer]:
+                  - /url: https://simplyprint.io/setup-guide
+                  - text: Browse by Brand
+                - link "Browse by Method" [ref=e2207] [cursor=pointer]:
+                  - /url: https://simplyprint.io/setup-guide/methods
+                  - text: Browse by Method
+              - generic [ref=e2210]:
+                - generic [ref=e2214] [cursor=pointer]: Welcome to the SimplyPrint Setup Guide
+                - generic [ref=e2217]:
+                  - paragraph [ref=e2218]:
+                    - text: This guide will help you connect your 3D printer to your
+                    - strong [ref=e2219]: SimplyPrint
+                    - text: account, enabling
+                    - strong [ref=e2220]: remote monitoring & printing
+                    - text: ","
+                    - strong [ref=e2221]: online slicing
+                    - text: ","
+                    - strong [ref=e2222]: print farm management
+                    - text: ","
+                    - strong [ref=e2223]: filament inventory tracking
+                    - text: ", and much more."
+                  - paragraph [ref=e2224]:
+                    - text: We support
+                    - strong [ref=e2225]: 617+ printer models
+                    - text: from
+                    - strong [ref=e2226]: 138+ brands
+                    - text: .
+                  - generic [ref=e2227]:
+                    - heading "Types of Printer Connections" [level=6] [ref=e2228]: Types of Printer Connections
+                    - paragraph [ref=e2230]: "For SimplyPrint to communicate with your printer, our software must be installed, enabled, or connected via supported hardware — the method depends on your printer type:"
+                    - generic [ref=e2231]:
+                      - generic [ref=e2233]:
+                        - heading "Smart Printers" [level=5] [ref=e2236]
+                        - paragraph [ref=e2237]: WiFi & Klipper built-in. Install directly — no extra hardware!
+                        - text: E.g. Creality K1, Ender-3 V3
+                      - generic [ref=e2239]:
+                        - heading "Cloud Printers" [level=5] [ref=e2242]
+                        - paragraph [ref=e2243]: Cloud-connected but locked. Need a local bridge device.
+                        - text: E.g. Bambu Lab X1C, P1P
+                      - generic [ref=e2245]:
+                        - heading "Traditional Printers" [level=5] [ref=e2248]
+                        - paragraph [ref=e2249]: No WiFi. Need a Raspberry Pi with OctoPrint via USB.
+                        - text: E.g. Ender-3, Prusa MK3
+                      - generic [ref=e2251]:
+                        - heading "Locked Printers" [level=5] [ref=e2254]
+                        - paragraph [ref=e2255]: Manufacturer-restricted. Requires "rooting" first.
+                        - text: Some Elegoo, Anycubic
+                  - paragraph [ref=e2256]: Don't worry if this sounds complicated — we'll guide you through it step by step.
+              - generic [ref=e2258]:
+                - combobox "Search printer brands" [ref=e2260]
+                - heading "Most popular brands" [level=3] [ref=e2261]
+                - generic [ref=e2262]:
+                  - link "Bambu Lab logo Bambu Lab" [ref=e2264] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/bambu-lab
+                    - generic [ref=e2265]:
+                      - img "Bambu Lab logo" [ref=e2268]
+                      - heading "Bambu Lab" [level=5] [ref=e2269]
+                  - link "Creality logo Creality" [ref=e2271] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/creality
+                    - generic [ref=e2272]:
+                      - img "Creality logo" [ref=e2275]
+                      - heading "Creality" [level=5] [ref=e2276]
+                  - link "Prusa logo Prusa" [ref=e2278] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/prusa
+                    - generic [ref=e2279]:
+                      - img "Prusa logo" [ref=e2282]
+                      - heading "Prusa" [level=5] [ref=e2283]
+                  - link "Anycubic logo Anycubic" [ref=e2285] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/anycubic
+                    - generic [ref=e2286]:
+                      - img "Anycubic logo" [ref=e2289]
+                      - heading "Anycubic" [level=5] [ref=e2290]
+                  - link "FLSUN logo FLSUN" [ref=e2292] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/flsun
+                    - generic [ref=e2293]:
+                      - img "FLSUN logo" [ref=e2296]
+                      - heading "FLSUN" [level=5] [ref=e2297]
+                  - link "Flashforge logo Flashforge" [ref=e2299] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/flashforge
+                    - generic [ref=e2300]:
+                      - img "Flashforge logo" [ref=e2303]
+                      - heading "Flashforge" [level=5] [ref=e2304]
+                  - link "Elegoo logo Elegoo" [ref=e2306] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/elegoo
+                    - generic [ref=e2307]:
+                      - img "Elegoo logo" [ref=e2310]
+                      - heading "Elegoo" [level=5] [ref=e2311]
+                  - link "Qidi Tech logo Qidi Tech" [ref=e2313] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/qidi-tech
+                    - generic [ref=e2314]:
+                      - img "Qidi Tech logo" [ref=e2317]
+                      - heading "Qidi Tech" [level=5] [ref=e2318]
+                  - link "Comgrow logo Comgrow" [ref=e2320] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/comgrow
+                    - generic [ref=e2321]:
+                      - img "Comgrow logo" [ref=e2324]
+                      - heading "Comgrow" [level=5] [ref=e2325]
+                  - link "Snapmaker logo Snapmaker" [ref=e2327] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/snapmaker
+                    - generic [ref=e2328]:
+                      - img "Snapmaker logo" [ref=e2331]
+                      - heading "Snapmaker" [level=5] [ref=e2332]
+                - heading "All other brands" [level=3] [ref=e2333]
+                - generic [ref=e2334]:
+                  - link "Artillery 3D" [ref=e2336] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/artillery-3d
+                    - heading "Artillery 3D" [level=5] [ref=e2338]
+                  - link "Sovol" [ref=e2340] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/sovol
+                    - heading "Sovol" [level=5] [ref=e2342]
+                  - link "Voron" [ref=e2344] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/voron
+                    - heading "Voron" [level=5] [ref=e2346]
+                  - link "Anet" [ref=e2348] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/anet
+                    - heading "Anet" [level=5] [ref=e2350]
+                  - link "Voxelab" [ref=e2352] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/voxelab
+                    - heading "Voxelab" [level=5] [ref=e2354]
+                  - link "Bigtreetech" [ref=e2356] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/bigtreetech
+                    - heading "Bigtreetech" [level=5] [ref=e2358]
+                  - link "Tronxy" [ref=e2360] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/tronxy
+                    - heading "Tronxy" [level=5] [ref=e2362]
+                  - link "Rat Rig" [ref=e2364] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/rat-rig
+                    - heading "Rat Rig" [level=5] [ref=e2366]
+                  - link "Geeetech" [ref=e2368] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/geeetech
+                    - heading "Geeetech" [level=5] [ref=e2370]
+                  - link "Monoprice" [ref=e2372] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/monoprice
+                    - heading "Monoprice" [level=5] [ref=e2374]
+                  - link "Ultimaker" [ref=e2376] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/ultimaker
+                    - heading "Ultimaker" [level=5] [ref=e2378]
+                  - link "Wanhao" [ref=e2380] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/wanhao
+                    - heading "Wanhao" [level=5] [ref=e2382]
+                  - link "Tevo" [ref=e2384] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/tevo
+                    - heading "Tevo" [level=5] [ref=e2386]
+                  - link "Longer" [ref=e2388] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/longer
+                    - heading "Longer" [level=5] [ref=e2390]
+                  - link "Proteor OEM Partner" [ref=e2392] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/proteor
+                    - heading "Proteor OEM Partner" [level=5] [ref=e2394]:
+                      - text: Proteor
+                      - generic [ref=e2395]: OEM Partner
+                  - link "Kingroon" [ref=e2397] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/kingroon
+                    - heading "Kingroon" [level=5] [ref=e2399]
+                  - link "XYZprinting" [ref=e2401] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/xyzprinting
+                    - heading "XYZprinting" [level=5] [ref=e2403]
+                  - link "Flying Bear" [ref=e2405] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/flying-bear
+                    - heading "Flying Bear" [level=5] [ref=e2407]
+                  - link "LulzBot" [ref=e2409] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/lulzbot
+                    - heading "LulzBot" [level=5] [ref=e2411]
+                  - link "Two Trees" [ref=e2413] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/two-trees
+                    - heading "Two Trees" [level=5] [ref=e2415]
+                  - link "IdeaFormer" [ref=e2417] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/ideaformer
+                    - heading "IdeaFormer" [level=5] [ref=e2419]
+                  - link "MakerBot" [ref=e2421] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/makerbot
+                    - heading "MakerBot" [level=5] [ref=e2423]
+                  - link "MINGDA" [ref=e2425] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/mingda
+                    - heading "MINGDA" [level=5] [ref=e2427]
+                  - link "Vivedino" [ref=e2429] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/vivedino
+                    - heading "Vivedino" [level=5] [ref=e2431]
+                  - link "Easythreed" [ref=e2433] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/easythreed
+                    - heading "Easythreed" [level=5] [ref=e2435]
+                  - link "Sunlu" [ref=e2437] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/sunlu
+                    - heading "Sunlu" [level=5] [ref=e2439]
+                  - link "Tenlog" [ref=e2441] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/tenlog
+                    - heading "Tenlog" [level=5] [ref=e2443]
+                  - link "WEEDO" [ref=e2445] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/weedo
+                    - heading "WEEDO" [level=5] [ref=e2447]
+                  - link "JGMaker/JGAurora" [ref=e2449] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/jgmaker-jgaurora
+                    - heading "JGMaker/JGAurora" [level=5] [ref=e2451]
+                  - link "Alfawise" [ref=e2453] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/alfawise
+                    - heading "Alfawise" [level=5] [ref=e2455]
+                  - link "Meltingplot" [ref=e2457] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/meltingplot
+                    - heading "Meltingplot" [level=5] [ref=e2459]
+                  - link "CreatBot" [ref=e2461] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/creatbot
+                    - heading "CreatBot" [level=5] [ref=e2463]
+                  - link "Robo 3D" [ref=e2465] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/robo-3d
+                    - heading "Robo 3D" [level=5] [ref=e2467]
+                  - link "MakerGear" [ref=e2469] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/makergear
+                    - heading "MakerGear" [level=5] [ref=e2471]
+                  - link "Eryone" [ref=e2473] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/eryone
+                    - heading "Eryone" [level=5] [ref=e2475]
+                  - link "Lotmaxx" [ref=e2477] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/lotmaxx
+                    - heading "Lotmaxx" [level=5] [ref=e2479]
+                  - link "GTMAX" [ref=e2481] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/gtmax
+                    - heading "GTMAX" [level=5] [ref=e2483]
+                  - link "Renkforce" [ref=e2485] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/renkforce
+                    - heading "Renkforce" [level=5] [ref=e2487]
+                  - link "Malyan" [ref=e2489] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/malyan
+                    - heading "Malyan" [level=5] [ref=e2491]
+                  - link "Kentstrapper OEM Partner" [ref=e2493] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/kentstrapper
+                    - heading "Kentstrapper OEM Partner" [level=5] [ref=e2495]:
+                      - text: Kentstrapper
+                      - generic [ref=e2496]: OEM Partner
+                  - link "Hypercube" [ref=e2498] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/hypercube
+                    - heading "Hypercube" [level=5] [ref=e2500]
+                  - link "Dremel" [ref=e2502] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/dremel
+                    - heading "Dremel" [level=5] [ref=e2504]
+                  - link "AnkerMake" [ref=e2506] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/ankermake
+                    - heading "AnkerMake" [level=5] [ref=e2508]
+                  - link "IFactory3D" [ref=e2510] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/ifactory3d
+                    - heading "IFactory3D" [level=5] [ref=e2512]
+                  - link "printrbot" [ref=e2514] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/printrbot
+                    - heading "printrbot" [level=5] [ref=e2516]
+                  - link "SeeMeCNC" [ref=e2518] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/seemecnc
+                    - heading "SeeMeCNC" [level=5] [ref=e2520]
+                  - link "Fokoos" [ref=e2522] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/fokoos
+                    - heading "Fokoos" [level=5] [ref=e2524]
+                  - link "Velleman" [ref=e2526] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/velleman
+                    - heading "Velleman" [level=5] [ref=e2528]
+                  - link "BCN3D" [ref=e2530] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/bcn3d
+                    - heading "BCN3D" [level=5] [ref=e2532]
+                  - link "Dagoma" [ref=e2534] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/dagoma
+                    - heading "Dagoma" [level=5] [ref=e2536]
+                  - link "AdimLab" [ref=e2538] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/adimlab
+                    - heading "AdimLab" [level=5] [ref=e2540]
+                  - link "Goofoo" [ref=e2542] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/goofoo
+                    - heading "Goofoo" [level=5] [ref=e2544]
+                  - link "Me3D" [ref=e2546] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/me3d
+                    - heading "Me3D" [level=5] [ref=e2548]
+                  - link "CTC" [ref=e2550] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/ctc
+                    - heading "CTC" [level=5] [ref=e2552]
+                  - link "LABISTS" [ref=e2554] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/labists
+                    - heading "LABISTS" [level=5] [ref=e2556]
+                  - link "Pantheon" [ref=e2558] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/pantheon
+                    - heading "Pantheon" [level=5] [ref=e2560]
+                  - link "Raise3D" [ref=e2562] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/raise3d
+                    - heading "Raise3D" [level=5] [ref=e2564]
+                  - link "Silhouette" [ref=e2566] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/silhouette
+                    - heading "Silhouette" [level=5] [ref=e2568]
+                  - link "Creativity" [ref=e2570] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/creativity
+                    - heading "Creativity" [level=5] [ref=e2572]
+                  - link "Hellbot" [ref=e2574] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/hellbot
+                    - heading "Hellbot" [level=5] [ref=e2576]
+                  - link "PolyFusion OEM Partner" [ref=e2578] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/polyfusion
+                    - heading "PolyFusion OEM Partner" [level=5] [ref=e2580]:
+                      - text: PolyFusion
+                      - generic [ref=e2581]: OEM Partner
+                  - link "Afinibot" [ref=e2583] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/afinibot
+                    - heading "Afinibot" [level=5] [ref=e2585]
+                  - link "iUse" [ref=e2587] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/iuse
+                    - heading "iUse" [level=5] [ref=e2589]
+                  - link "Modix" [ref=e2591] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/modix
+                    - heading "Modix" [level=5] [ref=e2593]
+                  - link "Phrozen" [ref=e2595] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/phrozen
+                    - heading "Phrozen" [level=5] [ref=e2597]
+                  - link "Spark 3D" [ref=e2599] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/spark-3d
+                    - heading "Spark 3D" [level=5] [ref=e2601]
+                  - link "The Industry OEM Partner" [ref=e2603] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/the-industry
+                    - heading "The Industry OEM Partner" [level=5] [ref=e2605]:
+                      - text: The Industry
+                      - generic [ref=e2606]: OEM Partner
+                  - link "Balco" [ref=e2608] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/balco
+                    - heading "Balco" [level=5] [ref=e2610]
+                  - link "Craftbot" [ref=e2612] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/craftbot
+                    - heading "Craftbot" [level=5] [ref=e2614]
+                  - link "Folger Tech" [ref=e2616] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/folger-tech
+                    - heading "Folger Tech" [level=5] [ref=e2618]
+                  - link "M3D" [ref=e2620] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/m3d
+                    - heading "M3D" [level=5] [ref=e2622]
+                  - link "MakerPi" [ref=e2624] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/makerpi
+                    - heading "MakerPi" [level=5] [ref=e2626]
+                  - link "PrimaCreator" [ref=e2628] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/primacreator
+                    - heading "PrimaCreator" [level=5] [ref=e2630]
+                  - link "RepRap" [ref=e2632] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/reprap
+                    - heading "RepRap" [level=5] [ref=e2634]
+                  - link "ToAuto" [ref=e2636] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/toauto
+                    - heading "ToAuto" [level=5] [ref=e2638]
+                  - link "WASP" [ref=e2640] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/wasp
+                    - heading "WASP" [level=5] [ref=e2642]
+                  - link "Zonestar" [ref=e2644] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/zonestar
+                    - heading "Zonestar" [level=5] [ref=e2646]
+                  - link "3ntr" [ref=e2648] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/3ntr
+                    - heading "3ntr" [level=5] [ref=e2650]
+                  - link "AM" [ref=e2652] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/am
+                    - heading "AM" [level=5] [ref=e2654]
+                  - link "HE3D" [ref=e2656] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/he3d
+                    - heading "HE3D" [level=5] [ref=e2658]
+                  - link "Kywoo3D" [ref=e2660] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/kywoo3d
+                    - heading "Kywoo3D" [level=5] [ref=e2662]
+                  - link "Mattershaper" [ref=e2664] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/mattershaper
+                    - heading "Mattershaper" [level=5] [ref=e2666]
+                  - link "RigidBot" [ref=e2668] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/rigidbot
+                    - heading "RigidBot" [level=5] [ref=e2670]
+                  - link "Sethi" [ref=e2672] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/sethi
+                    - heading "Sethi" [level=5] [ref=e2674]
+                  - link "BQ" [ref=e2676] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/bq
+                    - heading "BQ" [level=5] [ref=e2678]
+                  - link "Copymaster" [ref=e2680] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/copymaster
+                    - heading "Copymaster" [level=5] [ref=e2682]
+                  - link "Creasee" [ref=e2684] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/creasee
+                    - heading "Creasee" [level=5] [ref=e2686]
+                  - link "DIGGRO" [ref=e2688] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/diggro
+                    - heading "DIGGRO" [level=5] [ref=e2690]
+                  - link "GridBot" [ref=e2692] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/gridbot
+                    - heading "GridBot" [level=5] [ref=e2694]
+                  - link "Hictop" [ref=e2696] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/hictop
+                    - heading "Hictop" [level=5] [ref=e2698]
+                  - link "Intamsys" [ref=e2700] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/intamsys
+                    - heading "Intamsys" [level=5] [ref=e2702]
+                  - link "Keytec" [ref=e2704] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/keytec
+                    - heading "Keytec" [level=5] [ref=e2706]
+                  - link "MatterHackers" [ref=e2708] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/matterhackers
+                    - heading "MatterHackers" [level=5] [ref=e2710]
+                  - link "SpiderMaker" [ref=e2712] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/spidermaker
+                    - heading "SpiderMaker" [level=5] [ref=e2714]
+                  - link "Toybox" [ref=e2716] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/toybox
+                    - heading "Toybox" [level=5] [ref=e2718]
+                  - link "Turnigy" [ref=e2720] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/turnigy
+                    - heading "Turnigy" [level=5] [ref=e2722]
+                  - link "Xinkebot" [ref=e2724] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/xinkebot
+                    - heading "Xinkebot" [level=5] [ref=e2726]
+                  - link "Afina" [ref=e2728] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/afina
+                    - heading "Afina" [level=5] [ref=e2730]
+                  - link "Alunar" [ref=e2732] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/alunar
+                    - heading "Alunar" [level=5] [ref=e2734]
+                  - link "Cocoon" [ref=e2736] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/cocoon
+                    - heading "Cocoon" [level=5] [ref=e2738]
+                  - link "Deezmaker" [ref=e2740] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/deezmaker
+                    - heading "Deezmaker" [level=5] [ref=e2742]
+                  - link "Deltaprintr" [ref=e2744] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/deltaprintr
+                    - heading "Deltaprintr" [level=5] [ref=e2746]
+                  - link "Febtop Tech" [ref=e2748] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/febtop-tech
+                    - heading "Febtop Tech" [level=5] [ref=e2750]
+                  - link "Gcreate" [ref=e2752] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/gcreate
+                    - heading "Gcreate" [level=5] [ref=e2754]
+                  - link "Koonovo" [ref=e2756] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/koonovo
+                    - heading "Koonovo" [level=5] [ref=e2758]
+                  - link "Micromake" [ref=e2760] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/micromake
+                    - heading "Micromake" [level=5] [ref=e2762]
+                  - link "Mixware" [ref=e2764] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/mixware
+                    - heading "Mixware" [level=5] [ref=e2766]
+                  - link "Ortur" [ref=e2768] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/ortur
+                    - heading "Ortur" [level=5] [ref=e2770]
+                  - link "Peopoly" [ref=e2772] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/peopoly
+                    - heading "Peopoly" [level=5] [ref=e2774]
+                  - link "Positron 3D" [ref=e2776] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/positron-3d
+                    - heading "Positron 3D" [level=5] [ref=e2778]
+                  - link "Reliabot" [ref=e2780] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/reliabot
+                    - heading "Reliabot" [level=5] [ref=e2782]
+                  - link "ZAV" [ref=e2784] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/zav
+                    - heading "ZAV" [level=5] [ref=e2786]
+                  - link "ATOM" [ref=e2788] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/atom
+                    - heading "ATOM" [level=5] [ref=e2790]
+                  - link "BigRep" [ref=e2792] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/bigrep
+                    - heading "BigRep" [level=5] [ref=e2794]
+                  - link "Blackbelt 3D" [ref=e2796] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/blackbelt-3d
+                    - heading "Blackbelt 3D" [level=5] [ref=e2798]
+                  - link "Bluemaker" [ref=e2800] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/bluemaker
+                    - heading "Bluemaker" [level=5] [ref=e2802]
+                  - link "Cadx" [ref=e2804] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/cadx
+                    - heading "Cadx" [level=5] [ref=e2806]
+                  - link "Fusion3" [ref=e2808] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/fusion3
+                    - heading "Fusion3" [level=5] [ref=e2810]
+                  - link "Junco" [ref=e2812] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/junco
+                    - heading "Junco" [level=5] [ref=e2814]
+                  - link "lhndo" [ref=e2816] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/lhndo
+                    - heading "lhndo" [level=5] [ref=e2818]
+                  - link "NWA3D" [ref=e2820] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/nwa3d
+                    - heading "NWA3D" [level=5] [ref=e2822]
+                  - link "Project R3D" [ref=e2824] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/project-r3d
+                    - heading "Project R3D" [level=5] [ref=e2826]
+                  - link "RailCore Labs / Project R3D" [ref=e2828] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/railcore-labs-project-r3d
+                    - heading "RailCore Labs / Project R3D" [level=5] [ref=e2830]
+                  - link "Rapide" [ref=e2832] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/rapide
+                    - heading "Rapide" [level=5] [ref=e2834]
+                  - link "Tinkerine" [ref=e2836] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/tinkerine
+                    - heading "Tinkerine" [level=5] [ref=e2838]
+                  - link "Tractus3D" [ref=e2840] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/tractus3d
+                    - heading "Tractus3D" [level=5] [ref=e2842]
+                  - link "TronHoo" [ref=e2844] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/tronhoo
+                    - heading "TronHoo" [level=5] [ref=e2846]
+                  - link "XTLW" [ref=e2848] [cursor=pointer]:
+                    - /url: https://simplyprint.io/setup-guide/xtlw
+                    - heading "XTLW" [level=5] [ref=e2850]
+  - dialog [active] [ref=e8687]:
+    - document:
+      - generic [ref=e8688]:
+        - generic [ref=e8689]:
+          - 'heading "Create copy of system profile: RatRig V-Core 4 HYBRID 400" [level=5] [ref=e8691]'
+          - separator [ref=e8692]
+          - generic [ref=e8693]:
+            - generic [ref=e8694]:
+              - generic [ref=e8695]:
+                - generic [ref=e8696]: Machine name
+                - textbox "Machine name" [ref=e8697]:
+                  - /placeholder: Rat Rig [model name]
+                  - text: RatRig V-Core 4 HYBRID 400
+              - generic [ref=e8698]:
+                - generic [ref=e8699]: Brand name
+                - textbox "Brand name" [ref=e8700]: Rat Rig
+              - generic [ref=e8702] [cursor=pointer]:
+                - img "Printer image" [ref=e8704]
+                - generic [ref=e8705]:
+                  - generic [ref=e8706]: ▼
+                  - combobox "Click to select..." [ref=e8707]: "\"V-Core 4.0 (400mm)\" model"
+                  - generic [ref=e8708]: Select printers
+            - generic [ref=e8709]:
+              - heading "Variants Add variant" [level=5] [ref=e8710]:
+                - generic [ref=e8711]: Variants
+                - button "Add variant" [ref=e8712] [cursor=pointer]: Add variant
+              - paragraph [ref=e8714]: Variants allow you to define different configurations for the same machine profile, such as different nozzle sizes.
+              - generic [ref=e8716] [cursor=pointer]:
+                - heading "0.8mm nozzle variant" [level=6] [ref=e8717]:
+                  - generic [ref=e8718]: 0.8mm nozzle variant
+                - button [ref=e8720]
+              - generic [ref=e8724] [cursor=pointer]:
+                - heading "0.6mm nozzle variant" [level=6] [ref=e8725]:
+                  - generic [ref=e8726]: 0.6mm nozzle variant
+                - button [ref=e8728]
+              - generic [ref=e8732] [cursor=pointer]:
+                - heading "0.5mm nozzle variant" [level=6] [ref=e8733]:
+                  - generic [ref=e8734]: 0.5mm nozzle variant
+                - button [ref=e8736]
+              - generic [ref=e8740] [cursor=pointer]:
+                - heading "0.4mm nozzle variant" [level=6] [ref=e8741]:
+                  - generic [ref=e8742]: 0.4mm nozzle variant
+                - button [ref=e8744]
+            - button "Save custom copy of profile" [ref=e8747] [cursor=pointer]: Save custom copy of profile
+        - button "Close" [ref=e8750] [cursor=pointer]
