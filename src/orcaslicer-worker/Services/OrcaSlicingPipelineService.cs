@@ -344,6 +344,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// Converts a Settings dictionary to JSON for OrcaSlicer --load-settings.
     /// All scalars are written as JSON strings. Values that look like JSON arrays
     /// (start with '[') are written as native arrays.
+    /// Keys with values that would fail OrcaSlicer's CLI validator are sanitized.
     /// </summary>
     internal static string SettingsDictToNativeJson(Dictionary<string, string>? settings)
     {
@@ -351,6 +352,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             return "{}";
         }
+
+        // OrcaSlicer --load-settings has stricter range checks than the profile format.
+        // Clamp known speed/rate fields that use 0="auto" in profiles but require ≥1 in CLI.
+        SanitizeForCli(settings);
 
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
@@ -383,5 +388,27 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>
+    /// Clamp values that OrcaSlicer profiles store as 0 (meaning "auto/disabled")
+    /// but the --load-settings CLI validator rejects as out of range.
+    /// </summary>
+    private static void SanitizeForCli(Dictionary<string, string> settings)
+    {
+        // Speed fields: 0 means "auto" in profiles but CLI requires ≥ 1
+        string[] speedKeys =
+        [
+            "scarf_joint_speed",
+            "skirt_speed",
+        ];
+
+        foreach (string key in speedKeys)
+        {
+            if (settings.TryGetValue(key, out string? val) && val == "0")
+            {
+                settings[key] = "1";
+            }
+        }
     }
 }
