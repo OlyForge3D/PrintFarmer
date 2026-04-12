@@ -189,8 +189,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string output = await outputTask;
         string error = await errorTask;
 
-        _logger.LogInformation("OrcaSlicer exited with code {ExitCode}. Stdout length={StdoutLen}, Stderr length={StderrLen}",
-            process.ExitCode, output.Length, error.Length);
+        _logger.LogInformation(
+            "OrcaSlicer exited with code {ExitCode}. Stdout length={StdoutLen}, Stderr length={StderrLen}",
+            process.ExitCode,
+            output.Length,
+            error.Length);
 
         if (!string.IsNullOrWhiteSpace(output))
         {

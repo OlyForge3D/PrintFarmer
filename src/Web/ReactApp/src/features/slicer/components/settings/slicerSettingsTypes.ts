@@ -45,7 +45,7 @@ export type InfillPattern =
 export type BedAdhesionType = 'none' | 'skirt' | 'brim' | 'raft';
 
 /** Support types */
-export type SupportType = 'none' | 'normal' | 'tree' | 'tree_auto';
+export type SupportType = 'none' | 'normal' | 'tree' | 'tree_auto' | 'normal(auto)' | 'tree(auto)' | 'normal(manual)' | 'tree(manual)';
 
 /** Seam position options */
 export type SeamPosition = 'random' | 'aligned' | 'back' | 'nearest';

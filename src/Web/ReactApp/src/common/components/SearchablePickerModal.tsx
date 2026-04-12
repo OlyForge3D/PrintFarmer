@@ -313,7 +313,7 @@ function SearchablePickerContent<T>({
                   <div
                     key={id}
                     role="option"
-                    aria-selected={isFocused ? 'true' : 'false'}
+                    aria-selected={isFocused || undefined}
                     className={clsx(
                       'flex flex-col items-center gap-2 rounded-lg border p-3 cursor-pointer transition-colors',
                       'hover:border-pf-accent-2/50 hover:bg-pf-bg-0/50',
