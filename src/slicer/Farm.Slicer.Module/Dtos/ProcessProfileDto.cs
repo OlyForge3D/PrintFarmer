@@ -107,5 +107,5 @@ public class ProcessProfileDto
     public int? OuterWallAcceleration { get; set; }
 
     // ── Full settings bag (forward compatibility) ─────────────────────────
-    public Dictionary<string, object> Settings { get; set; } = new();
+    public Dictionary<string, string> Settings { get; set; } = new();
 }

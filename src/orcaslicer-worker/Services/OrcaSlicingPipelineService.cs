@@ -339,10 +339,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     /// <summary>
     /// Converts a Settings dictionary to JSON for OrcaSlicer --load-settings.
-    /// Values are stored as plain strings (from GetString()), arrays (as JsonElement),
-    /// or raw number text. OrcaSlicer expects all scalars as JSON strings.
+    /// All scalars are written as JSON strings. Values that look like JSON arrays
+    /// (start with '[') are written as native arrays.
     /// </summary>
-    internal static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
+    internal static string SettingsDictToNativeJson(Dictionary<string, string>? settings)
     {
         if (settings == null || settings.Count == 0)
         {
@@ -353,69 +353,32 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartObject();
-            foreach (KeyValuePair<string, object> kvp in settings)
+            foreach (KeyValuePair<string, string> kvp in settings)
             {
                 writer.WritePropertyName(kvp.Key);
-                WriteOrcaValue(writer, kvp.Value);
+                string value = kvp.Value ?? string.Empty;
+
+                // Arrays stored as raw JSON text (e.g. "[\"0.4\"]") — write as native array
+                if (value.Length > 0 && value[0] == '[')
+                {
+                    try
+                    {
+                        using JsonDocument arr = JsonDocument.Parse(value);
+                        arr.RootElement.WriteTo(writer);
+                        continue;
+                    }
+                    catch (JsonException)
+                    {
+                        // Not valid JSON array — fall through to string
+                    }
+                }
+
+                writer.WriteStringValue(value);
             }
 
             writer.WriteEndObject();
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
-    }
-
-    /// <summary>
-    /// Writes a single value in OrcaSlicer-native format.
-    /// OrcaSlicer expects all scalars as JSON strings and arrays as native JSON arrays.
-    /// The dictionary values may be String, JsonElement, or other types depending on
-    /// whether they came from SerializeElementToDict or JSON deserialization.
-    /// </summary>
-    private static void WriteOrcaValue(Utf8JsonWriter writer, object? value)
-    {
-        if (value is null)
-        {
-            writer.WriteStringValue(string.Empty);
-            return;
-        }
-
-        if (value is JsonElement je)
-        {
-            switch (je.ValueKind)
-            {
-                case JsonValueKind.Array:
-                    je.WriteTo(writer);
-                    break;
-                case JsonValueKind.String:
-                    writer.WriteStringValue(je.GetString() ?? string.Empty);
-                    break;
-                case JsonValueKind.Number:
-                    // OrcaSlicer wants numbers as strings: "0", "300"
-                    writer.WriteStringValue(je.GetRawText());
-                    break;
-                case JsonValueKind.True:
-                    writer.WriteStringValue("1");
-                    break;
-                case JsonValueKind.False:
-                    writer.WriteStringValue("0");
-                    break;
-                default:
-                    writer.WriteStringValue(je.ToString());
-                    break;
-            }
-
-            return;
-        }
-
-        // String values — may contain embedded quotes from GetRawText() round-trips
-        string str = value.ToString() ?? string.Empty;
-
-        // Strip surrounding quotes if present (from GetRawText() leak)
-        if (str.Length >= 2 && str[0] == '"' && str[^1] == '"')
-        {
-            str = str[1..^1];
-        }
-
-        writer.WriteStringValue(str);
     }
 }
