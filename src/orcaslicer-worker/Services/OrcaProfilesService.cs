@@ -1576,26 +1576,25 @@ public class OrcaProfilesService : ISlicerProfilesService
         return null;
     }
 
-    internal static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
+    internal static Dictionary<string, string> SerializeElementToDict(JsonElement elem)
     {
-        Dictionary<string, object> dict = [];
+        Dictionary<string, string> dict = [];
         try
         {
             if (elem.ValueKind == JsonValueKind.Object)
             {
                 foreach (JsonProperty prop in elem.EnumerateObject())
                 {
-                    // Store the actual value, not the raw JSON text.
-                    // For strings: GetString() returns "50%" not "\"50%\""
-                    // For arrays: clone the element so it survives document disposal
-                    // For numbers/booleans: store as string (OrcaSlicer expects all values as strings)
+                    // All values stored as plain strings.
+                    // Arrays are serialized as JSON text (e.g. "[\"0.4\"]") and
+                    // re-parsed at write time by SettingsDictToNativeJson.
                     dict[prop.Name] = prop.Value.ValueKind switch
                     {
                         JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
-                        JsonValueKind.Array => prop.Value.Clone(),
                         JsonValueKind.True => "1",
                         JsonValueKind.False => "0",
                         JsonValueKind.Number => prop.Value.GetRawText(),
+                        // Arrays/objects: store as raw JSON text for later parsing
                         _ => prop.Value.GetRawText()
                     };
                 }
