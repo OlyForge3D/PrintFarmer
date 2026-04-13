@@ -151,8 +151,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
-        // Build command line: --slice 0 --load-settings "machine.json;process.json" --load-filaments "filament.json" --allow-newer-file --outputdir "/tmp/slice-XYZ/output" /tmp/slice-XYZ/input/uploaded-file.stl
-        string arguments = $"--slice 0 --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
+        // Build command line: --slice 0 --ensure-on-bed --load-settings "machine.json;process.json" --load-filaments "filament.json" --allow-newer-file --outputdir "/tmp/slice-XYZ/output" /tmp/slice-XYZ/input/uploaded-file.stl
+        string arguments = $"--slice 0 --ensure-on-bed --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;
