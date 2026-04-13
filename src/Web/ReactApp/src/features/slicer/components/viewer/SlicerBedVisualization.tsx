@@ -1358,7 +1358,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
     <div className={`w-full h-full ${className}`}>
       <Canvas
         frameloop="demand"
-        style={{ background: backgroundColor }}
+        style={{ background: '#141418' }}
         gl={{
           antialias: true,
           preserveDrawingBuffer: false,
@@ -1376,7 +1376,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
         onCreated={({ gl, scene }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 0.85;
-          scene.background = new THREE.Color('#1e1e22');
+          scene.background = new THREE.Color('#141418');
         }}
       >
         <Suspense fallback={null}>
