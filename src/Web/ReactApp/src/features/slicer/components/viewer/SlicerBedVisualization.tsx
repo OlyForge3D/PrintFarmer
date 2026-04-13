@@ -1257,16 +1257,16 @@ function BedScene({
   return (
     <>
       {/* Lighting */}
-      <ambientLight intensity={0.4} />
+      <ambientLight intensity={0.25} />
       <directionalLight 
         position={[width, -depth, height * 2]} 
-        intensity={0.5} 
+        intensity={0.35} 
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
       />
-      <directionalLight position={[-width, depth, height]} intensity={0.3} />
-      <pointLight position={[0, 0, height * 1.5]} intensity={0.15} />
+      <directionalLight position={[-width, depth, height]} intensity={0.2} />
+      <pointLight position={[0, 0, height * 1.5]} intensity={0.1} />
 
       {/* Camera controls */}
       <CameraController bedWidth={width} bedDepth={depth} bedHeight={height} orbitRef={orbitRef} />
@@ -1375,8 +1375,8 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
         }}
         onCreated={({ gl, scene }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1;
-          scene.background = new THREE.Color('#2a2a2e');
+          gl.toneMappingExposure = 0.85;
+          scene.background = new THREE.Color('#1e1e22');
         }}
       >
         <Suspense fallback={null}>
