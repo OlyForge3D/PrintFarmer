@@ -108,10 +108,14 @@ public class SettingsSerializationTests
         JsonElement root = output.RootElement;
 
         root.GetProperty("accel_to_decel_factor").GetString().Should().Be("50%");
-        root.GetProperty("accel_to_decel_enable").GetString().Should().Be("1");
-        root.GetProperty("adaptive_layer_height").GetString().Should().Be("0");
-        root.GetProperty("bottom_shell_layers").GetString().Should().Be("3");
-        root.GetProperty("bridge_flow").GetString().Should().Be("0.95");
+        root.GetProperty("accel_to_decel_enable").ValueKind.Should().Be(JsonValueKind.Number);
+        root.GetProperty("accel_to_decel_enable").GetInt64().Should().Be(1);
+        root.GetProperty("adaptive_layer_height").ValueKind.Should().Be(JsonValueKind.Number);
+        root.GetProperty("adaptive_layer_height").GetInt64().Should().Be(0);
+        root.GetProperty("bottom_shell_layers").ValueKind.Should().Be(JsonValueKind.Number);
+        root.GetProperty("bottom_shell_layers").GetInt64().Should().Be(3);
+        root.GetProperty("bridge_flow").ValueKind.Should().Be(JsonValueKind.Number);
+        root.GetProperty("bridge_flow").GetDouble().Should().Be(0.95);
         root.GetProperty("sparse_infill_pattern").GetString().Should().Be("crosshatch");
         root.GetProperty("compatible_printers_condition").GetString().Should().Be("");
         root.GetProperty("type").GetString().Should().Be("process");
@@ -157,9 +161,12 @@ public class SettingsSerializationTests
         using JsonDocument output = JsonDocument.Parse(json);
         JsonElement root = output.RootElement;
 
-        root.GetProperty("adaptive_bed_mesh_margin").GetString().Should().Be("0");
-        root.GetProperty("auxiliary_fan").GetString().Should().Be("1");
-        root.GetProperty("z_offset").GetString().Should().Be("0");
+        root.GetProperty("adaptive_bed_mesh_margin").ValueKind.Should().Be(JsonValueKind.Number);
+        root.GetProperty("adaptive_bed_mesh_margin").GetInt64().Should().Be(0);
+        root.GetProperty("auxiliary_fan").ValueKind.Should().Be(JsonValueKind.Number);
+        root.GetProperty("auxiliary_fan").GetInt64().Should().Be(1);
+        root.GetProperty("z_offset").ValueKind.Should().Be(JsonValueKind.Number);
+        root.GetProperty("z_offset").GetInt64().Should().Be(0);
         root.GetProperty("gcode_flavor").GetString().Should().Be("klipper");
 
         root.GetProperty("nozzle_diameter").ValueKind.Should().Be(JsonValueKind.Array);
@@ -184,8 +191,8 @@ public class SettingsSerializationTests
         string json = RoundTrip(SampleProcessProfile);
 
         json.Should().Contain("\"accel_to_decel_factor\": \"50%\"");
-        json.Should().Contain("\"accel_to_decel_enable\": \"1\"");
-        json.Should().Contain("\"default_acceleration\": \"10000\"");
+        json.Should().Contain("\"accel_to_decel_enable\": 1");
+        json.Should().Contain("\"default_acceleration\": 10000");
         json.Should().Contain("\"sparse_infill_pattern\": \"crosshatch\"");
     }
 
@@ -203,6 +210,7 @@ public class SettingsSerializationTests
 
             // Verify the file content byte-for-byte
             fileContent.Should().Contain("\"accel_to_decel_factor\": \"50%\"");
+            fileContent.Should().Contain("\"default_acceleration\": 10000");
             fileContent.Should().NotContain("\\u0022");
             fileContent.Should().NotContain("\\\"");
 
